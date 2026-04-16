@@ -9,6 +9,21 @@ const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = req
 
 let mainWindow = null;
 
+// Single instance lock — prevent multiple copies running at once.
+// Also handles the installer/updater trying to relaunch the app.
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    // Someone tried to launch a second instance — focus our window instead
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+}
+
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1280,

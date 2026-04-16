@@ -25,7 +25,7 @@ win:
 nsis:
   oneClick: true
   perMachine: false
-  allowElevation: false
+  allowElevation: true
   runAfterFinish: true
   createDesktopShortcut: true
   createStartMenuShortcut: true

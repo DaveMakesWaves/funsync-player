@@ -93,7 +93,18 @@ async function startBackend() {
 
 function stopBackend() {
   if (pythonProcess) {
-    pythonProcess.kill();
+    const pid = pythonProcess.pid;
+    try {
+      // On Windows, .kill() sends SIGTERM which PyInstaller exes can ignore.
+      // Use taskkill /T to kill the process tree (includes child processes).
+      if (process.platform === 'win32' && pid) {
+        require('child_process').execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
+      } else {
+        pythonProcess.kill('SIGKILL');
+      }
+    } catch {
+      // Process may already be dead
+    }
     pythonProcess = null;
   }
 }
