@@ -23,10 +23,18 @@ win:
       arch: x64
 
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  oneClick: true
+  perMachine: false
+  allowElevation: false
+  runAfterFinish: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  uninstallDisplayName: FunSync Player
+
+publish:
+  provider: github
+  owner: DaveMakesWaves
+  repo: funsync-player
 
 asar: true
 

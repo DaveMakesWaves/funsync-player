@@ -58,4 +58,30 @@ contextBridge.exposeInMainWorld('funsync', {
   fetchMetadata: (videoPath) => ipcRenderer.invoke('fetch-metadata', videoPath),
   generateThumbnails: (videoPath, interval) => ipcRenderer.invoke('generate-thumbnails', videoPath, interval),
   convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
+
+  // Auto-updater
+  updaterCheck: () => ipcRenderer.invoke('updater-check'),
+  updaterDownload: () => ipcRenderer.invoke('updater-download'),
+  updaterInstall: () => ipcRenderer.invoke('updater-install'),
+  onUpdateEvent: (callback) => {
+    const channels = [
+      'update:checking',
+      'update:available',
+      'update:not-available',
+      'update:download-progress',
+      'update:downloaded',
+      'update:error',
+    ];
+    const handlers = channels.map((ch) => {
+      const handler = (_event, data) => callback(ch, data);
+      ipcRenderer.on(ch, handler);
+      return { channel: ch, handler };
+    });
+    // Return cleanup function
+    return () => {
+      for (const { channel, handler } of handlers) {
+        ipcRenderer.removeListener(channel, handler);
+      }
+    };
+  },
 });

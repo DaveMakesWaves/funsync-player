@@ -5,6 +5,7 @@ const log = require('./logger');
 const { startBackend, stopBackend } = require('./python-bridge');
 const store = require('./store');
 const dataMigration = require('./data-migration');
+const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 
 let mainWindow = null;
 
@@ -30,7 +31,9 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
-
+    if (app.isPackaged) {
+      initAutoUpdater(mainWindow);
+    }
   });
 
   mainWindow.on('closed', () => {
@@ -428,4 +431,18 @@ ipcMain.handle('file-exists', (_event, filePath) => {
   } catch {
     return false;
   }
+});
+
+// --- IPC Handlers: Auto-Updater ---
+
+ipcMain.handle('updater-check', () => {
+  checkForUpdates();
+});
+
+ipcMain.handle('updater-download', () => {
+  downloadUpdate();
+});
+
+ipcMain.handle('updater-install', () => {
+  quitAndInstall();
 });

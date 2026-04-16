@@ -353,6 +353,9 @@ class App {
       }
     });
 
+    // Listen for auto-update events from main process
+    this._initAutoUpdater();
+
     // Show library as default landing page
     this._onEnterView('library');
 
@@ -959,6 +962,74 @@ class App {
         container.appendChild(dot);
       }
     }
+  }
+
+  // --- Auto-Updater ---
+
+  _initAutoUpdater() {
+    if (!window.funsync.onUpdateEvent) return;
+
+    this._updateCleanup = window.funsync.onUpdateEvent((channel, data) => {
+      switch (channel) {
+        case 'update:available':
+          this._showUpdateToast(data);
+          break;
+        case 'update:download-progress':
+          this._updateDownloadProgress(data);
+          break;
+        case 'update:downloaded':
+          this._showUpdateReadyToast(data);
+          break;
+        case 'update:error':
+          console.warn('[AutoUpdater]', data?.message);
+          break;
+      }
+    });
+  }
+
+  _showUpdateToast(data) {
+    const container = document.createElement('div');
+    container.className = 'update-toast';
+
+    const text = document.createElement('span');
+    text.textContent = `Update v${data.version} available`;
+    container.appendChild(text);
+
+    const btn = document.createElement('button');
+    btn.className = 'update-toast__btn';
+    btn.textContent = 'Download';
+    btn.addEventListener('click', () => {
+      window.funsync.updaterDownload();
+      btn.disabled = true;
+      btn.textContent = 'Downloading...';
+    });
+    container.appendChild(btn);
+
+    showToast(container, 'info', 15000);
+  }
+
+  _updateDownloadProgress(data) {
+    // Progress is logged; could add a progress bar in future
+    console.log(`[AutoUpdater] Download: ${data.percent}%`);
+  }
+
+  _showUpdateReadyToast(data) {
+    const container = document.createElement('div');
+    container.className = 'update-toast';
+
+    const text = document.createElement('span');
+    text.textContent = `v${data.version} ready — restart to update`;
+    container.appendChild(text);
+
+    const btn = document.createElement('button');
+    btn.className = 'update-toast__btn';
+    btn.textContent = 'Restart Now';
+    btn.addEventListener('click', () => {
+      window.funsync.updaterInstall();
+    });
+    container.appendChild(btn);
+
+    showToast(container, 'info', 0); // Persistent until dismissed
   }
 }
 

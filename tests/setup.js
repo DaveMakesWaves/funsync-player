@@ -30,6 +30,12 @@ window.funsync = {
   exportData: vi.fn().mockResolvedValue({ success: true, path: '/tmp/backup.zip' }),
   importData: vi.fn().mockResolvedValue({ success: true, funscriptCount: 0 }),
 
+  // Auto-updater
+  updaterCheck: vi.fn().mockResolvedValue(undefined),
+  updaterDownload: vi.fn().mockResolvedValue(undefined),
+  updaterInstall: vi.fn().mockResolvedValue(undefined),
+  onUpdateEvent: vi.fn().mockReturnValue(() => {}),
+
   // Data store IPC methods
   getAllData: vi.fn().mockResolvedValue({
     settings: {

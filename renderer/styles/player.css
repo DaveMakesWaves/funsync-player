@@ -1163,3 +1163,33 @@ html, body {
   from { opacity: 1; transform: translateY(0); }
   to { opacity: 0; transform: translateY(-10px); }
 }
+
+/* Update toast (rich content with button) */
+.update-toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.update-toast__btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 5px 14px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--transition-fast);
+}
+
+.update-toast__btn:hover {
+  background: var(--accent-hover);
+}
+
+.update-toast__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
