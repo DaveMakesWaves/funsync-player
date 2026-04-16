@@ -1,0 +1,52 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+backend-dist/
+
+# Python
+backend/__pycache__/
+backend/.venv/
+backend/*.pyc
+*.pyc
+
+# Environment / secrets
+.env
+.env.*
+
+# Logs
+*.log
+
+# Runtime caches
+thumbs/
+scripts_cache/
+.funsync/
+
+# Bundled binaries (not checked in — download separately)
+ffmpeg/*.exe
+ffmpeg/*.zip
+
+# Test media files (too large for git)
+Test.mp4
+Test.funscript
+Test-slow.funscript
+
+# Claude Code
+.claude/
+CLAUDE.md
+IMPROVEMENTS.md
+TODO.md
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

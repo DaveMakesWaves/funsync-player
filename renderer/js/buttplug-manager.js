@@ -1,0 +1,291 @@
+// ButtplugManager — Wrapper around buttplug.io v4 client for Intiface Central device control
+// Connects as a WebSocket client to a running Intiface Central instance
+//
+// v4 API: capabilities checked via device.hasOutput('Vibrate'), commands sent via
+// device.runOutput(DeviceOutput.Vibrate.percent(0.3))
+
+let ButtplugSDK = null;
+
+export class ButtplugManager {
+  constructor() {
+    this._client = null;
+    this._connector = null;
+    this._devices = new Map(); // deviceIndex → ButtplugClientDevice
+    this._connected = false;
+    this._port = 12345;
+    this._reconnectAttempts = 0;
+    this._maxReconnectAttempts = 3;
+    this._connecting = false;
+
+    // Callbacks
+    this.onConnect = null;      // () => {}
+    this.onDisconnect = null;   // () => {}
+    this.onDeviceAdded = null;  // (device) => {}
+    this.onDeviceRemoved = null; // (device) => {}
+    this.onError = null;        // (message) => {}
+  }
+
+  /**
+   * Initialize the Buttplug SDK. Must be called before any other method.
+   */
+  async init() {
+    try {
+      ButtplugSDK = await import('../../node_modules/buttplug/dist/web/buttplug.mjs');
+      console.log('Buttplug SDK loaded');
+    } catch (err) {
+      console.warn('Failed to load Buttplug SDK:', err.message);
+      throw err;
+    }
+  }
+
+  /**
+   * Connect to Intiface Central via WebSocket.
+   * @param {number} [port=12345] — Intiface WebSocket port
+   * @returns {boolean} True if connected
+   */
+  async connect(port) {
+    if (!ButtplugSDK) {
+      this._emitError('SDK not initialized');
+      return false;
+    }
+
+    if (this._connecting) return false;
+
+    if (this._connected) {
+      await this.disconnect();
+    }
+
+    this._connecting = true;
+    this._port = port || this._port;
+
+    try {
+      this._client = new ButtplugSDK.ButtplugClient('FunSync Player');
+
+      // Wire device events
+      this._client.addListener('deviceadded', (device) => {
+        this._devices.set(device.index, device);
+        if (this.onDeviceAdded) this.onDeviceAdded(this._serializeDevice(device));
+      });
+
+      this._client.addListener('deviceremoved', (device) => {
+        this._devices.delete(device.index);
+        if (this.onDeviceRemoved) this.onDeviceRemoved(this._serializeDevice(device));
+      });
+
+      this._client.addListener('disconnect', () => {
+        this._connected = false;
+        this._devices.clear();
+        if (this.onDisconnect) this.onDisconnect();
+      });
+
+      this._connector = new ButtplugSDK.ButtplugBrowserWebsocketClientConnector(
+        `ws://127.0.0.1:${this._port}`,
+      );
+
+      await this._client.connect(this._connector);
+      this._connected = true;
+      this._connecting = false;
+      this._reconnectAttempts = 0;
+
+      if (this.onConnect) this.onConnect();
+      console.log(`[Buttplug] Connected to Intiface on port ${this._port}`);
+      return true;
+    } catch (err) {
+      this._connected = false;
+      this._connecting = false;
+      const msg = err?.message || err?.reason || String(err);
+      this._emitError(`Connection failed: ${msg}`);
+      return false;
+    }
+  }
+
+  /**
+   * Disconnect from Intiface Central.
+   */
+  async disconnect() {
+    if (!this._client) return;
+
+    try {
+      await this._client.disconnect();
+    } catch (err) {
+      console.warn('[Buttplug] Disconnect error:', err.message);
+    }
+
+    this._connected = false;
+    this._devices.clear();
+    this._client = null;
+    this._connector = null;
+  }
+
+  /**
+   * Start scanning for devices.
+   */
+  async startScanning() {
+    if (!this._client || !this._connected) return;
+
+    try {
+      await this._client.startScanning();
+    } catch (err) {
+      if (!err.message?.includes('already')) {
+        this._emitError(`Scan failed: ${err.message}`);
+      }
+    }
+  }
+
+  /**
+   * Stop scanning for devices.
+   */
+  async stopScanning() {
+    if (!this._client || !this._connected) return;
+
+    try {
+      await this._client.stopScanning();
+    } catch (err) {
+      console.debug('[Buttplug] Stop scan:', err.message);
+    }
+  }
+
+  /**
+   * Send a vibrate command to a device (v4: DeviceOutput.Vibrate.percent).
+   * @param {number} deviceIndex — device index
+   * @param {number} intensity — vibration intensity 0–100 (funscript scale)
+   */
+  async sendVibrate(deviceIndex, intensity) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return;
+
+    const pct = Math.max(0, Math.min(1, intensity / 100));
+
+    try {
+      const cmd = ButtplugSDK.DeviceOutput.Vibrate.percent(pct);
+      await device.runOutput(cmd);
+    } catch (err) {
+      console.debug('[Buttplug] Vibrate error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Send a linear/position command to a device (v4: DeviceOutput.PositionWithDuration.percent).
+   * @param {number} deviceIndex — device index
+   * @param {number} position — target position 0–100 (funscript scale)
+   * @param {number} durationMs — time to reach position in ms
+   */
+  async sendLinear(deviceIndex, position, durationMs) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return;
+
+    const pct = Math.max(0, Math.min(1, position / 100));
+    const dur = Math.max(50, Math.round(durationMs));
+
+    try {
+      const cmd = ButtplugSDK.DeviceOutput.PositionWithDuration.percent(pct, dur);
+      await device.runOutput(cmd);
+    } catch (err) {
+      console.debug('[Buttplug] Linear error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Send a rotate command to a device (v4: DeviceOutput.Rotate.percent).
+   * @param {number} deviceIndex — device index
+   * @param {number} speed — rotation speed 0–100 (funscript scale)
+   */
+  async sendRotate(deviceIndex, speed) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return;
+
+    const pct = Math.max(0, Math.min(1, speed / 100));
+
+    try {
+      const cmd = ButtplugSDK.DeviceOutput.Rotate.percent(pct);
+      await device.runOutput(cmd);
+    } catch (err) {
+      console.debug('[Buttplug] Rotate error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Stop a specific device.
+   * @param {number} deviceIndex
+   */
+  async stopDevice(deviceIndex) {
+    const device = this._devices.get(deviceIndex);
+    if (!device) return;
+
+    try {
+      await device.stop();
+    } catch (err) {
+      console.debug('[Buttplug] Stop device error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Stop all devices.
+   */
+  async stopAll() {
+    if (!this._client || !this._connected) return;
+
+    try {
+      await this._client.stopAllDevices();
+    } catch (err) {
+      console.debug('[Buttplug] StopAll error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Serialize a ButtplugClientDevice for UI display.
+   * v4 API: capabilities checked via device.hasOutput('Vibrate') etc.
+   * @param {object} device
+   * @returns {object}
+   */
+  _serializeDevice(device) {
+    let canVibrate = false;
+    let canLinear = false;
+    let canRotate = false;
+
+    try { canVibrate = device.hasOutput('Vibrate'); } catch(e) {}
+    try { canLinear = device.hasOutput('Position'); } catch(e) {}
+    try { canRotate = device.hasOutput('Rotate'); } catch(e) {}
+
+    return {
+      index: device.index,
+      name: device.name,
+      canVibrate,
+      canLinear,
+      canRotate,
+    };
+  }
+
+  // --- Getters ---
+
+  get connected() { return this._connected; }
+  get port() { return this._port; }
+
+  /** Get all connected devices as serialized objects. */
+  get devices() {
+    const result = [];
+    for (const device of this._devices.values()) {
+      result.push(this._serializeDevice(device));
+    }
+    return result;
+  }
+
+  /**
+   * Get the first device with vibrate or linear capability.
+   * @returns {number|null} device index, or null if none found
+   */
+  get primaryDevice() {
+    for (const device of this._devices.values()) {
+      const info = this._serializeDevice(device);
+      if (info.canVibrate || info.canLinear) return device.index;
+    }
+    return null;
+  }
+
+  // --- Internal ---
+
+  _emitError(message) {
+    console.error(`[ButtplugManager] ${message}`);
+    if (this.onError) this.onError(message);
+  }
+}

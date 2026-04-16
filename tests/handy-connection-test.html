@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Handy SDK Connection Test</title>
+  <style>
+    body { font-family: 'Segoe UI', sans-serif; background: #1a1a2e; color: #e0e0e0; padding: 24px; }
+    h1 { font-size: 20px; margin-bottom: 16px; }
+    .step { margin: 12px 0; padding: 12px; background: #16213e; border-radius: 8px; }
+    .step-title { font-weight: 600; margin-bottom: 4px; }
+    .status { font-size: 13px; color: #a0a0a0; }
+    .status--ok { color: #4caf50; }
+    .status--fail { color: #f44336; }
+    .status--wait { color: #ff9800; }
+    button { background: #e94560; color: #fff; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-size: 14px; margin: 8px 4px 8px 0; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    button:hover:not(:disabled) { background: #ff6b81; }
+    pre { background: #111; padding: 12px; border-radius: 6px; font-size: 12px; max-height: 300px; overflow: auto; white-space: pre-wrap; }
+    input { background: #222; border: 1px solid #444; color: #e0e0e0; padding: 8px 12px; border-radius: 6px; font-size: 14px; width: 200px; }
+  </style>
+</head>
+<body>
+  <h1>Handy SDK Connection Test</h1>
+
+  <div class="step">
+    <div class="step-title">1. Load SDK</div>
+    <div id="step1-status" class="status">Pending...</div>
+    <button id="btn-load">Load SDK</button>
+  </div>
+
+  <div class="step">
+    <div class="step-title">2. Connect to Handy</div>
+    <div>
+      <input id="connection-key" type="text" placeholder="Connection key" value="eK6Qv3AH">
+    </div>
+    <div id="step2-status" class="status">Pending...</div>
+    <button id="btn-connect" disabled>Connect</button>
+    <button id="btn-disconnect" disabled>Disconnect</button>
+  </div>
+
+  <div class="step">
+    <div class="step-title">3. Time Sync</div>
+    <div id="step3-status" class="status">Pending...</div>
+    <button id="btn-sync" disabled>Sync Time</button>
+  </div>
+
+  <div class="step">
+    <div class="step-title">4. Test Script (slow up-down pattern)</div>
+    <div id="step4-status" class="status">Pending...</div>
+    <button id="btn-upload" disabled>Upload Script</button>
+    <button id="btn-play" disabled>Play</button>
+    <button id="btn-stop" disabled>Stop</button>
+  </div>
+
+  <div class="step">
+    <div class="step-title">5. Test HDSP (direct position)</div>
+    <div id="step5-status" class="status">Pending...</div>
+    <button id="btn-hdsp0" disabled>Move to 0%</button>
+    <button id="btn-hdsp50" disabled>Move to 50%</button>
+    <button id="btn-hdsp100" disabled>Move to 100%</button>
+  </div>
+
+  <h2 style="font-size: 16px; margin-top: 24px;">Log</h2>
+  <pre id="log"></pre>
+
+  <script type="module">
+    const logEl = document.getElementById('log');
+    function log(msg) {
+      const ts = new Date().toISOString().slice(11, 23);
+      logEl.textContent += `[${ts}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+      console.log(msg);
+    }
+
+    function setStatus(stepId, text, type = '') {
+      const el = document.getElementById(stepId);
+      el.textContent = text;
+      el.className = 'status' + (type ? ` status--${type}` : '');
+    }
+
+    let HandySDK = null;
+    let handy = null;
+
+    // Step 1: Load SDK
+    document.getElementById('btn-load').addEventListener('click', async () => {
+      setStatus('step1-status', 'Loading SDK...', 'wait');
+      try {
+        HandySDK = await import('../node_modules/@ohdoki/handy-sdk/dist/handy.esm.js');
+        log(`SDK loaded. Exports: ${Object.keys(HandySDK).join(', ')}`);
+
+        handy = HandySDK.init({
+          syncClientServerTime: true,
+          syncClient: { syncCount: 30, outliers: 10 },
+          syncHandy: { syncCount: 30, outliers: 10 },
+        });
+
+        handy.on('state', ({ state, change }) => {
+          log(`State change: ${JSON.stringify(change)}`);
+        });
+        handy.on('connect', () => log('Event: connected'));
+        handy.on('disconnect', () => log('Event: disconnected'));
+
+        setStatus('step1-status', 'SDK loaded and initialized', 'ok');
+        document.getElementById('btn-connect').disabled = false;
+      } catch (err) {
+        setStatus('step1-status', `Failed: ${err.message}`, 'fail');
+        log(`SDK load error: ${err.stack || err.message}`);
+      }
+    });
+
+    // Step 2: Connect
+    document.getElementById('btn-connect').addEventListener('click', async () => {
+      const key = document.getElementById('connection-key').value.trim();
+      if (!key) { log('No connection key'); return; }
+
+      setStatus('step2-status', 'Connecting...', 'wait');
+      try {
+        const result = await handy.connect(key);
+        log(`Connect result: ${JSON.stringify(result)}`);
+        const code = typeof result === 'number' ? result : result?.result;
+        if (code === 1) {
+          setStatus('step2-status', 'Connected!', 'ok');
+          document.getElementById('btn-disconnect').disabled = false;
+          document.getElementById('btn-sync').disabled = false;
+          document.getElementById('btn-upload').disabled = false;
+          document.getElementById('btn-hdsp0').disabled = false;
+          document.getElementById('btn-hdsp50').disabled = false;
+          document.getElementById('btn-hdsp100').disabled = false;
+
+          // Get device info
+          const state = handy.getState();
+          log(`Device state: ${JSON.stringify(state?.info || 'no info')}`);
+        } else {
+          setStatus('step2-status', `Connect failed (code: ${code})`, 'fail');
+        }
+      } catch (err) {
+        setStatus('step2-status', `Error: ${err.message}`, 'fail');
+        log(`Connect error: ${err.stack || err.message}`);
+      }
+    });
+
+    document.getElementById('btn-disconnect').addEventListener('click', async () => {
+      try {
+        await handy.disconnect();
+        setStatus('step2-status', 'Disconnected', '');
+        log('Disconnected');
+      } catch (err) {
+        log(`Disconnect error: ${err.message}`);
+      }
+    });
+
+    // Step 3: Sync
+    document.getElementById('btn-sync').addEventListener('click', async () => {
+      setStatus('step3-status', 'Syncing (30 rounds)...', 'wait');
+      try {
+        await handy.sync(
+          { syncCount: 30, outliers: 10 },
+          { syncCount: 30, outliers: 10 },
+        );
+        const latency = handy.getClientServerLatency();
+        const msg = `RTD: ${Math.round(latency?.avgRtd || 0)}ms, Offset: ${Math.round(latency?.avgOffset || 0)}ms`;
+        setStatus('step3-status', msg, 'ok');
+        log(`Sync done. ${msg}`);
+      } catch (err) {
+        setStatus('step3-status', `Sync failed: ${err.message}`, 'fail');
+        log(`Sync error: ${err.message}`);
+      }
+    });
+
+    // Step 4: Upload test script and play
+    // Simple slow pattern: move 0→100→0 over 4 seconds, repeat for 60s
+    function generateTestCSV() {
+      const lines = [];
+      const cycleDuration = 4000; // 4s per full cycle
+      const totalDuration = 60000; // 60s total
+      for (let t = 0; t <= totalDuration; t += 500) {
+        const phase = (t % cycleDuration) / cycleDuration;
+        // Triangle wave: 0→1→0
+        const pos = phase < 0.5 ? phase * 2 * 100 : (1 - phase) * 2 * 100;
+        lines.push(`${t},${Math.round(pos)}`);
+      }
+      return lines.join('\n');
+    }
+
+    let scriptUrl = null;
+
+    document.getElementById('btn-upload').addEventListener('click', async () => {
+      setStatus('step4-status', 'Generating and uploading script...', 'wait');
+      try {
+        const csv = generateTestCSV();
+        log(`Generated CSV: ${csv.split('\n').length} lines, first 3: ${csv.split('\n').slice(0, 3).join(' | ')}`);
+
+        // Upload via SDK
+        scriptUrl = await HandySDK.uploadDataToServer(csv);
+        log(`Script uploaded to: ${scriptUrl}`);
+
+        // Set script on device
+        const setupResult = await handy.setScript(scriptUrl);
+        log(`setScript result: ${JSON.stringify(setupResult)}`);
+        setStatus('step4-status', 'Script ready', 'ok');
+        document.getElementById('btn-play').disabled = false;
+        document.getElementById('btn-stop').disabled = false;
+      } catch (err) {
+        setStatus('step4-status', `Upload failed: ${err.message}`, 'fail');
+        log(`Upload error: ${err.stack || err.message}`);
+      }
+    });
+
+    document.getElementById('btn-play').addEventListener('click', async () => {
+      try {
+        const est = HandySDK.getEstimatedServerTime();
+        log(`Playing from 0ms, estimated server time: ${est}`);
+        const result = await handy.hsspPlay(0, est);
+        log(`hsspPlay result: ${JSON.stringify(result)}`);
+        setStatus('step4-status', 'Playing...', 'ok');
+      } catch (err) {
+        log(`Play error: ${err.message}`);
+      }
+    });
+
+    document.getElementById('btn-stop').addEventListener('click', async () => {
+      try {
+        const result = await handy.hsspStop();
+        log(`hsspStop result: ${JSON.stringify(result)}`);
+        setStatus('step4-status', 'Stopped', '');
+      } catch (err) {
+        log(`Stop error: ${err.message}`);
+      }
+    });
+
+    // Step 5: HDSP
+    async function hdspTo(pos) {
+      try {
+        log(`HDSP move to ${pos}%`);
+        const result = await handy.hdsp(pos, 500, 'percent', 'time', true, true);
+        log(`HDSP result: ${JSON.stringify(result)}`);
+        setStatus('step5-status', `Moved to ${pos}%`, 'ok');
+      } catch (err) {
+        setStatus('step5-status', `HDSP error: ${err.message}`, 'fail');
+        log(`HDSP error: ${err.message}`);
+      }
+    }
+
+    document.getElementById('btn-hdsp0').addEventListener('click', () => hdspTo(0));
+    document.getElementById('btn-hdsp50').addEventListener('click', () => hdspTo(50));
+    document.getElementById('btn-hdsp100').addEventListener('click', () => hdspTo(100));
+  </script>
+</body>
+</html>

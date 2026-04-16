@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com; media-src 'self' file: blob:; img-src 'self' http://localhost:* data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>FunSync Player</title>
+  <link rel="stylesheet" href="styles/player.css">
+  <link rel="stylesheet" href="styles/library.css">
+  <link rel="stylesheet" href="styles/nav-bar.css">
+  <link rel="stylesheet" href="styles/modal.css">
+  <link rel="stylesheet" href="styles/playlists.css">
+  <link rel="stylesheet" href="styles/categories.css">
+  <link rel="stylesheet" href="styles/editor.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Library View (default landing page) -->
+    <div id="library-container" class="library"></div>
+
+    <!-- Playlists View (hidden until opened) -->
+    <div id="playlists-container" class="playlists" hidden></div>
+
+    <!-- Categories View (hidden until opened) -->
+    <div id="categories-container" class="categories" hidden></div>
+
+    <!-- Video Player Container (hidden until video loaded) -->
+    <div id="player-container" class="player-container" hidden>
+      <div id="video-wrapper" class="player__video-wrapper">
+        <video id="video" class="player__video"></video>
+
+        <!-- Center Play/Pause Overlay -->
+        <button id="center-play-btn" class="center-play" aria-label="Play">
+          <span class="center-play__icon center-play__icon--play"><i data-lucide="play"></i></span>
+          <span class="center-play__icon center-play__icon--pause" hidden><i data-lucide="pause"></i></span>
+        </button>
+      </div>
+
+      <!-- Script Loading Overlay (shown while uploading funscript to Handy cloud) -->
+      <div id="script-loading-overlay" class="script-loading-overlay" hidden>
+        <div class="script-loading-overlay__content">
+          <div class="script-loading-overlay__spinner"></div>
+          <div class="script-loading-overlay__text">Preparing script...</div>
+        </div>
+      </div>
+
+      <!-- Controls Overlay -->
+      <div id="controls" class="player__controls" role="toolbar" aria-label="Video player controls">
+        <!-- Progress Bar -->
+        <div id="progress-container" class="controls__progress" role="slider"
+             aria-label="Video progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+             tabindex="0">
+          <div class="progress__heatmap" id="heatmap-canvas-container">
+            <canvas id="heatmap-canvas" aria-hidden="true"></canvas>
+          </div>
+          <div class="progress__buffered" id="buffered-bar"></div>
+          <div class="progress__filled" id="progress-bar"></div>
+          <div class="progress__thumb" id="progress-thumb"></div>
+          <div class="progress__tooltip" id="progress-tooltip" aria-hidden="true">
+            <div class="tooltip__thumbnail" id="tooltip-thumbnail"></div>
+            <span class="tooltip__time" id="tooltip-time">0:00</span>
+          </div>
+        </div>
+
+        <!-- Bottom Controls -->
+        <div class="controls__bottom">
+          <div class="controls__left">
+            <button id="btn-prev" class="control-btn control-btn--queue" hidden aria-label="Previous" title="Previous">
+              <i data-lucide="skip-back"></i>
+            </button>
+
+            <button id="btn-play" class="control-btn" aria-label="Play" title="Play (K)">
+              <span class="icon-play"><i data-lucide="play"></i></span>
+              <span class="icon-pause" hidden><i data-lucide="pause"></i></span>
+            </button>
+
+            <button id="btn-next" class="control-btn control-btn--queue" hidden aria-label="Next" title="Next">
+              <i data-lucide="skip-forward"></i>
+            </button>
+            <span id="queue-indicator" class="queue-indicator" hidden></span>
+
+            <div class="controls__volume" role="group" aria-label="Volume controls">
+              <button id="btn-mute" class="control-btn" aria-label="Mute" title="Mute (M)">
+                <span class="icon-volume"><i data-lucide="volume-2"></i></span>
+                <span class="icon-muted" hidden><i data-lucide="volume-x"></i></span>
+              </button>
+              <input type="range" id="volume-slider" class="volume-slider"
+                     min="0" max="100" value="100"
+                     aria-label="Volume" title="Volume">
+            </div>
+
+            <div class="controls__time" aria-live="polite">
+              <span id="time-current">0:00</span>
+              <span class="time-separator">/</span>
+              <span id="time-duration">0:00</span>
+            </div>
+          </div>
+
+          <div class="controls__right">
+            <span id="funscript-badge" class="funscript-badge" hidden title="Funscript loaded"></span>
+
+            <button id="btn-editor" class="control-btn" aria-label="Script Editor" title="Script Editor (E)" hidden>
+              <i data-lucide="pencil"></i>
+            </button>
+
+            <button id="btn-open" class="control-btn" aria-label="Open file" title="Open File (O)">
+              <i data-lucide="folder-open"></i>
+            </button>
+
+            <button id="btn-handy" class="control-btn control-btn--handy" aria-label="Device Connection" title="Devices Connection (H)">
+              <span class="icon-handy"><i data-lucide="bluetooth"></i></span>
+              <span class="handy-led" id="handy-led"></span>
+            </button>
+
+            <button id="btn-pip" class="control-btn" aria-label="Picture in Picture" title="Picture in Picture">
+              <i data-lucide="picture-in-picture-2"></i>
+            </button>
+
+            <button id="btn-fullscreen" class="control-btn" aria-label="Fullscreen" title="Fullscreen (F)">
+              <span class="icon-expand"><i data-lucide="maximize"></i></span>
+              <span class="icon-compress" hidden><i data-lucide="minimize"></i></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Top Bar Overlay (back button + title) -->
+      <div class="player__top-bar">
+        <button id="btn-player-back" class="player__back-btn" aria-label="Back" title="Back"><i data-lucide="arrow-left"></i></button>
+        <div id="video-title" class="player__title" aria-live="polite"></div>
+        <div id="video-category-dots" class="player__category-dots"></div>
+        <button id="btn-add-to-playlist" class="player__quick-add" aria-label="Add to playlist" title="Add to Playlist"><i data-lucide="plus"></i></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notifications -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
+
+  <script src="js/process-shim.js"></script>
+  <script src="js/app.js" type="module"></script>
+</body>
+</html>

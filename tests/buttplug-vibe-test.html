@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Buttplug Vibration Test</title>
+  <style>
+    body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; }
+    button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; }
+    #log { white-space: pre-wrap; background: #0a0a1a; padding: 10px; margin-top: 10px; max-height: 400px; overflow-y: auto; border: 1px solid #333; }
+    .ok { color: #4caf50; }
+    .err { color: #e94560; }
+    .info { color: #64b4ff; }
+  </style>
+</head>
+<body>
+  <h2>Buttplug.io Vibration Test</h2>
+  <div>
+    <label>Port: <input id="port" type="number" value="12345" style="width:80px"></label>
+    <button id="btn-connect">1. Connect</button>
+    <button id="btn-scan">2. Scan</button>
+    <button id="btn-vibe">3. Vibrate 2s</button>
+    <button id="btn-stop">Stop All</button>
+  </div>
+  <div id="log"></div>
+
+  <script type="module">
+    // Import buttplug from local node_modules
+    const SDK = await import('../node_modules/buttplug/dist/web/buttplug.mjs');
+
+    const log = document.getElementById('log');
+    function print(msg, cls = '') {
+      const line = document.createElement('div');
+      line.className = cls;
+      line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.appendChild(line);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    let client = null;
+    let devices = new Map();
+
+    // 1. Connect
+    document.getElementById('btn-connect').onclick = async () => {
+      const port = document.getElementById('port').value;
+      print(`Connecting to ws://127.0.0.1:${port}...`, 'info');
+
+      try {
+        client = new SDK.ButtplugClient('Vibe Test');
+
+        client.addListener('deviceadded', (dev) => {
+          devices.set(dev.index, dev);
+          const caps = [];
+          if (dev.vibrateAttributes?.length) caps.push(`vibrate(${dev.vibrateAttributes.length})`);
+          if (dev.linearAttributes?.length) caps.push(`linear(${dev.linearAttributes.length})`);
+          if (dev.rotateAttributes?.length) caps.push(`rotate(${dev.rotateAttributes.length})`);
+          if (dev.scalarAttributes?.length) caps.push(`scalar(${dev.scalarAttributes.length})`);
+          print(`Device added: "${dev.name}" [index=${dev.index}] caps: ${caps.join(', ') || 'none'}`, 'ok');
+
+          // Log all attributes for debugging
+          print(`  vibrateAttributes: ${JSON.stringify(dev.vibrateAttributes)}`, 'info');
+          print(`  linearAttributes: ${JSON.stringify(dev.linearAttributes)}`, 'info');
+          print(`  rotateAttributes: ${JSON.stringify(dev.rotateAttributes)}`, 'info');
+          print(`  scalarAttributes: ${JSON.stringify(dev.scalarAttributes)}`, 'info');
+
+          // List all methods on the device
+          const methods = Object.getOwnPropertyNames(Object.getPrototypeOf(dev))
+            .filter(m => typeof dev[m] === 'function' && !m.startsWith('_'));
+          print(`  methods: ${methods.join(', ')}`, 'info');
+        });
+
+        client.addListener('deviceremoved', (dev) => {
+          devices.delete(dev.index);
+          print(`Device removed: "${dev.name}"`, 'err');
+        });
+
+        const connector = new SDK.ButtplugBrowserWebsocketClientConnector(
+          `ws://127.0.0.1:${port}`
+        );
+
+        await client.connect(connector);
+        print('Connected to Intiface!', 'ok');
+      } catch (err) {
+        print(`Connection failed: ${err?.message || err}`, 'err');
+      }
+    };
+
+    // 2. Scan
+    document.getElementById('btn-scan').onclick = async () => {
+      if (!client?.connected) { print('Not connected', 'err'); return; }
+      print('Scanning for devices...', 'info');
+      try {
+        await client.startScanning();
+        print('Scan started — devices will appear above as they connect', 'ok');
+        // Stop scan after 10s
+        setTimeout(async () => {
+          try { await client.stopScanning(); } catch(e) {}
+          print(`Scan stopped. ${devices.size} device(s) found.`, 'info');
+        }, 10000);
+      } catch (err) {
+        print(`Scan error: ${err?.message || err}`, 'err');
+      }
+    };
+
+    // 3. Vibrate for 2 seconds
+    document.getElementById('btn-vibe').onclick = async () => {
+      if (!client?.connected) { print('Not connected', 'err'); return; }
+      if (devices.size === 0) { print('No devices — scan first', 'err'); return; }
+
+      for (const [idx, dev] of devices) {
+        print(`Testing device "${dev.name}" [${idx}]...`, 'info');
+
+        // Try vibrate
+        if (dev.vibrateAttributes?.length > 0) {
+          print(`  Sending vibrate(0.3) for 2 seconds...`, 'info');
+          try {
+            await dev.vibrate(0.3);
+            print(`  vibrate(0.3) sent OK`, 'ok');
+          } catch (err) {
+            print(`  vibrate failed: ${err?.message || err}`, 'err');
+          }
+        } else {
+          print(`  No vibrate capability`, 'info');
+        }
+
+        // Try scalar (some devices use scalar instead of vibrate)
+        if (dev.scalarAttributes?.length > 0) {
+          print(`  Sending scalar(0.3) for vibrate actuators...`, 'info');
+          try {
+            // ScalarCmd: array of [speed, actuatorType] pairs
+            // ActuatorType for vibrate is typically 'Vibrate'
+            for (let i = 0; i < dev.scalarAttributes.length; i++) {
+              const attr = dev.scalarAttributes[i];
+              print(`    scalar attr[${i}]: ${JSON.stringify(attr)}`, 'info');
+            }
+            await dev.scalar(0.3);
+            print(`  scalar(0.3) sent OK`, 'ok');
+          } catch (err) {
+            print(`  scalar failed: ${err?.message || err}`, 'err');
+          }
+        }
+
+        // Try linear
+        if (dev.linearAttributes?.length > 0) {
+          print(`  Sending linear(0.5, 1000) — move to 50% over 1s...`, 'info');
+          try {
+            await dev.linear(0.5, 1000);
+            print(`  linear(0.5, 1000) sent OK`, 'ok');
+          } catch (err) {
+            print(`  linear failed: ${err?.message || err}`, 'err');
+          }
+        }
+
+        // Stop after 2 seconds
+        setTimeout(async () => {
+          try {
+            await client.stopAllDevices();
+            print(`  Stopped all devices after 2s`, 'ok');
+          } catch (err) {
+            print(`  Stop failed: ${err?.message || err}`, 'err');
+          }
+        }, 2000);
+      }
+    };
+
+    // Stop all
+    document.getElementById('btn-stop').onclick = async () => {
+      if (!client?.connected) { print('Not connected', 'err'); return; }
+      try {
+        await client.stopAllDevices();
+        print('All devices stopped', 'ok');
+      } catch (err) {
+        print(`Stop failed: ${err?.message || err}`, 'err');
+      }
+    };
+
+    print('Ready. Click Connect, then Scan, then Vibrate.', 'info');
+  </script>
+</body>
+</html>

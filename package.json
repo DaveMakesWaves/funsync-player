@@ -1,0 +1,41 @@
+{
+  "name": "funsync-player",
+  "version": "0.1.0",
+  "description": "Local desktop video player with Handy device integration for synchronized funscript playback",
+  "main": "electron/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "concurrently \"electron .\" \"cd backend && python main.py\"",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "backend:dev": "cd backend && python main.py",
+    "backend:test": "cd backend && pytest -v",
+    "build": "node scripts/build.js"
+  },
+  "keywords": [
+    "video-player",
+    "funscript",
+    "handy",
+    "electron"
+  ],
+  "author": "FunSync",
+  "license": "UNLICENSED",
+  "private": true,
+  "dependencies": {
+    "@ohdoki/handy-sdk": "^2.3.4",
+    "buttplug": "^4.0.1",
+    "electron-conf": "^1.3.0",
+    "electron-log": "^5.4.3",
+    "jszip": "^3.10.1",
+    "lucide": "^1.8.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "concurrently": "^9.2.1",
+    "electron": "^41.2.0",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^29.0.2",
+    "vitest": "^4.1.4"
+  }
+}

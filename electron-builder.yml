@@ -1,0 +1,38 @@
+appId: com.funsync.player
+productName: FunSync Player
+copyright: Copyright © 2026
+
+directories:
+  output: dist
+
+files:
+  - electron/**/*
+  - renderer/**/*
+  - node_modules/**/*
+  - package.json
+
+extraResources:
+  - from: backend-dist/
+    to: backend
+    filter:
+      - "**/*"
+
+win:
+  target:
+    - target: nsis
+      arch: x64
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+asar: true
+
+extraFiles:
+  - from: ffmpeg/
+    to: ffmpeg
+    filter:
+      - ffmpeg.exe
+      - ffprobe.exe
