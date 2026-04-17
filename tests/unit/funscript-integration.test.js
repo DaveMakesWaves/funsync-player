@@ -1,15 +1,16 @@
 // Integration tests using the real Test.funscript file through FunscriptEngine
 import { describe, it, expect, beforeAll, vi } from 'vitest';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { FunscriptEngine } from '../../renderer/js/funscript-engine.js';
 
-// Read the actual test funscript
+// Read the actual test funscript (skip entire suite in CI where file doesn't exist)
 const funscriptPath = join(__dirname, '..', '..', 'Test.funscript');
-const rawContent = readFileSync(funscriptPath, 'utf-8');
+const hasTestFile = existsSync(funscriptPath);
+const rawContent = hasTestFile ? readFileSync(funscriptPath, 'utf-8') : '{"actions":[],"version":"1.0"}';
 const funscriptData = JSON.parse(rawContent);
 
-describe('Real Test.funscript parsing', () => {
+describe.skipIf(!hasTestFile)('Real Test.funscript parsing', () => {
   it('has valid structure', () => {
     expect(funscriptData.version).toBe('1.0');
     expect(funscriptData.inverted).toBe(false);
@@ -53,7 +54,7 @@ describe('Real Test.funscript parsing', () => {
 });
 
 // Test through the real FunscriptEngine class
-describe('FunscriptEngine with real Test.funscript', () => {
+describe.skipIf(!hasTestFile)('FunscriptEngine with real Test.funscript', () => {
   let engine;
 
   beforeAll(async () => {
@@ -105,7 +106,7 @@ describe('FunscriptEngine with real Test.funscript', () => {
 });
 
 // Test heatmap speed calculations with real data
-describe('Real funscript heatmap speeds', () => {
+describe.skipIf(!hasTestFile)('Real funscript heatmap speeds', () => {
   it('produces valid speed values', () => {
     const actions = funscriptData.actions;
     for (let i = 0; i < actions.length - 1; i++) {
