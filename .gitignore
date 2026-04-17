@@ -30,7 +30,6 @@ ffmpeg/*.zip
 
 # Test media files (too large for git)
 Test.mp4
-Test.funscript
 Test-slow.funscript
 Logo.ico
 FS(1).png
