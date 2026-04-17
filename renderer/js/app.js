@@ -115,7 +115,19 @@ class App {
     this.navBar = new NavBar({
       onNavigate: (viewId) => this._navigateTo(viewId),
       onHandyClick: () => { if (this.connectionPanel) this.connectionPanel.toggle(); },
-      onEroScriptsClick: () => { if (this.eroscriptsPanel) this.eroscriptsPanel.toggle(); },
+      onEroScriptsClick: () => {
+        if (!this.eroscriptsPanel) return;
+        if (this._currentVideoName && !this.funscriptEngine.isLoaded && !this.eroscriptsPanel._visible) {
+          const query = this._currentVideoName.replace(/\.[^/.]+$/, '');
+          this.eroscriptsPanel.setSearchQuery(query, true);
+        }
+        this.eroscriptsPanel.toggle();
+      },
+      onLibraryCollectionChange: (collectionId) => this._switchCollection(collectionId),
+      onNewCollection: () => this._showNewCollectionModal(),
+      onRenameCollection: (id) => this._renameCollection(id),
+      onDeleteCollection: (id) => this._deleteCollection(id),
+      onAddSource: () => this._addSource(),
     });
     this.navBar.init(document.getElementById('app'));
     this.navBar.setActive('library');
@@ -126,6 +138,9 @@ class App {
       onBack: () => this._navigateBack(),
       settings: this.settings,
     });
+
+    // Load saved collections into nav bar + library (must be after library creation)
+    await this._refreshCollectionsUI();
 
     // Playlists
     this.playlists = new Playlists({
@@ -150,12 +165,6 @@ class App {
     const btnAddToPlaylist = document.getElementById('btn-add-to-playlist');
     if (btnAddToPlaylist) {
       btnAddToPlaylist.addEventListener('click', () => this._quickAddToPlaylist());
-    }
-
-    // "Open File" button in player controls
-    const btnOpen = document.getElementById('btn-open');
-    if (btnOpen) {
-      btnOpen.addEventListener('click', () => this.dragDrop._openNativeDialog());
     }
 
     // Queue navigation (prev/next)
@@ -478,9 +487,9 @@ class App {
   _updateHandyIndicators(status) {
     const deviceCount = this._getConnectedDeviceCount();
 
-    // Check if any device (Handy OR Buttplug) is connected
-    const buttplugConnected = this.buttplugManager?.connected;
-    const anyConnected = status === 'connected' || status === 'connecting' || buttplugConnected;
+    // Check if any actual device is connected (not just Intiface server)
+    const buttplugDevices = this.buttplugManager?.connected ? this.buttplugManager.devices.length : 0;
+    const anyConnected = status === 'connected' || status === 'connecting' || buttplugDevices > 0;
     const effectiveStatus = anyConnected
       ? (status === 'connecting' ? 'connecting' : 'connected')
       : 'disconnected';
@@ -514,9 +523,9 @@ class App {
    */
   _updateDeviceIndicators() {
     const handyConnected = this.handyManager?.connected;
-    const buttplugConnected = this.buttplugManager?.connected;
-    const anyConnected = handyConnected || buttplugConnected;
+    const buttplugDevices = this.buttplugManager?.connected ? this.buttplugManager.devices.length : 0;
     const deviceCount = this._getConnectedDeviceCount();
+    const anyConnected = deviceCount > 0;
 
     const led = document.getElementById('handy-led');
     if (led) {
@@ -717,6 +726,7 @@ class App {
     this._currentVariants = [];
     this._allVariantsWithManual = [];
     this._activeVariantIndex = 0;
+    this._activeVariantPath = null;
 
     // Hide editor, clear funscript path, and show editor toggle button
     if (this.scriptEditor) {
@@ -827,7 +837,7 @@ class App {
         btn.textContent = 'Get Script';
         btn.addEventListener('click', () => {
           if (this.eroscriptsPanel) {
-            this.eroscriptsPanel.setSearchQuery(query);
+            this.eroscriptsPanel.setSearchQuery(query, true);
             this.eroscriptsPanel.show();
           }
         });
@@ -1041,6 +1051,7 @@ class App {
     this._currentMultiAxis = null;
     this._currentVariants = variants || [];
     this._activeVariantIndex = 0;
+    this._activeVariantPath = null;
     this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: false });
     this._updateVariantSelector();
     if (funscriptData) {
@@ -1212,6 +1223,400 @@ class App {
     this.progressBar.setGaps(null);
   }
 
+  // --- Library Collections ---
+
+  async _refreshCollectionsUI() {
+    const collections = this.settings.get('library.collections') || [];
+    let activeCollectionId = this.settings.get('library.activeCollectionId') || null;
+    let sources = this.settings.get('library.sources') || [];
+
+    // Auto-migrate: if legacy directory exists but not in sources, add it
+    const legacyDir = this.settings.get('library.directory');
+    if (legacyDir && !sources.some(s => s.path === legacyDir)) {
+      const dirName = legacyDir.split(/[\\/]/).pop() || 'Library';
+      sources.push({ id: crypto.randomUUID(), name: dirName, path: legacyDir, enabled: true });
+      this.settings.set('library.sources', sources);
+    }
+
+    // Check which source paths are available (external drives may be disconnected)
+    const unavailablePaths = new Set();
+    await Promise.all(sources.map(async (s) => {
+      try {
+        const exists = await window.funsync.fileExists(s.path);
+        if (!exists) unavailablePaths.add(s.path);
+      } catch {
+        unavailablePaths.add(s.path);
+      }
+    }));
+
+    // Determine which collections are unavailable (any video from an unavailable source)
+    // Use separator-aware prefix check to avoid false matches (e.g. D:/Videos vs D:/Videos2)
+    const unavailableCollectionIds = new Set();
+    const unavailableWithSep = [...unavailablePaths].flatMap(sp => [sp + '/', sp + '\\']);
+    for (const col of collections) {
+      const hasUnavailable = (col.videoPaths || []).some(vp =>
+        unavailableWithSep.some(prefix => vp.startsWith(prefix)) ||
+        unavailablePaths.has(vp) // exact match (unlikely but safe)
+      );
+      if (hasUnavailable) unavailableCollectionIds.add(col.id);
+    }
+
+    // If active collection is unavailable, fall back to All Videos
+    if (activeCollectionId && unavailableCollectionIds.has(activeCollectionId)) {
+      activeCollectionId = null;
+      this.settings.set('library.activeCollectionId', null);
+    }
+
+    this.navBar.setCollections(collections, activeCollectionId, sources, unavailablePaths, unavailableCollectionIds);
+    if (this.library) {
+      this.library._activeCollectionId = activeCollectionId;
+      this.library._unavailablePaths = unavailablePaths;
+    }
+  }
+
+  async _addSource() {
+    const dirPath = await window.funsync.selectDirectory();
+    if (!dirPath) return;
+
+    const name = await Modal.prompt('Name this source', 'Source name', dirPath.split(/[\\/]/).pop());
+    if (!name) return;
+
+    const sources = this.settings.get('library.sources') || [];
+    // Don't add duplicates
+    if (sources.some(s => s.path === dirPath)) {
+      showToast('This folder is already a source', 'warn');
+      return;
+    }
+
+    sources.push({
+      id: crypto.randomUUID(),
+      name,
+      path: dirPath,
+      enabled: true,
+    });
+    this.settings.set('library.sources', sources);
+
+    // Also set as legacy directory if it's the first source
+    if (!this.settings.get('library.directory')) {
+      this.settings.set('library.directory', dirPath);
+    }
+
+    await this._refreshCollectionsUI();
+    if (this._currentView() === 'library') {
+      this.library.show(this._getViewEl('library'));
+    }
+  }
+
+  async _switchCollection(collectionId) {
+    this.settings.set('library.activeCollectionId', collectionId || null);
+    await this._refreshCollectionsUI();
+    // Re-render library if it's the active view
+    if (this._currentView() === 'library') {
+      this.library.show(this._getViewEl('library'));
+    }
+  }
+
+  /**
+   * Shared modal for creating/editing collections.
+   * Shows source picker + name input + searchable video grid with multi-select.
+   */
+  async _showCollectionModal(title, existingName, existingPaths) {
+    const sources = this.settings.get('library.sources') || [];
+    const legacyDir = this.settings.get('library.directory');
+    const unavailable = this.library?._unavailablePaths || new Set();
+
+    // Get initial videos from all available sources (or legacy dir)
+    let allScanPaths = sources.length > 0
+      ? sources.filter(s => s.enabled !== false && !unavailable.has(s.path)).map(s => s.path)
+      : (legacyDir && !unavailable.has(legacyDir) ? [legacyDir] : []);
+
+    // Scan to get initial video list
+    let videos = [];
+    if (allScanPaths.length > 0) {
+      const scanResult = await window.funsync.scanDirectory(allScanPaths.length === 1 ? allScanPaths[0] : allScanPaths);
+      videos = scanResult?.videos || [];
+    }
+
+    return Modal.open({
+      title,
+      onRender: (body, close) => {
+        // Source picker
+        const sourceRow = document.createElement('div');
+        sourceRow.className = 'library__collection-toolbar';
+        sourceRow.style.marginBottom = '8px';
+
+        const sourceLabel = document.createElement('span');
+        sourceLabel.className = 'library__collection-count';
+        sourceLabel.textContent = 'Source:';
+        sourceLabel.style.marginRight = '6px';
+
+        const sourceSelect = document.createElement('select');
+        sourceSelect.className = 'library__sort-select';
+        sourceSelect.style.flex = '1';
+
+        const allOpt = document.createElement('option');
+        allOpt.value = 'all';
+        allOpt.textContent = 'All Sources';
+        sourceSelect.appendChild(allOpt);
+
+        for (const src of sources) {
+          const opt = document.createElement('option');
+          opt.value = src.id;
+          const isOffline = unavailable.has(src.path);
+          opt.textContent = isOffline ? `${src.name} (disconnected)` : src.name;
+          opt.disabled = isOffline;
+          sourceSelect.appendChild(opt);
+        }
+
+        const browseOpt = document.createElement('option');
+        browseOpt.value = '__browse__';
+        browseOpt.textContent = '+ Browse for folder...';
+        sourceSelect.appendChild(browseOpt);
+
+        sourceRow.appendChild(sourceLabel);
+        sourceRow.appendChild(sourceSelect);
+        body.appendChild(sourceRow);
+
+        // Name input
+        const nameInput = document.createElement('input');
+        nameInput.type = 'text';
+        nameInput.className = 'modal-input';
+        nameInput.placeholder = 'Collection name...';
+        nameInput.value = existingName || '';
+        nameInput.style.marginBottom = '8px';
+        body.appendChild(nameInput);
+
+        // Search + count
+        const toolbar = document.createElement('div');
+        toolbar.className = 'library__collection-toolbar';
+
+        const searchInput = document.createElement('input');
+        searchInput.type = 'text';
+        searchInput.className = 'library__search-input';
+        searchInput.placeholder = 'Search...';
+        searchInput.style.flex = '1';
+
+        const countLabel = document.createElement('span');
+        countLabel.className = 'library__collection-count';
+        countLabel.textContent = `${existingPaths.size} selected`;
+
+        const selectAllBtn = document.createElement('button');
+        selectAllBtn.className = 'library__collection-select-all';
+        selectAllBtn.textContent = 'Select All';
+        selectAllBtn.addEventListener('click', () => {
+          const query = searchInput.value.toLowerCase().trim();
+          const visible = query
+            ? currentVideos.filter(v => v.name.toLowerCase().includes(query))
+            : currentVideos;
+          const allSelected = visible.length > 0 && visible.every(v => selected.has(v.path));
+          for (const v of visible) {
+            if (allSelected) {
+              selected.delete(v.path);
+            } else {
+              selected.add(v.path);
+            }
+          }
+          countLabel.textContent = `${selected.size} selected`;
+          renderGrid();
+        });
+
+        toolbar.appendChild(searchInput);
+        toolbar.appendChild(selectAllBtn);
+        toolbar.appendChild(countLabel);
+        body.appendChild(toolbar);
+
+        // Video grid
+        const grid = document.createElement('div');
+        grid.className = 'library__collection-grid';
+
+        const selected = new Set(existingPaths);
+        let currentVideos = [...videos];
+        const pendingSources = []; // sources added via browse — only saved on confirm
+
+        const renderGrid = () => {
+          grid.innerHTML = '';
+          const query = searchInput.value.toLowerCase().trim();
+          const filtered = query
+            ? currentVideos.filter(v => v.name.toLowerCase().includes(query))
+            : currentVideos;
+
+          for (const video of filtered) {
+            const card = document.createElement('div');
+            card.className = 'library__collection-card';
+            if (selected.has(video.path)) card.classList.add('library__collection-card--selected');
+
+            const checkbox = document.createElement('div');
+            checkbox.className = 'library__collection-card-check';
+            if (selected.has(video.path)) checkbox.classList.add('library__collection-card-check--on');
+
+            const titleEl = document.createElement('div');
+            titleEl.className = 'library__collection-card-title';
+            titleEl.textContent = video.name.replace(/\.[^/.]+$/, '');
+            titleEl.title = video.name;
+
+            card.appendChild(checkbox);
+            card.appendChild(titleEl);
+
+            card.addEventListener('click', () => {
+              if (selected.has(video.path)) {
+                selected.delete(video.path);
+                card.classList.remove('library__collection-card--selected');
+                checkbox.classList.remove('library__collection-card-check--on');
+              } else {
+                selected.add(video.path);
+                card.classList.add('library__collection-card--selected');
+                checkbox.classList.add('library__collection-card-check--on');
+              }
+              countLabel.textContent = `${selected.size} selected`;
+              // Sync Select All button text
+              const allVis = filtered.every(v => selected.has(v.path));
+              selectAllBtn.textContent = allVis ? 'Deselect All' : 'Select All';
+            });
+
+            grid.appendChild(card);
+          }
+
+          if (filtered.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'library__collection-count';
+            empty.style.padding = '20px';
+            empty.style.textAlign = 'center';
+            empty.textContent = currentVideos.length === 0 ? 'No videos in this source' : 'No matches';
+            grid.appendChild(empty);
+          }
+
+          // Sync Select All button text
+          const allVisible = filtered.length > 0 && filtered.every(v => selected.has(v.path));
+          selectAllBtn.textContent = allVisible ? 'Deselect All' : 'Select All';
+          selectAllBtn.hidden = filtered.length === 0;
+        };
+
+        searchInput.addEventListener('input', renderGrid);
+
+        // Source change — rescan the selected source
+        let previousSourceValue = 'all';
+        sourceSelect.addEventListener('change', async () => {
+          const val = sourceSelect.value;
+          if (val === '__browse__') {
+            const dirPath = await window.funsync.selectDirectory();
+            if (dirPath) {
+              // Add as new source
+              const name = dirPath.split(/[\\/]/).pop();
+              const newSrc = { id: crypto.randomUUID(), name, path: dirPath, enabled: true };
+              const allExisting = [...(this.settings.get('library.sources') || []), ...pendingSources];
+              if (!allExisting.some(s => s.path === dirPath)) {
+                pendingSources.push(newSrc);
+                const opt = document.createElement('option');
+                opt.value = newSrc.id;
+                opt.textContent = name;
+                sourceSelect.insertBefore(opt, browseOpt);
+                sourceSelect.value = newSrc.id;
+              }
+              // Scan new directory
+              const result = await window.funsync.scanDirectory(dirPath);
+              currentVideos = result?.videos || [];
+            } else {
+              // User cancelled directory picker — revert dropdown to previous value
+              sourceSelect.value = previousSourceValue;
+              return;
+            }
+          } else if (val === 'all') {
+            currentVideos = [...videos];
+          } else {
+            const src = sources.find(s => s.id === val) || pendingSources.find(s => s.id === val);
+            if (src) {
+              const result = await window.funsync.scanDirectory(src.path);
+              currentVideos = result?.videos || [];
+            }
+          }
+          previousSourceValue = sourceSelect.value;
+          searchInput.value = '';
+          renderGrid();
+        });
+
+        renderGrid();
+        body.appendChild(grid);
+
+        // Save/Create button
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'library__assoc-save-btn';
+        saveBtn.textContent = existingName ? 'Save' : 'Create';
+        saveBtn.style.marginTop = '12px';
+        saveBtn.addEventListener('click', () => {
+          const name = nameInput.value.trim();
+          if (!name) { nameInput.focus(); return; }
+          if (selected.size === 0) return;
+          // Save any pending sources that were browsed during this modal
+          if (pendingSources.length > 0) {
+            const srcs = this.settings.get('library.sources') || [];
+            for (const ps of pendingSources) {
+              if (!srcs.some(s => s.path === ps.path)) srcs.push(ps);
+            }
+            this.settings.set('library.sources', srcs);
+          }
+          close({ name, paths: [...selected] });
+        });
+        body.appendChild(saveBtn);
+
+        nameInput.focus();
+      },
+    });
+  }
+
+  async _renameCollection(id) {
+    const collections = this.settings.get('library.collections') || [];
+    const col = collections.find(c => c.id === id);
+    if (!col) return;
+
+    const result = await this._showCollectionModal(`Edit — ${col.name}`, col.name, new Set(col.videoPaths));
+    if (!result) return;
+
+    col.name = result.name;
+    col.videoPaths = result.paths;
+    this.settings.set('library.collections', collections);
+    await this._refreshCollectionsUI();
+
+    if (this.settings.get('library.activeCollectionId') === id) {
+      this.library.show(this._getViewEl('library'));
+    }
+  }
+
+  async _deleteCollection(id) {
+    const collections = this.settings.get('library.collections') || [];
+    const col = collections.find(c => c.id === id);
+    if (!col) return;
+
+    const confirmed = await Modal.confirm('Delete Library', `Delete "${col.name}"? Your videos won't be affected.`);
+    if (!confirmed) return;
+
+    const updated = collections.filter(c => c.id !== id);
+    this.settings.set('library.collections', updated);
+
+    // If the deleted collection was active, switch to All
+    if (this.settings.get('library.activeCollectionId') === id) {
+      await this._switchCollection(null);
+    } else {
+      await this._refreshCollectionsUI();
+    }
+  }
+
+  async _showNewCollectionModal() {
+    const chosen = await this._showCollectionModal('Create Collection', '', new Set());
+    if (!chosen) return;
+
+    const collections = this.settings.get('library.collections') || [];
+    const newCol = {
+      id: crypto.randomUUID(),
+      name: chosen.name,
+      videoPaths: chosen.paths,
+    };
+    collections.push(newCol);
+    this.settings.set('library.collections', collections);
+
+    // Switch to the new collection
+    await this._switchCollection(newCol.id);
+  }
+
   _loadSubtitleFromLibrary(subtitleData) {
     if (!subtitleData || !subtitleData.textContent || !subtitleData.name) return;
     const file = new File([subtitleData.textContent], subtitleData.name, { type: 'text/plain' });
@@ -1247,6 +1652,12 @@ class App {
     const manualVariants = this.settings.get('library.manualVariants') || {};
     const manual = videoPath && manualVariants[videoPath] ? manualVariants[videoPath] : [];
     const allVariants = [...baseVariants, ...manual];
+
+    // Resolve active index from stored path (array may have been rebuilt)
+    if (this._activeVariantPath) {
+      const idx = allVariants.findIndex(v => v.path === this._activeVariantPath);
+      if (idx >= 0) this._activeVariantIndex = idx;
+    }
 
     // Show selector only if there are variants (or always to allow adding)
     if (allVariants.length > 1 || this._currentVideoPath) {
@@ -1296,14 +1707,18 @@ class App {
     });
     dropdown.appendChild(addBtn);
 
-    // Close on outside click
-    const closeHandler = (e) => {
+    // Close on outside click (clean up previous listener)
+    if (this._variantDropdownClose) {
+      document.removeEventListener('click', this._variantDropdownClose, true);
+    }
+    this._variantDropdownClose = (e) => {
       if (!dropdown.contains(e.target) && !document.getElementById('variant-btn')?.contains(e.target)) {
         dropdown.hidden = true;
-        document.removeEventListener('click', closeHandler, true);
+        document.removeEventListener('click', this._variantDropdownClose, true);
+        this._variantDropdownClose = null;
       }
     };
-    setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+    setTimeout(() => document.addEventListener('click', this._variantDropdownClose, true), 0);
   }
 
   _addManualVariant(fsPath, fsName) {
@@ -1329,9 +1744,12 @@ class App {
   }
 
   async _showAddVariantModal() {
-    // Get all funscripts from current library directory
-    const dirPath = this.settings.get('library.directory');
-    if (!dirPath) {
+    // Get all funscripts from library sources
+    const sources = this.settings.get('library.sources') || [];
+    const dirPath = sources.length > 0
+      ? sources.filter(s => s.enabled !== false).map(s => s.path)
+      : this.settings.get('library.directory');
+    if (!dirPath || (Array.isArray(dirPath) && dirPath.length === 0)) {
       // No library — fall back to file dialog
       const result = await window.funsync.selectFunscript();
       if (result) this._addManualVariant(result.path, result.name);
@@ -1406,6 +1824,7 @@ class App {
 
     const variant = variants[index];
     this._activeVariantIndex = index;
+    this._activeVariantPath = variant.path || null;
 
     try {
       const content = await window.funsync.readFunscript(variant.path);

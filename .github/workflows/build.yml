@@ -1,0 +1,97 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+            python: python
+          - os: ubuntu-latest
+            target: linux
+            python: python3
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run JS tests
+        run: npx vitest run
+
+      - name: Setup Python backend
+        run: |
+          cd backend
+          ${{ matrix.python }} -m venv .venv
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install -r requirements.txt
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m pytest -v
+
+      - name: Build Python backend with PyInstaller
+        run: |
+          cd backend
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install pyinstaller
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m PyInstaller --distpath ../backend-dist --workpath ../build/pyinstaller --clean funsync-backend.spec
+
+      - name: Download ffmpeg (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p ffmpeg-linux
+          wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O ffmpeg-linux.tar.xz
+          tar xf ffmpeg-linux.tar.xz --strip-components=1 -C ffmpeg-linux
+          chmod +x ffmpeg-linux/ffmpeg ffmpeg-linux/ffprobe
+
+      - name: Build Electron app
+        run: npx electron-builder --config electron-builder.yml --${{ matrix.target }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: funsync-${{ matrix.target }}
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/*.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/funsync-win/*.exe
+            artifacts/funsync-linux/*.AppImage
+          draft: false
+          prerelease: false

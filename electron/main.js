@@ -34,7 +34,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: "FunSync Player",
-    icon: path.join(__dirname, '..', 'assets', 'icons', 'icon.ico'),
+    icon: path.join(__dirname, '..', 'assets', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     backgroundColor: "#1a1a2e",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -267,22 +267,42 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('scan-directory', async (_event, dirPath) => {
+ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
+  // Accept a single path or array of paths (multi-source)
+  const dirPaths = Array.isArray(dirPathOrPaths) ? dirPathOrPaths : [dirPathOrPaths];
+  const dirPath = dirPaths[0]; // for backward compat logging
   const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac'];
   const FUNSCRIPT_EXT = '.funscript';
   const SUBTITLE_EXTS = ['.srt', '.vtt'];
   const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 
-  let entries;
-  try {
-    entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  } catch (err) {
-    log.error('scan-directory failed:', err.message);
-    return { videos: [], unmatchedFunscripts: [], unmatchedSubtitles: [] };
+  let entries = [];
+  const scanStart = Date.now();
+  for (const dp of dirPaths) {
+    if (!dp) continue;
+    try {
+      const dirEntries = fs.readdirSync(dp, { withFileTypes: true, recursive: true });
+      entries.push(...dirEntries);
+    } catch (err) {
+      log.warn(`[Library] Failed to scan ${dp}: ${err.message}`);
+    }
   }
+  log.info(`[Library] Scanned ${entries.length} entries in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
 
   // Normalize a basename for matching: lowercase, replace separators with spaces, collapse
   const normalizeName = (name) => name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
+
+  // Helper: get the full path for a recursive dirent
+  const entryPath = (entry) => {
+    // Node recursive dirent: entry.parentPath or entry.path contains the parent directory
+    const parent = entry.parentPath || entry.path || dirPath;
+    return path.join(parent, entry.name);
+  };
+
+  // Helper: get the directory of an entry (for same-directory matching)
+  const entryDir = (entry) => {
+    return entry.parentPath || entry.path || dirPath;
+  };
 
   // Collect all funscripts with variant/axis classification
   const funscriptList = [];
@@ -291,8 +311,8 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
     const ext = path.extname(entry.name).toLowerCase();
     if (ext !== FUNSCRIPT_EXT) continue;
 
-    const nameNoExt = path.basename(entry.name, ext); // e.g. "video", "video.vib", "video (Soft)", "video.intense"
-    const fullPath = path.join(dirPath, entry.name);
+    const nameNoExt = path.basename(entry.name, ext);
+    const fullPath = entryPath(entry);
 
     // Check for axis suffix: "video.vib" -> suffix "vib"
     const dotIdx = nameNoExt.lastIndexOf('.');
@@ -321,6 +341,7 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
     funscriptList.push({
       name: entry.name,
       path: fullPath,
+      dir: entryDir(entry),
       videoBase,
       variantLabel,
       isAxis,
@@ -329,31 +350,40 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
     });
   }
 
-  // Build a map of normalized video base -> primary funscript (for backward compat)
-  const funscriptMap = new Map();
+  // Build two maps: same-directory (preferred) and global (fallback)
+  const funscriptMapLocal = new Map(); // dir+base → fs
+  const funscriptMapGlobal = new Map(); // base → fs
   for (const fs of funscriptList) {
-    if (!fs.isAxis && !fs.variantLabel && !funscriptMap.has(fs.videoBase)) {
-      funscriptMap.set(fs.videoBase, fs);
+    const localKey = fs.dir + '\0' + fs.videoBase;
+    const globalKey = fs.videoBase;
+    if (!fs.isAxis && !fs.variantLabel) {
+      if (!funscriptMapLocal.has(localKey)) funscriptMapLocal.set(localKey, fs);
+      if (!funscriptMapGlobal.has(globalKey)) funscriptMapGlobal.set(globalKey, fs);
     }
   }
-  // If no default variant, use the first matching funscript
+  // Fallback: if no default variant, use first matching
   for (const fs of funscriptList) {
-    if (!fs.isAxis && !funscriptMap.has(fs.videoBase)) {
-      funscriptMap.set(fs.videoBase, fs);
+    const localKey = fs.dir + '\0' + fs.videoBase;
+    const globalKey = fs.videoBase;
+    if (!fs.isAxis) {
+      if (!funscriptMapLocal.has(localKey)) funscriptMapLocal.set(localKey, fs);
+      if (!funscriptMapGlobal.has(globalKey)) funscriptMapGlobal.set(globalKey, fs);
     }
   }
 
-  // Collect subtitle basenames for matching
-  const subtitleMap = new Map();
+  // Collect subtitle basenames — local (same-dir) and global maps
+  const subtitleMapLocal = new Map();
+  const subtitleMapGlobal = new Map();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
     if (SUBTITLE_EXTS.includes(ext)) {
       const baseName = normalizeName(path.basename(entry.name, ext));
-      // If multiple subtitle files match the same base name, keep the first
-      if (!subtitleMap.has(baseName)) {
-        subtitleMap.set(baseName, { name: entry.name, path: path.join(dirPath, entry.name), _used: false });
-      }
+      const dir = entryDir(entry);
+      const localKey = dir + '\0' + baseName;
+      const sub = { name: entry.name, path: entryPath(entry), dir, _used: false };
+      if (!subtitleMapLocal.has(localKey)) subtitleMapLocal.set(localKey, sub);
+      if (!subtitleMapGlobal.has(baseName)) subtitleMapGlobal.set(baseName, sub);
     }
   }
 
@@ -365,25 +395,36 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
     if (!VIDEO_EXTS.includes(ext)) continue;
 
     const baseName = normalizeName(path.basename(entry.name, ext));
+    const dir = entryDir(entry);
+    const localKey = dir + '\0' + baseName;
 
-    const fsEntry = funscriptMap.get(baseName);
+    // Funscript: prefer same directory, fall back to global
+    const fsEntry = funscriptMapLocal.get(localKey) || funscriptMapGlobal.get(baseName) || null;
     const funscriptPath = fsEntry ? fsEntry.path : null;
     if (fsEntry) fsEntry._used = true;
 
-    const subEntry = subtitleMap.get(baseName);
+    // Subtitle: prefer same directory, fall back to global
+    const subEntry = subtitleMapLocal.get(localKey) || subtitleMapGlobal.get(baseName) || null;
     const subtitlePath = subEntry ? subEntry.path : null;
     if (subEntry) subEntry._used = true;
 
-    // Collect variants for this video (non-axis funscripts sharing the base name)
+    // Collect variants: same directory first, then global matches
     const variants = [];
+    const seenVariantPaths = new Set();
+    // Pass 1: same directory
     for (const fs of funscriptList) {
-      if (fs.videoBase !== baseName || fs.isAxis) continue;
+      if (fs.videoBase !== baseName || fs.isAxis || fs.dir !== dir) continue;
       fs._used = true;
-      variants.push({
-        label: fs.variantLabel || 'Default',
-        path: fs.path,
-        name: fs.name,
-      });
+      seenVariantPaths.add(fs.path);
+      variants.push({ label: fs.variantLabel || 'Default', path: fs.path, name: fs.name });
+    }
+    // Pass 2: global (other directories) — only if not already found locally
+    if (variants.length === 0) {
+      for (const fs of funscriptList) {
+        if (fs.videoBase !== baseName || fs.isAxis || seenVariantPaths.has(fs.path)) continue;
+        fs._used = true;
+        variants.push({ label: fs.variantLabel || 'Default', path: fs.path, name: fs.name });
+      }
     }
     // Sort: Default first, then alphabetical
     variants.sort((a, b) => {
@@ -394,7 +435,7 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
 
     videos.push({
       name: entry.name,
-      path: path.join(dirPath, entry.name),
+      path: entryPath(entry),
       ext,
       hasFunscript: funscriptPath !== null,
       funscriptPath,
@@ -415,7 +456,7 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
 
   // Collect unmatched subtitles
   const unmatchedSubtitles = [];
-  for (const subEntry of subtitleMap.values()) {
+  for (const subEntry of subtitleMapGlobal.values()) {
     if (!subEntry._used) {
       unmatchedSubtitles.push({ name: subEntry.name, path: subEntry.path });
     }
@@ -431,6 +472,7 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
 
   // Sort alphabetically
   videos.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  log.info(`[Library] Result: ${videos.length} videos, ${unmatchedFunscripts.length} unmatched fs, ${allFunscripts.length} total fs (${Date.now() - scanStart}ms total)`);
   return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts };
 });
 
@@ -615,6 +657,10 @@ ipcMain.handle('eroscripts-restore-session', (_event, cookie, username) => {
 
 ipcMain.handle('eroscripts-status', () => {
   return { loggedIn: eroScripts.isLoggedIn, username: eroScripts.username };
+});
+
+ipcMain.handle('eroscripts-validate', async () => {
+  return eroScripts.validateSession();
 });
 
 ipcMain.handle('eroscripts-search', async (_event, query, page) => {

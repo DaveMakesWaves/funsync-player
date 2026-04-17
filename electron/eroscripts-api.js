@@ -6,6 +6,22 @@ const log = require('./logger');
 const BASE_URL = 'https://discuss.eroscripts.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
+// Debug log file for EroScripts API diagnostics
+const fs = require('fs');
+const path = require('path');
+
+function _getDebugLogPath() {
+  return path.join(__dirname, '..', 'eroscripts-debug.log');
+}
+
+function _debugLog(msg) {
+  try {
+    const timestamp = new Date().toISOString();
+    const line = `[${timestamp}] ${msg}\n`;
+    fs.appendFileSync(_getDebugLogPath(), line);
+  } catch { /* ignore write errors */ }
+}
+
 class EroScriptsAPI {
   constructor() {
     this._cookie = null;
@@ -25,6 +41,8 @@ class EroScriptsAPI {
   restoreSession(cookie, username) {
     this._cookie = cookie;
     this._username = username;
+    this._sessionCookies = cookie ? `_t=${cookie}` : '';
+    _debugLog(`SESSION restored for ${username}, cookie length: ${(cookie || '').length}`);
   }
 
   /**
@@ -32,13 +50,17 @@ class EroScriptsAPI {
    * Returns { success, requires2FA, nonce, username, cookie, error }
    */
   async login(username, password) {
+    _debugLog(`LOGIN attempt for user: ${username}`);
     try {
       // Get CSRF token
       const csrfResp = await fetch(`${BASE_URL}/session/csrf.json`, {
         headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
       });
       if (!csrfResp.ok) {
-        return { success: false, error: `Failed to reach EroScripts (${csrfResp.status})` };
+        const msg = csrfResp.status === 503 ? 'EroScripts is temporarily unavailable — try again later'
+          : `Failed to reach EroScripts (${csrfResp.status})`;
+        _debugLog(`LOGIN CSRF failed: ${csrfResp.status}`);
+        return { success: false, error: msg };
       }
 
       const csrfData = await this._safeJson(csrfResp);
@@ -69,6 +91,9 @@ class EroScriptsAPI {
       }
 
       log.info('[EroScripts] Login response:', JSON.stringify(data));
+      _debugLog(`LOGIN response status: ${loginResp.status}`);
+      _debugLog(`LOGIN response: ${JSON.stringify(data)}`);
+      _debugLog(`LOGIN cookies: ${this._sessionCookies.substring(0, 200)}`);
 
       // Merge cookies from login response
       const loginCookies = this._extractCookies(loginResp);
@@ -218,6 +243,43 @@ class EroScriptsAPI {
     return { success: true, username: this._username, cookie: this._cookie };
   }
 
+  /**
+   * Validate the current session is still active.
+   * Makes a lightweight request to check if authenticated.
+   * @returns {{ valid: boolean }}
+   */
+  async validateSession() {
+    if (!this._cookie) return { valid: false };
+
+    try {
+      // Use the session/current endpoint — lightweight, returns user info if logged in
+      const resp = await fetch(`${BASE_URL}/session/current.json`, {
+        headers: this._headers(),
+      });
+      _debugLog(`VALIDATE session status: ${resp.status}`);
+
+      if (resp.status === 403 || resp.status === 401) {
+        return { valid: false };
+      }
+      if (!resp.ok) {
+        // Server error (503 etc.) — don't invalidate on transient failures
+        return { valid: true };
+      }
+
+      const data = await this._safeJson(resp);
+      if (!data) {
+        // HTML response (Cloudflare) — session likely expired
+        return { valid: false };
+      }
+
+      // If we get user data back, session is valid
+      return { valid: !!data.current_user };
+    } catch {
+      // Network error — assume valid, don't log out on connectivity issues
+      return { valid: true };
+    }
+  }
+
   logout() {
     this._cookie = null;
     this._username = null;
@@ -239,13 +301,24 @@ class EroScriptsAPI {
         headers: this._headers(),
       });
 
+      log.info(`[EroScripts] Search status: ${resp.status} for query: ${query}`);
+      _debugLog(`SEARCH query="${query}" status=${resp.status}`);
+      _debugLog(`SEARCH cookies sent: ${(this._headers().Cookie || 'none').substring(0, 150)}`);
+      if (resp.status !== 200) {
+        const bodyPreview = await resp.clone().text();
+        _debugLog(`SEARCH error body: ${bodyPreview.substring(0, 500)}`);
+      }
+
       if (resp.status === 429) {
         return { results: [], error: 'Rate limited — try again in a moment' };
+      }
+      if (resp.status === 403) {
+        return { results: [], error: 'Access denied — try logging in again' };
       }
 
       const data = await this._safeJson(resp);
       if (!data) {
-        return { results: [], error: `Search failed (${resp.status})` };
+        return { results: [], error: `Search failed (${resp.status}) — try logging out and back in` };
       }
 
       // Log structure for debugging
@@ -469,7 +542,10 @@ class EroScriptsAPI {
 
   _headers() {
     const h = { 'User-Agent': USER_AGENT, 'Accept': 'application/json' };
-    if (this._cookie) {
+    // Send all session cookies (includes _t + Cloudflare cf_clearance etc.)
+    if (this._sessionCookies) {
+      h['Cookie'] = this._sessionCookies;
+    } else if (this._cookie) {
       h['Cookie'] = `_t=${this._cookie}`;
     }
     return h;
@@ -481,10 +557,12 @@ class EroScriptsAPI {
       // Guard against HTML responses (DOCTYPE, login redirects, etc.)
       if (text.startsWith('<!') || text.startsWith('<html')) {
         log.warn('[EroScripts] Received HTML instead of JSON');
+        _debugLog(`HTML response (${resp.status}): ${text.substring(0, 300)}`);
         return null;
       }
       return JSON.parse(text);
-    } catch {
+    } catch (err) {
+      _debugLog(`JSON parse error: ${err.message}`);
       return null;
     }
   }

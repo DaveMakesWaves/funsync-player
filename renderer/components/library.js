@@ -17,6 +17,7 @@ export class Library {
     this._container = null;
     this._videos = [];
     this._dirPath = null;
+    this._durationCache = new Map(); // path → duration (survives re-scans)
     this._observer = null;
     this._pendingThumbnails = [];
     this._activeThumbnails = 0;
@@ -30,6 +31,7 @@ export class Library {
     this._searchQuery = '';
     this._sortKey = 'name:asc';
     this._viewMode = 'grid';
+    this._unavailablePaths = new Set();
 
     // Hover preview state (singleton video element — avoids Electron memory leak #18277)
     this._previewVideo = null;
@@ -45,11 +47,26 @@ export class Library {
 
   show(containerEl) {
     this._container = containerEl;
-    this._dirPath = this._settings.get('library.directory') || null;
 
-    if (this._dirPath) {
+    // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives)
+    const sources = this._settings.get('library.sources') || [];
+    const legacyDir = this._settings.get('library.directory') || null;
+    const unavailable = this._unavailablePaths || new Set();
+
+    let scanPaths;
+    if (sources.length > 0) {
+      scanPaths = sources.filter(s => s.enabled !== false && !unavailable.has(s.path)).map(s => s.path);
+    } else if (legacyDir && !unavailable.has(legacyDir)) {
+      scanPaths = [legacyDir];
+    } else {
+      scanPaths = [];
+    }
+
+    this._dirPath = scanPaths.length > 0 ? scanPaths[0] : null;
+
+    if (scanPaths.length > 0) {
       this._renderWithHeader();
-      this._scanDirectory(this._dirPath);
+      this._scanDirectory(scanPaths.length === 1 ? scanPaths[0] : scanPaths);
     } else {
       this._renderEmpty();
     }
@@ -77,14 +94,12 @@ export class Library {
     this._container.innerHTML = `
       <div class="library__empty">
         <div class="library__empty-icon"></div>
-        <div class="library__empty-text">Select a folder to browse your video library</div>
-        <button class="library__select-dir-btn">Choose Directory</button>
+        <div class="library__empty-text">Add a source folder to browse your video library</div>
+        <div class="library__empty-hint">Use the Library dropdown in the nav bar to add source folders</div>
       </div>
     `;
     this._container.querySelector('.library__empty-icon')
       .appendChild(icon(FolderOpen, { width: 48, height: 48 }));
-    this._container.querySelector('.library__select-dir-btn')
-      .addEventListener('click', () => this._selectDirectory());
   }
 
   _renderWithHeader() {
@@ -116,12 +131,12 @@ export class Library {
           <button class="view-toggle view-toggle--list" aria-label="List view" title="List view"></button>
         </div>
         <button class="library__select-mode-btn">Select</button>
-        <button class="library__change-dir-btn">Change Directory</button>
       </div>
       <div class="library__selection-bar" hidden>
         <span class="library__selection-count">0 selected</span>
         <button class="library__selection-action" data-action="playlist">Add to Playlist</button>
         <button class="library__selection-action" data-action="category">Assign Category</button>
+        <button class="library__selection-action" data-action="collection">Add to Library</button>
         <button class="library__selection-cancel">Cancel</button>
       </div>
       <div class="library__grid-wrapper">
@@ -129,8 +144,6 @@ export class Library {
       </div>
     `;
 
-    this._container.querySelector('.library__change-dir-btn')
-      .addEventListener('click', () => this._selectDirectory());
 
     // Search
     const searchInput = this._container.querySelector('.library__search-input');
@@ -179,6 +192,8 @@ export class Library {
       .addEventListener('click', () => this._bulkAddToPlaylist());
     this._container.querySelector('[data-action="category"]')
       .addEventListener('click', () => this._bulkAssignCategory());
+    this._container.querySelector('[data-action="collection"]')
+      .addEventListener('click', () => this._bulkAddToCollection());
   }
 
   async _selectDirectory() {
@@ -232,6 +247,12 @@ export class Library {
         video.subtitlePath = subAssociations[video.path];
         video._manualSubtitle = true;
       }
+    }
+
+    // Restore cached durations from previous scans
+    for (const video of this._videos) {
+      const cached = this._durationCache.get(video.path);
+      if (cached && !video.duration) video.duration = cached;
     }
 
     // Compute funscript speed stats for paired videos (non-blocking)
@@ -555,6 +576,8 @@ export class Library {
         if (duration) {
           const video = this._videos.find(v => v.path === videoPath);
           if (video) video.duration = duration;
+          if (this._durationCache.size > 5000) this._durationCache.clear();
+          this._durationCache.set(videoPath, duration);
         }
       }
 
@@ -783,9 +806,15 @@ export class Library {
   }
 
   _startPreviewLoop(cardEl, gen) {
+    if (gen !== this._previewGeneration) return; // stale — another hover started
+
     // Find the thumbnail container (grid or list)
     const thumb = cardEl.querySelector('.library__card-thumbnail') || cardEl.querySelector('.library__list-thumb');
     if (!thumb) return;
+
+    // Remove any existing preview canvas to prevent duplicates
+    const existing = thumb.querySelector('.library__preview-canvas');
+    if (existing) existing.remove();
 
     // Insert canvas overlay — use opacity, NOT display:none (Electron leak #22417)
     const canvas = this._previewCanvas;
@@ -933,6 +962,20 @@ export class Library {
       this._assignCategory(video.path, cardEl);
     });
     menu.appendChild(categoryBtn);
+
+    // Add to Library (collection)
+    const collections = this._settings.get('library.collections') || [];
+    if (collections.length > 0) {
+      const libBtn = document.createElement('button');
+      libBtn.className = 'library__kebab-menu-item';
+      libBtn.textContent = 'Add to Library';
+      libBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        this._closeMenu();
+        await this._addToCollection(video.path);
+      });
+      menu.appendChild(libBtn);
+    }
 
     cardEl.appendChild(menu);
     this._openMenu = menu;
@@ -1432,6 +1475,19 @@ export class Library {
   _applyFilters() {
     let filtered = this._videos;
 
+    // Filter by active collection
+    if (this._activeCollectionId) {
+      const collections = this._settings.get('library.collections') || [];
+      const col = collections.find(c => c.id === this._activeCollectionId);
+      if (col) {
+        const pathSet = new Set(col.videoPaths);
+        filtered = filtered.filter(v => pathSet.has(v.path));
+      } else {
+        // Collection was deleted — reset to All
+        this._activeCollectionId = null;
+      }
+    }
+
     // Filter by active tab
     if (this._activeTab === 'matched') {
       filtered = filtered.filter((v) => v.hasFunscript);
@@ -1644,6 +1700,41 @@ export class Library {
 
   // --- Playlist / Category integration ---
 
+  async _addToCollection(videoPath) {
+    const collections = this._settings.get('library.collections') || [];
+    if (collections.length === 0) return;
+
+    const items = collections
+      .filter(c => !c.videoPaths.includes(videoPath))
+      .map(c => ({
+        id: c.id,
+        label: c.name,
+        subtitle: `${c.videoPaths.length} video${c.videoPaths.length !== 1 ? 's' : ''}`,
+      }));
+
+    if (items.length === 0) {
+      const { showToast } = await import('../js/toast.js');
+      showToast('Video is already in all libraries', 'info');
+      return;
+    }
+
+    const selectedId = await Modal.selectFromList('Add to Library', items);
+    if (selectedId) {
+      // Re-fetch in case collections changed while modal was open
+      const freshCollections = this._settings.get('library.collections') || [];
+      const col = freshCollections.find(c => c.id === selectedId);
+      if (col) {
+        if (!col.videoPaths.includes(videoPath)) {
+          col.videoPaths.push(videoPath);
+          this._settings.set('library.collections', freshCollections);
+        }
+      } else {
+        const { showToast } = await import('../js/toast.js');
+        showToast('Library was deleted', 'warn');
+      }
+    }
+  }
+
   async _addToPlaylist(videoPath) {
     const playlists = this._settings.getPlaylists();
     if (playlists.length === 0) {
@@ -1829,6 +1920,32 @@ export class Library {
         // Update dots on visible cards
         const card = this._container?.querySelector(`[data-video-path="${CSS.escape(path)}"]`);
         if (card) this._updateCardCategoryDots(card, path);
+      }
+      this._exitSelectMode();
+    }
+  }
+
+  async _bulkAddToCollection() {
+    if (this._selectedPaths.size === 0) return;
+    const collections = this._settings.get('library.collections') || [];
+    if (collections.length === 0) {
+      const { showToast } = await import('../js/toast.js');
+      showToast('Create a library first using the Library dropdown in the nav bar', 'info');
+      return;
+    }
+    const items = collections.map(c => ({
+      id: c.id,
+      label: c.name,
+      subtitle: `${c.videoPaths.length} video${c.videoPaths.length !== 1 ? 's' : ''}`,
+    }));
+    const selectedId = await Modal.selectFromList('Add to Library', items);
+    if (selectedId) {
+      const col = collections.find(c => c.id === selectedId);
+      if (col) {
+        for (const path of this._selectedPaths) {
+          if (!col.videoPaths.includes(path)) col.videoPaths.push(path);
+        }
+        this._settings.set('library.collections', collections);
       }
       this._exitSelectMode();
     }

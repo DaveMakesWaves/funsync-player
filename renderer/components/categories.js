@@ -163,7 +163,7 @@ export class Categories {
     return card;
   }
 
-  _renderDetail(categoryId) {
+  async _renderDetail(categoryId) {
     const cat = this._settings.getCategories().find((c) => c.id === categoryId);
     if (!cat) {
       this._view = 'grid';
@@ -207,7 +207,24 @@ export class Categories {
     const wrapper = document.createElement('div');
     wrapper.className = 'categories__grid-wrapper';
 
-    if (videoPaths.length === 0) {
+    // Filter out videos that no longer exist on disk
+    const validPaths = [];
+    for (const vp of videoPaths) {
+      const exists = await window.funsync.fileExists(vp);
+      if (exists) validPaths.push(vp);
+    }
+
+    // Clean up dead paths
+    if (validPaths.length < videoPaths.length) {
+      for (const dead of videoPaths.filter(p => !validPaths.includes(p))) {
+        this._settings.unassignCategory(dead, categoryId);
+      }
+    }
+
+    // Update count display with valid count
+    countSpan.textContent = `${validPaths.length} video${validPaths.length !== 1 ? 's' : ''}`;
+
+    if (validPaths.length === 0) {
       wrapper.innerHTML = `
         <div class="categories__empty">
           <div class="categories__empty-text">No videos in this category</div>
@@ -222,7 +239,7 @@ export class Categories {
     grid.className = 'categories__grid';
     grid.classList.toggle('categories__grid--list', this._viewMode === 'list');
 
-    for (const videoPath of videoPaths) {
+    for (const videoPath of validPaths) {
       const el = this._viewMode === 'list' ? this._createVideoListItem(videoPath, cat) : this._createVideoCard(videoPath, cat);
       grid.appendChild(el);
     }

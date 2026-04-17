@@ -153,7 +153,7 @@ export class Playlists {
     return card;
   }
 
-  _renderDetail(playlistId) {
+  async _renderDetail(playlistId) {
     const pl = this._settings.getPlaylist(playlistId);
     if (!pl) {
       this._view = 'grid';
@@ -201,7 +201,21 @@ export class Playlists {
     const wrapper = document.createElement('div');
     wrapper.className = 'playlists__grid-wrapper';
 
-    if (pl.videoPaths.length === 0) {
+    // Filter out videos that no longer exist on disk
+    const validPaths = [];
+    for (const vp of pl.videoPaths) {
+      const exists = await window.funsync.fileExists(vp);
+      if (exists) validPaths.push(vp);
+    }
+
+    // Clean up dead paths from the playlist data
+    if (validPaths.length < pl.videoPaths.length) {
+      for (const dead of pl.videoPaths.filter(p => !validPaths.includes(p))) {
+        this._settings.removeVideoFromPlaylist(pl.id, dead);
+      }
+    }
+
+    if (validPaths.length === 0) {
       wrapper.innerHTML = `
         <div class="playlists__empty">
           <div class="playlists__empty-text">No videos in this playlist</div>
@@ -216,7 +230,7 @@ export class Playlists {
     grid.className = 'playlists__grid';
     grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
 
-    for (const videoPath of pl.videoPaths) {
+    for (const videoPath of validPaths) {
       const el = this._viewMode === 'list' ? this._createVideoListItem(videoPath, pl) : this._createVideoCard(videoPath, pl);
       grid.appendChild(el);
     }

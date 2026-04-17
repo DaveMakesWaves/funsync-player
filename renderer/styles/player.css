@@ -192,6 +192,16 @@ html, body {
   pointer-events: auto;
 }
 
+/* In fullscreen, only show on controls-visible (not hover — cursor is always "inside") */
+.player-container:fullscreen:hover .player__top-bar {
+  opacity: 0;
+  pointer-events: none;
+}
+.player-container:fullscreen.controls-visible .player__top-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 .player__back-btn {
   background: none;
   border: none;
@@ -274,6 +284,13 @@ html, body {
   opacity: 1;
 }
 
+.player-container:fullscreen:hover .player__controls {
+  opacity: 0;
+}
+.player-container:fullscreen.controls-visible .player__controls {
+  opacity: 1;
+}
+
 /* === Progress Bar === */
 .controls__progress {
   position: relative;
@@ -296,10 +313,11 @@ html, body {
   position: absolute;
   left: 0;
   right: 0;
-  height: 4px;
+  height: 12px;
   border-radius: 2px;
   overflow: hidden;
-  transition: height var(--transition-fast);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
 }
 
 .progress__heatmap canvas {
@@ -348,8 +366,9 @@ html, body {
   height: 12px;
 }
 
-.controls__progress:hover .progress__heatmap {
-  height: 12px;
+.controls__progress:hover .progress__heatmap,
+.progress--preview .progress__heatmap {
+  opacity: 1;
 }
 
 /* Progress Tooltip */

@@ -700,6 +700,11 @@
   color: var(--text-primary);
 }
 
+.library__sort-select option:disabled {
+  color: var(--text-secondary);
+  opacity: 0.5;
+}
+
 .library__sort-select:focus {
   border-color: var(--accent);
 }
@@ -781,6 +786,112 @@
 
 .library__browse-fallback:hover {
   opacity: 1;
+}
+
+/* Collection creation modal */
+.library__collection-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.library__collection-select-all {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 5px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 100ms, background 100ms;
+}
+
+.library__collection-select-all:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.library__collection-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.library__collection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 4px;
+  max-height: 350px;
+  overflow-y: auto;
+  padding: 2px;
+}
+
+.library__collection-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 100ms, border-color 100ms;
+}
+
+.library__collection-card:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.library__collection-card--selected {
+  background: rgba(233, 69, 96, 0.08);
+  border-color: rgba(233, 69, 96, 0.3);
+}
+
+.library__collection-card-check {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-radius: 3px;
+  flex-shrink: 0;
+  transition: background 100ms, border-color 100ms;
+}
+
+.library__collection-card-check--on {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.library__collection-card-check--on::after {
+  content: '✓';
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.library__collection-card-title {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.library__collection-grid::-webkit-scrollbar {
+  width: 5px;
+}
+
+.library__collection-grid::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
 }
 
 /* EroScripts Button */

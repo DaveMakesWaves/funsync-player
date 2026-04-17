@@ -5,12 +5,12 @@
   "main": "electron/main.js",
   "scripts": {
     "start": "electron .",
-    "dev": "concurrently \"electron .\" \"cd backend && python main.py\"",
+    "dev": "concurrently \"electron .\" \"cd backend && python3 main.py || python main.py\"",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "backend:dev": "cd backend && python main.py",
-    "backend:test": "cd backend && pytest -v",
+    "backend:dev": "cd backend && python3 main.py || python main.py",
+    "backend:test": "cd backend && python3 -m pytest -v || python -m pytest -v",
     "build": "node scripts/build.js"
   },
   "keywords": [

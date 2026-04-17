@@ -31,8 +31,11 @@ const DEFAULTS = {
     },
     library: {
       directory: '',
+      sources: [],
       associations: {},
       manualVariants: {},
+      collections: [],
+      activeCollectionId: null,
     },
     editor: {
       defaultCreator: '',

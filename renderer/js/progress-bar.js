@@ -155,6 +155,7 @@ export class ProgressBar {
    */
   renderHeatmap(actions, duration) {
     if (!this.heatmapCanvas || !this.heatmapCtx || !actions || actions.length < 2) return;
+    if (!isFinite(duration) || duration <= 0) return;
 
     this._heatmapData = { actions, duration };
 

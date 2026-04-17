@@ -17,13 +17,33 @@ extraResources:
     filter:
       - "**/*"
 
-icon: assets/icons/icon.ico
-
 win:
   icon: assets/icons/icon.ico
   target:
     - target: nsis
       arch: x64
+  extraFiles:
+    - from: ffmpeg/
+      to: ffmpeg
+      filter:
+        - ffmpeg.exe
+        - ffprobe.exe
+
+linux:
+  icon: assets/icons/icon.png
+  category: Video
+  target:
+    - target: AppImage
+      arch: x64
+  desktop:
+    Name: FunSync Player
+    Comment: Video player with device integration for synchronized funscript playback
+  extraFiles:
+    - from: ffmpeg-linux/
+      to: ffmpeg
+      filter:
+        - ffmpeg
+        - ffprobe
 
 nsis:
   oneClick: true
@@ -40,10 +60,3 @@ publish:
   repo: funsync-player
 
 asar: true
-
-extraFiles:
-  - from: ffmpeg/
-    to: ffmpeg
-    filter:
-      - ffmpeg.exe
-      - ffprobe.exe

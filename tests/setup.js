@@ -40,6 +40,7 @@ window.funsync = {
   eroscriptsLogout: vi.fn().mockResolvedValue({ success: true }),
   eroscriptsRestoreSession: vi.fn().mockResolvedValue({ success: true }),
   eroscriptsStatus: vi.fn().mockResolvedValue({ loggedIn: false }),
+  eroscriptsValidate: vi.fn().mockResolvedValue({ valid: false }),
   eroscriptsSearch: vi.fn().mockResolvedValue({ results: [] }),
   eroscriptsTopic: vi.fn().mockResolvedValue({ attachments: [] }),
   eroscriptsTopicImage: vi.fn().mockResolvedValue(null),
@@ -79,7 +80,10 @@ window.funsync = {
       },
       library: {
         directory: '',
+        sources: [],
         associations: {},
+        collections: [],
+        activeCollectionId: null,
       },
       editor: {
         defaultCreator: '',

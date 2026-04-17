@@ -934,9 +934,12 @@ export class ConnectionPanel {
   show() {
     this._panel.hidden = false;
     this._visible = true;
-    this._panel.querySelector('#connection-key-input').focus();
+    this._panel.querySelector('#connection-key-input')?.focus();
 
-    // Close on click outside (next tick to avoid immediate close from the toggle click)
+    // Clean up previous listener before adding new one
+    if (this._boundOutsideClick) {
+      document.removeEventListener('click', this._boundOutsideClick, true);
+    }
     this._boundOutsideClick = (e) => {
       if (!this._panel.contains(e.target)) {
         e.preventDefault();

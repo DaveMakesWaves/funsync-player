@@ -54,6 +54,7 @@ export { default as RotateCcw } from '../../node_modules/lucide/dist/esm/icons/r
 export { default as Download } from '../../node_modules/lucide/dist/esm/icons/download.js';
 export { default as LayoutGrid } from '../../node_modules/lucide/dist/esm/icons/layout-grid.js';
 export { default as LayoutList } from '../../node_modules/lucide/dist/esm/icons/layout-list.js';
+export { default as Unplug } from '../../node_modules/lucide/dist/esm/icons/unplug.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

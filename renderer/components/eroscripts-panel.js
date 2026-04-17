@@ -69,9 +69,20 @@ export class EroScriptsPanel {
 
   async _restoreSession() {
     const saved = this._settings.get('eroscripts.session');
-    if (saved && saved.cookie && saved.username) {
-      await window.funsync.eroscriptsRestoreSession(saved.cookie, saved.username);
+    if (!saved || !saved.cookie || !saved.username) return;
+
+    await window.funsync.eroscriptsRestoreSession(saved.cookie, saved.username);
+
+    // Validate the session is still active
+    const { valid } = await window.funsync.eroscriptsValidate();
+    if (valid) {
       this._setLoggedIn(saved.username);
+    } else {
+      // Session expired — clear it
+      this._settings.set('eroscripts.session', null);
+      await window.funsync.eroscriptsLogout();
+      this._setLoggedOut();
+      showToast('EroScripts session expired — log in again via the EroScripts panel', 'warn', 6000);
     }
   }
 
@@ -295,6 +306,7 @@ export class EroScriptsPanel {
     const input = this._panel.querySelector('#es-search-input');
     const query = input.value.trim();
     if (!query || this._searching) return;
+    this._lastSearchQuery = query;
 
     this._searching = true;
     const resultsEl = this._panel.querySelector('#es-results');
@@ -443,18 +455,17 @@ export class EroScriptsPanel {
   async _downloadAttachment(attachment, btn) {
     if (btn) { btn.disabled = true; btn.textContent = 'Saving script...'; }
 
-    const libraryDir = this._settings.get('library.directory');
+    const sources = this._settings.get('library.sources') || [];
+    const libraryDir = sources.length > 0 ? sources[0].path : this._settings.get('library.directory');
     const playerContainer = document.getElementById('player-container');
     const videoPath = playerContainer?.dataset?.videoPath;
 
     let savePath;
     let savedName = attachment.name;
-    if (videoPath) {
+    if (videoPath && videoPath.includes('/') || videoPath?.includes('\\')) {
       // Auto-rename to match video filename for auto-pairing
       const videoDir = videoPath.replace(/[\\/][^\\/]+$/, '');
-      const videoBase = videoPath.replace(/[\\/][^\\/]+$/, '').length < videoPath.length
-        ? videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '')
-        : 'script';
+      const videoBase = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
       savedName = `${videoBase}.funscript`;
       savePath = `${videoDir}/${savedName}`;
     } else if (libraryDir) {
@@ -479,9 +490,26 @@ export class EroScriptsPanel {
     }
   }
 
-  setSearchQuery(query) {
+  /**
+   * Set the search query and optionally auto-search.
+   * @param {string} query
+   * @param {boolean} [autoSearch=false]
+   */
+  setSearchQuery(query, autoSearch = false) {
     const input = this._panel.querySelector('#es-search-input');
     if (input) input.value = query || '';
+
+    // Clear stale results if query changed
+    if (query !== this._lastSearchQuery) {
+      const resultsEl = this._panel.querySelector('#es-results');
+      if (resultsEl) {
+        resultsEl.innerHTML = '<div class="eroscripts-panel__placeholder">Search for a video name to find community scripts</div>';
+      }
+    }
+
+    if (autoSearch && query) {
+      this._search();
+    }
   }
 
   toggle() { if (this._visible) this.hide(); else this.show(); }

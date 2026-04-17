@@ -69,6 +69,7 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsLogout: () => ipcRenderer.invoke('eroscripts-logout'),
   eroscriptsRestoreSession: (cookie, username) => ipcRenderer.invoke('eroscripts-restore-session', cookie, username),
   eroscriptsStatus: () => ipcRenderer.invoke('eroscripts-status'),
+  eroscriptsValidate: () => ipcRenderer.invoke('eroscripts-validate'),
   eroscriptsSearch: (query, page) => ipcRenderer.invoke('eroscripts-search', query, page),
   eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),

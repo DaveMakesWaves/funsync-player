@@ -39,6 +39,7 @@ async function startBackend() {
     pythonProcess = spawn(cmd, args, {
       cwd,
       stdio: ['pipe', 'pipe', 'pipe'],
+      detached: process.platform !== 'win32', // detached on Linux for process group kill
     });
 
     let started = false;
@@ -99,8 +100,9 @@ function stopBackend() {
       // Use taskkill /T to kill the process tree (includes child processes).
       if (process.platform === 'win32' && pid) {
         require('child_process').execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
-      } else {
-        pythonProcess.kill('SIGKILL');
+      } else if (pid) {
+        // Kill process group on Linux (spawned with detached: true)
+        process.kill(-pid, 'SIGKILL');
       }
     } catch {
       // Process may already be dead

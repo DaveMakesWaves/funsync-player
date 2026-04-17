@@ -290,8 +290,8 @@ export class ButtplugSync {
       targetPos = applySpeedLimit(targetPos, this._lastSentPos, deltaMs, this._speedLimit);
     }
 
-    // Dirty check — skip if position barely changed
-    if (Math.abs(targetPos - this._lastSentPos) < MIN_POS_DELTA) return;
+    // Dirty check — skip if position barely changed (but always send first command)
+    if (this._lastSentPos >= 0 && Math.abs(targetPos - this._lastSentPos) < MIN_POS_DELTA) return;
 
     const prevPos = this._lastSentPos >= 0 ? this._lastSentPos : targetPos;
     this._sendToDevices(targetPos, duration, prevPos);

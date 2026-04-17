@@ -33,6 +33,9 @@ Test.mp4
 Test.funscript
 Test-slow.funscript
 Logo.ico
+FS(1).png
+ffmpeg-linux/*.zip
+eroscripts-debug.log
 
 # Claude Code
 .claude/

@@ -89,6 +89,8 @@ export class VideoPlayer {
     this.video.addEventListener('play', () => {
       this._ended = false;
       this._updatePlayButton(true);
+      // Remove heatmap preview mode on first play
+      this.progressContainer.classList.remove('progress--preview');
     });
     this.video.addEventListener('pause', () => this._updatePlayButton(false));
     this.video.addEventListener('ended', () => this._onEnded());
@@ -133,6 +135,18 @@ export class VideoPlayer {
   loadSource(url, filename) {
     this.video.src = url;
     this.video.load();
+
+    // Reset progress bar to start position
+    this.progressBar.style.width = '0%';
+    this.progressThumb.style.left = '0%';
+    this.progressContainer.setAttribute('aria-valuenow', '0');
+    this.timeCurrent.textContent = '0:00';
+    this.timeDuration.textContent = '0:00';
+
+    // Show heatmap at full height until first play (reset first in case of rapid loads)
+    this.progressContainer.classList.remove('progress--preview');
+    this.progressContainer.classList.add('progress--preview');
+
     // Show controls briefly so user knows the player is active
     this._showControls();
     // Show center play button so user knows to click play
@@ -413,7 +427,7 @@ export class VideoPlayer {
         this.container.classList.remove('controls-visible');
         this.container.style.cursor = 'none';
       }
-    }, 3000);
+    }, 1500);
   }
 
   // --- Screenshot ---
@@ -520,9 +534,12 @@ export class VideoPlayer {
   // --- Subtitles ---
 
   async loadSubtitles(file) {
-    // Remove existing tracks
+    // Remove existing tracks and revoke old blob URLs
     const existing = this.video.querySelectorAll('track');
-    existing.forEach((t) => t.remove());
+    existing.forEach((t) => {
+      if (t.src && t.src.startsWith('blob:')) URL.revokeObjectURL(t.src);
+      t.remove();
+    });
 
     // Read file content
     let text = typeof file.textContent === 'string' ? file.textContent : await file.text();
