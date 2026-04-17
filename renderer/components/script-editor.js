@@ -52,6 +52,7 @@ export class ScriptEditor {
     this._funscriptPath = null; // path on disk for autosave
     this._autosaveTimer = null;
     this._autosaveDelay = 1000; // 1s debounce
+    this._autosaveEnabled = false;
 
     // Waveform state
     this._waveformEnabled = false;
@@ -147,6 +148,32 @@ export class ScriptEditor {
     const sep3 = this._makeSeparator();
     const btnSave = this._makeBtn(Save, 'Save (Ctrl+S)', () => this._save());
 
+    // Autosave checkbox + status
+    const autosaveGroup = document.createElement('span');
+    autosaveGroup.className = 'editor__autosave-group';
+
+    this._autosaveCheckbox = document.createElement('input');
+    this._autosaveCheckbox.type = 'checkbox';
+    this._autosaveCheckbox.id = 'editor-autosave';
+    this._autosaveCheckbox.checked = false;
+    this._autosaveCheckbox.addEventListener('change', () => {
+      this._autosaveEnabled = this._autosaveCheckbox.checked;
+      this._autosaveStatusEl.textContent = '';
+      if (this._autosaveEnabled && this.editableScript?.dirty) {
+        this._triggerAutosave();
+      }
+    });
+
+    const autosaveLabel = document.createElement('label');
+    autosaveLabel.htmlFor = 'editor-autosave';
+    autosaveLabel.className = 'editor__autosave-label';
+    autosaveLabel.textContent = 'Autosave';
+
+    this._autosaveStatusEl = document.createElement('span');
+    this._autosaveStatusEl.className = 'editor__autosave-status';
+
+    autosaveGroup.append(this._autosaveCheckbox, autosaveLabel, this._autosaveStatusEl);
+
     this._statusEl = document.createElement('span');
     this._statusEl.className = 'editor__status';
 
@@ -157,7 +184,7 @@ export class ScriptEditor {
       btnMetadata, btnBookmark, btnFillGaps, this._btnWaveform, btnBeats, sep1d,
       btnZoomIn, btnZoomOut, btnFitAll, sep2,
       speedLabel, this._speedSelect, sep3,
-      btnSave, this._statusEl,
+      btnSave, autosaveGroup, this._statusEl,
     );
 
     // Canvas container
@@ -384,18 +411,7 @@ export class ScriptEditor {
     const { x, y } = this.graph.getCanvasCoords(e);
 
     if (this._dragMode === 'click-or-rubber') {
-      // Was a single click on empty area (no drag) → INSERT action at click position
-      const dx = Math.abs(x - this._dragStartX);
-      const dy = Math.abs(y - this._dragStartY);
-      if (dx < 3 && dy < 3) {
-        const time = this.graph.xToTime(x);
-        const pos = this.graph.yToPos(y);
-        if (time >= 0) {
-          const newIdx = this.editableScript.insertAction(time, pos);
-          this.editableScript.select(newIdx);
-          this._lastSelectedIndex = newIdx;
-        }
-      }
+      // Single click on empty area — no longer inserts (use numpad keys instead)
       this.graph.clearRubberBand();
     } else if (this._dragMode === 'rubber') {
       // Check if it was a click (not a drag)
@@ -1383,6 +1399,7 @@ export class ScriptEditor {
 
   /** Debounced autosave — called after every script mutation. */
   _triggerAutosave() {
+    if (!this._autosaveEnabled) return;
     if (!this._funscriptPath) return;
     if (this._autosaveTimer) clearTimeout(this._autosaveTimer);
     this._autosaveTimer = setTimeout(() => this._autosave(), this._autosaveDelay);
@@ -1390,6 +1407,11 @@ export class ScriptEditor {
 
   async _autosave() {
     if (!this._funscriptPath || !this.editableScript.dirty) return;
+
+    if (this._autosaveStatusEl) {
+      this._autosaveStatusEl.textContent = 'Saving...';
+      this._autosaveStatusEl.classList.add('editor__autosave-status--saving');
+    }
 
     const json = this.editableScript.toFunscriptJSON();
 
@@ -1399,9 +1421,20 @@ export class ScriptEditor {
         this.editableScript.markSaved();
         this._updateStatus();
         this._reloadIntoEngineAndSync();
+
+        if (this._autosaveStatusEl) {
+          const now = new Date();
+          const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          this._autosaveStatusEl.textContent = `Saved ${time}`;
+          this._autosaveStatusEl.classList.remove('editor__autosave-status--saving');
+        }
       }
     } catch (err) {
       console.warn('[Editor] Autosave failed:', err.message);
+      if (this._autosaveStatusEl) {
+        this._autosaveStatusEl.textContent = 'Save failed';
+        this._autosaveStatusEl.classList.remove('editor__autosave-status--saving');
+      }
     }
   }
 
@@ -1571,11 +1604,11 @@ export class ScriptEditor {
     if (!this._open) return;
     this._open = false;
 
-    // Flush pending autosave before closing
+    // Flush pending autosave before closing (only if autosave is enabled)
     if (this._autosaveTimer) {
       clearTimeout(this._autosaveTimer);
       this._autosaveTimer = null;
-      if (this.editableScript.dirty && this._funscriptPath) {
+      if (this._autosaveEnabled && this.editableScript.dirty && this._funscriptPath) {
         this._autosave();
       }
     }

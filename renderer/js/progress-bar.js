@@ -101,8 +101,9 @@ export class ProgressBar {
   _seekThumbVideo(timeSeconds) {
     const video = this._thumbVideo;
     if (!video || !isFinite(timeSeconds)) return;
+    if (!isFinite(video.duration) || video.duration <= 0) return;
 
-    const clamped = Math.max(0, Math.min(timeSeconds, video.duration || 0));
+    const clamped = Math.max(0, Math.min(timeSeconds, video.duration));
     this._thumbSeeking = true;
     video.currentTime = clamped;
   }
@@ -125,8 +126,13 @@ export class ProgressBar {
 
   _destroyThumbVideo() {
     if (this._thumbVideo) {
+      this._thumbVideo.pause();
       this._thumbVideo.removeAttribute('src');
       this._thumbVideo.load();
+      // Remove all listeners before removing element to prevent leaks
+      this._thumbVideo.onloadeddata = null;
+      this._thumbVideo.onseeked = null;
+      this._thumbVideo.onerror = null;
       this._thumbVideo.remove();
       this._thumbVideo = null;
     }
@@ -185,6 +191,45 @@ export class ProgressBar {
 
       ctx.fillStyle = color;
       ctx.fillRect(x1, 0, Math.max(x2 - x1, 1), h);
+    }
+
+    // Render gap indicators if available
+    if (this._gapData) {
+      this._renderGapIndicators(ctx, w, h, durationMs);
+    }
+  }
+
+  /**
+   * Set gap data for rendering indicators on the progress bar.
+   * @param {Array<{startMs: number, endMs: number}>} gaps
+   */
+  setGaps(gaps) {
+    this._gapData = gaps && gaps.length > 0 ? gaps : null;
+    this.redraw();
+  }
+
+  _renderGapIndicators(ctx, w, h, durationMs) {
+    if (!this._gapData || durationMs <= 0) return;
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    for (const gap of this._gapData) {
+      const x1 = (gap.startMs / durationMs) * w;
+      const x2 = (gap.endMs / durationMs) * w;
+      ctx.fillRect(x1, 0, Math.max(x2 - x1, 1), h);
+    }
+
+    // Draw thin border lines at gap edges
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1;
+    for (const gap of this._gapData) {
+      const x1 = Math.round((gap.startMs / durationMs) * w) + 0.5;
+      const x2 = Math.round((gap.endMs / durationMs) * w) + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(x1, 0);
+      ctx.lineTo(x1, h);
+      ctx.moveTo(x2, 0);
+      ctx.lineTo(x2, h);
+      ctx.stroke();
     }
   }
 

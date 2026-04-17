@@ -107,12 +107,14 @@ export class SyncEngine {
     }, this._secondPlayDelay);
 
     this._emitStatus('synced');
+    this._startDriftMonitor();
   }
 
   async _handlePause() {
     if (!this._active || !this.handy.connected) return;
 
     clearTimeout(this._playingTimer);
+    this._stopDriftMonitor();
     await this.handy.hsspStop();
   }
 
@@ -136,6 +138,7 @@ export class SyncEngine {
     if (!this._active || !this.handy.connected) return;
 
     clearTimeout(this._playingTimer);
+    this._stopDriftMonitor();
     await this.handy.hsspStop();
   }
 

@@ -110,6 +110,11 @@
   outline: none;
 }
 
+.editor__speed-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
 .editor__speed-select:focus {
   border-color: var(--accent);
 }
@@ -131,6 +136,39 @@
 }
 
 .editor__status--dirty {
+  color: #ff9800;
+}
+
+/* Autosave group */
+.editor__autosave-group {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+
+.editor__autosave-group input[type="checkbox"] {
+  accent-color: var(--accent);
+  margin: 0;
+  cursor: pointer;
+}
+
+.editor__autosave-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor__autosave-status {
+  font-size: 10px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  opacity: 0.8;
+}
+
+.editor__autosave-status--saving {
   color: #ff9800;
 }
 

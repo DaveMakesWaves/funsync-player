@@ -32,13 +32,11 @@ ffmpeg/*.zip
 Test.mp4
 Test.funscript
 Test-slow.funscript
+Logo.ico
 
 # Claude Code
 .claude/
-CLAUDE.md
-IMPROVEMENTS.md
-TODO.md
-RELEASE.md
+notes/
 
 # OS files
 Thumbs.db

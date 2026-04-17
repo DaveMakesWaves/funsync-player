@@ -42,6 +42,7 @@ contextBridge.exposeInMainWorld('funsync', {
   scanDirectory: (dirPath) => ipcRenderer.invoke('scan-directory', dirPath),
   selectFunscript: () => ipcRenderer.invoke('select-funscript'),
   readFunscript: (filePath) => ipcRenderer.invoke('read-funscript', filePath),
+  selectSubtitle: () => ipcRenderer.invoke('select-subtitle'),
 
   // Script editor
   saveFunscript: (content, name) => ipcRenderer.invoke('save-funscript', content, name),
@@ -58,6 +59,20 @@ contextBridge.exposeInMainWorld('funsync', {
   fetchMetadata: (videoPath) => ipcRenderer.invoke('fetch-metadata', videoPath),
   generateThumbnails: (videoPath, interval) => ipcRenderer.invoke('generate-thumbnails', videoPath, interval),
   convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
+
+  // Shell
+  openExternal: (url) => ipcRenderer.invoke('open-external', url),
+
+  // EroScripts
+  eroscriptsLogin: (username, password) => ipcRenderer.invoke('eroscripts-login', username, password),
+  eroscriptsVerify2FA: (nonce, token, username, password) => ipcRenderer.invoke('eroscripts-verify-2fa', nonce, token, username, password),
+  eroscriptsLogout: () => ipcRenderer.invoke('eroscripts-logout'),
+  eroscriptsRestoreSession: (cookie, username) => ipcRenderer.invoke('eroscripts-restore-session', cookie, username),
+  eroscriptsStatus: () => ipcRenderer.invoke('eroscripts-status'),
+  eroscriptsSearch: (query, page) => ipcRenderer.invoke('eroscripts-search', query, page),
+  eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
+  eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
+  eroscriptsDownload: (url, savePath) => ipcRenderer.invoke('eroscripts-download', url, savePath),
 
   // Auto-updater
   updaterCheck: () => ipcRenderer.invoke('updater-check'),

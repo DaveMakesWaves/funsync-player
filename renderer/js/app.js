@@ -15,14 +15,17 @@ import { showToast } from './toast.js';
 import { Library } from '../components/library.js';
 import { NavBar } from '../components/nav-bar.js';
 import { Modal } from '../components/modal.js';
+import { rankFunscriptMatches } from './fuzzy-match.js';
 import { Playlists } from '../components/playlists.js';
 import { Categories } from '../components/categories.js';
 import { ScriptEditor } from '../components/script-editor.js';
 import { DeviceSimulator } from '../components/device-simulator.js';
+import { GapSkipEngine } from './gap-skip.js';
+import { EroScriptsPanel } from '../components/eroscripts-panel.js';
 import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, FolderOpen, Bluetooth,
   Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-  Pencil, FileCheck,
+  Pencil, FileCheck, Captions, RotateCcw,
 } from './icons.js';
 
 class App {
@@ -68,7 +71,7 @@ class App {
       icons: {
         Play, Pause, Volume2, VolumeX, FolderOpen, Bluetooth,
         Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-        Pencil,
+        Pencil, RotateCcw,
       },
       attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
     });
@@ -112,13 +115,14 @@ class App {
     this.navBar = new NavBar({
       onNavigate: (viewId) => this._navigateTo(viewId),
       onHandyClick: () => { if (this.connectionPanel) this.connectionPanel.toggle(); },
+      onEroScriptsClick: () => { if (this.eroscriptsPanel) this.eroscriptsPanel.toggle(); },
     });
     this.navBar.init(document.getElementById('app'));
     this.navBar.setActive('library');
 
     // Library
     this.library = new Library({
-      onPlayVideo: (video, funscript) => this._playFromLibrary(video, funscript),
+      onPlayVideo: (video, funscript, subtitle, variants) => this._playFromLibrary(video, funscript, subtitle, variants),
       onBack: () => this._navigateBack(),
       settings: this.settings,
     });
@@ -126,14 +130,14 @@ class App {
     // Playlists
     this.playlists = new Playlists({
       settings: this.settings,
-      onPlayVideo: (videoData, funscriptData) => this._playFromLibrary(videoData, funscriptData),
+      onPlayVideo: (videoData, funscriptData, subtitleData, variants) => this._playFromLibrary(videoData, funscriptData, subtitleData, variants),
       onPlayAll: (videoList) => this._playAll(videoList),
     });
 
     // Categories
     this.categories = new Categories({
       settings: this.settings,
-      onPlayVideo: (videoData, funscriptData) => this._playFromLibrary(videoData, funscriptData),
+      onPlayVideo: (videoData, funscriptData, subtitleData, variants) => this._playFromLibrary(videoData, funscriptData, subtitleData, variants),
     });
 
     // Player back button
@@ -165,6 +169,17 @@ class App {
 
     // Redraw heatmap on resize
     window.addEventListener('resize', () => this.progressBar.redraw());
+
+    // Gate library hover preview when main video is playing
+    this.videoPlayer.video.addEventListener('play', () => {
+      if (this.library) this.library._isVideoPlaying = true;
+    });
+    this.videoPlayer.video.addEventListener('pause', () => {
+      if (this.library) this.library._isVideoPlaying = false;
+    });
+    this.videoPlayer.video.addEventListener('ended', () => {
+      if (this.library) this.library._isVideoPlaying = false;
+    });
 
     // Render heatmap once video duration is known
     this.videoPlayer.video.addEventListener('loadedmetadata', () => {
@@ -220,6 +235,32 @@ class App {
         settings: this.settings,
       });
 
+      // Wire smoothing settings change from connection panel
+      this.connectionPanel.onSmoothingChanged = (mode) => {
+        if (this.buttplugSync) this.buttplugSync.setInterpolationMode(mode);
+      };
+      this.connectionPanel.onSpeedLimitChanged = (maxSpeed) => {
+        if (this.buttplugSync) this.buttplugSync.setSpeedLimit(maxSpeed);
+      };
+
+      // Load saved smoothing settings into buttplug sync
+      if (this.buttplugSync) {
+        const savedSmoothing = this.settings.get('player.smoothing') || 'linear';
+        const savedSpeedLimit = this.settings.get('player.speedLimit') || 0;
+        this.buttplugSync.setInterpolationMode(savedSmoothing);
+        this.buttplugSync.setSpeedLimit(savedSpeedLimit);
+      }
+
+      // Wire gap skip settings change from connection panel
+      this.connectionPanel.onGapSkipChanged = (mode, threshold) => {
+        if (this.gapSkipEngine) {
+          this.gapSkipEngine.setSettings(mode, threshold);
+          if (this.funscriptEngine.isLoaded) {
+            this._startGapSkip();
+          }
+        }
+      };
+
       // ConnectionPanel sets handyManager.onConnect/onDisconnect for its own UI updates.
       // Wrap them so we also get notified (to upload pending scripts + update indicators).
       const panelOnConnect = this.handyManager.onConnect;
@@ -231,7 +272,9 @@ class App {
       const panelOnDisconnect = this.handyManager.onDisconnect;
       this.handyManager.onDisconnect = () => {
         if (panelOnDisconnect) panelOnDisconnect();
+        if (this.syncEngine) this.syncEngine.stop();
         this._updateHandyIndicators('disconnected');
+        this._updateDeviceIndicators();
       };
 
       // Buttplug.io callback wiring (same pattern as Handy — wrap panel callbacks)
@@ -255,6 +298,7 @@ class App {
           if (panelBpDeviceAdded) panelBpDeviceAdded(dev);
           this._updateDeviceIndicators();
           this._tryStartButtplugSync();
+          if (this.connectionPanel) this.connectionPanel.updateVibControlState();
         };
 
         const panelBpDeviceRemoved = this.buttplugManager.onDeviceRemoved;
@@ -295,6 +339,11 @@ class App {
       if (savedKey) {
         this._autoConnectHandy(savedKey);
       }
+
+      // Auto-connect to Buttplug/Intiface if previously used
+      if (this.buttplugManager) {
+        this._autoConnectButtplug();
+      }
     } catch (err) {
       console.warn('Handy integration unavailable:', err.message);
       showToast('Handy integration unavailable — playback still works', 'warn');
@@ -306,6 +355,22 @@ class App {
         scriptEditor: null, // Set after ScriptEditor creation below
       });
     }
+
+    // Initialize EroScripts panel
+    this.eroscriptsPanel = new EroScriptsPanel({ settings: this.settings });
+    this.eroscriptsPanel.onLoginStatusChanged = (loggedIn) => {
+      if (this.navBar) this.navBar.setEroScriptsStatus(loggedIn);
+    };
+    this.eroscriptsPanel.onScriptDownloaded = (fsPath, fsName) => {
+      // If a video is currently playing, load the downloaded script
+      if (this._currentVideoName && this.funscriptEngine) {
+        window.funsync.readFunscript(fsPath).then((content) => {
+          if (content) {
+            this.loadFunscript({ name: fsName, textContent: content, path: fsPath });
+          }
+        }).catch(() => {});
+      }
+    };
 
     // Initialize script editor (after all dependencies are set up)
     this.scriptEditor = new ScriptEditor({
@@ -323,16 +388,44 @@ class App {
       funscriptEngine: this.funscriptEngine,
     });
 
-    // Wire script editor + device simulator into keyboard handler
+    // Initialize gap skip engine
+    this.gapSkipEngine = new GapSkipEngine({
+      videoPlayer: this.videoPlayer,
+      funscriptEngine: this.funscriptEngine,
+    });
+    this._wireGapSkipUI();
+
+    // Wire script editor + device simulator + gap skip + variants into keyboard handler
     if (this._keyboard) {
       this._keyboard.scriptEditor = this.scriptEditor;
       this._keyboard.deviceSimulator = this.deviceSimulator;
+      this._keyboard.gapSkipEngine = this.gapSkipEngine;
+      this._keyboard.onCycleVariant = (dir) => this._cycleVariant(dir);
     }
 
     // Editor toggle button
     const btnEditor = document.getElementById('btn-editor');
     if (btnEditor) {
       btnEditor.addEventListener('click', () => this.scriptEditor.toggle());
+    }
+
+    // Initialize subtitle badge icon
+    const subBadgeInit = document.getElementById('subtitle-badge');
+    if (subBadgeInit) {
+      subBadgeInit.appendChild(icon(Captions, { width: 20, height: 20, 'stroke-width': 1.75 }));
+    }
+
+    // Variant selector button
+    const variantBtn = document.getElementById('variant-btn');
+    if (variantBtn) {
+      variantBtn.addEventListener('click', () => {
+        const dropdown = document.getElementById('variant-dropdown');
+        if (dropdown && !dropdown.hidden) {
+          dropdown.hidden = true;
+        } else {
+          this._showVariantDropdown();
+        }
+      });
     }
 
     // Stop Handy device when app closes
@@ -385,18 +478,25 @@ class App {
   _updateHandyIndicators(status) {
     const deviceCount = this._getConnectedDeviceCount();
 
+    // Check if any device (Handy OR Buttplug) is connected
+    const buttplugConnected = this.buttplugManager?.connected;
+    const anyConnected = status === 'connected' || status === 'connecting' || buttplugConnected;
+    const effectiveStatus = anyConnected
+      ? (status === 'connecting' ? 'connecting' : 'connected')
+      : 'disconnected';
+
     // Nav bar LED + text
     if (this.navBar) {
-      this.navBar.setHandyStatus(status, deviceCount);
+      this.navBar.setHandyStatus(effectiveStatus, deviceCount);
     }
 
     // Player control button LED
     const led = document.getElementById('handy-led');
     if (led) {
       led.className = 'handy-led';
-      if (status === 'connected') {
+      if (effectiveStatus === 'connected') {
         led.classList.add('handy-led--connected');
-      } else if (status === 'connecting') {
+      } else if (effectiveStatus === 'connecting') {
         led.classList.add('handy-led--connecting');
       }
     }
@@ -453,7 +553,7 @@ class App {
    */
   _tryStartButtplugSync() {
     if (!this.buttplugSync || !this.buttplugManager?.connected) return;
-    if (!this.funscriptEngine.isLoaded) return;
+    if (!this.funscriptEngine.isLoaded && !this.buttplugSync.hasVibScript) return;
 
     const devices = this.buttplugManager.devices;
     if (devices.length === 0) return;
@@ -493,6 +593,31 @@ class App {
     } catch (err) {
       console.warn('[Handy] Auto-connect error:', err.message);
       this._updateHandyIndicators('disconnected');
+    }
+  }
+
+  /**
+   * Auto-connect to Buttplug/Intiface Central on startup.
+   * Silently tries to connect — no error toast if Intiface isn't running.
+   */
+  async _autoConnectButtplug() {
+    const savedPort = this.settings.get('buttplug.port') || 12345;
+    console.log(`[Buttplug] Auto-connecting to Intiface on port ${savedPort}...`);
+
+    try {
+      const success = await this.buttplugManager.connect(savedPort);
+      if (success) {
+        console.log('[Buttplug] Auto-connect successful, scanning for devices...');
+        this._updateDeviceIndicators();
+        // Auto-scan for devices
+        await this.buttplugManager.startScanning();
+        // The onDeviceAdded callback will handle sync start + indicator updates
+      } else {
+        console.log('[Buttplug] Intiface not running — skipping auto-connect');
+      }
+    } catch (err) {
+      // Silent failure — Intiface may not be running
+      console.log('[Buttplug] Auto-connect skipped:', err.message);
     }
   }
 
@@ -557,6 +682,16 @@ class App {
     }
     this.syncEngine?.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
+    this._stopGapSkip();
+    if (this._queueEndedListener) {
+      this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
+      this._queueEndedListener = null;
+    }
+    if (this.buttplugSync) {
+      this.buttplugSync.setVibrationActions(null);
+      if (this.connectionPanel) this.connectionPanel.updateVibControlState();
+    }
+    this._currentMultiAxis = null;
     this.funscriptEngine.clear();
     this._scriptCloudUrl = null;
     this._waitingForScript = false;
@@ -566,11 +701,22 @@ class App {
     }
     this._hideScriptLoadingOverlay();
     this.progressBar.clearHeatmap();
+    this.progressBar.setGaps(null);
     const fsBadge = document.getElementById('funscript-badge');
     if (fsBadge) {
       fsBadge.hidden = true;
-      fsBadge.innerHTML = ''; // Clear icon so it re-creates fresh
+      fsBadge.innerHTML = '';
     }
+    const subBadge = document.getElementById('subtitle-badge');
+    if (subBadge) {
+      subBadge.hidden = true;
+    }
+    // Reset variant selector
+    const variantSelector = document.getElementById('variant-selector');
+    if (variantSelector) variantSelector.hidden = true;
+    this._currentVariants = [];
+    this._allVariantsWithManual = [];
+    this._activeVariantIndex = 0;
 
     // Hide editor, clear funscript path, and show editor toggle button
     if (this.scriptEditor) {
@@ -643,6 +789,56 @@ class App {
     if (match) {
       this._pendingFunscripts = this._pendingFunscripts.filter((f) => f !== match);
       this.loadFunscript(match);
+    } else if (!this.funscriptEngine.isLoaded) {
+      // No funscript found locally — try auto-matching on EroScripts (background, non-blocking)
+      this._autoMatchEroScripts(file.name);
+    }
+  }
+
+  async _autoMatchEroScripts(videoName) {
+    // Don't auto-match if not logged in or no EroScripts panel
+    if (!this.eroscriptsPanel?.isLoggedIn) return;
+
+    // Debounce — only one auto-match at a time
+    if (this._autoMatchPending) return;
+    this._autoMatchPending = true;
+
+    try {
+      // Wait a moment for the video to fully load (don't race with funscript loading)
+      await new Promise(r => setTimeout(r, 2000));
+
+      // If a funscript was loaded in the meantime, skip
+      if (this.funscriptEngine.isLoaded) return;
+
+      const query = videoName.replace(/\.[^/.]+$/, ''); // strip extension
+      const { results } = await window.funsync.eroscriptsSearch(query);
+
+      if (results && results.length > 0 && !this.funscriptEngine.isLoaded) {
+        const top = results[0];
+        const container = document.createElement('div');
+        container.className = 'update-toast';
+
+        const text = document.createElement('span');
+        text.textContent = `Script found: ${top.title}`;
+        container.appendChild(text);
+
+        const btn = document.createElement('button');
+        btn.className = 'update-toast__btn';
+        btn.textContent = 'Get Script';
+        btn.addEventListener('click', () => {
+          if (this.eroscriptsPanel) {
+            this.eroscriptsPanel.setSearchQuery(query);
+            this.eroscriptsPanel.show();
+          }
+        });
+        container.appendChild(btn);
+
+        showToast(container, 'info', 10000);
+      }
+    } catch (err) {
+      console.warn('[AutoMatch] EroScripts search failed:', err.message);
+    } finally {
+      this._autoMatchPending = false;
     }
   }
 
@@ -689,6 +885,9 @@ class App {
 
       // If Buttplug is connected, start sync
       this._tryStartButtplugSync();
+
+      // Start gap skip monitoring
+      this._startGapSkip();
     } catch (err) {
       console.error('Failed to load funscript:', err.message);
       showToast('Failed to load funscript: ' + err.message, 'error');
@@ -699,7 +898,24 @@ class App {
     const badge = document.getElementById('funscript-badge');
     if (!badge || !info) return;
 
-    badge.title = `${info.filename} — ${info.actionCount} actions, ${info.durationFormatted}`;
+    let title = `${info.filename} — ${info.actionCount} actions, ${info.durationFormatted}`;
+
+    if (this._currentMultiAxis && this._currentMultiAxis.axes) {
+      const axes = this._currentMultiAxis.axes;
+      const lines = [title, '— Multi-Axis —'];
+      for (const [suffix, path] of Object.entries(axes)) {
+        if (!path) continue;
+        const name = path.split(/[\\/]/).pop();
+        const axisLabel = suffix.charAt(0).toUpperCase() + suffix.slice(1);
+        lines.push(`${axisLabel}: ${name}`);
+      }
+      if (this._currentMultiAxis.buttplugVib) {
+        lines.push('Vib → Buttplug.io');
+      }
+      title = lines.join('\n');
+    }
+
+    badge.title = title;
     badge.hidden = false;
     if (!badge.querySelector('svg')) {
       badge.appendChild(icon(FileCheck, { width: 20, height: 20, 'stroke-width': 1.75 }));
@@ -798,6 +1014,9 @@ class App {
   _onLeaveView(viewId) {
     if (viewId === 'player') {
       this.videoPlayer.video.pause();
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
     } else if (viewId === 'library') {
       this.library.hide();
     } else if (viewId === 'playlists') {
@@ -813,16 +1032,437 @@ class App {
     this._navigateTo('library');
   }
 
-  _playFromLibrary(videoData, funscriptData) {
+  _playFromLibrary(videoData, funscriptData, subtitleData, variants) {
     this._navigateTo('player');
     this._playQueue = [];
     this._playQueueIndex = -1;
     this._updateQueueUI();
 
+    this._currentMultiAxis = null;
+    this._currentVariants = variants || [];
+    this._activeVariantIndex = 0;
     this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: false });
+    this._updateVariantSelector();
     if (funscriptData) {
-      this.loadFunscript(funscriptData);
+      if (funscriptData._multiAxis) {
+        this._currentMultiAxis = funscriptData._multiAxis;
+      }
+      // Only load main funscript if it has content
+      if (funscriptData.textContent) {
+        this.loadFunscript(funscriptData);
+      }
+      // Load multi-axis vibration script for Buttplug.io (works with or without main script)
+      if (funscriptData._multiAxis) {
+        this._loadMultiAxisScripts(funscriptData._multiAxis);
+      }
     }
+    if (subtitleData) {
+      this._loadSubtitleFromLibrary(subtitleData);
+    }
+  }
+
+  async _loadMultiAxisScripts(config) {
+    if (!config.axes?.vib) return;
+
+    const vibPath = config.axes.vib;
+
+    try {
+      const content = await window.funsync.readFunscript(vibPath);
+      if (!content) return;
+      const parsed = JSON.parse(content);
+      const actions = parsed?.actions;
+      if (!actions || actions.length < 2) return;
+
+      // If no main funscript was loaded, use the vib script for heatmap + badge
+      if (!this.funscriptEngine.isLoaded) {
+        const vibName = vibPath.split(/[\\/]/).pop();
+        await this.funscriptEngine.loadContent(content, vibName);
+        this._showFunscriptBadge({
+          filename: vibName,
+          actionCount: actions.length,
+          durationFormatted: this._formatActionsDuration(actions),
+        });
+
+        if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
+          this.progressBar.renderHeatmap(actions, this.videoPlayer.duration);
+        }
+      }
+
+      // Route to Buttplug.io vibrate devices if enabled
+      if (config.buttplugVib && this.buttplugSync) {
+        this.buttplugSync.setVibrationActions(actions);
+        console.log(`[MultiAxis] Loaded vibration script: ${actions.length} actions`);
+        if (this.connectionPanel) this.connectionPanel.updateVibControlState();
+
+        // Start sync if not already active (vib-only case — _tryStartButtplugSync may have skipped it)
+        if (this.buttplugManager?.connected && !this.buttplugSync._active) {
+          const devices = this.buttplugManager.devices;
+          if (devices.length > 0) {
+            if (this.connectionPanel) this.connectionPanel._loadButtplugDeviceSettings();
+            this.buttplugSync.start();
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[MultiAxis] Failed to load vib script:', err.message);
+    }
+  }
+
+  _formatActionsDuration(actions) {
+    if (!actions || actions.length === 0) return '0:00';
+    const totalMs = actions[actions.length - 1].at - actions[0].at;
+    const totalSec = Math.floor(totalMs / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  _wireGapSkipUI() {
+    const overlay = document.getElementById('gap-skip-overlay');
+    const btnSkip = document.getElementById('gap-skip-btn');
+    const btnCancel = document.getElementById('gap-skip-cancel');
+    if (!overlay || !btnSkip) return;
+
+    // Load settings
+    const gapSettings = this.settings.get('player.gapSkip') || {};
+    this.gapSkipEngine.setSettings(gapSettings.mode || 'off', gapSettings.threshold || 10000);
+
+    // Wire overlay callbacks
+    this.gapSkipEngine.onShowOverlay = (gap, countdown, gapType) => {
+      overlay.hidden = false;
+      const label = gapType === 'leading' ? 'Skip to action'
+        : gapType === 'trailing' ? 'Skip to end'
+        : 'Skip to next action';
+
+      if (countdown !== null) {
+        btnSkip.textContent = `${label} in ${countdown}...`;
+        btnCancel.hidden = false;
+      } else {
+        btnSkip.textContent = label;
+        btnCancel.hidden = true;
+      }
+    };
+
+    this.gapSkipEngine.onHideOverlay = () => {
+      overlay.hidden = true;
+    };
+
+    this.gapSkipEngine.onCountdownTick = (remaining) => {
+      const gapType = this.gapSkipEngine._currentGapType || 'mid';
+      const label = gapType === 'leading' ? 'Skip to action'
+        : gapType === 'trailing' ? 'Skip to end'
+        : 'Skip to next action';
+      btnSkip.textContent = remaining > 0 ? `${label} in ${remaining}...` : 'Skipping...';
+    };
+
+    this.gapSkipEngine.onSkipped = (skippedMs) => {
+      const sec = Math.round(Math.abs(skippedMs) / 1000);
+      const dir = skippedMs > 0 ? 'forward' : 'back';
+      const container = document.createElement('div');
+      container.className = 'update-toast';
+      const text = document.createElement('span');
+      text.textContent = `Skipped ${sec}s ${dir}`;
+      container.appendChild(text);
+      const undoBtn = document.createElement('button');
+      undoBtn.className = 'update-toast__btn';
+      undoBtn.textContent = 'Undo';
+      undoBtn.addEventListener('click', () => this.gapSkipEngine.undo());
+      container.appendChild(undoBtn);
+      showToast(container, 'info', 4000);
+    };
+
+    // Wire buttons
+    btnSkip.addEventListener('click', () => this.gapSkipEngine.skipToNextAction());
+    if (btnCancel) {
+      btnCancel.addEventListener('click', () => {
+        this.gapSkipEngine._clearCountdown();
+        this.gapSkipEngine._hideOverlay();
+        this.gapSkipEngine._currentGap = null;
+      });
+    }
+  }
+
+  _startGapSkip() {
+    if (!this.gapSkipEngine) return;
+
+    // Clean up any pending deferred listener
+    if (this._gapSkipMetaListener) {
+      this.videoPlayer.video.removeEventListener('loadedmetadata', this._gapSkipMetaListener);
+      this._gapSkipMetaListener = null;
+    }
+
+    // If video duration isn't available yet, defer until loadedmetadata
+    if (!isFinite(this.videoPlayer.duration) || this.videoPlayer.duration <= 0) {
+      this._gapSkipMetaListener = () => {
+        this._gapSkipMetaListener = null;
+        this._startGapSkip();
+      };
+      this.videoPlayer.video.addEventListener('loadedmetadata', this._gapSkipMetaListener, { once: true });
+      return;
+    }
+
+    this.gapSkipEngine.loadGaps();
+    this.progressBar.setGaps(this.gapSkipEngine.gaps);
+    this.gapSkipEngine.start();
+  }
+
+  _stopGapSkip() {
+    if (!this.gapSkipEngine) return;
+    this.gapSkipEngine.stop();
+    this.progressBar.setGaps(null);
+  }
+
+  _loadSubtitleFromLibrary(subtitleData) {
+    if (!subtitleData || !subtitleData.textContent || !subtitleData.name) return;
+    const file = new File([subtitleData.textContent], subtitleData.name, { type: 'text/plain' });
+    this.videoPlayer.loadSubtitles(file);
+  }
+
+  // --- Script Variants ---
+
+  _updateVariantSelector() {
+    const selector = document.getElementById('variant-selector');
+    const btn = document.getElementById('variant-btn');
+    if (!selector || !btn) return;
+
+    // Build the full variants list: auto-detected + currently loaded + manual
+    const videoPath = this._currentVideoPath;
+
+    // Start with auto-detected variants from library scan
+    let baseVariants = [...this._currentVariants];
+
+    // If a funscript is currently loaded but not in the variants list, add it as "Default"
+    if (this.funscriptEngine.isLoaded && baseVariants.length === 0) {
+      const rawContent = this.funscriptEngine.getRawContent();
+      const currentPath = this.scriptEditor?._funscriptPath || null;
+      const currentName = this._currentVideoName
+        ? this._currentVideoName.replace(/\.[^/.]+$/, '') + '.funscript'
+        : 'current.funscript';
+      if (rawContent) {
+        baseVariants.push({ label: 'Default', path: currentPath || '', name: currentName });
+      }
+    }
+
+    // Append manually added variants from settings
+    const manualVariants = this.settings.get('library.manualVariants') || {};
+    const manual = videoPath && manualVariants[videoPath] ? manualVariants[videoPath] : [];
+    const allVariants = [...baseVariants, ...manual];
+
+    // Show selector only if there are variants (or always to allow adding)
+    if (allVariants.length > 1 || this._currentVideoPath) {
+      selector.hidden = false;
+      const active = allVariants[this._activeVariantIndex];
+      btn.textContent = active ? active.label : 'Default';
+    } else {
+      selector.hidden = true;
+    }
+
+    this._allVariantsWithManual = allVariants;
+  }
+
+  _showVariantDropdown() {
+    const dropdown = document.getElementById('variant-dropdown');
+    if (!dropdown) return;
+
+    dropdown.innerHTML = '';
+    dropdown.hidden = false;
+
+    const variants = this._allVariantsWithManual || [];
+    for (let i = 0; i < variants.length; i++) {
+      const v = variants[i];
+      const item = document.createElement('button');
+      item.className = 'variant-selector__item';
+      if (i === this._activeVariantIndex) item.classList.add('variant-selector__item--active');
+
+      const label = document.createElement('span');
+      label.className = 'variant-selector__item-label';
+      label.textContent = v.label;
+      item.appendChild(label);
+
+      item.addEventListener('click', () => {
+        this._switchVariant(i);
+        dropdown.hidden = true;
+      });
+      dropdown.appendChild(item);
+    }
+
+    // Add variation button
+    const addBtn = document.createElement('button');
+    addBtn.className = 'variant-selector__add';
+    addBtn.textContent = '+ Add variation...';
+    addBtn.addEventListener('click', async () => {
+      dropdown.hidden = true;
+      this._showAddVariantModal();
+    });
+    dropdown.appendChild(addBtn);
+
+    // Close on outside click
+    const closeHandler = (e) => {
+      if (!dropdown.contains(e.target) && !document.getElementById('variant-btn')?.contains(e.target)) {
+        dropdown.hidden = true;
+        document.removeEventListener('click', closeHandler, true);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler, true), 0);
+  }
+
+  _addManualVariant(fsPath, fsName) {
+    const videoPath = this._currentVideoPath;
+    if (!videoPath) return;
+
+    // Derive label from filename
+    const nameNoExt = fsName.replace(/\.funscript$/i, '');
+    const parenMatch = nameNoExt.match(/\(([^)]+)\)/);
+    const label = parenMatch ? parenMatch[1].trim() : nameNoExt;
+
+    const variant = { label, path: fsPath, name: fsName };
+
+    // Save to settings
+    const manualVariants = this.settings.get('library.manualVariants') || {};
+    if (!manualVariants[videoPath]) manualVariants[videoPath] = [];
+    manualVariants[videoPath].push(variant);
+    this.settings.set('library.manualVariants', manualVariants);
+
+    // Update current variants and switch to the new one
+    this._updateVariantSelector();
+    this._switchVariant(this._allVariantsWithManual.length - 1);
+  }
+
+  async _showAddVariantModal() {
+    // Get all funscripts from current library directory
+    const dirPath = this.settings.get('library.directory');
+    if (!dirPath) {
+      // No library — fall back to file dialog
+      const result = await window.funsync.selectFunscript();
+      if (result) this._addManualVariant(result.path, result.name);
+      return;
+    }
+
+    const scanResult = await window.funsync.scanDirectory(dirPath);
+    const allScripts = scanResult?.allFunscripts || [];
+
+    if (allScripts.length === 0) {
+      const result = await window.funsync.selectFunscript();
+      if (result) this._addManualVariant(result.path, result.name);
+      return;
+    }
+
+    const videoName = this._currentVideoName || '';
+    const ranked = rankFunscriptMatches(videoName, allScripts, 0);
+
+    const chosen = await Modal.open({
+      title: 'Add Script Variation',
+      onRender: (body, close) => {
+        if (ranked.length > 0) {
+          const list = document.createElement('div');
+          list.className = 'modal-list';
+
+          for (const match of ranked.slice(0, 30)) {
+            const row = document.createElement('button');
+            row.className = 'modal-list-item';
+
+            const label = document.createElement('span');
+            label.className = 'modal-list-item-label';
+            label.textContent = match.name;
+            row.appendChild(label);
+
+            if (match.score > 0) {
+              const badge = document.createElement('span');
+              const scoreClass = match.score >= 70 ? '--high' : match.score >= 40 ? '--medium' : '--low';
+              badge.className = `library__match-score library__match-score${scoreClass}`;
+              badge.textContent = `${match.score}%`;
+              row.appendChild(badge);
+            }
+
+            row.addEventListener('click', () => close({ path: match.path, name: match.name }));
+            list.appendChild(row);
+          }
+          body.appendChild(list);
+        }
+
+        const divider = document.createElement('div');
+        divider.className = 'library__suggestion-divider';
+        body.appendChild(divider);
+
+        const browseRow = document.createElement('button');
+        browseRow.className = 'modal-list-item library__browse-fallback';
+        browseRow.textContent = 'Browse...';
+        browseRow.addEventListener('click', async () => {
+          const result = await window.funsync.selectFunscript();
+          if (result) close(result);
+        });
+        body.appendChild(browseRow);
+      },
+    });
+
+    if (!chosen) return;
+    this._addManualVariant(chosen.path, chosen.name);
+  }
+
+  async _switchVariant(index) {
+    const variants = this._allVariantsWithManual || [];
+    if (index < 0 || index >= variants.length) return;
+    if (index === this._activeVariantIndex) return;
+
+    const variant = variants[index];
+    this._activeVariantIndex = index;
+
+    try {
+      const content = await window.funsync.readFunscript(variant.path);
+      if (!content) return;
+
+      const fsName = variant.name || variant.path.split(/[\\/]/).pop();
+      await this.funscriptEngine.loadContent(content, fsName);
+
+      // Update heatmap
+      if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
+        this.progressBar.renderHeatmap(
+          this.funscriptEngine.getActions(),
+          this.videoPlayer.duration,
+        );
+      }
+
+      // Update badge
+      const info = {
+        filename: fsName,
+        actionCount: this.funscriptEngine.getActions().length,
+        durationFormatted: this._formatActionsDuration(this.funscriptEngine.getActions()),
+      };
+      this._showFunscriptBadge(info);
+
+      // Reload buttplug sync
+      if (this.buttplugSync?._active) this.buttplugSync.reloadActions();
+
+      // Re-upload to Handy
+      if (this.handyManager?.connected) {
+        showToast('Switching script...', 'info', 2000);
+        await this._uploadAndStartSync();
+      }
+
+      // Reload editor if open
+      if (this.scriptEditor?.isOpen) {
+        this.scriptEditor.setFunscriptPath(variant.path);
+        this.scriptEditor.loadScript();
+      }
+
+      // Restart gap skip
+      this._startGapSkip();
+
+      // Update variant button label
+      this._updateVariantSelector();
+
+      showToast(`Now playing: ${variant.label}`, 'info', 2000);
+    } catch (err) {
+      console.warn('[Variants] Switch failed:', err.message);
+      showToast('Failed to switch script variant', 'error');
+    }
+  }
+
+  _cycleVariant(direction) {
+    const variants = this._allVariantsWithManual;
+    if (!variants || variants.length < 2) return;
+    const next = (this._activeVariantIndex + direction + variants.length) % variants.length;
+    this._switchVariant(next);
   }
 
   /** Play a list of videos sequentially (Play All). */
@@ -858,14 +1498,18 @@ class App {
 
     this._updateQueueUI();
 
-    // Wire auto-advance on ended
-    const onEnded = () => {
-      this.videoPlayer.video.removeEventListener('ended', onEnded);
+    // Wire auto-advance on ended (remove previous listener if any)
+    if (this._queueEndedListener) {
+      this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
+    }
+    this._queueEndedListener = () => {
+      this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
+      this._queueEndedListener = null;
       if (this._playQueueIndex + 1 < this._playQueue.length) {
         this._playQueueItem(this._playQueueIndex + 1);
       }
     };
-    this.videoPlayer.video.addEventListener('ended', onEnded);
+    this.videoPlayer.video.addEventListener('ended', this._queueEndedListener);
   }
 
   _playPrev() {

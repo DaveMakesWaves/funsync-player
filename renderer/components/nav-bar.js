@@ -1,11 +1,12 @@
 // NavBar — Persistent top navigation bar
 
-import { icon, Library, ListVideo, Tag } from '../js/icons.js';
+import { icon, Library, ListVideo, Tag, Download } from '../js/icons.js';
 
 export class NavBar {
-  constructor({ onNavigate, onHandyClick }) {
+  constructor({ onNavigate, onHandyClick, onEroScriptsClick }) {
     this._onNavigate = onNavigate;
     this._onHandyClick = onHandyClick;
+    this._onEroScriptsClick = onEroScriptsClick;
     this._el = null;
     this._activeId = null;
     this._handyBtn = null;
@@ -47,6 +48,19 @@ export class NavBar {
 
       this._el.appendChild(btn);
     }
+
+    // EroScripts button (right-aligned, before device button)
+    this._esBtn = document.createElement('button');
+    this._esBtn.className = 'nav-bar__eroscripts';
+    this._esBtn.title = 'Search EroScripts';
+    this._esBtn.appendChild(icon(Download, { width: 14, height: 14 }));
+    const esLabel = document.createElement('span');
+    esLabel.textContent = 'EroScripts';
+    this._esBtn.appendChild(esLabel);
+    this._esBtn.addEventListener('click', () => {
+      if (this._onEroScriptsClick) this._onEroScriptsClick();
+    });
+    this._el.appendChild(this._esBtn);
 
     // Device status widget (right-aligned)
     this._handyBtn = document.createElement('button');
@@ -107,6 +121,12 @@ export class NavBar {
       default:
         this._handyText.textContent = 'Disconnected';
         break;
+    }
+  }
+
+  setEroScriptsStatus(loggedIn) {
+    if (this._esBtn) {
+      this._esBtn.classList.toggle('nav-bar__eroscripts--connected', loggedIn);
     }
   }
 

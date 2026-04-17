@@ -23,6 +23,15 @@ export function detectGaps(actions, minGapMs, totalDurationMs) {
     return gaps;
   }
 
+  // Check leading gap (from 0 to first action)
+  if (actions[0].at >= minGapMs) {
+    gaps.push({
+      startMs: 0,
+      endMs: actions[0].at,
+      durationMs: actions[0].at,
+    });
+  }
+
   // Check gaps between consecutive actions
   for (let i = 0; i < actions.length - 1; i++) {
     const gapMs = actions[i + 1].at - actions[i].at;

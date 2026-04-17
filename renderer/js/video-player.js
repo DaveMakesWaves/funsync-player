@@ -71,6 +71,8 @@ export class VideoPlayer {
     this.centerPlayBtn = document.getElementById('center-play-btn');
     this.centerIconPlay = this.centerPlayBtn.querySelector('.center-play__icon--play');
     this.centerIconPause = this.centerPlayBtn.querySelector('.center-play__icon--pause');
+    this.centerIconReplay = this.centerPlayBtn.querySelector('.center-play__icon--replay');
+    this.iconReplay = this.btnPlay.querySelector('.icon-replay');
   }
 
   _bindEvents() {
@@ -84,8 +86,12 @@ export class VideoPlayer {
       clearTimeout(this._clickTimer);
       this.toggleFullscreen();
     });
-    this.video.addEventListener('play', () => this._updatePlayButton(true));
+    this.video.addEventListener('play', () => {
+      this._ended = false;
+      this._updatePlayButton(true);
+    });
     this.video.addEventListener('pause', () => this._updatePlayButton(false));
+    this.video.addEventListener('ended', () => this._onEnded());
 
     // Center play/pause overlay — click to toggle
     this.centerPlayBtn.addEventListener('click', () => this.togglePlay());
@@ -134,11 +140,21 @@ export class VideoPlayer {
   }
 
   togglePlay() {
+    if (this._ended) {
+      this.replay();
+      return;
+    }
     if (this.video.paused || this.video.ended) {
       this.video.play();
     } else {
       this.video.pause();
     }
+  }
+
+  replay() {
+    this._ended = false;
+    this.video.currentTime = 0;
+    this.video.play();
   }
 
   play() {
@@ -229,10 +245,31 @@ export class VideoPlayer {
 
   // --- Private ---
 
+  _onEnded() {
+    this._ended = true;
+    // Show replay icons in both the bar button and center overlay
+    this.iconPlay.hidden = true;
+    this.iconPause.hidden = true;
+    if (this.iconReplay) this.iconReplay.hidden = false;
+    this.btnPlay.setAttribute('aria-label', 'Replay');
+    this.btnPlay.title = 'Replay (K)';
+
+    // Center overlay — show replay icon persistently
+    clearTimeout(this._centerFlashTimer);
+    this.centerPlayBtn.classList.remove('center-play--flash');
+    this.centerIconPlay.hidden = true;
+    this.centerIconPause.hidden = true;
+    if (this.centerIconReplay) this.centerIconReplay.hidden = false;
+    this.centerPlayBtn.classList.add('center-play--visible');
+    this.centerPlayBtn.setAttribute('aria-label', 'Replay');
+  }
+
   _updatePlayButton(isPlaying) {
     this.iconPlay.hidden = isPlaying;
     this.iconPause.hidden = !isPlaying;
+    if (this.iconReplay) this.iconReplay.hidden = true;
     this.btnPlay.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+    this.btnPlay.title = isPlaying ? 'Pause (K)' : 'Play (K)';
     this._updateCenterPlay(isPlaying);
   }
 
@@ -253,6 +290,7 @@ export class VideoPlayer {
   _updateCenterPlay(isPlaying) {
     clearTimeout(this._centerFlashTimer);
     this.centerPlayBtn.classList.remove('center-play--flash', 'center-play--visible');
+    if (this.centerIconReplay) this.centerIconReplay.hidden = true;
 
     if (isPlaying) {
       // Flash the pause icon briefly, then hide
@@ -481,21 +519,37 @@ export class VideoPlayer {
 
   // --- Subtitles ---
 
-  loadSubtitles(file) {
+  async loadSubtitles(file) {
     // Remove existing tracks
     const existing = this.video.querySelectorAll('track');
     existing.forEach((t) => t.remove());
 
-    const url = URL.createObjectURL(file);
+    // Read file content
+    let text = typeof file.textContent === 'string' ? file.textContent : await file.text();
+    const name = file.name || 'subtitles';
+    const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
+
+    // Convert SRT to VTT (HTML5 <track> only supports WebVTT)
+    if (ext === '.srt') {
+      text = 'WEBVTT\n\n' + text.replace(/\r\n/g, '\n').replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+    }
+
+    const blob = new Blob([text], { type: 'text/vtt' });
+    const url = URL.createObjectURL(blob);
+
     const track = document.createElement('track');
     track.kind = 'subtitles';
-    track.label = file.name.replace(/\.[^/.]+$/, '');
+    track.label = name.replace(/\.[^/.]+$/, '');
     track.src = url;
     track.default = true;
     this.video.appendChild(track);
 
     // Enable the track
     this.video.textTracks[0].mode = 'showing';
+
+    // Show subtitle indicator
+    const badge = document.getElementById('subtitle-badge');
+    if (badge) badge.hidden = false;
   }
 
   // --- Utils ---

@@ -1,0 +1,423 @@
+/* === EroScripts Panel === */
+
+.eroscripts-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 480px;
+  max-height: 80vh;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.eroscripts-panel__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
+}
+
+.eroscripts-panel__title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.eroscripts-panel__status {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.eroscripts-panel__status--ok {
+  color: #4caf50;
+}
+
+.eroscripts-panel__close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  transition: background 150ms, color 150ms;
+}
+
+.eroscripts-panel__close:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+/* Auth bar (compact — always visible in panel) */
+.eroscripts-panel__auth-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.eroscripts-panel__auth-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex: 1;
+}
+
+/* Login modal (separate overlay) */
+.eroscripts-login-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.eroscripts-login-modal {
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  width: 420px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+}
+
+.eroscripts-login-modal__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 18px 10px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.eroscripts-login-modal__close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  display: flex;
+  transition: background 150ms;
+}
+
+.eroscripts-login-modal__close:hover {
+  background: var(--control-hover);
+  color: var(--text-primary);
+}
+
+.eroscripts-login-modal__body {
+  padding: 16px 18px 18px;
+}
+
+.eroscripts-login-modal__field {
+  margin-bottom: 12px;
+}
+
+.eroscripts-login-modal__field label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.eroscripts-login-modal__field .eroscripts-panel__input {
+  width: 100%;
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+.eroscripts-login-modal__2fa {
+  margin-bottom: 12px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.eroscripts-login-modal__2fa label {
+  display: block;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.eroscripts-login-modal__hint {
+  font-size: 11px;
+  color: var(--text-secondary);
+  opacity: 0.7;
+  margin-top: 6px;
+}
+
+/* OTP digit boxes */
+.eroscripts-login-modal__otp-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: center;
+  margin: 8px 0;
+}
+
+.eroscripts-login-modal__otp-digit {
+  width: 42px;
+  height: 50px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 600;
+  font-family: var(--font-family);
+  text-align: center;
+  outline: none;
+  caret-color: var(--accent);
+  transition: border-color 150ms;
+}
+
+.eroscripts-login-modal__otp-digit:focus {
+  border-color: var(--accent);
+  background: rgba(233, 69, 96, 0.06);
+}
+
+.eroscripts-login-modal__otp-sep {
+  width: 10px;
+  height: 2px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 1px;
+  flex-shrink: 0;
+}
+
+.eroscripts-login-modal__error {
+  font-size: 12px;
+  color: #f44336;
+  margin-bottom: 10px;
+}
+
+.eroscripts-login-modal__submit {
+  width: 100%;
+  padding: 9px;
+  font-size: 13px;
+}
+
+.eroscripts-panel__input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.eroscripts-panel__input {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 5px;
+  padding: 6px 10px;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-family);
+  outline: none;
+  min-width: 0;
+}
+
+.eroscripts-panel__input:focus {
+  border-color: var(--accent);
+}
+
+.eroscripts-panel__input::placeholder {
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+
+.eroscripts-panel__btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 150ms;
+}
+
+.eroscripts-panel__btn:hover {
+  background: var(--accent-hover);
+}
+
+.eroscripts-panel__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.eroscripts-panel__btn--secondary {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary);
+}
+
+.eroscripts-panel__btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.eroscripts-panel__error {
+  font-size: 11px;
+  color: #f44336;
+  padding-top: 6px;
+}
+
+/* Search */
+.eroscripts-panel__search {
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.eroscripts-panel__search-input {
+  flex: 1;
+}
+
+/* Results */
+.eroscripts-panel__results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.eroscripts-panel__placeholder {
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+  padding: 30px 16px;
+  opacity: 0.7;
+}
+
+.eroscripts-panel__placeholder--error {
+  color: #f44336;
+  opacity: 1;
+}
+
+.eroscripts-panel__result {
+  display: flex;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  margin-bottom: 4px;
+  transition: background 150ms;
+}
+
+.eroscripts-panel__result:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.eroscripts-panel__result-thumb {
+  width: 80px;
+  height: 50px;
+  object-fit: cover;
+  border-radius: 4px;
+  flex-shrink: 0;
+  background: #111;
+}
+
+.eroscripts-panel__result-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.eroscripts-panel__result-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 3px;
+}
+
+.eroscripts-panel__result-meta {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.eroscripts-panel__result-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 6px;
+}
+
+.eroscripts-panel__tag {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-secondary);
+}
+
+.eroscripts-panel__result-actions {
+  display: flex;
+  gap: 6px;
+  position: relative;
+}
+
+.eroscripts-panel__attachment-list {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  margin-bottom: 4px;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  padding: 2px;
+  z-index: 10;
+  min-width: 200px;
+}
+
+.eroscripts-panel__attachment-item {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  padding: 6px 10px;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 100ms;
+}
+
+.eroscripts-panel__attachment-item:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* Scrollbar */
+.eroscripts-panel__results::-webkit-scrollbar {
+  width: 6px;
+}
+
+.eroscripts-panel__results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.eroscripts-panel__results::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}

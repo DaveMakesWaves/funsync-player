@@ -391,3 +391,67 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* List mode */
+.categories__grid--list {
+  grid-template-columns: 1fr;
+  gap: 2px;
+}
+
+.categories__list-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-secondary);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.categories__list-item:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.categories__list-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.categories__list-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.categories__list-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.categories__list-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.categories__list-actions {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+
+.categories__list-item:hover .categories__list-actions {
+  opacity: 1;
+}

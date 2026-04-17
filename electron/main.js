@@ -6,6 +6,9 @@ const { startBackend, stopBackend } = require('./python-bridge');
 const store = require('./store');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
+const { EroScriptsAPI } = require('./eroscripts-api');
+
+const eroScripts = new EroScriptsAPI();
 
 let mainWindow = null;
 
@@ -31,6 +34,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: "FunSync Player",
+    icon: path.join(__dirname, '..', 'assets', 'icons', 'icon.ico'),
     backgroundColor: "#1a1a2e",
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
@@ -266,30 +270,94 @@ ipcMain.handle('select-directory', async () => {
 ipcMain.handle('scan-directory', async (_event, dirPath) => {
   const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac'];
   const FUNSCRIPT_EXT = '.funscript';
+  const SUBTITLE_EXTS = ['.srt', '.vtt'];
+  const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 
   let entries;
   try {
     entries = fs.readdirSync(dirPath, { withFileTypes: true });
   } catch (err) {
     log.error('scan-directory failed:', err.message);
-    return { videos: [], unmatchedFunscripts: [] };
+    return { videos: [], unmatchedFunscripts: [], unmatchedSubtitles: [] };
   }
 
   // Normalize a basename for matching: lowercase, replace separators with spaces, collapse
   const normalizeName = (name) => name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
 
-  // Collect funscript basenames for matching
-  const funscriptMap = new Map();
+  // Collect all funscripts with variant/axis classification
+  const funscriptList = [];
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
-    if (ext === FUNSCRIPT_EXT) {
-      const baseName = normalizeName(path.basename(entry.name, ext));
-      funscriptMap.set(baseName, { name: entry.name, path: path.join(dirPath, entry.name), _used: false });
+    if (ext !== FUNSCRIPT_EXT) continue;
+
+    const nameNoExt = path.basename(entry.name, ext); // e.g. "video", "video.vib", "video (Soft)", "video.intense"
+    const fullPath = path.join(dirPath, entry.name);
+
+    // Check for axis suffix: "video.vib" -> suffix "vib"
+    const dotIdx = nameNoExt.lastIndexOf('.');
+    const dotSuffix = dotIdx >= 0 ? nameNoExt.slice(dotIdx + 1).toLowerCase() : null;
+    const isAxis = dotSuffix && AXIS_SUFFIXES.has(dotSuffix);
+
+    // Check for parenthesized variant: "video (Soft)" -> label "Soft"
+    const parenMatch = nameNoExt.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
+
+    let videoBase, variantLabel;
+    if (isAxis) {
+      videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
+      variantLabel = null; // axis, not a variant
+    } else if (parenMatch) {
+      videoBase = normalizeName(parenMatch[1]);
+      variantLabel = parenMatch[2].trim();
+    } else if (dotSuffix && dotIdx > 0) {
+      // Dot-separated variant: "video.intense" (not a known axis)
+      videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
+      variantLabel = dotSuffix;
+    } else {
+      videoBase = normalizeName(nameNoExt);
+      variantLabel = null; // default/primary
+    }
+
+    funscriptList.push({
+      name: entry.name,
+      path: fullPath,
+      videoBase,
+      variantLabel,
+      isAxis,
+      axisSuffix: isAxis ? dotSuffix : null,
+      _used: false,
+    });
+  }
+
+  // Build a map of normalized video base -> primary funscript (for backward compat)
+  const funscriptMap = new Map();
+  for (const fs of funscriptList) {
+    if (!fs.isAxis && !fs.variantLabel && !funscriptMap.has(fs.videoBase)) {
+      funscriptMap.set(fs.videoBase, fs);
+    }
+  }
+  // If no default variant, use the first matching funscript
+  for (const fs of funscriptList) {
+    if (!fs.isAxis && !funscriptMap.has(fs.videoBase)) {
+      funscriptMap.set(fs.videoBase, fs);
     }
   }
 
-  // Build video list with funscript pairing
+  // Collect subtitle basenames for matching
+  const subtitleMap = new Map();
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const ext = path.extname(entry.name).toLowerCase();
+    if (SUBTITLE_EXTS.includes(ext)) {
+      const baseName = normalizeName(path.basename(entry.name, ext));
+      // If multiple subtitle files match the same base name, keep the first
+      if (!subtitleMap.has(baseName)) {
+        subtitleMap.set(baseName, { name: entry.name, path: path.join(dirPath, entry.name), _used: false });
+      }
+    }
+  }
+
+  // Build video list with funscript + subtitle + variant pairing
   const videos = [];
   for (const entry of entries) {
     if (!entry.isFile()) continue;
@@ -297,9 +365,32 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
     if (!VIDEO_EXTS.includes(ext)) continue;
 
     const baseName = normalizeName(path.basename(entry.name, ext));
+
     const fsEntry = funscriptMap.get(baseName);
     const funscriptPath = fsEntry ? fsEntry.path : null;
     if (fsEntry) fsEntry._used = true;
+
+    const subEntry = subtitleMap.get(baseName);
+    const subtitlePath = subEntry ? subEntry.path : null;
+    if (subEntry) subEntry._used = true;
+
+    // Collect variants for this video (non-axis funscripts sharing the base name)
+    const variants = [];
+    for (const fs of funscriptList) {
+      if (fs.videoBase !== baseName || fs.isAxis) continue;
+      fs._used = true;
+      variants.push({
+        label: fs.variantLabel || 'Default',
+        path: fs.path,
+        name: fs.name,
+      });
+    }
+    // Sort: Default first, then alphabetical
+    variants.sort((a, b) => {
+      if (a.label === 'Default') return -1;
+      if (b.label === 'Default') return 1;
+      return a.label.localeCompare(b.label);
+    });
 
     videos.push({
       name: entry.name,
@@ -307,21 +398,40 @@ ipcMain.handle('scan-directory', async (_event, dirPath) => {
       ext,
       hasFunscript: funscriptPath !== null,
       funscriptPath,
+      hasSubtitle: subtitlePath !== null,
+      subtitlePath,
+      variants: variants.length > 1 ? variants : [],
     });
   }
 
   // Collect unmatched funscripts (not paired to any video)
   const unmatchedFunscripts = [];
-  for (const fsEntry of funscriptMap.values()) {
-    if (!fsEntry._used) {
-      unmatchedFunscripts.push({ name: fsEntry.name, path: fsEntry.path });
+  for (const fs of funscriptList) {
+    if (!fs._used) {
+      unmatchedFunscripts.push({ name: fs.name, path: fs.path });
     }
   }
   unmatchedFunscripts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 
+  // Collect unmatched subtitles
+  const unmatchedSubtitles = [];
+  for (const subEntry of subtitleMap.values()) {
+    if (!subEntry._used) {
+      unmatchedSubtitles.push({ name: subEntry.name, path: subEntry.path });
+    }
+  }
+  unmatchedSubtitles.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
+  // Collect all funscripts for multi-axis dropdowns
+  const allFunscripts = [];
+  for (const fs of funscriptList) {
+    allFunscripts.push({ name: fs.name, path: fs.path });
+  }
+  allFunscripts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+
   // Sort alphabetically
   videos.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  return { videos, unmatchedFunscripts };
+  return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts };
 });
 
 ipcMain.handle('select-funscript', async () => {
@@ -329,6 +439,18 @@ ipcMain.handle('select-funscript', async () => {
     properties: ['openFile'],
     filters: [
       { name: 'Funscript Files', extensions: ['funscript'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const filePath = result.filePaths[0];
+  return { name: path.basename(filePath), path: filePath };
+});
+
+ipcMain.handle('select-subtitle', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      { name: 'Subtitle Files', extensions: ['srt', 'vtt'] },
     ],
   });
   if (result.canceled || result.filePaths.length === 0) return null;
@@ -448,6 +570,15 @@ ipcMain.handle('file-exists', (_event, filePath) => {
   }
 });
 
+// --- IPC Handlers: Shell ---
+
+ipcMain.handle('open-external', async (_event, url) => {
+  const { shell } = require('electron');
+  if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
+    await shell.openExternal(url);
+  }
+});
+
 // --- IPC Handlers: Auto-Updater ---
 
 ipcMain.handle('updater-check', () => {
@@ -460,4 +591,44 @@ ipcMain.handle('updater-download', () => {
 
 ipcMain.handle('updater-install', () => {
   quitAndInstall();
+});
+
+// --- IPC Handlers: EroScripts ---
+
+ipcMain.handle('eroscripts-login', async (_event, username, password) => {
+  return eroScripts.login(username, password);
+});
+
+ipcMain.handle('eroscripts-verify-2fa', async (_event, nonce, token, username, password) => {
+  return eroScripts.verify2FA(nonce, token, username, password);
+});
+
+ipcMain.handle('eroscripts-logout', () => {
+  eroScripts.logout();
+  return { success: true };
+});
+
+ipcMain.handle('eroscripts-restore-session', (_event, cookie, username) => {
+  eroScripts.restoreSession(cookie, username);
+  return { success: true };
+});
+
+ipcMain.handle('eroscripts-status', () => {
+  return { loggedIn: eroScripts.isLoggedIn, username: eroScripts.username };
+});
+
+ipcMain.handle('eroscripts-search', async (_event, query, page) => {
+  return eroScripts.search(query, page);
+});
+
+ipcMain.handle('eroscripts-topic', async (_event, topicId) => {
+  return eroScripts.getTopicAttachments(topicId);
+});
+
+ipcMain.handle('eroscripts-topic-image', async (_event, topicId) => {
+  return eroScripts.getTopicImage(topicId);
+});
+
+ipcMain.handle('eroscripts-download', async (_event, url, savePath) => {
+  return eroScripts.downloadFile(url, savePath);
 });

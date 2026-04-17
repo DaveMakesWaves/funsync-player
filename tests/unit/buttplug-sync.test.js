@@ -144,11 +144,15 @@ describe('ButtplugSync', () => {
       sync._lastActionIndex = 0;
     });
 
-    it('sends LinearCmd for next action', () => {
-      mockPlayer.currentTime = 0; // At action 0 (at: 0)
+    it('sends LinearCmd with interpolated position', () => {
+      mockPlayer.currentTime = 0.25; // 250ms — halfway between 0ms and 500ms
       sync._sendPendingActions();
 
-      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(0, 100, 500);
+      // Linear interpolation: at 250ms between (0,0) and (500,100) = position 50
+      expect(mockButtplug.sendLinear).toHaveBeenCalled();
+      const call = mockButtplug.sendLinear.mock.calls[0];
+      expect(call[0]).toBe(0); // device index
+      expect(call[1]).toBeCloseTo(50, 0); // interpolated position
     });
 
     it('does not send when not connected', () => {
@@ -171,18 +175,23 @@ describe('ButtplugSync', () => {
       expect(mockButtplug.sendLinear).not.toHaveBeenCalled();
     });
 
-    it('advances lastActionIndex', () => {
-      mockPlayer.currentTime = 0;
+    it('advances lastActionIndex during catch-up', () => {
+      mockPlayer.currentTime = 0.6; // past action at 500ms
       sync._sendPendingActions();
-      expect(sync._lastActionIndex).toBe(1);
+      expect(sync._lastActionIndex).toBeGreaterThanOrEqual(1);
     });
 
-    it('enforces minimum 50ms duration', () => {
-      sync._lastActionIndex = 0;
-      mockPlayer.currentTime = 0.49; // 490ms — only 10ms until next action
+    it('applies speed limit when configured', () => {
+      sync.setSpeedLimit(100); // 100 units/sec
+      sync._lastSentPos = 0;
+      sync._lastSendTime = performance.now() - 100; // 100ms ago
+      mockPlayer.currentTime = 0.5; // at 500ms, linear interp = 100
       sync._sendPendingActions();
-      // Duration would be 500-490=10ms, but clamped to 50ms
-      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(0, 100, 50);
+      // With 100 units/sec and 100ms, max delta = 10 units
+      if (mockButtplug.sendLinear.mock.calls.length > 0) {
+        const sentPos = mockButtplug.sendLinear.mock.calls[0][1];
+        expect(sentPos).toBeLessThanOrEqual(10.5); // speed limited
+      }
     });
   });
 

@@ -20,6 +20,7 @@ window.funsync = {
   selectDirectory: vi.fn().mockResolvedValue(null),
   scanDirectory: vi.fn().mockResolvedValue({ videos: [], unmatchedFunscripts: [] }),
   selectFunscript: vi.fn().mockResolvedValue(null),
+  selectSubtitle: vi.fn().mockResolvedValue(null),
   getBackendPort: vi.fn().mockResolvedValue(5123),
   getAppVersion: vi.fn().mockResolvedValue('0.1.0'),
 
@@ -29,6 +30,20 @@ window.funsync = {
   // Data export/import
   exportData: vi.fn().mockResolvedValue({ success: true, path: '/tmp/backup.zip' }),
   importData: vi.fn().mockResolvedValue({ success: true, funscriptCount: 0 }),
+
+  // Shell
+  openExternal: vi.fn().mockResolvedValue(undefined),
+
+  // EroScripts
+  eroscriptsLogin: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
+  eroscriptsVerify2FA: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
+  eroscriptsLogout: vi.fn().mockResolvedValue({ success: true }),
+  eroscriptsRestoreSession: vi.fn().mockResolvedValue({ success: true }),
+  eroscriptsStatus: vi.fn().mockResolvedValue({ loggedIn: false }),
+  eroscriptsSearch: vi.fn().mockResolvedValue({ results: [] }),
+  eroscriptsTopic: vi.fn().mockResolvedValue({ attachments: [] }),
+  eroscriptsTopicImage: vi.fn().mockResolvedValue(null),
+  eroscriptsDownload: vi.fn().mockResolvedValue({ success: true }),
 
   // Auto-updater
   updaterCheck: vi.fn().mockResolvedValue(undefined),
@@ -51,6 +66,12 @@ window.funsync = {
         volume: 80,
         theme: 'dark',
         recentFiles: [],
+        gapSkip: {
+          mode: 'off',
+          threshold: 10000,
+        },
+        smoothing: 'linear',
+        speedLimit: 0,
       },
       backend: {
         port: 5123,

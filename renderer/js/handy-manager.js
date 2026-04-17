@@ -179,6 +179,9 @@ export class HandyManager {
       console.log('[Handy] Script uploaded to cloud:', cloudUrl);
       this._lastCloudUrl = cloudUrl;
 
+      // Check device still connected after async upload
+      if (!this._handy || !this._connected) return false;
+
       // setScript auto-switches to HSSP mode and sets the script on the device
       const result = await this._handy.setScript(cloudUrl);
       console.log('[Handy] setScript result:', JSON.stringify(result));

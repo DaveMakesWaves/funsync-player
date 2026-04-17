@@ -49,6 +49,11 @@ export { default as FileCheck } from '../../node_modules/lucide/dist/esm/icons/f
 export { default as FileX } from '../../node_modules/lucide/dist/esm/icons/file-x.js';
 export { default as Gauge } from '../../node_modules/lucide/dist/esm/icons/gauge.js';
 export { default as Music } from '../../node_modules/lucide/dist/esm/icons/music.js';
+export { default as Captions } from '../../node_modules/lucide/dist/esm/icons/captions.js';
+export { default as RotateCcw } from '../../node_modules/lucide/dist/esm/icons/rotate-ccw.js';
+export { default as Download } from '../../node_modules/lucide/dist/esm/icons/download.js';
+export { default as LayoutGrid } from '../../node_modules/lucide/dist/esm/icons/layout-grid.js';
+export { default as LayoutList } from '../../node_modules/lucide/dist/esm/icons/layout-list.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

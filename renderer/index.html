@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com; media-src 'self' file: blob:; img-src 'self' http://localhost:* data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com https://discuss.eroscripts.com; media-src 'self' file: blob:; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
   <title>FunSync Player</title>
   <link rel="stylesheet" href="styles/player.css">
   <link rel="stylesheet" href="styles/library.css">
@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="styles/playlists.css">
   <link rel="stylesheet" href="styles/categories.css">
   <link rel="stylesheet" href="styles/editor.css">
+  <link rel="stylesheet" href="styles/eroscripts.css">
 </head>
 <body>
   <div id="app">
@@ -29,10 +30,11 @@
       <div id="video-wrapper" class="player__video-wrapper">
         <video id="video" class="player__video"></video>
 
-        <!-- Center Play/Pause Overlay -->
+        <!-- Center Play/Pause/Replay Overlay -->
         <button id="center-play-btn" class="center-play" aria-label="Play">
           <span class="center-play__icon center-play__icon--play"><i data-lucide="play"></i></span>
           <span class="center-play__icon center-play__icon--pause" hidden><i data-lucide="pause"></i></span>
+          <span class="center-play__icon center-play__icon--replay" hidden><i data-lucide="rotate-ccw"></i></span>
         </button>
       </div>
 
@@ -72,6 +74,7 @@
             <button id="btn-play" class="control-btn" aria-label="Play" title="Play (K)">
               <span class="icon-play"><i data-lucide="play"></i></span>
               <span class="icon-pause" hidden><i data-lucide="pause"></i></span>
+              <span class="icon-replay" hidden><i data-lucide="rotate-ccw"></i></span>
             </button>
 
             <button id="btn-next" class="control-btn control-btn--queue" hidden aria-label="Next" title="Next">
@@ -98,6 +101,11 @@
 
           <div class="controls__right">
             <span id="funscript-badge" class="funscript-badge" hidden title="Funscript loaded"></span>
+            <div id="variant-selector" class="variant-selector" hidden>
+              <button id="variant-btn" class="variant-selector__btn" title="Script variants (V)"></button>
+              <div id="variant-dropdown" class="variant-selector__dropdown" hidden></div>
+            </div>
+            <span id="subtitle-badge" class="subtitle-badge" hidden title="Subtitles loaded"></span>
 
             <button id="btn-editor" class="control-btn" aria-label="Script Editor" title="Script Editor (E)" hidden>
               <i data-lucide="pencil"></i>
@@ -130,6 +138,12 @@
         <div id="video-title" class="player__title" aria-live="polite"></div>
         <div id="video-category-dots" class="player__category-dots"></div>
         <button id="btn-add-to-playlist" class="player__quick-add" aria-label="Add to playlist" title="Add to Playlist"><i data-lucide="plus"></i></button>
+      </div>
+
+      <!-- Gap Skip Overlay -->
+      <div id="gap-skip-overlay" class="gap-skip" hidden>
+        <button id="gap-skip-btn" class="gap-skip__btn">Skip to next action</button>
+        <button id="gap-skip-cancel" class="gap-skip__cancel" hidden>Cancel</button>
       </div>
     </div>
   </div>

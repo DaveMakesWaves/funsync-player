@@ -2,6 +2,8 @@
 // Uses setInterval (not RAF) so it survives tab backgrounding.
 // Rate-limited to avoid overwhelming Bluetooth, with dirty-check to skip redundant sends.
 
+import { getInterpolator, applySpeedLimit, linearInterpolate } from './interpolation.js';
+
 const TICK_INTERVAL_MS = 40;     // ~25Hz polling — safe for BLE
 const MIN_SEND_INTERVAL_MS = 50; // Don't send commands faster than this
 const MAX_GAP_MS = 5000;         // Don't send commands for actions more than 5s away
@@ -25,8 +27,18 @@ export class ButtplugSync {
     this._lastSendTime = 0;       // timestamp of last command sent
     this._lastSentPos = -1;       // last position sent (for dirty check)
     this._actions = null;
+    this._vibActions = null;       // separate vibration script actions (multi-axis)
+    this._vibActionIndex = -1;
+    this._lastVibSendTime = 0;
+    this._lastVibSentIntensity = -1;
     this._invertedDevices = new Set();
     this._vibeModeMap = new Map();
+
+    // Interpolation
+    this._interpolationMode = 'linear';
+    this._interpolator = linearInterpolate;
+    this._speedLimit = 0; // 0 = disabled, otherwise pos-units per second
+    this._vibInterpolationMode = 'step'; // vibration defaults to step
 
     // Callbacks
     this.onSyncStatus = null; // (status: 'synced'|'idle') => {}
@@ -44,6 +56,10 @@ export class ButtplugSync {
     this._bindVideoEvents();
 
     if (!this.player.paused) {
+      this._resetIndex();
+      this._resetVibIndex();
+      this._lastSentPos = -1;
+      this._lastVibSentIntensity = -1;
       this._startScheduler();
     }
 
@@ -60,6 +76,9 @@ export class ButtplugSync {
     this._lastActionIndex = -1;
     this._lastSentPos = -1;
     this._lastSendTime = 0;
+    this._vibActionIndex = -1;
+    this._lastVibSendTime = 0;
+    this._lastVibSentIntensity = -1;
 
     console.log('[ButtplugSync] Stopped');
   }
@@ -71,6 +90,23 @@ export class ButtplugSync {
     this._cacheActions();
     this._lastActionIndex = -1;
     this._lastSentPos = -1;
+    this._vibActionIndex = -1;
+    this._lastVibSentIntensity = -1;
+  }
+
+  get hasVibScript() {
+    return !!this._vibActions;
+  }
+
+  /**
+   * Set a separate vibration script (multi-axis).
+   * When set, vibrate devices use this instead of deriving from the main stroke script.
+   * @param {Array<{at: number, pos: number}>} actions
+   */
+  setVibrationActions(actions) {
+    this._vibActions = actions && actions.length >= 2 ? actions : null;
+    this._vibActionIndex = -1;
+    this._lastVibSentIntensity = -1;
   }
 
   // --- Action cache ---
@@ -109,6 +145,9 @@ export class ButtplugSync {
   _handlePlaying() {
     if (!this._active) return;
     this._resetIndex();
+    this._resetVibIndex();
+    this._lastSentPos = -1;
+    this._lastVibSentIntensity = -1;
     this._startScheduler();
     this._emitStatus('synced');
   }
@@ -118,6 +157,7 @@ export class ButtplugSync {
     this._stopScheduler();
     this.buttplug.stopAll();
     this._lastSentPos = -1;
+    this._lastVibSentIntensity = -1;
     this._emitStatus('idle');
   }
 
@@ -125,6 +165,8 @@ export class ButtplugSync {
     if (!this._active) return;
     this._resetIndex();
     this._lastSentPos = -1;
+    this._resetVibIndex();
+    this._lastVibSentIntensity = -1;
   }
 
   _handleEnded() {
@@ -132,6 +174,7 @@ export class ButtplugSync {
     this._stopScheduler();
     this.buttplug.stopAll();
     this._lastSentPos = -1;
+    this._lastVibSentIntensity = -1;
     this._emitStatus('idle');
   }
 
@@ -165,12 +208,34 @@ export class ButtplugSync {
     this._lastActionIndex = result;
   }
 
+  _resetVibIndex() {
+    if (!this._vibActions || this._vibActions.length === 0) {
+      this._vibActionIndex = -1;
+      return;
+    }
+    const timeMs = this.player.currentTime * 1000;
+    let lo = 0;
+    let hi = this._vibActions.length - 1;
+    let result = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >>> 1;
+      if (this._vibActions[mid].at <= timeMs) {
+        result = mid;
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+    this._vibActionIndex = result;
+  }
+
   _startScheduler() {
     if (this._intervalId) return;
 
     this._intervalId = setInterval(() => {
       if (!this._active || this.player.paused) return;
       this._sendPendingActions();
+      if (this._vibActions) this._sendPendingVibActions();
     }, TICK_INTERVAL_MS);
   }
 
@@ -184,8 +249,8 @@ export class ButtplugSync {
   /**
    * Core scheduling loop — runs every TICK_INTERVAL_MS.
    *
-   * Checks current video time against the action list, catches up if behind,
-   * rate-limits to avoid overwhelming BLE, and skips redundant sends.
+   * Uses the configured interpolation method to compute smooth positions
+   * between action points. Rate-limited to avoid overwhelming BLE.
    */
   _sendPendingActions() {
     if (!this._actions || this._actions.length < 2) return;
@@ -197,32 +262,41 @@ export class ButtplugSync {
     // Rate limit — don't send faster than MIN_SEND_INTERVAL_MS
     if (now - this._lastSendTime < MIN_SEND_INTERVAL_MS) return;
 
-    // Catch up: skip past any actions we've already passed
+    // Catch up index for position tracking
     while (this._lastActionIndex + 1 < this._actions.length &&
            this._actions[this._lastActionIndex + 1].at <= timeMs) {
       this._lastActionIndex++;
     }
 
+    // Check we're within the action range
+    if (this._lastActionIndex < 0) return;
     const nextIdx = this._lastActionIndex + 1;
     if (nextIdx >= this._actions.length) return;
 
-    const currentAction = this._lastActionIndex >= 0 ? this._actions[this._lastActionIndex] : null;
     const nextAction = this._actions[nextIdx];
-
-    if (!currentAction || timeMs < currentAction.at) return;
-
     const duration = Math.max(MIN_SEND_INTERVAL_MS, nextAction.at - timeMs);
 
-    // Skip if next action is too far away (avoids very slow moves)
+    // Skip if next action is too far away (avoids very slow moves during gaps)
     if (duration > MAX_GAP_MS) return;
 
-    // Dirty check — skip if position barely changed
-    if (Math.abs(nextAction.pos - this._lastSentPos) < MIN_POS_DELTA) return;
+    // Compute interpolated position at current time
+    if (!this._actions || !this._interpolator) return;
+    let targetPos = this._interpolator(this._actions, timeMs);
+    if (targetPos === null) return;
 
-    this._sendToDevices(nextAction.pos, duration, currentAction.pos);
-    this._lastActionIndex = nextIdx;
+    // Apply speed limit
+    if (this._speedLimit > 0 && this._lastSentPos >= 0) {
+      const deltaMs = now - this._lastSendTime;
+      targetPos = applySpeedLimit(targetPos, this._lastSentPos, deltaMs, this._speedLimit);
+    }
+
+    // Dirty check — skip if position barely changed
+    if (Math.abs(targetPos - this._lastSentPos) < MIN_POS_DELTA) return;
+
+    const prevPos = this._lastSentPos >= 0 ? this._lastSentPos : targetPos;
+    this._sendToDevices(targetPos, duration, prevPos);
     this._lastSendTime = now;
-    this._lastSentPos = nextAction.pos;
+    this._lastSentPos = targetPos;
   }
 
   /**
@@ -242,12 +316,51 @@ export class ButtplugSync {
       if (dev.canLinear) {
         this.buttplug.sendLinear(dev.index, pos, durationMs);
       }
-      if (dev.canVibrate) {
+      // Only drive vibrate from main script if no separate vib script is loaded
+      if (dev.canVibrate && !this._vibActions) {
         const mode = this._vibeModeMap.get(dev.index) || 'speed';
         const intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
         this.buttplug.sendVibrate(dev.index, intensity);
       }
     }
+  }
+
+  /**
+   * Send vibration commands from the dedicated vibration script.
+   * The vib funscript uses pos 0-100 as vibration intensity directly.
+   */
+  _sendPendingVibActions() {
+    if (!this._vibActions || this._vibActions.length < 2) return;
+    if (!this.buttplug.connected) return;
+
+    const now = performance.now();
+    const timeMs = this.player.currentTime * 1000;
+
+    if (now - this._lastVibSendTime < MIN_SEND_INTERVAL_MS) return;
+
+    // Catch up
+    while (this._vibActionIndex + 1 < this._vibActions.length &&
+           this._vibActions[this._vibActionIndex + 1].at <= timeMs) {
+      this._vibActionIndex++;
+    }
+
+    if (this._vibActionIndex < 0 || this._vibActionIndex >= this._vibActions.length) return;
+
+    const action = this._vibActions[this._vibActionIndex];
+    const intensity = Math.max(0, Math.min(100, action.pos));
+
+    // Dirty check
+    if (Math.abs(intensity - this._lastVibSentIntensity) < MIN_POS_DELTA) return;
+
+    const devices = this.buttplug.devices;
+    for (const dev of devices) {
+      if (dev.canVibrate) {
+        this.buttplug.sendVibrate(dev.index, intensity);
+      }
+    }
+
+    this._lastVibSendTime = now;
+    this._lastVibSentIntensity = intensity;
   }
 
   // --- Per-device settings ---
@@ -267,6 +380,23 @@ export class ButtplugSync {
 
   getVibeMode(deviceIndex) {
     return this._vibeModeMap.get(deviceIndex) || 'speed';
+  }
+
+  setInterpolationMode(mode) {
+    this._interpolationMode = mode || 'linear';
+    this._interpolator = getInterpolator(this._interpolationMode);
+  }
+
+  getInterpolationMode() {
+    return this._interpolationMode;
+  }
+
+  setSpeedLimit(maxSpeed) {
+    this._speedLimit = maxSpeed || 0;
+  }
+
+  getSpeedLimit() {
+    return this._speedLimit;
   }
 
   /**

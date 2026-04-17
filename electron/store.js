@@ -18,6 +18,12 @@ const DEFAULTS = {
       volume: 80,
       theme: 'dark',
       recentFiles: [],
+      gapSkip: {
+        mode: 'off',
+        threshold: 10000,
+      },
+      smoothing: 'linear',
+      speedLimit: 0,
     },
     backend: {
       port: 5123,
@@ -26,6 +32,7 @@ const DEFAULTS = {
     library: {
       directory: '',
       associations: {},
+      manualVariants: {},
     },
     editor: {
       defaultCreator: '',

@@ -29,6 +29,7 @@ export class ConnectionPanel {
         <div class="connection-panel__tabs">
           <button class="connection-panel__tab connection-panel__tab--active" data-tab="handy">Handy</button>
           <button class="connection-panel__tab" data-tab="buttplug">Buttplug.io</button>
+          <button class="connection-panel__tab" data-tab="settings">Settings</button>
         </div>
         <button class="connection-panel__close control-btn" aria-label="Close"><i data-lucide="x"></i></button>
       </div>
@@ -143,13 +144,59 @@ export class ConnectionPanel {
 
       </div><!-- end tab-buttplug -->
 
-      <div class="connection-panel__section" id="data-section">
+      <div class="connection-panel__tab-content" id="tab-settings" hidden>
+
+      <div class="connection-panel__section">
+        <label class="connection-panel__section-label">Gap Skip</label>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Mode</span>
+          <select id="gap-skip-mode" class="connection-panel__device-select connection-panel__setting-select">
+            <option value="off">Off</option>
+            <option value="auto">Auto (countdown)</option>
+            <option value="button">Show Skip Button</option>
+          </select>
+        </div>
+        <div class="connection-panel__setting-row" id="gap-skip-threshold-row" hidden>
+          <span class="connection-panel__setting-label">Threshold</span>
+          <input type="range" id="gap-skip-threshold" class="connection-panel__setting-slider"
+                 min="5" max="60" value="10" aria-label="Gap skip threshold">
+          <span id="gap-skip-threshold-val" class="connection-panel__setting-value">10s</span>
+        </div>
+        <div class="connection-panel__setting-hint" id="gap-skip-hint" hidden>
+          Gaps shorter than the threshold are ignored. Press G to skip manually anytime.
+        </div>
+      </div>
+
+      <div class="connection-panel__section">
+        <label class="connection-panel__section-label">Motion Smoothing</label>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Interpolation</span>
+          <select id="smoothing-mode" class="connection-panel__device-select connection-panel__setting-select">
+            <option value="linear">Linear (default)</option>
+            <option value="pchip">Smooth (PCHIP)</option>
+            <option value="makima">Extra Smooth (Makima)</option>
+          </select>
+        </div>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Speed Limit</span>
+          <input type="range" id="speed-limit-slider" class="connection-panel__setting-slider"
+                 min="0" max="500" value="0" step="10" aria-label="Speed limit">
+          <span id="speed-limit-val" class="connection-panel__setting-value">Off</span>
+        </div>
+        <div class="connection-panel__setting-hint">
+          Smoothing affects Buttplug.io linear devices. Handy uses its own interpolation.
+        </div>
+      </div>
+
+      <div class="connection-panel__section">
         <label class="connection-panel__section-label">Data</label>
         <div class="connection-panel__data-row">
           <button id="btn-export-data" class="connection-panel__btn connection-panel__btn--secondary">Export Backup</button>
           <button id="btn-import-data" class="connection-panel__btn connection-panel__btn--secondary">Import Backup</button>
         </div>
       </div>
+
+      </div><!-- end tab-settings -->
     `;
 
     document.getElementById('app').appendChild(this._panel);
@@ -279,6 +326,73 @@ export class ConnectionPanel {
     // Export/Import buttons
     this._panel.querySelector('#btn-export-data')?.addEventListener('click', () => this._onExportData());
     this._panel.querySelector('#btn-import-data')?.addEventListener('click', () => this._onImportData());
+
+    // Gap skip settings
+    const gapModeSelect = this._panel.querySelector('#gap-skip-mode');
+    const gapThresholdSlider = this._panel.querySelector('#gap-skip-threshold');
+    const gapThresholdVal = this._panel.querySelector('#gap-skip-threshold-val');
+    const gapThresholdRow = this._panel.querySelector('#gap-skip-threshold-row');
+    const gapHint = this._panel.querySelector('#gap-skip-hint');
+
+    if (gapModeSelect) {
+      // Load saved settings
+      const saved = this.settings.get('player.gapSkip') || {};
+      gapModeSelect.value = saved.mode || 'off';
+      if (gapThresholdSlider) gapThresholdSlider.value = Math.round((saved.threshold || 10000) / 1000);
+      if (gapThresholdVal) gapThresholdVal.textContent = `${gapThresholdSlider?.value || 10}s`;
+
+      const showThreshold = saved.mode && saved.mode !== 'off';
+      if (gapThresholdRow) gapThresholdRow.hidden = !showThreshold;
+      if (gapHint) gapHint.hidden = !showThreshold;
+
+      gapModeSelect.addEventListener('change', () => {
+        const mode = gapModeSelect.value;
+        const threshold = (parseInt(gapThresholdSlider?.value, 10) || 10) * 1000;
+        this.settings.set('player.gapSkip', { mode, threshold });
+        if (gapThresholdRow) gapThresholdRow.hidden = mode === 'off';
+        if (gapHint) gapHint.hidden = mode === 'off';
+        if (this.onGapSkipChanged) this.onGapSkipChanged(mode, threshold);
+      });
+    }
+
+    if (gapThresholdSlider) {
+      gapThresholdSlider.addEventListener('input', () => {
+        const seconds = parseInt(gapThresholdSlider.value, 10) || 10;
+        if (gapThresholdVal) gapThresholdVal.textContent = `${seconds}s`;
+        const mode = gapModeSelect?.value || 'off';
+        const threshold = seconds * 1000;
+        this.settings.set('player.gapSkip', { mode, threshold });
+        if (this.onGapSkipChanged) this.onGapSkipChanged(mode, threshold);
+      });
+    }
+
+    // Smoothing settings
+    const smoothingSelect = this._panel.querySelector('#smoothing-mode');
+    const speedLimitSlider = this._panel.querySelector('#speed-limit-slider');
+    const speedLimitVal = this._panel.querySelector('#speed-limit-val');
+
+    if (smoothingSelect) {
+      const savedSmoothing = this.settings.get('player.smoothing') || 'linear';
+      smoothingSelect.value = savedSmoothing;
+
+      smoothingSelect.addEventListener('change', () => {
+        this.settings.set('player.smoothing', smoothingSelect.value);
+        if (this.onSmoothingChanged) this.onSmoothingChanged(smoothingSelect.value);
+      });
+    }
+
+    if (speedLimitSlider) {
+      const savedLimit = this.settings.get('player.speedLimit') || 0;
+      speedLimitSlider.value = savedLimit;
+      speedLimitVal.textContent = savedLimit > 0 ? `${savedLimit}` : 'Off';
+
+      speedLimitSlider.addEventListener('input', () => {
+        const val = parseInt(speedLimitSlider.value, 10) || 0;
+        speedLimitVal.textContent = val > 0 ? `${val}` : 'Off';
+        this.settings.set('player.speedLimit', val);
+        if (this.onSpeedLimitChanged) this.onSpeedLimitChanged(val);
+      });
+    }
   }
 
   _loadSavedSettings() {
@@ -490,6 +604,7 @@ export class ConnectionPanel {
 
     this._panel.querySelector('#tab-handy').hidden = tabId !== 'handy';
     this._panel.querySelector('#tab-buttplug').hidden = tabId !== 'buttplug';
+    this._panel.querySelector('#tab-settings').hidden = tabId !== 'settings';
   }
 
   // --- Buttplug ---
@@ -596,7 +711,7 @@ export class ConnectionPanel {
       // Vibe mode selector (only for vibrate-capable devices)
       if (dev.canVibrate) {
         const modeSelect = document.createElement('select');
-        modeSelect.className = 'connection-panel__device-select';
+        modeSelect.className = 'connection-panel__device-select connection-panel__vib-control';
         modeSelect.title = 'Vibration mapping mode';
         const modes = [
           { value: 'speed', label: 'Speed' },
@@ -632,7 +747,7 @@ export class ConnectionPanel {
 
       // Invert toggle
       const invertLabel = document.createElement('label');
-      invertLabel.className = 'connection-panel__device-toggle';
+      invertLabel.className = 'connection-panel__device-toggle connection-panel__vib-control';
       const invertCheck = document.createElement('input');
       invertCheck.type = 'checkbox';
       invertCheck.checked = this.buttplugSync?.isInverted(dev.index) || false;
@@ -653,6 +768,9 @@ export class ConnectionPanel {
 
     // Restore saved invert settings
     this._loadButtplugDeviceSettings();
+
+    // Apply vib control disabled state if multi-axis vib is active
+    this.updateVibControlState();
   }
 
   _saveButtplugDeviceSettings() {
@@ -723,11 +841,12 @@ export class ConnectionPanel {
     `;
 
     // Close on click anywhere
-    const closeHandler = () => {
+    this._vibeHelpCloseHandler = () => {
       tooltip.remove();
-      document.removeEventListener('click', closeHandler);
+      document.removeEventListener('click', this._vibeHelpCloseHandler);
+      this._vibeHelpCloseHandler = null;
     };
-    setTimeout(() => document.addEventListener('click', closeHandler), 0);
+    setTimeout(() => document.addEventListener('click', this._vibeHelpCloseHandler), 0);
 
     // Append to panel (not parent) so it isn't clipped by overflow
     this._panel.appendChild(tooltip);
@@ -816,11 +935,66 @@ export class ConnectionPanel {
     this._panel.hidden = false;
     this._visible = true;
     this._panel.querySelector('#connection-key-input').focus();
+
+    // Close on click outside (next tick to avoid immediate close from the toggle click)
+    this._boundOutsideClick = (e) => {
+      if (!this._panel.contains(e.target)) {
+        e.preventDefault();
+        e.stopPropagation();
+        this.hide();
+      }
+    };
+    setTimeout(() => {
+      document.addEventListener('click', this._boundOutsideClick, true);
+    }, 0);
   }
 
   hide() {
     this._panel.hidden = true;
     this._visible = false;
+    if (this._boundOutsideClick) {
+      document.removeEventListener('click', this._boundOutsideClick, true);
+      this._boundOutsideClick = null;
+    }
+    if (this._vibeHelpCloseHandler) {
+      document.removeEventListener('click', this._vibeHelpCloseHandler);
+      this._vibeHelpCloseHandler = null;
+    }
+    // Remove any open tooltips
+    this._panel.querySelector('.connection-panel__vibe-help')?.remove();
+  }
+
+  /**
+   * Update the disabled state of vibration controls based on whether
+   * a dedicated vib script is loaded (multi-axis).
+   */
+  updateVibControlState() {
+    const hasVibScript = !!this.buttplugSync?.hasVibScript;
+    const controls = this._panel.querySelectorAll('.connection-panel__vib-control');
+
+    for (const el of controls) {
+      if (el.tagName === 'SELECT') {
+        el.disabled = hasVibScript;
+      } else if (el.tagName === 'LABEL') {
+        const cb = el.querySelector('input[type="checkbox"]');
+        if (cb) cb.disabled = hasVibScript;
+      }
+      el.classList.toggle('connection-panel__vib-control--disabled', hasVibScript);
+    }
+
+    // Add or remove the explanation text
+    const existingNote = this._panel.querySelector('.connection-panel__vib-override-note');
+    if (hasVibScript && !existingNote) {
+      const note = document.createElement('div');
+      note.className = 'connection-panel__vib-override-note';
+      note.textContent = 'Vibration controlled by dedicated script — mode and invert settings have no effect.';
+      const deviceList = this._panel.querySelector('.connection-panel__device-list');
+      if (deviceList) {
+        deviceList.parentElement.appendChild(note);
+      }
+    } else if (!hasVibScript && existingNote) {
+      existingNote.remove();
+    }
   }
 }
 

@@ -2,8 +2,9 @@
 
 import { Modal } from './modal.js';
 import { rankFunscriptMatches } from '../js/fuzzy-match.js';
-import { icon, FolderOpen, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge } from '../js/icons.js';
+import { icon, FolderOpen, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList } from '../js/icons.js';
 import { fuzzySearch, sortVideos, computeSpeedStats } from '../js/library-search.js';
+import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/multi-axis.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 
 const MAX_CONCURRENT_THUMBNAILS = 3;
@@ -24,9 +25,22 @@ export class Library {
     this._selectMode = false;
     this._selectedPaths = new Set();
     this._unmatchedFunscripts = [];
+    this._unmatchedSubtitles = [];
     this._activeTab = 'matched';
     this._searchQuery = '';
     this._sortKey = 'name:asc';
+    this._viewMode = 'grid';
+
+    // Hover preview state (singleton video element — avoids Electron memory leak #18277)
+    this._previewVideo = null;
+    this._previewCanvas = null;
+    this._previewCtx = null;
+    this._previewRaf = null;
+    this._previewCycleTimer = null;
+    this._previewCycleIndex = 0;
+    this._previewGeneration = 0;
+    this._previewHoverTimer = null;
+    this._isVideoPlaying = false; // set by app.js to gate preview
   }
 
   show(containerEl) {
@@ -44,6 +58,7 @@ export class Library {
   hide() {
     this._closeMenu();
     this._exitSelectMode();
+    this._stopPreview();
     this._activeTab = 'matched';
     this._searchQuery = '';
     this._sortKey = 'name:asc';
@@ -75,7 +90,6 @@ export class Library {
   _renderWithHeader() {
     this._container.innerHTML = `
       <div class="library__header">
-        <button class="library__back-btn" aria-label="Back" title="Back"></button>
         <span class="library__title">Library</span>
         <span class="library__dir-path" title="${this._escapeHtml(this._dirPath || '')}">${this._escapeHtml(this._dirPath || '')}</span>
         <span class="library__video-count"></span>
@@ -97,6 +111,10 @@ export class Library {
           <button class="library__tab library__tab--active" data-tab="matched">Matched</button>
           <button class="library__tab" data-tab="unmatched">Unmatched</button>
         </div>
+        <div class="view-toggle-group">
+          <button class="view-toggle view-toggle--grid" aria-label="Grid view" title="Grid view"></button>
+          <button class="view-toggle view-toggle--list" aria-label="List view" title="List view"></button>
+        </div>
         <button class="library__select-mode-btn">Select</button>
         <button class="library__change-dir-btn">Change Directory</button>
       </div>
@@ -111,9 +129,6 @@ export class Library {
       </div>
     `;
 
-    const backBtn = this._container.querySelector('.library__back-btn');
-    backBtn.appendChild(icon(ArrowLeft, { width: 20, height: 20 }));
-    backBtn.addEventListener('click', () => this._onBack());
     this._container.querySelector('.library__change-dir-btn')
       .addEventListener('click', () => this._selectDirectory());
 
@@ -146,6 +161,15 @@ export class Library {
       tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
     });
 
+    // View toggle
+    const btnGrid = this._container.querySelector('.view-toggle--grid');
+    const btnList = this._container.querySelector('.view-toggle--list');
+    btnGrid.appendChild(icon(LayoutGrid, { width: 16, height: 16 }));
+    btnList.appendChild(icon(LayoutList, { width: 16, height: 16 }));
+    btnGrid.classList.add('view-toggle--active');
+    btnGrid.addEventListener('click', () => this._setViewMode('grid'));
+    btnList.addEventListener('click', () => this._setViewMode('list'));
+
     // Multi-select
     this._container.querySelector('.library__select-mode-btn')
       .addEventListener('click', () => this._toggleSelectMode());
@@ -172,15 +196,41 @@ export class Library {
     // Handle both old (array) and new ({ videos, unmatchedFunscripts }) return shapes
     const videos = Array.isArray(result) ? result : result.videos;
     this._unmatchedFunscripts = Array.isArray(result) ? [] : (result.unmatchedFunscripts || []);
+    this._unmatchedSubtitles = Array.isArray(result) ? [] : (result.unmatchedSubtitles || []);
+    this._allFunscripts = Array.isArray(result) ? [] : (result.allFunscripts || []);
     this._videos = videos;
 
     // Apply manual funscript associations from settings
     const associations = this._settings.get('library.associations') || {};
     for (const video of this._videos) {
-      if (!video.hasFunscript && associations[video.path]) {
-        video.hasFunscript = true;
-        video.funscriptPath = associations[video.path];
-        video._manualAssociation = true;
+      const assoc = associations[video.path];
+      if (!assoc) continue;
+      if (typeof assoc === 'string') {
+        // Single axis association
+        if (!video.hasFunscript) {
+          video.hasFunscript = true;
+          video.funscriptPath = assoc;
+          video._manualAssociation = true;
+        }
+      } else if (typeof assoc === 'object') {
+        // Multi axis association
+        const hasAnyScript = !!assoc.main || Object.values(assoc.axes || {}).some(Boolean);
+        if (hasAnyScript) {
+          video.hasFunscript = true;
+          video.funscriptPath = assoc.main || null;
+          video._manualAssociation = true;
+          video._multiAxis = assoc;
+        }
+      }
+    }
+
+    // Apply manual subtitle associations from settings
+    const subAssociations = this._settings.get('library.subtitleAssociations') || {};
+    for (const video of this._videos) {
+      if (!video.hasSubtitle && subAssociations[video.path]) {
+        video.hasSubtitle = true;
+        video.subtitlePath = subAssociations[video.path];
+        video._manualSubtitle = true;
       }
     }
 
@@ -209,6 +259,9 @@ export class Library {
     if (!grid) return;
     grid.innerHTML = '';
 
+    // Toggle grid/list class
+    grid.classList.toggle('library__grid--list', this._viewMode === 'list');
+
     // Set up IntersectionObserver for lazy thumbnail loading
     if (this._observer) this._observer.disconnect();
     this._pendingThumbnails = [];
@@ -229,10 +282,122 @@ export class Library {
     }, { rootMargin: '200px' });
 
     for (const video of videos) {
-      const card = this._createCard(video);
-      grid.appendChild(card);
-      this._observer.observe(card);
+      const el = this._viewMode === 'list' ? this._createListItem(video) : this._createCard(video);
+      grid.appendChild(el);
+      this._observer.observe(el);
     }
+  }
+
+  _setViewMode(mode) {
+    if (this._viewMode === mode) return;
+    this._viewMode = mode;
+
+    const btnGrid = this._container.querySelector('.view-toggle--grid');
+    const btnList = this._container.querySelector('.view-toggle--list');
+    if (btnGrid) btnGrid.classList.toggle('view-toggle--active', mode === 'grid');
+    if (btnList) btnList.classList.toggle('view-toggle--active', mode === 'list');
+
+    this._applyFilters();
+  }
+
+  _createListItem(video) {
+    const row = document.createElement('div');
+    row.className = 'library__list-item';
+    row.dataset.videoPath = video.path;
+
+    // Small thumbnail
+    const thumb = document.createElement('div');
+    thumb.className = 'library__list-thumb';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'library__card-placeholder';
+    placeholder.appendChild(icon(Clapperboard, { width: 16, height: 16 }));
+    thumb.appendChild(placeholder);
+    row.appendChild(thumb);
+
+    // Title
+    const title = document.createElement('span');
+    title.className = 'library__list-title';
+    title.textContent = video.name.replace(/\.[^/.]+$/, '');
+    title.title = video.name;
+    row.appendChild(title);
+
+    // Badges container
+    const badges = document.createElement('div');
+    badges.className = 'library__list-badges';
+
+    if (video.hasFunscript) {
+      const fsBadge = document.createElement('span');
+      fsBadge.className = `library__funscript-badge--inline ${video._manualAssociation ? 'library__funscript-badge--manual' : 'library__funscript-badge--auto'}`;
+      fsBadge.title = video._manualAssociation ? 'Funscript (manual)' : 'Funscript (auto-detected)';
+      fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      badges.appendChild(fsBadge);
+    }
+
+    if (video.hasSubtitle) {
+      const subBadge = document.createElement('span');
+      subBadge.className = `library__subtitle-badge--inline ${video._manualSubtitle ? 'library__subtitle-badge--manual' : 'library__subtitle-badge--auto'}`;
+      subBadge.title = video._manualSubtitle ? 'Subtitles (manual)' : 'Subtitles (auto-detected)';
+      subBadge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      badges.appendChild(subBadge);
+    }
+
+    if (video.avgSpeed > 0 || video.maxSpeed > 0) {
+      this._addSpeedBadge(badges, { avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
+    }
+
+    // Category dots
+    const catIds = this._settings.getVideoCategories(video.path);
+    if (catIds.length > 0) {
+      const allCats = this._settings.getCategories();
+      for (const catId of catIds) {
+        const cat = allCats.find((c) => c.id === catId);
+        if (cat) {
+          const dot = document.createElement('span');
+          dot.className = 'library__card-category-dot';
+          dot.style.background = cat.color;
+          dot.title = cat.name;
+          badges.appendChild(dot);
+        }
+      }
+    }
+
+    row.appendChild(badges);
+
+    // Duration
+    if (video.duration > 0) {
+      const dur = document.createElement('span');
+      dur.className = 'library__list-duration';
+      dur.textContent = this._formatDuration(video.duration);
+      row.appendChild(dur);
+    }
+
+    // Kebab button
+    const kebab = document.createElement('button');
+    kebab.className = 'library__list-kebab';
+    kebab.appendChild(icon(EllipsisVertical, { width: 16, height: 16 }));
+    kebab.title = 'Options';
+    kebab.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._showKebabMenu(video, kebab, row);
+    });
+    row.appendChild(kebab);
+
+    // Select checkbox (hidden unless select mode)
+    const checkbox = document.createElement('div');
+    checkbox.className = 'library__card-checkbox';
+    checkbox.hidden = !this._selectMode;
+    row.appendChild(checkbox);
+
+    // Click to play (or toggle select)
+    row.addEventListener('click', () => {
+      if (this._selectMode) {
+        this._toggleCardSelection(row, video.path);
+      } else {
+        this._playVideo(video);
+      }
+    });
+
+    return row;
   }
 
   _createCard(video) {
@@ -282,6 +447,15 @@ export class Library {
       badge.title = video._manualAssociation ? 'Funscript (manual)' : 'Funscript (auto-detected)';
       badge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
       thumbnail.appendChild(badge);
+    }
+
+    // Subtitle badge
+    if (video.hasSubtitle) {
+      const subBadge = document.createElement('span');
+      subBadge.className = `library__subtitle-badge ${video._manualSubtitle ? 'library__subtitle-badge--manual' : 'library__subtitle-badge--auto'}`;
+      subBadge.title = video._manualSubtitle ? 'Subtitles (manual)' : 'Subtitles (auto-detected)';
+      subBadge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      thumbnail.appendChild(subBadge);
     }
 
     // Category dot badges
@@ -335,6 +509,15 @@ export class Library {
       }
     });
 
+    // Hover preview (debounced 300ms)
+    card.addEventListener('mouseenter', () => {
+      this._previewHoverTimer = setTimeout(() => this._startPreview(card, video.path), 300);
+    });
+    card.addEventListener('mouseleave', () => {
+      clearTimeout(this._previewHoverTimer);
+      this._stopPreview();
+    });
+
     return card;
   }
 
@@ -377,7 +560,7 @@ export class Library {
 
       if (!dataUrl) return;
 
-      const thumbnailContainer = cardEl.querySelector('.library__card-thumbnail');
+      const thumbnailContainer = cardEl.querySelector('.library__card-thumbnail') || cardEl.querySelector('.library__list-thumb');
       if (!thumbnailContainer) return;
 
       const img = document.createElement('img');
@@ -481,6 +664,25 @@ export class Library {
     }
   }
 
+  async _loadSpeedStatsForVideo(video, cardEl) {
+    if (!video.hasFunscript || !video.funscriptPath) return;
+    try {
+      const content = await window.funsync.readFunscript(video.funscriptPath);
+      if (!content) return;
+      const parsed = JSON.parse(content);
+      const actions = parsed?.actions;
+      if (actions && actions.length >= 2) {
+        const stats = computeSpeedStats(actions);
+        video.avgSpeed = stats.avgSpeed;
+        video.maxSpeed = stats.maxSpeed;
+        if (cardEl) {
+          const info = cardEl.querySelector('.library__card-info');
+          if (info) this._addSpeedBadge(info, stats);
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
   /**
    * Add a speed gauge icon to a container element (info bar or thumbnail).
    * Color based on max speed using the OFS heatmap scale (max 400 units/s).
@@ -522,7 +724,142 @@ export class Library {
     return `${m}:${String(s).padStart(2, '0')}`;
   }
 
+  // --- Hover Video Preview ---
+
+  _ensurePreviewVideo() {
+    if (this._previewVideo) return;
+
+    // Singleton — reuse for all hovers (avoids Electron memory leak #18277)
+    const video = document.createElement('video');
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = 'auto';
+    video.style.cssText = 'position:fixed;left:-9999px;width:1px;height:1px;';
+    document.body.appendChild(video);
+
+    const canvas = document.createElement('canvas');
+    canvas.width = 320;
+    canvas.height = 180;
+
+    this._previewVideo = video;
+    this._previewCanvas = canvas;
+    this._previewCtx = canvas.getContext('2d');
+  }
+
+  _startPreview(cardEl, videoPath) {
+    // Gate: don't preview if a video is actively playing
+    if (this._isVideoPlaying) return;
+
+    this._ensurePreviewVideo();
+    this._previewGeneration++;
+    const gen = this._previewGeneration;
+
+    const video = this._previewVideo;
+    const normalizedPath = videoPath.replace(/\\/g, '/');
+    video.src = `file:///${normalizedPath}`;
+
+    video.addEventListener('loadeddata', () => {
+      if (gen !== this._previewGeneration) return;
+
+      // Set canvas aspect ratio
+      if (video.videoWidth > 0 && video.videoHeight > 0) {
+        this._previewCanvas.height = Math.round(320 * (video.videoHeight / video.videoWidth));
+      }
+
+      // Seek to 25% of duration
+      if (isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = video.duration * 0.25;
+      }
+    }, { once: true });
+
+    video.addEventListener('seeked', () => {
+      if (gen !== this._previewGeneration) return;
+      this._startPreviewLoop(cardEl, gen);
+    }, { once: true });
+
+    video.addEventListener('error', () => {
+      // Preview failed — silently ignore, static thumbnail stays
+    }, { once: true });
+  }
+
+  _startPreviewLoop(cardEl, gen) {
+    // Find the thumbnail container (grid or list)
+    const thumb = cardEl.querySelector('.library__card-thumbnail') || cardEl.querySelector('.library__list-thumb');
+    if (!thumb) return;
+
+    // Insert canvas overlay — use opacity, NOT display:none (Electron leak #22417)
+    const canvas = this._previewCanvas;
+    canvas.className = 'library__preview-canvas';
+    thumb.appendChild(canvas);
+
+    // Fade in
+    requestAnimationFrame(() => canvas.classList.add('library__preview-canvas--visible'));
+
+    // Start drawing frames
+    const video = this._previewVideo;
+    const ctx = this._previewCtx;
+    const drawFrame = () => {
+      if (gen !== this._previewGeneration) return;
+      try {
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      } catch { /* cross-origin or other error */ }
+      this._previewRaf = requestAnimationFrame(drawFrame);
+    };
+
+    video.play().catch(() => {});
+    this._previewRaf = requestAnimationFrame(drawFrame);
+
+    // Auto-cycle through positions every 3 seconds
+    const positions = [0.25, 0.45, 0.65, 0.85, 0.1];
+    this._previewCycleIndex = 0;
+    this._previewCycleTimer = setInterval(() => {
+      if (gen !== this._previewGeneration) return;
+      this._previewCycleIndex = (this._previewCycleIndex + 1) % positions.length;
+      if (isFinite(video.duration) && video.duration > 0) {
+        video.currentTime = video.duration * positions[this._previewCycleIndex];
+      }
+    }, 3000);
+  }
+
+  _stopPreview() {
+    this._previewGeneration++; // invalidate any pending operations
+
+    if (this._previewRaf) {
+      cancelAnimationFrame(this._previewRaf);
+      this._previewRaf = null;
+    }
+    if (this._previewCycleTimer) {
+      clearInterval(this._previewCycleTimer);
+      this._previewCycleTimer = null;
+    }
+    if (this._previewHoverTimer) {
+      clearTimeout(this._previewHoverTimer);
+      this._previewHoverTimer = null;
+    }
+
+    if (this._previewVideo) {
+      this._previewVideo.pause();
+      this._previewVideo.removeAttribute('src');
+      this._previewVideo.load(); // release media resource
+    }
+
+    // Remove canvas from card (fade out then remove)
+    if (this._previewCanvas) {
+      const canvas = this._previewCanvas;
+      canvas.classList.remove('library__preview-canvas--visible');
+      setTimeout(() => {
+        if (canvas.parentElement) canvas.remove();
+      }, 200);
+    }
+  }
+
   _showKebabMenu(video, buttonEl, cardEl) {
+    // If this button already has the menu open, just close it
+    if (this._openMenu && this._openMenuButton === buttonEl) {
+      this._closeMenu();
+      return;
+    }
+
     this._closeMenu();
 
     const menu = document.createElement('div');
@@ -551,6 +888,30 @@ export class Library {
       menu.appendChild(removeBtn);
     }
 
+    // Subtitle association
+    const subBtn = document.createElement('button');
+    subBtn.className = 'library__kebab-menu-item';
+    subBtn.textContent = video.hasSubtitle ? 'Change Subtitle' : 'Associate Subtitle';
+    subBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeMenu();
+      this._associateSubtitle(video, cardEl);
+    });
+    menu.appendChild(subBtn);
+
+    // If manually associated subtitle, add option to remove
+    if (video._manualSubtitle) {
+      const removeSubBtn = document.createElement('button');
+      removeSubBtn.className = 'library__kebab-menu-item';
+      removeSubBtn.textContent = 'Remove Subtitle';
+      removeSubBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closeMenu();
+        this._removeSubtitleAssociation(video, cardEl);
+      });
+      menu.appendChild(removeSubBtn);
+    }
+
     // Add to Playlist
     const playlistBtn = document.createElement('button');
     playlistBtn.className = 'library__kebab-menu-item';
@@ -573,9 +934,9 @@ export class Library {
     });
     menu.appendChild(categoryBtn);
 
-    const thumbnailContainer = cardEl.querySelector('.library__card-thumbnail');
-    thumbnailContainer.appendChild(menu);
+    cardEl.appendChild(menu);
     this._openMenu = menu;
+    this._openMenuButton = buttonEl;
 
     // Close on outside click (next tick to avoid immediate close)
     setTimeout(() => {
@@ -588,6 +949,7 @@ export class Library {
       this._openMenu.remove();
       this._openMenu = null;
     }
+    this._openMenuButton = null;
     document.removeEventListener('click', this._boundCloseMenu);
   }
 
@@ -596,67 +958,416 @@ export class Library {
   }
 
   async _associateFunscript(video, cardEl) {
-    // If unmatched funscripts exist, show fuzzy-ranked suggestions
-    if (this._unmatchedFunscripts.length > 0) {
-      const ranked = rankFunscriptMatches(video.name, this._unmatchedFunscripts);
+    const allScripts = this._allFunscripts;
+    const unmatchedScripts = this._unmatchedFunscripts;
+    const ranked = unmatchedScripts.length > 0 ? rankFunscriptMatches(video.name, unmatchedScripts) : [];
 
-      const chosen = await Modal.open({
-        title: 'Associate Funscript',
-        onRender: (body, close) => {
-          if (ranked.length > 0) {
-            const list = document.createElement('div');
-            list.className = 'modal-list';
+    // Auto-detect companion files from directory
+    const mainFsPath = video.funscriptPath || '';
+    const allPaths = allScripts.map(f => f.name);
+    const detected = mainFsPath ? detectCompanionFiles(mainFsPath.split(/[\\/]/).pop(), allPaths) : [];
 
-            for (const match of ranked) {
-              const row = document.createElement('button');
-              row.className = 'modal-list-item';
+    // Load existing multi-axis config
+    const existingAssoc = this._settings.get('library.associations') || {};
+    const existing = existingAssoc[video.path];
+    const isMulti = existing && typeof existing === 'object';
 
-              const label = document.createElement('span');
-              label.className = 'modal-list-item-label';
-              label.textContent = match.name;
-              row.appendChild(label);
+    const chosen = await Modal.open({
+      title: 'Associate Funscript',
+      onRender: (body, close) => {
+        // --- Mode radio ---
+        const modeRow = document.createElement('div');
+        modeRow.className = 'library__assoc-mode';
 
-              const badge = document.createElement('span');
-              const scoreClass = match.score >= 70 ? '--high' : match.score >= 40 ? '--medium' : '--low';
-              badge.className = `library__match-score library__match-score${scoreClass}`;
-              badge.textContent = `${match.score}%`;
-              row.appendChild(badge);
+        const radioSingle = document.createElement('input');
+        radioSingle.type = 'radio';
+        radioSingle.name = 'assoc-mode';
+        radioSingle.id = 'assoc-single';
+        radioSingle.value = 'single';
+        radioSingle.checked = !isMulti;
 
-              row.addEventListener('click', () => close({ path: match.path, name: match.name }));
-              list.appendChild(row);
-            }
+        const labelSingle = document.createElement('label');
+        labelSingle.htmlFor = 'assoc-single';
+        labelSingle.textContent = 'Single Axis';
 
-            body.appendChild(list);
-          } else {
-            const msg = document.createElement('div');
-            msg.className = 'modal-message modal-message--muted';
-            msg.textContent = 'No good matches found among unmatched funscripts.';
-            body.appendChild(msg);
-          }
+        const radioMulti = document.createElement('input');
+        radioMulti.type = 'radio';
+        radioMulti.name = 'assoc-mode';
+        radioMulti.id = 'assoc-multi';
+        radioMulti.value = 'multi';
+        radioMulti.checked = isMulti;
 
-          // Divider + Browse fallback
-          const divider = document.createElement('div');
-          divider.className = 'library__suggestion-divider';
-          body.appendChild(divider);
+        const labelMulti = document.createElement('label');
+        labelMulti.htmlFor = 'assoc-multi';
+        labelMulti.textContent = 'Multi Axis';
 
-          const browseRow = document.createElement('button');
-          browseRow.className = 'modal-list-item library__browse-fallback';
-          browseRow.textContent = 'Browse...';
-          browseRow.addEventListener('click', async () => {
-            const result = await window.funsync.selectFunscript();
-            close(result); // null if canceled
+        modeRow.appendChild(radioSingle);
+        modeRow.appendChild(labelSingle);
+        modeRow.appendChild(radioMulti);
+        modeRow.appendChild(labelMulti);
+        body.appendChild(modeRow);
+
+        // --- Single axis panel ---
+        const singlePanel = document.createElement('div');
+        singlePanel.className = 'library__assoc-panel';
+        singlePanel.hidden = isMulti;
+
+        // Current script info
+        const currentSection = document.createElement('div');
+        currentSection.className = 'library__assoc-current';
+
+        if (video.hasFunscript && video.funscriptPath) {
+          const currentName = video.funscriptPath.split(/[\\/]/).pop();
+          const currentLabel = document.createElement('span');
+          currentLabel.className = 'library__assoc-current-label';
+          currentLabel.textContent = 'Current:';
+          const currentFile = document.createElement('span');
+          currentFile.className = 'library__assoc-current-name';
+          currentFile.textContent = currentName;
+          currentFile.title = video.funscriptPath;
+          const currentType = document.createElement('span');
+          currentType.className = 'library__assoc-current-type';
+          currentType.textContent = video._manualAssociation ? 'manual' : 'auto';
+          const clearBtn = document.createElement('button');
+          clearBtn.className = 'library__assoc-current-clear';
+          clearBtn.textContent = '✕';
+          clearBtn.title = 'Remove association';
+          clearBtn.addEventListener('click', () => {
+            close({ mode: 'remove' });
           });
-          body.appendChild(browseRow);
-        },
-      });
+          currentSection.append(currentLabel, currentFile, currentType, clearBtn);
+        } else {
+          const noScript = document.createElement('span');
+          noScript.className = 'library__assoc-current-none';
+          noScript.textContent = 'No script associated';
+          currentSection.appendChild(noScript);
+        }
+        singlePanel.appendChild(currentSection);
 
-      if (!chosen) return;
+        // Change section header
+        const changeHeader = document.createElement('div');
+        changeHeader.className = 'library__assoc-section-header';
+        changeHeader.textContent = video.hasFunscript ? 'Change to:' : 'Select script:';
+        singlePanel.appendChild(changeHeader);
+
+        // Fuzzy ranked list
+        if (ranked.length > 0) {
+          const list = document.createElement('div');
+          list.className = 'modal-list';
+          for (const match of ranked) {
+            const row = document.createElement('button');
+            row.className = 'modal-list-item';
+            const label = document.createElement('span');
+            label.className = 'modal-list-item-label';
+            label.textContent = match.name;
+            row.appendChild(label);
+            const badge = document.createElement('span');
+            const scoreClass = match.score >= 70 ? '--high' : match.score >= 40 ? '--medium' : '--low';
+            badge.className = `library__match-score library__match-score${scoreClass}`;
+            badge.textContent = `${match.score}%`;
+            row.appendChild(badge);
+            row.addEventListener('click', () => close({ mode: 'single', path: match.path, name: match.name }));
+            list.appendChild(row);
+          }
+          singlePanel.appendChild(list);
+        } else {
+          const msg = document.createElement('div');
+          msg.className = 'modal-message modal-message--muted';
+          msg.textContent = 'No funscripts found in directory. Use Browse.';
+          singlePanel.appendChild(msg);
+        }
+
+        const divider = document.createElement('div');
+        divider.className = 'library__suggestion-divider';
+        singlePanel.appendChild(divider);
+
+        const browseRow = document.createElement('button');
+        browseRow.className = 'modal-list-item library__browse-fallback';
+        browseRow.textContent = 'Browse...';
+        browseRow.addEventListener('click', async () => {
+          const result = await window.funsync.selectFunscript();
+          if (result) close({ mode: 'single', path: result.path, name: result.name });
+        });
+        singlePanel.appendChild(browseRow);
+
+        // Variations section
+        const varDivider = document.createElement('div');
+        varDivider.className = 'library__suggestion-divider';
+        singlePanel.appendChild(varDivider);
+
+        const varSection = document.createElement('div');
+        varSection.className = 'library__assoc-variants';
+
+        const varHeader = document.createElement('div');
+        varHeader.className = 'library__assoc-section-header';
+        const autoVariants = video.variants || [];
+        const manualVariants = (this._settings.get('library.manualVariants') || {})[video.path] || [];
+        const allVariants = [...autoVariants, ...manualVariants];
+        varHeader.textContent = allVariants.length > 0 ? `Variations (${allVariants.length})` : 'Variations';
+        varSection.appendChild(varHeader);
+
+        if (allVariants.length > 0) {
+          for (const v of allVariants) {
+            const vRow = document.createElement('div');
+            vRow.className = 'library__assoc-variant-row';
+            const vName = document.createElement('span');
+            vName.className = 'library__assoc-variant-name';
+            vName.textContent = v.label;
+            vName.title = v.name || v.path;
+            vRow.appendChild(vName);
+            varSection.appendChild(vRow);
+          }
+        }
+
+        const addVarBtn = document.createElement('button');
+        addVarBtn.className = 'modal-list-item library__browse-fallback';
+        addVarBtn.textContent = '+ Add Variation...';
+        addVarBtn.addEventListener('click', async () => {
+          const result = await window.funsync.selectFunscript();
+          if (result) close({ mode: 'addVariant', path: result.path, name: result.name });
+        });
+        varSection.appendChild(addVarBtn);
+
+        singlePanel.appendChild(varSection);
+        body.appendChild(singlePanel);
+
+        // --- Multi axis panel ---
+        const multiPanel = document.createElement('div');
+        multiPanel.className = 'library__assoc-panel library__assoc-multi-panel';
+        multiPanel.hidden = !isMulti;
+
+        // Build a lookup of detected companions by suffix
+        const detectedMap = new Map();
+        for (const c of detected) {
+          detectedMap.set(c.axis.suffix, c.path);
+        }
+
+        // Existing multi config values
+        const existingAxes = isMulti ? (existing.axes || {}) : {};
+
+        // Main axis row
+        const axisRows = [];
+        const mainRow = this._createAxisDropdown('Main (Stroke)', 'main', allScripts, isMulti ? existing.main : (video.funscriptPath || ''), video.name);
+        multiPanel.appendChild(mainRow.row);
+        axisRows.push(mainRow);
+
+        // Axis rows for relevant axes
+        const shownAxes = AXIS_DEFINITIONS.filter(a => ['vib', 'surge', 'sway', 'twist', 'roll', 'pitch'].includes(a.suffix));
+        for (const axisDef of shownAxes) {
+          // Pre-fill: existing config > detected companion > empty
+          const preValue = existingAxes[axisDef.suffix] || '';
+          const detectedPath = detectedMap.get(axisDef.suffix);
+          const defaultVal = preValue || (detectedPath ? this._findScriptByName(allScripts, detectedPath) : '');
+
+          const axisRow = this._createAxisDropdown(`${axisDef.label} (${axisDef.tcode})`, axisDef.suffix, allScripts, defaultVal, video.name);
+          multiPanel.appendChild(axisRow.row);
+          axisRows.push(axisRow);
+        }
+
+        // Buttplug.io vibration checkbox
+        const bpRow = document.createElement('div');
+        bpRow.className = 'library__assoc-axis-row library__assoc-bp-row';
+        const bpCheck = document.createElement('input');
+        bpCheck.type = 'checkbox';
+        bpCheck.id = 'assoc-bp-vib';
+        bpCheck.checked = isMulti ? !!existing.buttplugVib : false;
+        const bpLabel = document.createElement('label');
+        bpLabel.htmlFor = 'assoc-bp-vib';
+        bpLabel.textContent = 'Use Buttplug.io for vibrations';
+        bpRow.appendChild(bpCheck);
+        bpRow.appendChild(bpLabel);
+        multiPanel.appendChild(bpRow);
+
+        // Save button
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'library__assoc-save-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.addEventListener('click', () => {
+          const axes = {};
+          for (const ar of axisRows) {
+            if (ar.key !== 'main' && ar.select.value) {
+              axes[ar.key] = ar.select.value;
+            }
+          }
+          const mainSelect = axisRows.find(r => r.key === 'main');
+          close({
+            mode: 'multi',
+            main: mainSelect?.select.value || '',
+            axes,
+            buttplugVib: bpCheck.checked,
+          });
+        });
+        multiPanel.appendChild(saveBtn);
+
+        body.appendChild(multiPanel);
+
+        // --- Radio toggle ---
+        radioSingle.addEventListener('change', () => {
+          singlePanel.hidden = false;
+          multiPanel.hidden = true;
+        });
+        radioMulti.addEventListener('change', () => {
+          singlePanel.hidden = true;
+          multiPanel.hidden = false;
+        });
+      },
+    });
+
+    if (!chosen) return;
+
+    if (chosen.mode === 'single') {
       this._applyAssociation(video, cardEl, chosen.path, chosen.name);
-    } else {
-      // No unmatched funscripts — fall back to native file dialog
-      const result = await window.funsync.selectFunscript();
-      if (!result) return;
-      this._applyAssociation(video, cardEl, result.path, result.name);
+    } else if (chosen.mode === 'multi') {
+      const hasAny = !!chosen.main || Object.values(chosen.axes || {}).some(Boolean);
+      if (!hasAny) return;
+      this._applyMultiAxisAssociation(video, cardEl, chosen);
+    } else if (chosen.mode === 'remove') {
+      this._removeAssociation(video, cardEl);
+      this._applyFilters();
+    } else if (chosen.mode === 'addVariant') {
+      // Add a variant without changing the main script
+      const nameNoExt = chosen.name.replace(/\.funscript$/i, '');
+      const parenMatch = nameNoExt.match(/\(([^)]+)\)/);
+      const label = parenMatch ? parenMatch[1].trim() : nameNoExt;
+      const manualVariants = this._settings.get('library.manualVariants') || {};
+      if (!manualVariants[video.path]) manualVariants[video.path] = [];
+      manualVariants[video.path].push({ label, path: chosen.path, name: chosen.name });
+      this._settings.set('library.manualVariants', manualVariants);
+    }
+  }
+
+  _createAxisDropdown(label, key, allScripts, preValue, videoName) {
+    const row = document.createElement('div');
+    row.className = 'library__assoc-axis-row';
+
+    const lbl = document.createElement('label');
+    lbl.className = 'library__assoc-axis-label';
+    lbl.textContent = label;
+    row.appendChild(lbl);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'library__searchable-select';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'library__searchable-select-input';
+    input.placeholder = key === 'main' ? 'Search or select...' : 'None — type to search...';
+
+    // Hidden value holder
+    const valueHolder = { value: '' };
+
+    // Pre-fill
+    if (preValue) {
+      const match = allScripts.find(s => s.path === preValue || s.name === preValue);
+      if (match) {
+        input.value = match.name;
+        valueHolder.value = match.path;
+      }
+    }
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'library__searchable-select-dropdown';
+    dropdown.hidden = true;
+
+    // Rank scripts by fuzzy match to video name for initial ordering
+    const ranked = videoName
+      ? rankFunscriptMatches(videoName, allScripts, 0)
+      : allScripts.map(s => ({ name: s.name, path: s.path, score: 0 }));
+
+    const renderOptions = (filter) => {
+      dropdown.innerHTML = '';
+      const query = (filter || '').toLowerCase().trim();
+
+      let items = ranked;
+      if (query) {
+        items = ranked.filter(s => s.name.toLowerCase().includes(query));
+      }
+
+      if (items.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'library__searchable-select-empty';
+        empty.textContent = 'No matches';
+        dropdown.appendChild(empty);
+        return;
+      }
+
+      for (const item of items.slice(0, 30)) { // cap at 30 visible
+        const opt = document.createElement('button');
+        opt.className = 'library__searchable-select-option';
+        opt.textContent = item.name;
+        if (item.path === valueHolder.value) opt.classList.add('library__searchable-select-option--active');
+        opt.addEventListener('mousedown', (e) => {
+          e.preventDefault(); // prevent input blur
+          input.value = item.name;
+          valueHolder.value = item.path;
+          dropdown.hidden = true;
+        });
+        dropdown.appendChild(opt);
+      }
+
+      // Clear option
+      const clearOpt = document.createElement('button');
+      clearOpt.className = 'library__searchable-select-option library__searchable-select-clear';
+      clearOpt.textContent = key === 'main' ? '— Clear —' : '— None —';
+      clearOpt.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        input.value = '';
+        valueHolder.value = '';
+        dropdown.hidden = true;
+      });
+      dropdown.appendChild(clearOpt);
+    };
+
+    input.addEventListener('focus', () => {
+      renderOptions(input.value);
+      dropdown.hidden = false;
+    });
+
+    input.addEventListener('input', () => {
+      renderOptions(input.value);
+      dropdown.hidden = false;
+    });
+
+    input.addEventListener('blur', () => {
+      // Delay to allow mousedown on option to fire first
+      setTimeout(() => { dropdown.hidden = true; }, 150);
+    });
+
+    wrapper.appendChild(input);
+    wrapper.appendChild(dropdown);
+    row.appendChild(wrapper);
+
+    // Expose a select-like interface for the save button
+    const select = { get value() { return valueHolder.value; } };
+    return { row, select, key };
+  }
+
+  _findScriptByName(allScripts, filename) {
+    const f = allScripts.find(s => s.name === filename || s.path.endsWith(filename));
+    return f ? f.path : '';
+  }
+
+  _applyMultiAxisAssociation(video, cardEl, config) {
+    const associations = this._settings.get('library.associations') || {};
+    associations[video.path] = {
+      main: config.main,
+      axes: config.axes,
+      buttplugVib: config.buttplugVib,
+    };
+    this._settings.set('library.associations', associations);
+
+    const hasAnyScript = !!config.main || Object.values(config.axes || {}).some(Boolean);
+    video.hasFunscript = hasAnyScript;
+    video.funscriptPath = config.main || null;
+    video._manualAssociation = true;
+    video._multiAxis = config;
+
+    // Re-render to update badges in both grid and list views
+    this._applyFilters();
+
+    // Compute speed stats for main script (async, updates card when done)
+    if (config.main) {
+      this._loadSpeedStatsForVideo(video, null);
     }
   }
 
@@ -760,9 +1471,113 @@ export class Library {
     video.hasFunscript = false;
     video.funscriptPath = null;
     video._manualAssociation = false;
+    video._multiAxis = null;
 
     // Remove badge
     const badge = cardEl.querySelector('.library__funscript-badge');
+    if (badge) badge.remove();
+  }
+
+  // --- Subtitle Association ---
+
+  async _associateSubtitle(video, cardEl) {
+    if (this._unmatchedSubtitles.length > 0) {
+      const ranked = rankFunscriptMatches(video.name, this._unmatchedSubtitles);
+
+      const chosen = await Modal.open({
+        title: 'Associate Subtitle',
+        onRender: (body, close) => {
+          if (ranked.length > 0) {
+            const list = document.createElement('div');
+            list.className = 'modal-list';
+
+            for (const match of ranked) {
+              const row = document.createElement('button');
+              row.className = 'modal-list-item';
+
+              const label = document.createElement('span');
+              label.className = 'modal-list-item-label';
+              label.textContent = match.name;
+              row.appendChild(label);
+
+              const badge = document.createElement('span');
+              const scoreClass = match.score >= 70 ? '--high' : match.score >= 40 ? '--medium' : '--low';
+              badge.className = `library__match-score library__match-score${scoreClass}`;
+              badge.textContent = `${match.score}%`;
+              row.appendChild(badge);
+
+              row.addEventListener('click', () => close({ path: match.path, name: match.name }));
+              list.appendChild(row);
+            }
+
+            body.appendChild(list);
+          } else {
+            const msg = document.createElement('div');
+            msg.className = 'modal-message modal-message--muted';
+            msg.textContent = 'No good matches found among unmatched subtitles.';
+            body.appendChild(msg);
+          }
+
+          const divider = document.createElement('div');
+          divider.className = 'library__suggestion-divider';
+          body.appendChild(divider);
+
+          const browseRow = document.createElement('button');
+          browseRow.className = 'modal-list-item library__browse-fallback';
+          browseRow.textContent = 'Browse...';
+          browseRow.addEventListener('click', async () => {
+            const result = await window.funsync.selectSubtitle();
+            close(result);
+          });
+          body.appendChild(browseRow);
+        },
+      });
+
+      if (!chosen) return;
+      this._applySubtitleAssociation(video, cardEl, chosen.path, chosen.name);
+    } else {
+      const result = await window.funsync.selectSubtitle();
+      if (!result) return;
+      this._applySubtitleAssociation(video, cardEl, result.path, result.name);
+    }
+  }
+
+  _applySubtitleAssociation(video, cardEl, subPath, subName) {
+    const associations = this._settings.get('library.subtitleAssociations') || {};
+    associations[video.path] = subPath;
+    this._settings.set('library.subtitleAssociations', associations);
+
+    video.hasSubtitle = true;
+    video.subtitlePath = subPath;
+    video._manualSubtitle = true;
+
+    // Remove from unmatched list
+    this._unmatchedSubtitles = this._unmatchedSubtitles.filter((s) => s.path !== subPath);
+
+    // Update subtitle badge on card
+    const thumbnailContainer = cardEl.querySelector('.library__card-thumbnail');
+    let badge = thumbnailContainer.querySelector('.library__subtitle-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      thumbnailContainer.appendChild(badge);
+    }
+    badge.className = 'library__subtitle-badge library__subtitle-badge--manual';
+    badge.title = 'Subtitles (manual)';
+    if (!badge.querySelector('svg')) {
+      badge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
+    }
+  }
+
+  _removeSubtitleAssociation(video, cardEl) {
+    const associations = this._settings.get('library.subtitleAssociations') || {};
+    delete associations[video.path];
+    this._settings.set('library.subtitleAssociations', associations);
+
+    video.hasSubtitle = false;
+    video.subtitlePath = null;
+    video._manualSubtitle = false;
+
+    const badge = cardEl.querySelector('.library__subtitle-badge');
     if (badge) badge.remove();
   }
 
@@ -785,13 +1600,40 @@ export class Library {
             name: fsName,
             textContent: content,
           };
+
+          // Attach multi-axis config if present
+          if (video._multiAxis) {
+            funscriptData._multiAxis = video._multiAxis;
+          }
         }
       } catch (err) {
         console.warn('Failed to read funscript:', err.message);
       }
     }
 
-    this._onPlayVideo(fileData, funscriptData);
+    // Attach multi-axis config even without a main funscript (vib-only case)
+    if (!funscriptData && video._multiAxis) {
+      funscriptData = { name: '', textContent: null, _multiAxis: video._multiAxis };
+    }
+
+    // If subtitle is available, read it and build a subtitle file-like object
+    let subtitleData = null;
+    if (video.hasSubtitle && video.subtitlePath) {
+      try {
+        const content = await window.funsync.readFunscript(video.subtitlePath); // reuse text reader
+        if (content) {
+          const subName = video.subtitlePath.split(/[\\/]/).pop();
+          subtitleData = {
+            name: subName,
+            textContent: content,
+          };
+        }
+      } catch (err) {
+        console.warn('Failed to read subtitle:', err.message);
+      }
+    }
+
+    this._onPlayVideo(fileData, funscriptData, subtitleData, video.variants || []);
   }
 
   _escapeHtml(str) {

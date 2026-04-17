@@ -1,12 +1,13 @@
 // KeyboardHandler — Keyboard shortcuts for video playback
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
     this.scriptEditor = scriptEditor || null;
     this.deviceSimulator = deviceSimulator || null;
+    this.gapSkipEngine = gapSkipEngine || null;
     this._bindEvents();
   }
 
@@ -123,6 +124,26 @@ export class KeyboardHandler {
       case 'E':
         e.preventDefault();
         if (this.scriptEditor) this.scriptEditor.toggle();
+        break;
+
+      case 'v':
+        e.preventDefault();
+        if (this.onCycleVariant) this.onCycleVariant(1);
+        break;
+
+      case 'V':
+        e.preventDefault();
+        if (this.onCycleVariant) this.onCycleVariant(-1);
+        break;
+
+      case 'g':
+        e.preventDefault();
+        if (this.gapSkipEngine) this.gapSkipEngine.skipToNextAction();
+        break;
+
+      case 'G':
+        e.preventDefault();
+        if (this.gapSkipEngine) this.gapSkipEngine.skipToPreviousAction();
         break;
 
       case 'o':

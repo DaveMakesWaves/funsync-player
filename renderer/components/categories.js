@@ -1,7 +1,7 @@
 // Categories — Grid view of categories with detail view showing videos
 
 import { Modal } from './modal.js';
-import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, FileX, FileCheck, Gauge } from '../js/icons.js';
+import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
 import { computeSpeedStats } from '../js/library-search.js';
 
 const PRESET_COLORS = [
@@ -17,6 +17,7 @@ export class Categories {
     this._container = null;
     this._view = 'grid'; // 'grid' or 'detail'
     this._detailCategoryId = null;
+    this._viewMode = 'grid';
   }
 
   show(containerEl) {
@@ -53,6 +54,7 @@ export class Categories {
     const header = document.createElement('div');
     header.className = 'categories__header';
     header.innerHTML = `<span class="categories__title">Categories</span>`;
+    this._addViewToggle(header);
     this._container.appendChild(header);
 
     const wrapper = document.createElement('div');
@@ -76,11 +78,12 @@ export class Categories {
 
     const grid = document.createElement('div');
     grid.className = 'categories__grid';
+    grid.classList.toggle('categories__grid--list', this._viewMode === 'list');
 
     for (const cat of categories) {
       const videoCount = this._settings.getVideosByCategory(cat.id).length;
-      const card = this._createCategoryCard(cat, videoCount);
-      grid.appendChild(card);
+      const el = this._viewMode === 'list' ? this._createCategoryListItem(cat, videoCount) : this._createCategoryCard(cat, videoCount);
+      grid.appendChild(el);
     }
 
     // Create new card (dashed)
@@ -197,6 +200,7 @@ export class Categories {
     header.appendChild(colorDot);
     header.appendChild(title);
     header.appendChild(countSpan);
+    this._addViewToggle(header);
     this._container.appendChild(header);
 
     // Video grid
@@ -216,10 +220,11 @@ export class Categories {
 
     const grid = document.createElement('div');
     grid.className = 'categories__grid';
+    grid.classList.toggle('categories__grid--list', this._viewMode === 'list');
 
     for (const videoPath of videoPaths) {
-      const card = this._createVideoCard(videoPath, cat);
-      grid.appendChild(card);
+      const el = this._viewMode === 'list' ? this._createVideoListItem(videoPath, cat) : this._createVideoCard(videoPath, cat);
+      grid.appendChild(el);
     }
 
     wrapper.appendChild(grid);
@@ -527,5 +532,122 @@ export class Categories {
     if (!confirmed) return;
     this._settings.deleteCategory(cat.id);
     this._renderGrid();
+  }
+
+  // --- View toggle ---
+
+  _addViewToggle(header) {
+    const group = document.createElement('div');
+    group.className = 'view-toggle-group';
+
+    const btnGrid = document.createElement('button');
+    btnGrid.className = 'view-toggle view-toggle--grid';
+    btnGrid.title = 'Grid view';
+    btnGrid.appendChild(icon(LayoutGrid, { width: 16, height: 16 }));
+    btnGrid.classList.toggle('view-toggle--active', this._viewMode === 'grid');
+    btnGrid.addEventListener('click', () => this._setViewMode('grid'));
+
+    const btnList = document.createElement('button');
+    btnList.className = 'view-toggle view-toggle--list';
+    btnList.title = 'List view';
+    btnList.appendChild(icon(LayoutList, { width: 16, height: 16 }));
+    btnList.classList.toggle('view-toggle--active', this._viewMode === 'list');
+    btnList.addEventListener('click', () => this._setViewMode('list'));
+
+    group.append(btnGrid, btnList);
+    header.appendChild(group);
+  }
+
+  _setViewMode(mode) {
+    if (this._viewMode === mode) return;
+    this._viewMode = mode;
+    if (this._view === 'detail' && this._detailCategoryId) {
+      this._renderDetail(this._detailCategoryId);
+    } else {
+      this._renderGrid();
+    }
+  }
+
+  _createCategoryListItem(cat, videoCount) {
+    const row = document.createElement('div');
+    row.className = 'categories__list-item';
+
+    const dot = document.createElement('span');
+    dot.className = 'categories__list-dot';
+    dot.style.background = cat.color;
+
+    const name = document.createElement('span');
+    name.className = 'categories__list-name';
+    name.textContent = cat.name;
+
+    const count = document.createElement('span');
+    count.className = 'categories__list-count';
+    count.textContent = `${videoCount} video${videoCount !== 1 ? 's' : ''}`;
+
+    const actions = document.createElement('div');
+    actions.className = 'categories__list-actions';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'categories__card-action-btn';
+    renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
+    renameBtn.title = 'Rename';
+    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this._renameCategory(cat); });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'categories__card-action-btn categories__card-action-btn--danger';
+    deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
+    deleteBtn.title = 'Delete';
+    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this._deleteCategory(cat); });
+
+    actions.append(renameBtn, deleteBtn);
+    row.append(dot, name, count, actions);
+
+    row.addEventListener('click', () => {
+      this._view = 'detail';
+      this._detailCategoryId = cat.id;
+      this._renderDetail(cat.id);
+    });
+
+    return row;
+  }
+
+  _createVideoListItem(videoPath, category) {
+    const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
+    const row = document.createElement('div');
+    row.className = 'categories__list-item';
+
+    const title = document.createElement('span');
+    title.className = 'categories__list-name';
+    title.textContent = fileName.replace(/\.[^/.]+$/, '');
+    title.title = fileName;
+
+    const badges = document.createElement('div');
+    badges.className = 'categories__list-badges';
+
+    const funscriptPath = this._getFunscriptPath(videoPath);
+    if (funscriptPath) {
+      const fsBadge = document.createElement('span');
+      fsBadge.className = 'library__funscript-badge--inline library__funscript-badge--auto';
+      fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      badges.appendChild(fsBadge);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'categories__card-action-btn categories__card-action-btn--danger';
+    removeBtn.appendChild(icon(X, { width: 14, height: 14 }));
+    removeBtn.title = 'Remove from category';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._settings.unassignCategory(videoPath, category.id);
+      this._renderDetail(category.id);
+    });
+
+    row.append(title, badges, removeBtn);
+
+    row.addEventListener('click', () => {
+      this._playVideoByPath(videoPath);
+    });
+
+    return row;
   }
 }

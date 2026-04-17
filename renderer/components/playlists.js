@@ -1,7 +1,7 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
 import { computeSpeedStats } from '../js/library-search.js';
 
 export class Playlists {
@@ -12,6 +12,7 @@ export class Playlists {
     this._container = null;
     this._view = 'grid'; // 'grid' or 'detail'
     this._detailPlaylistId = null;
+    this._viewMode = 'grid'; // 'grid' or 'list'
   }
 
   show(containerEl) {
@@ -48,6 +49,8 @@ export class Playlists {
     const header = document.createElement('div');
     header.className = 'playlists__header';
     header.innerHTML = `<span class="playlists__title">Playlists</span>`;
+
+    this._addViewToggle(header);
     this._container.appendChild(header);
 
     const wrapper = document.createElement('div');
@@ -71,10 +74,11 @@ export class Playlists {
 
     const grid = document.createElement('div');
     grid.className = 'playlists__grid';
+    grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
 
     // Playlist cards
     for (const pl of playlists) {
-      const card = this._createPlaylistCard(pl);
+      const card = this._viewMode === 'list' ? this._createPlaylistListItem(pl) : this._createPlaylistCard(pl);
       grid.appendChild(card);
     }
 
@@ -190,6 +194,7 @@ export class Playlists {
       header.appendChild(playAllBtn);
     }
 
+    this._addViewToggle(header);
     this._container.appendChild(header);
 
     // Video grid
@@ -209,10 +214,11 @@ export class Playlists {
 
     const grid = document.createElement('div');
     grid.className = 'playlists__grid';
+    grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
 
     for (const videoPath of pl.videoPaths) {
-      const card = this._createVideoCard(videoPath, pl);
-      grid.appendChild(card);
+      const el = this._viewMode === 'list' ? this._createVideoListItem(videoPath, pl) : this._createVideoCard(videoPath, pl);
+      grid.appendChild(el);
     }
 
     wrapper.appendChild(grid);
@@ -479,5 +485,119 @@ export class Playlists {
       return { name, path: p, funscriptPath };
     });
     this._onPlayAll(videoList);
+  }
+
+  // --- View toggle ---
+
+  _addViewToggle(header) {
+    const group = document.createElement('div');
+    group.className = 'view-toggle-group';
+
+    const btnGrid = document.createElement('button');
+    btnGrid.className = 'view-toggle view-toggle--grid';
+    btnGrid.title = 'Grid view';
+    btnGrid.appendChild(icon(LayoutGrid, { width: 16, height: 16 }));
+    btnGrid.classList.toggle('view-toggle--active', this._viewMode === 'grid');
+    btnGrid.addEventListener('click', () => this._setViewMode('grid'));
+
+    const btnList = document.createElement('button');
+    btnList.className = 'view-toggle view-toggle--list';
+    btnList.title = 'List view';
+    btnList.appendChild(icon(LayoutList, { width: 16, height: 16 }));
+    btnList.classList.toggle('view-toggle--active', this._viewMode === 'list');
+    btnList.addEventListener('click', () => this._setViewMode('list'));
+
+    group.append(btnGrid, btnList);
+    header.appendChild(group);
+  }
+
+  _setViewMode(mode) {
+    if (this._viewMode === mode) return;
+    this._viewMode = mode;
+    // Re-render current view
+    if (this._view === 'detail' && this._detailPlaylistId) {
+      this._renderDetail(this._detailPlaylistId);
+    } else {
+      this._renderGrid();
+    }
+  }
+
+  _createPlaylistListItem(pl) {
+    const row = document.createElement('div');
+    row.className = 'playlists__list-item';
+
+    const name = document.createElement('span');
+    name.className = 'playlists__list-name';
+    name.textContent = pl.name;
+
+    const count = document.createElement('span');
+    count.className = 'playlists__list-count';
+    count.textContent = `${pl.videoPaths.length} video${pl.videoPaths.length !== 1 ? 's' : ''}`;
+
+    const actions = document.createElement('div');
+    actions.className = 'playlists__list-actions';
+
+    const renameBtn = document.createElement('button');
+    renameBtn.className = 'playlists__card-action-btn';
+    renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
+    renameBtn.title = 'Rename';
+    renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this._renamePlaylist(pl); });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
+    deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
+    deleteBtn.title = 'Delete';
+    deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this._deletePlaylist(pl); });
+
+    actions.append(renameBtn, deleteBtn);
+    row.append(name, count, actions);
+
+    row.addEventListener('click', () => {
+      this._view = 'detail';
+      this._detailPlaylistId = pl.id;
+      this._renderDetail(pl.id);
+    });
+
+    return row;
+  }
+
+  _createVideoListItem(videoPath, playlist) {
+    const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
+    const row = document.createElement('div');
+    row.className = 'playlists__list-item';
+
+    const title = document.createElement('span');
+    title.className = 'playlists__list-name';
+    title.textContent = fileName.replace(/\.[^/.]+$/, '');
+    title.title = fileName;
+
+    const badges = document.createElement('div');
+    badges.className = 'playlists__list-badges';
+
+    const funscriptPath = this._getFunscriptPath(videoPath);
+    if (funscriptPath) {
+      const fsBadge = document.createElement('span');
+      fsBadge.className = 'library__funscript-badge--inline library__funscript-badge--auto';
+      fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      badges.appendChild(fsBadge);
+    }
+
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
+    removeBtn.appendChild(icon(X, { width: 14, height: 14 }));
+    removeBtn.title = 'Remove from playlist';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._settings.removeVideoFromPlaylist(playlist.id, videoPath);
+      this._renderDetail(playlist.id);
+    });
+
+    row.append(title, badges, removeBtn);
+
+    row.addEventListener('click', () => {
+      this._playVideoByPath(videoPath);
+    });
+
+    return row;
   }
 }
