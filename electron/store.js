@@ -41,8 +41,19 @@ const DEFAULTS = {
       defaultCreator: '',
       patternPresets: [],
     },
+    knownDevices: [],
     buttplug: {
       port: 12345,
+    },
+    tcode: {
+      port: '',
+      baudRate: 115200,
+      axisRanges: {},
+      axisEnabled: {},
+    },
+    autoblow: {
+      token: '',
+      offset: 0,
     },
   },
   playlists: [],

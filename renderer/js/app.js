@@ -7,6 +7,10 @@ import { HandyManager } from './handy-manager.js';
 import { SyncEngine } from './sync-engine.js';
 import { ButtplugManager } from './buttplug-manager.js';
 import { ButtplugSync } from './buttplug-sync.js';
+import { TCodeManager } from './tcode-manager.js';
+import { TCodeSync } from './tcode-sync.js';
+import { AutoblowManager } from './autoblow-manager.js';
+import { AutoblowSync } from './autoblow-sync.js';
 import { ConnectionPanel } from '../components/connection-panel.js';
 import { DragDrop } from './drag-drop.js';
 import { KeyboardHandler } from './keyboard.js';
@@ -37,6 +41,10 @@ class App {
     this.syncEngine = null;
     this.buttplugManager = null;
     this.buttplugSync = null;
+    this.tcodeManager = null;
+    this.tcodeSync = null;
+    this.autoblowManager = null;
+    this.autoblowSync = null;
     this.connectionPanel = null;
     this.settings = dataService;
     this.scriptEditor = null;
@@ -136,6 +144,7 @@ class App {
     this.library = new Library({
       onPlayVideo: (video, funscript, subtitle, variants) => this._playFromLibrary(video, funscript, subtitle, variants),
       onBack: () => this._navigateBack(),
+      onAddSource: () => this._addSource(),
       settings: this.settings,
     });
 
@@ -221,9 +230,12 @@ class App {
         handyManager: this.handyManager,
         funscriptEngine: this.funscriptEngine,
       });
+    } catch (err) {
+      console.warn('Handy integration unavailable:', err.message);
+    }
 
-      // Initialize Buttplug.io integration (non-critical — works alongside Handy)
-      try {
+    // Initialize Buttplug.io integration (non-critical — works alongside Handy)
+    try {
         this.buttplugManager = new ButtplugManager();
         await this.buttplugManager.init();
 
@@ -237,10 +249,37 @@ class App {
         console.warn('Buttplug.io integration unavailable:', err.message);
       }
 
+      // Initialize TCode serial integration (non-critical)
+      try {
+        this.tcodeManager = new TCodeManager();
+        this.tcodeSync = new TCodeSync({
+          videoPlayer: this.videoPlayer,
+          tcodeManager: this.tcodeManager,
+          funscriptEngine: this.funscriptEngine,
+        });
+      } catch (err) {
+        console.warn('TCode integration unavailable:', err.message);
+      }
+
+      // Initialize Autoblow integration (non-critical)
+      try {
+        this.autoblowManager = new AutoblowManager();
+        this.autoblowSync = new AutoblowSync({
+          videoPlayer: this.videoPlayer,
+          autoblowManager: this.autoblowManager,
+        });
+      } catch (err) {
+        console.warn('Autoblow integration unavailable:', err.message);
+      }
+
       this.connectionPanel = new ConnectionPanel({
         handyManager: this.handyManager,
         buttplugManager: this.buttplugManager,
         buttplugSync: this.buttplugSync,
+        tcodeManager: this.tcodeManager,
+        tcodeSync: this.tcodeSync,
+        autoblowManager: this.autoblowManager,
+        autoblowSync: this.autoblowSync,
         settings: this.settings,
       });
 
@@ -260,6 +299,20 @@ class App {
         this.buttplugSync.setSpeedLimit(savedSpeedLimit);
       }
 
+      // Wire command activity indicator (throttled to avoid DOM thrashing)
+      if (this.buttplugSync) {
+        let activityTimeout = null;
+        this.buttplugSync.onCommandSent = () => {
+          if (this.navBar?._handyLed) {
+            this.navBar._handyLed.classList.add('nav-bar__handy-led--active');
+            if (activityTimeout) clearTimeout(activityTimeout);
+            activityTimeout = setTimeout(() => {
+              this.navBar._handyLed.classList.remove('nav-bar__handy-led--active');
+            }, 200);
+          }
+        };
+      }
+
       // Wire gap skip settings change from connection panel
       this.connectionPanel.onGapSkipChanged = (mode, threshold) => {
         if (this.gapSkipEngine) {
@@ -272,19 +325,22 @@ class App {
 
       // ConnectionPanel sets handyManager.onConnect/onDisconnect for its own UI updates.
       // Wrap them so we also get notified (to upload pending scripts + update indicators).
-      const panelOnConnect = this.handyManager.onConnect;
-      this.handyManager.onConnect = () => {
-        if (panelOnConnect) panelOnConnect();
-        this._onHandyConnected();
-      };
+      if (this.handyManager) {
+        const panelOnConnect = this.handyManager.onConnect;
+        this.handyManager.onConnect = () => {
+          if (panelOnConnect) panelOnConnect();
+          this._registerKnownDevice('handy', 'The Handy', 'handy');
+          this._onHandyConnected();
+        };
 
-      const panelOnDisconnect = this.handyManager.onDisconnect;
-      this.handyManager.onDisconnect = () => {
-        if (panelOnDisconnect) panelOnDisconnect();
-        if (this.syncEngine) this.syncEngine.stop();
-        this._updateHandyIndicators('disconnected');
-        this._updateDeviceIndicators();
-      };
+        const panelOnDisconnect = this.handyManager.onDisconnect;
+        this.handyManager.onDisconnect = () => {
+          if (panelOnDisconnect) panelOnDisconnect();
+          if (this.syncEngine) this.syncEngine.stop();
+          this._updateHandyIndicators('disconnected');
+          this._updateDeviceIndicators();
+        };
+      }
 
       // Buttplug.io callback wiring (same pattern as Handy — wrap panel callbacks)
       if (this.buttplugManager) {
@@ -305,6 +361,7 @@ class App {
         const panelBpDeviceAdded = this.buttplugManager.onDeviceAdded;
         this.buttplugManager.onDeviceAdded = (dev) => {
           if (panelBpDeviceAdded) panelBpDeviceAdded(dev);
+          this._registerKnownDevice(`buttplug:${dev.name}`, dev.name, 'buttplug');
           this._updateDeviceIndicators();
           this._tryStartButtplugSync();
           if (this.connectionPanel) this.connectionPanel.updateVibControlState();
@@ -313,6 +370,43 @@ class App {
         const panelBpDeviceRemoved = this.buttplugManager.onDeviceRemoved;
         this.buttplugManager.onDeviceRemoved = (dev) => {
           if (panelBpDeviceRemoved) panelBpDeviceRemoved(dev);
+          this._updateDeviceIndicators();
+        };
+      }
+
+      // Wire TCode connect/disconnect callbacks
+      if (this.tcodeManager) {
+        const panelTCodeConnect = this.tcodeManager.onConnect;
+        this.tcodeManager.onConnect = () => {
+          if (panelTCodeConnect) panelTCodeConnect();
+          this._registerKnownDevice('tcode', `TCode (${this.tcodeManager.portPath})`, 'tcode');
+          this._updateDeviceIndicators();
+          this._tryStartTCodeSync();
+        };
+
+        const panelTCodeDisconnect = this.tcodeManager.onDisconnect;
+        this.tcodeManager.onDisconnect = () => {
+          if (panelTCodeDisconnect) panelTCodeDisconnect();
+          if (this.tcodeSync) this.tcodeSync.stop();
+          this._updateDeviceIndicators();
+        };
+      }
+
+      // Wire Autoblow connect/disconnect callbacks
+      if (this.autoblowManager) {
+        const panelAbConnect = this.autoblowManager.onConnect;
+        this.autoblowManager.onConnect = () => {
+          if (panelAbConnect) panelAbConnect();
+          const abLabel = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
+          this._registerKnownDevice('autoblow', abLabel, 'autoblow');
+          this._updateDeviceIndicators();
+          this._tryStartAutoblowSync();
+        };
+
+        const panelAbDisconnect = this.autoblowManager.onDisconnect;
+        this.autoblowManager.onDisconnect = () => {
+          if (panelAbDisconnect) panelAbDisconnect();
+          if (this.autoblowSync) this.autoblowSync.stop();
           this._updateDeviceIndicators();
         };
       }
@@ -353,17 +447,6 @@ class App {
       if (this.buttplugManager) {
         this._autoConnectButtplug();
       }
-    } catch (err) {
-      console.warn('Handy integration unavailable:', err.message);
-      showToast('Handy integration unavailable — playback still works', 'warn');
-
-      // Initialize keyboard shortcuts without connection panel
-      this._keyboard = new KeyboardHandler({
-        videoPlayer: this.videoPlayer,
-        onOpenFile: () => this.dragDrop._openNativeDialog(),
-        scriptEditor: null, // Set after ScriptEditor creation below
-      });
-    }
 
     // Initialize EroScripts panel
     this.eroscriptsPanel = new EroScriptsPanel({ settings: this.settings });
@@ -440,8 +523,11 @@ class App {
     // Stop Handy device when app closes
     window.addEventListener('beforeunload', () => {
       try {
+        if (this._sourcePollingInterval) clearInterval(this._sourcePollingInterval);
         if (this.syncEngine) this.syncEngine.stop();
         if (this.buttplugSync) this.buttplugSync.stop();
+        if (this.tcodeSync) this.tcodeSync.stop();
+        if (this.autoblowSync) this.autoblowSync.stop();
         if (this.handyManager?.connected) {
           this.handyManager.hsspStop();
           this.handyManager.disconnect();
@@ -449,6 +535,13 @@ class App {
         if (this.buttplugManager?.connected) {
           this.buttplugManager.stopAll();
           this.buttplugManager.disconnect();
+        }
+        if (this.tcodeManager?.connected) {
+          this.tcodeManager.stop();
+          this.tcodeManager.disconnect();
+        }
+        if (this.autoblowManager?.connected) {
+          this.autoblowManager.disconnect();
         }
       } catch (e) {
         // Fire-and-forget — app is closing
@@ -461,7 +554,127 @@ class App {
     // Show library as default landing page
     this._onEnterView('library');
 
+    // Poll source availability every 30s (detect external drive connect/disconnect)
+    this._sourcePollingInterval = setInterval(() => this._pollSourceAvailability(), 30000);
+
     console.log('FunSync Player initialized');
+  }
+
+  /**
+   * Load custom routing: each route gets a synthetic axis, device is pre-assigned.
+   * Main route is already loaded via loadFunscript (L0). Additional routes get CR1, CR2, etc.
+   */
+  async _loadCustomRouting(routes) {
+    if (!routes || routes.length === 0) return;
+    this._currentCustomRoutes = routes;
+
+    // Tell sync engines that custom routing is active — unassigned devices get nothing
+    if (this.buttplugSync) this.buttplugSync._customRoutingActive = true;
+
+    let axisCounter = 1;
+    for (const route of routes) {
+      if (route.role === 'main') continue; // already loaded via loadFunscript
+
+      if (!route.scriptPath) continue;
+
+      try {
+        const content = await window.funsync.readFunscript(route.scriptPath);
+        if (!content) continue;
+        const parsed = JSON.parse(content);
+        const actions = parsed?.actions;
+        if (!actions || actions.length < 2) continue;
+
+        // Assign to a synthetic axis (CR1, CR2, ...)
+        const syntheticAxis = `CR${axisCounter++}`;
+
+        if (this.buttplugSync) {
+          this.buttplugSync.setAxisActions(syntheticAxis, actions);
+        }
+        if (this.tcodeSync) {
+          this.tcodeSync.setAxisActions(syntheticAxis, actions);
+        }
+
+        // Pre-assign device to this axis if currently connected
+        if (route.deviceId && this.buttplugManager?.connected) {
+          const bpDevices = this.buttplugManager.devices;
+          const matchedDev = bpDevices.find(d => `buttplug:${d.name}` === route.deviceId);
+          if (matchedDev && this.buttplugSync) {
+            this.buttplugSync.setAxisAssignment(matchedDev.index, syntheticAxis);
+          }
+        }
+
+        // For Handy on a non-main route: upload and start its own sync
+        if (route.deviceId === 'handy' && this.handyManager?.connected) {
+          await this.handyManager.uploadAndSetScript(content);
+          this.syncEngine?._scriptReady && this.syncEngine.start();
+        }
+
+        // For Autoblow on a non-main route: upload script
+        if (route.deviceId === 'autoblow' && this.autoblowManager?.connected) {
+          await this.autoblowSync?.uploadScript(content);
+        }
+
+        console.log(`[CustomRouting] Loaded ${route.scriptPath.split(/[\\/]/).pop()} → ${syntheticAxis} → ${route.deviceId}`);
+      } catch (err) {
+        console.warn(`[CustomRouting] Failed to load route:`, err.message);
+      }
+    }
+
+    // Pre-assign main route device if specified
+    const mainRoute = routes.find(r => r.role === 'main');
+    if (mainRoute?.deviceId && this.buttplugManager?.connected && this.buttplugSync) {
+      const bpDevices = this.buttplugManager.devices;
+      const matchedDev = bpDevices.find(d => `buttplug:${d.name}` === mainRoute.deviceId);
+      if (matchedDev) {
+        this.buttplugSync.setAxisAssignment(matchedDev.index, 'L0');
+      }
+    }
+  }
+
+  _isDeviceOnMainRoute(deviceId) {
+    if (!this._currentCustomRoutes) return false;
+    const mainRoute = this._currentCustomRoutes.find(r => r.role === 'main');
+    return mainRoute && mainRoute.deviceId === deviceId;
+  }
+
+  _registerKnownDevice(id, label, type) {
+    const devices = this.settings.get('knownDevices') || [];
+    if (devices.some(d => d.id === id)) return;
+    devices.push({ id, label, type });
+    this.settings.set('knownDevices', devices);
+  }
+
+  async _pollSourceAvailability() {
+    const sources = this.settings.get('library.sources') || [];
+    if (sources.length === 0) return;
+
+    const prevUnavailable = this.library?._unavailablePaths || new Set();
+    await this._refreshCollectionsUI();
+    const nowUnavailable = this.library?._unavailablePaths || new Set();
+
+    // Detect changes
+    const becameUnavailable = [...nowUnavailable].filter(p => !prevUnavailable.has(p));
+    const becameAvailable = [...prevUnavailable].filter(p => !nowUnavailable.has(p));
+
+    if (becameUnavailable.length > 0) {
+      const names = sources.filter(s => becameUnavailable.includes(s.path)).map(s => s.name);
+      showToast(`Source disconnected: ${names.join(', ')}`, 'warn', 5000);
+      // Invalidate library cache
+      if (this.library) this.library._lastScanKey = null;
+      // If library is the active view, re-render
+      if (this._currentView() === 'library') {
+        this.library.show(this._getViewEl('library'));
+      }
+    }
+
+    if (becameAvailable.length > 0) {
+      const names = sources.filter(s => becameAvailable.includes(s.path)).map(s => s.name);
+      showToast(`Source reconnected: ${names.join(', ')}`, 'info', 5000);
+      if (this.library) this.library._lastScanKey = null;
+      if (this._currentView() === 'library') {
+        this.library.show(this._getViewEl('library'));
+      }
+    }
   }
 
   /**
@@ -551,6 +764,8 @@ class App {
     let count = 0;
     if (this.handyManager?.connected) count += 1;
     if (this.buttplugManager?.connected) count += this.buttplugManager.devices.length;
+    if (this.tcodeManager?.connected) count += 1;
+    if (this.autoblowManager?.connected) count += 1;
     return count;
   }
 
@@ -580,6 +795,37 @@ class App {
 
     console.log(`[Buttplug] Starting sync — ${devices.length} device(s)`);
     this.buttplugSync.start();
+  }
+
+  _tryStartTCodeSync() {
+    if (!this.tcodeSync || !this.tcodeManager?.connected) return;
+    if (!this.funscriptEngine.isLoaded) return;
+
+    if (this.tcodeSync._active) {
+      this.tcodeSync.reloadActions();
+      return;
+    }
+
+    console.log('[TCode] Starting sync');
+    this.tcodeSync.start();
+  }
+
+  async _tryStartAutoblowSync() {
+    if (!this.autoblowSync || !this.autoblowManager?.connected) return;
+    if (!this.funscriptEngine.isLoaded) return;
+
+    // Upload the funscript if not already uploaded
+    if (!this.autoblowSync.scriptReady) {
+      const rawContent = this.funscriptEngine.getRawContent();
+      if (!rawContent) return;
+      const ok = await this.autoblowSync.uploadScript(rawContent);
+      if (!ok) return;
+    }
+
+    if (!this.autoblowSync._active) {
+      console.log('[Autoblow] Starting sync');
+      this.autoblowSync.start();
+    }
   }
 
   /**
@@ -691,6 +937,8 @@ class App {
     }
     this.syncEngine?.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
+    if (this.tcodeSync?._active) this.tcodeSync.stop();
+    if (this.autoblowSync?._active) this.autoblowSync.stop();
     this._stopGapSkip();
     if (this._queueEndedListener) {
       this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
@@ -698,9 +946,16 @@ class App {
     }
     if (this.buttplugSync) {
       this.buttplugSync.setVibrationActions(null);
+      this.buttplugSync.clearAxisActions();
       if (this.connectionPanel) this.connectionPanel.updateVibControlState();
     }
+    if (this.tcodeSync) {
+      this.tcodeSync.clearAxisActions();
+    }
     this._currentMultiAxis = null;
+    this._currentCustomRoutes = null;
+    this._customRoutingActive = false;
+    if (this.buttplugSync) this.buttplugSync._customRoutingActive = false;
     this.funscriptEngine.clear();
     this._scriptCloudUrl = null;
     this._waitingForScript = false;
@@ -773,17 +1028,37 @@ class App {
       }, { once: true });
     }
 
-    // Handle video load errors
+    // Handle video load errors (including mid-playback drive disconnect)
     this.videoPlayer.video.addEventListener('error', () => {
       const code = this.videoPlayer.video.error?.code;
-      const msgs = {
-        1: 'Video loading aborted',
-        2: 'Network error loading video',
-        3: 'Video decoding failed — unsupported codec?',
-        4: 'Video format not supported',
-      };
-      showToast(msgs[code] || 'Failed to load video', 'error');
-    }, { once: true });
+      const src = this.videoPlayer.video.src || '';
+      const isFileUrl = src.startsWith('file:');
+
+      // Stop all sync engines and devices immediately
+      if (this.syncEngine) this.syncEngine.stop();
+      if (this.buttplugSync?._active) this.buttplugSync.stop();
+      if (this.tcodeSync?._active) this.tcodeSync.stop();
+      if (this.autoblowSync?._active) this.autoblowSync.stop();
+      if (this.handyManager?.connected) this.handyManager.hsspStop();
+      if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
+      if (this.tcodeManager?.connected) this.tcodeManager.stop();
+      if (this.autoblowManager?.connected) this.autoblowManager.syncStop();
+
+      // Show appropriate error message
+      if (isFileUrl && code === 2) {
+        showToast('Source disconnected — file no longer available', 'error', 5000);
+        // Invalidate library cache so re-scan catches the change
+        if (this.library) this.library._lastScanKey = null;
+      } else {
+        const msgs = {
+          1: 'Video loading aborted',
+          2: 'Network error loading video',
+          3: 'Video decoding failed — unsupported codec?',
+          4: 'Video format not supported',
+        };
+        showToast(msgs[code] || 'Failed to load video', 'error');
+      }
+    });
 
     // Set title
     const titleEl = document.getElementById('video-title');
@@ -891,13 +1166,28 @@ class App {
       }
 
       // If Handy is connected, upload script to cloud and start sync
-      await this._uploadAndStartSync();
+      // (skip if custom routing is active — routing handles Handy assignment)
+      if (!this._customRoutingActive || this._isDeviceOnMainRoute('handy')) {
+        await this._uploadAndStartSync();
+      }
 
       // If Buttplug is connected, start sync
       this._tryStartButtplugSync();
 
-      // Start gap skip monitoring
-      this._startGapSkip();
+      // If TCode is connected, start sync
+      this._tryStartTCodeSync();
+
+      // If Autoblow is connected, upload script and start sync
+      // (skip if custom routing is active — routing handles Autoblow assignment)
+      if (!this._customRoutingActive || this._isDeviceOnMainRoute('autoblow')) {
+        await this._tryStartAutoblowSync();
+      }
+
+      // Start gap skip monitoring (only for single-script playback — multi-device routing
+      // has different scripts per device, skipping would desync them)
+      if (!this._customRoutingActive) {
+        this._startGapSkip();
+      }
     } catch (err) {
       console.error('Failed to load funscript:', err.message);
       showToast('Failed to load funscript: ' + err.message, 'error');
@@ -910,7 +1200,18 @@ class App {
 
     let title = `${info.filename} — ${info.actionCount} actions, ${info.durationFormatted}`;
 
-    if (this._currentMultiAxis && this._currentMultiAxis.axes) {
+    if (this._currentCustomRoutes && this._currentCustomRoutes.length > 0) {
+      const knownDevices = this.settings.get('knownDevices') || [];
+      const lines = [title, '— Custom Routing —'];
+      for (const route of this._currentCustomRoutes) {
+        const scriptName = route.scriptName || route.scriptPath?.split(/[\\/]/).pop() || '(none)';
+        const device = knownDevices.find(d => d.id === route.deviceId);
+        const deviceLabel = device ? device.label : (route.deviceId || 'Unassigned');
+        const roleLabel = route.role === 'main' ? '★ ' : '';
+        lines.push(`${roleLabel}${deviceLabel}: ${scriptName}`);
+      }
+      title = lines.join('\n');
+    } else if (this._currentMultiAxis && this._currentMultiAxis.axes) {
       const axes = this._currentMultiAxis.axes;
       const lines = [title, '— Multi-Axis —'];
       for (const [suffix, path] of Object.entries(axes)) {
@@ -1012,7 +1313,11 @@ class App {
     }
 
     if (viewId === 'library') {
-      this.library.show(this._getViewEl('library'));
+      // Recheck source availability before showing (drive may have been disconnected)
+      this._refreshCollectionsUI().then(() => {
+        this.library.show(this._getViewEl('library'));
+      });
+      return;
     } else if (viewId === 'playlists') {
       this.playlists.show(this._getViewEl('playlists'));
     } else if (viewId === 'categories') {
@@ -1023,7 +1328,20 @@ class App {
   /** Hook called when leaving a view. */
   _onLeaveView(viewId) {
     if (viewId === 'player') {
+      // Pause video first — stops playback immediately in the browser
       this.videoPlayer.video.pause();
+
+      // Stop all sync engines (prevents any new commands from being queued)
+      if (this.syncEngine) this.syncEngine.stop();
+      if (this.buttplugSync?._active) this.buttplugSync.stop();
+      if (this.tcodeSync?._active) this.tcodeSync.stop();
+      if (this.autoblowSync?._active) this.autoblowSync.stop();
+
+      // Stop all devices (network calls — async but fire-and-forget)
+      if (this.handyManager?.connected) this.handyManager.hsspStop();
+      if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
+      if (this.tcodeManager?.connected) this.tcodeManager.stop();
+      if (this.autoblowManager?.connected) this.autoblowManager.syncStop();
       if (document.fullscreenElement) {
         document.exitFullscreen().catch(() => {});
       }
@@ -1042,22 +1360,35 @@ class App {
     this._navigateTo('library');
   }
 
-  _playFromLibrary(videoData, funscriptData, subtitleData, variants) {
+  async _playFromLibrary(videoData, funscriptData, subtitleData, variants) {
     this._navigateTo('player');
     this._playQueue = [];
     this._playQueueIndex = -1;
     this._updateQueueUI();
 
     this._currentMultiAxis = null;
+    this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: false });
+
+    // Set variants AFTER loadVideo (which resets them)
     this._currentVariants = variants || [];
     this._activeVariantIndex = 0;
     this._activeVariantPath = null;
-    this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: false });
     this._updateVariantSelector();
     if (funscriptData) {
       if (funscriptData._multiAxis) {
         this._currentMultiAxis = funscriptData._multiAxis;
       }
+
+      // Custom routing: load additional routes BEFORE main script so device
+      // assignments are in place when sync engines start (prevents all devices
+      // briefly playing L0)
+      if (funscriptData._customRouting) {
+        this._customRoutingActive = true;
+        await this._loadCustomRouting(funscriptData._customRouting);
+      } else {
+        this._customRoutingActive = false;
+      }
+
       // Only load main funscript if it has content
       if (funscriptData.textContent) {
         this.loadFunscript(funscriptData);
@@ -1073,49 +1404,84 @@ class App {
   }
 
   async _loadMultiAxisScripts(config) {
-    if (!config.axes?.vib) return;
+    if (!config.axes) return;
 
-    const vibPath = config.axes.vib;
+    const axisEntries = Object.entries(config.axes); // e.g. { vib: 'path', twist: 'path', ... }
+    if (axisEntries.length === 0) return;
 
-    try {
-      const content = await window.funsync.readFunscript(vibPath);
-      if (!content) return;
-      const parsed = JSON.parse(content);
-      const actions = parsed?.actions;
-      if (!actions || actions.length < 2) return;
+    // Clear previous axis actions
+    if (this.buttplugSync) this.buttplugSync.clearAxisActions();
 
-      // If no main funscript was loaded, use the vib script for heatmap + badge
-      if (!this.funscriptEngine.isLoaded) {
-        const vibName = vibPath.split(/[\\/]/).pop();
-        await this.funscriptEngine.loadContent(content, vibName);
-        this._showFunscriptBadge({
-          filename: vibName,
-          actionCount: actions.length,
-          durationFormatted: this._formatActionsDuration(actions),
-        });
+    // Map axis suffixes to TCode identifiers
+    const SUFFIX_TO_TCODE = {
+      surge: 'L1', sway: 'L2',
+      twist: 'R0', roll: 'R1', pitch: 'R2',
+      vib: 'V0', lube: 'V1', pump: 'V1',
+      suction: 'V2', valve: 'A0',
+    };
 
-        if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
-          this.progressBar.renderHeatmap(actions, this.videoPlayer.duration);
+    let vibActions = null;
+    let firstLoadedScript = null;
+
+    for (const [suffix, axisPath] of axisEntries) {
+      if (!axisPath) continue;
+      const tcode = SUFFIX_TO_TCODE[suffix];
+      if (!tcode) continue;
+
+      try {
+        const content = await window.funsync.readFunscript(axisPath);
+        if (!content) continue;
+        const parsed = JSON.parse(content);
+        const actions = parsed?.actions;
+        if (!actions || actions.length < 2) continue;
+
+        if (suffix === 'vib') {
+          vibActions = actions;
         }
-      }
 
-      // Route to Buttplug.io vibrate devices if enabled
-      if (config.buttplugVib && this.buttplugSync) {
-        this.buttplugSync.setVibrationActions(actions);
-        console.log(`[MultiAxis] Loaded vibration script: ${actions.length} actions`);
-        if (this.connectionPanel) this.connectionPanel.updateVibControlState();
-
-        // Start sync if not already active (vib-only case — _tryStartButtplugSync may have skipped it)
-        if (this.buttplugManager?.connected && !this.buttplugSync._active) {
-          const devices = this.buttplugManager.devices;
-          if (devices.length > 0) {
-            if (this.connectionPanel) this.connectionPanel._loadButtplugDeviceSettings();
-            this.buttplugSync.start();
-          }
+        // Load as axis actions into ButtplugSync and TCodeSync
+        if (this.buttplugSync) {
+          this.buttplugSync.setAxisActions(tcode, actions);
         }
+        if (this.tcodeSync) {
+          this.tcodeSync.setAxisActions(tcode, actions);
+        }
+        console.log(`[MultiAxis] Loaded ${suffix} (${tcode}): ${actions.length} actions`);
+
+        if (!firstLoadedScript) {
+          firstLoadedScript = { content, name: axisPath.split(/[\\/]/).pop(), actions };
+        }
+      } catch (err) {
+        console.warn(`[MultiAxis] Failed to load ${suffix} script:`, err.message);
       }
-    } catch (err) {
-      console.warn('[MultiAxis] Failed to load vib script:', err.message);
+    }
+
+    // If no main funscript was loaded, use the first companion for heatmap + badge
+    if (!this.funscriptEngine.isLoaded && firstLoadedScript) {
+      await this.funscriptEngine.loadContent(firstLoadedScript.content, firstLoadedScript.name);
+      this._showFunscriptBadge({
+        filename: firstLoadedScript.name,
+        actionCount: firstLoadedScript.actions.length,
+        durationFormatted: this._formatActionsDuration(firstLoadedScript.actions),
+      });
+      if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
+        this.progressBar.renderHeatmap(firstLoadedScript.actions, this.videoPlayer.duration);
+      }
+    }
+
+    // Route vib axis to Buttplug.io vibrate devices via dedicated path (backwards compat)
+    if (vibActions && config.buttplugVib && this.buttplugSync) {
+      this.buttplugSync.setVibrationActions(vibActions);
+      if (this.connectionPanel) this.connectionPanel.updateVibControlState();
+    }
+
+    // Start sync if not already active (multi-axis-only case)
+    if (this.buttplugSync && this.buttplugManager?.connected && !this.buttplugSync._active) {
+      const devices = this.buttplugManager.devices;
+      if (devices.length > 0) {
+        if (this.connectionPanel) this.connectionPanel._loadButtplugDeviceSettings();
+        this.buttplugSync.start();
+      }
     }
   }
 
@@ -1269,6 +1635,12 @@ class App {
 
     this.navBar.setCollections(collections, activeCollectionId, sources, unavailablePaths, unavailableCollectionIds);
     if (this.library) {
+      // Invalidate scan cache if availability changed
+      const prevUnavail = this.library._unavailablePaths || new Set();
+      if (unavailablePaths.size !== prevUnavail.size ||
+          [...unavailablePaths].some(p => !prevUnavail.has(p))) {
+        this.library._lastScanKey = null;
+      }
       this.library._activeCollectionId = activeCollectionId;
       this.library._unavailablePaths = unavailablePaths;
     }
@@ -1648,15 +2020,31 @@ class App {
       }
     }
 
-    // Append manually added variants from settings
+    // Append manually added variants from settings (with filename fallback for drive letter changes)
     const manualVariants = this.settings.get('library.manualVariants') || {};
-    const manual = videoPath && manualVariants[videoPath] ? manualVariants[videoPath] : [];
+    let manual = videoPath && manualVariants[videoPath] ? manualVariants[videoPath] : [];
+    if (manual.length === 0 && videoPath) {
+      const videoName = videoPath.split(/[\\/]/).pop().toLowerCase();
+      for (const [oldPath, oldVariants] of Object.entries(manualVariants)) {
+        if (oldPath === videoPath) continue;
+        if (oldPath.split(/[\\/]/).pop().toLowerCase() === videoName && oldVariants.length > 0) {
+          manual = oldVariants;
+          manualVariants[videoPath] = manual;
+          delete manualVariants[oldPath];
+          this.settings.set('library.manualVariants', manualVariants);
+          break;
+        }
+      }
+    }
     const allVariants = [...baseVariants, ...manual];
 
     // Resolve active index from stored path (array may have been rebuilt)
     if (this._activeVariantPath) {
       const idx = allVariants.findIndex(v => v.path === this._activeVariantPath);
       if (idx >= 0) this._activeVariantIndex = idx;
+    } else {
+      // No active path (Default variant) — reset to index 0
+      this._activeVariantIndex = 0;
     }
 
     // Show selector only if there are variants (or always to allow adding)
@@ -1707,6 +2095,21 @@ class App {
     });
     dropdown.appendChild(addBtn);
 
+    // Manage variations button (only if there are manual variants)
+    const videoPath = this._currentVideoPath;
+    const manualVariants = this.settings.get('library.manualVariants') || {};
+    const manualForVideo = videoPath && manualVariants[videoPath] ? manualVariants[videoPath] : [];
+    if (manualForVideo.length > 0) {
+      const manageBtn = document.createElement('button');
+      manageBtn.className = 'variant-selector__add';
+      manageBtn.textContent = 'Manage variations...';
+      manageBtn.addEventListener('click', () => {
+        dropdown.hidden = true;
+        this._showManageVariantsModal();
+      });
+      dropdown.appendChild(manageBtn);
+    }
+
     // Close on outside click (clean up previous listener)
     if (this._variantDropdownClose) {
       document.removeEventListener('click', this._variantDropdownClose, true);
@@ -1721,14 +2124,107 @@ class App {
     setTimeout(() => document.addEventListener('click', this._variantDropdownClose, true), 0);
   }
 
-  _addManualVariant(fsPath, fsName) {
+  async _addManualVariant(fsPath, fsName) {
     const videoPath = this._currentVideoPath;
     if (!videoPath) return;
 
-    // Derive label from filename
+    // Extract suggested names from parenthesized parts and dot-separated suffixes
     const nameNoExt = fsName.replace(/\.funscript$/i, '');
-    const parenMatch = nameNoExt.match(/\(([^)]+)\)/);
-    const label = parenMatch ? parenMatch[1].trim() : nameNoExt;
+    const parenMatches = [...nameNoExt.matchAll(/\(([^)]+)\)/g)].map(m => m[1].trim());
+    const dotParts = nameNoExt.split('.');
+    const dotSuffix = dotParts.length > 1 ? dotParts[dotParts.length - 1].trim() : null;
+
+    const suggestions = [];
+    const seen = new Set();
+    for (const s of parenMatches) {
+      const lower = s.toLowerCase();
+      if (!seen.has(lower)) { seen.add(lower); suggestions.push(s); }
+    }
+    if (dotSuffix && !seen.has(dotSuffix.toLowerCase())) {
+      suggestions.push(dotSuffix);
+    }
+    // Add full filename as a fallback suggestion
+    if (!seen.has(nameNoExt.toLowerCase())) {
+      suggestions.push(nameNoExt);
+    }
+
+    // Show naming modal
+    const label = await Modal.open({
+      title: 'Name This Variation',
+      onRender: (body, close) => {
+        const hint = document.createElement('div');
+        hint.className = 'library__collection-count';
+        hint.style.marginBottom = '10px';
+        hint.textContent = fsName;
+        body.appendChild(hint);
+
+        if (suggestions.length > 0) {
+          const sugLabel = document.createElement('div');
+          sugLabel.className = 'library__collection-count';
+          sugLabel.style.marginBottom = '6px';
+          sugLabel.textContent = 'Suggestions:';
+          body.appendChild(sugLabel);
+
+          const sugList = document.createElement('div');
+          sugList.style.display = 'flex';
+          sugList.style.flexWrap = 'wrap';
+          sugList.style.gap = '6px';
+          sugList.style.marginBottom = '12px';
+
+          for (const sug of suggestions) {
+            const btn = document.createElement('button');
+            btn.className = 'library__assoc-save-btn';
+            btn.style.padding = '6px 14px';
+            btn.style.fontSize = '13px';
+            btn.textContent = sug;
+            btn.addEventListener('click', () => close(sug));
+            sugList.appendChild(btn);
+          }
+          body.appendChild(sugList);
+        }
+
+        const divider = document.createElement('div');
+        divider.className = 'nav-bar__library-divider';
+        divider.style.margin = '8px 0';
+        body.appendChild(divider);
+
+        const customLabel = document.createElement('div');
+        customLabel.className = 'library__collection-count';
+        customLabel.style.marginBottom = '6px';
+        customLabel.textContent = 'Custom name:';
+        body.appendChild(customLabel);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'modal-input';
+        input.placeholder = 'Enter a name...';
+        input.style.marginBottom = '12px';
+        body.appendChild(input);
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'library__assoc-save-btn';
+        confirmBtn.style.display = 'block';
+        confirmBtn.style.width = '66%';
+        confirmBtn.style.margin = '0 auto';
+        confirmBtn.textContent = 'OK';
+        confirmBtn.addEventListener('click', () => {
+          const val = input.value.trim();
+          if (val) close(val);
+        });
+        body.appendChild(confirmBtn);
+
+        input.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            const val = input.value.trim();
+            if (val) close(val);
+          }
+        });
+
+        input.focus();
+      },
+    });
+
+    if (!label) return;
 
     const variant = { label, path: fsPath, name: fsName };
 
@@ -1752,7 +2248,7 @@ class App {
     if (!dirPath || (Array.isArray(dirPath) && dirPath.length === 0)) {
       // No library — fall back to file dialog
       const result = await window.funsync.selectFunscript();
-      if (result) this._addManualVariant(result.path, result.name);
+      if (result) await this._addManualVariant(result.path, result.name);
       return;
     }
 
@@ -1761,7 +2257,7 @@ class App {
 
     if (allScripts.length === 0) {
       const result = await window.funsync.selectFunscript();
-      if (result) this._addManualVariant(result.path, result.name);
+      if (result) await this._addManualVariant(result.path, result.name);
       return;
     }
 
@@ -1814,7 +2310,119 @@ class App {
     });
 
     if (!chosen) return;
-    this._addManualVariant(chosen.path, chosen.name);
+    await this._addManualVariant(chosen.path, chosen.name);
+  }
+
+  async _showManageVariantsModal() {
+    const videoPath = this._currentVideoPath;
+    if (!videoPath) return;
+
+    const manualVariants = this.settings.get('library.manualVariants') || {};
+    const manualForVideo = manualVariants[videoPath] ? [...manualVariants[videoPath]] : [];
+    if (manualForVideo.length === 0) return;
+
+    let changed = false;
+
+    await Modal.open({
+      title: 'Manage Variations',
+      onRender: (body, close) => {
+        const list = document.createElement('div');
+        list.className = 'modal-list';
+
+        const renderList = () => {
+          list.innerHTML = '';
+
+          if (manualForVideo.length === 0) {
+            const empty = document.createElement('div');
+            empty.className = 'library__collection-count';
+            empty.style.padding = '16px';
+            empty.style.textAlign = 'center';
+            empty.textContent = 'No manual variations';
+            list.appendChild(empty);
+            return;
+          }
+
+          for (let i = 0; i < manualForVideo.length; i++) {
+            const v = manualForVideo[i];
+            const row = document.createElement('div');
+            row.className = 'modal-list-item';
+            row.style.display = 'flex';
+            row.style.alignItems = 'center';
+            row.style.gap = '8px';
+            row.style.cursor = 'default';
+
+            const label = document.createElement('span');
+            label.className = 'modal-list-item-label';
+            label.style.flex = '1';
+            label.textContent = v.label;
+            label.title = v.name;
+            row.appendChild(label);
+
+            const fileName = document.createElement('span');
+            fileName.style.fontSize = '11px';
+            fileName.style.color = 'var(--text-secondary)';
+            fileName.style.maxWidth = '180px';
+            fileName.style.overflow = 'hidden';
+            fileName.style.textOverflow = 'ellipsis';
+            fileName.style.whiteSpace = 'nowrap';
+            fileName.textContent = v.name;
+            row.appendChild(fileName);
+
+            const renameBtn = document.createElement('button');
+            renameBtn.className = 'nav-bar__library-action';
+            renameBtn.textContent = '✎';
+            renameBtn.title = 'Rename';
+            renameBtn.addEventListener('click', async (e) => {
+              e.stopPropagation();
+              const newName = await Modal.prompt('Rename Variation', 'Name', v.label);
+              if (newName && newName !== v.label) {
+                manualForVideo[i].label = newName;
+                changed = true;
+                renderList();
+              }
+            });
+            row.appendChild(renameBtn);
+
+            const deleteBtn = document.createElement('button');
+            deleteBtn.className = 'nav-bar__library-action nav-bar__library-action--danger';
+            deleteBtn.textContent = '✕';
+            deleteBtn.title = 'Remove';
+            deleteBtn.addEventListener('click', (e) => {
+              e.stopPropagation();
+              manualForVideo.splice(i, 1);
+              changed = true;
+              renderList();
+            });
+            row.appendChild(deleteBtn);
+
+            list.appendChild(row);
+          }
+        };
+
+        renderList();
+        body.appendChild(list);
+
+        const doneBtn = document.createElement('button');
+        doneBtn.className = 'library__assoc-save-btn';
+        doneBtn.style.display = 'block';
+        doneBtn.style.width = '66%';
+        doneBtn.style.margin = '12px auto 0';
+        doneBtn.textContent = 'Done';
+        doneBtn.addEventListener('click', () => close());
+        body.appendChild(doneBtn);
+      },
+    });
+
+    if (changed) {
+      const fresh = this.settings.get('library.manualVariants') || {};
+      if (manualForVideo.length === 0) {
+        delete fresh[videoPath];
+      } else {
+        fresh[videoPath] = manualForVideo;
+      }
+      this.settings.set('library.manualVariants', fresh);
+      this._updateVariantSelector();
+    }
   }
 
   async _switchVariant(index) {
@@ -1849,14 +2457,19 @@ class App {
       };
       this._showFunscriptBadge(info);
 
-      // Reload buttplug sync
+      // Reload all sync engines
       if (this.buttplugSync?._active) this.buttplugSync.reloadActions();
+      if (this.tcodeSync?._active) this.tcodeSync.reloadActions();
 
-      // Re-upload to Handy
+      // Re-upload to Handy (stop first so start() doesn't early-return)
       if (this.handyManager?.connected) {
+        if (this.syncEngine) this.syncEngine.stop();
         showToast('Switching script...', 'info', 2000);
         await this._uploadAndStartSync();
       }
+
+      // Re-upload to Autoblow
+      await this._tryStartAutoblowSync();
 
       // Reload editor if open
       if (this.scriptEditor?.isOpen) {

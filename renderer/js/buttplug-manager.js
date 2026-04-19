@@ -76,6 +76,8 @@ export class ButtplugManager {
         this._connected = false;
         this._devices.clear();
         if (this.onDisconnect) this.onDisconnect();
+        // Auto-reconnect with exponential backoff
+        this._attemptReconnect();
       });
 
       this._connector = new ButtplugSDK.ButtplugBrowserWebsocketClientConnector(
@@ -104,6 +106,8 @@ export class ButtplugManager {
    */
   async disconnect() {
     if (!this._client) return;
+
+    this._intentionalDisconnect = true; // suppress auto-reconnect
 
     try {
       await this._client.disconnect();
@@ -189,18 +193,39 @@ export class ButtplugManager {
    * Send a rotate command to a device (v4: DeviceOutput.Rotate.percent).
    * @param {number} deviceIndex — device index
    * @param {number} speed — rotation speed 0–100 (funscript scale)
+   * @param {boolean} [clockwise=true] — rotation direction
    */
-  async sendRotate(deviceIndex, speed) {
+  async sendRotate(deviceIndex, speed, clockwise = true) {
     const device = this._devices.get(deviceIndex);
     if (!device || !ButtplugSDK) return;
 
     const pct = Math.max(0, Math.min(1, speed / 100));
 
     try {
-      const cmd = ButtplugSDK.DeviceOutput.Rotate.percent(pct);
+      const cmd = ButtplugSDK.DeviceOutput.Rotate.percent(pct, clockwise);
       await device.runOutput(cmd);
     } catch (err) {
       console.debug('[Buttplug] Rotate error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Send a scalar command to a device (v4: DeviceOutput.Scalar).
+   * Used for e-stim (DG-LAB Coyote, MK-312BT, ET-312), inflate, constrict, etc.
+   * @param {number} deviceIndex — device index
+   * @param {number} intensity — scalar intensity 0–100 (funscript scale)
+   */
+  async sendScalar(deviceIndex, intensity) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return;
+
+    const pct = Math.max(0, Math.min(1, intensity / 100));
+
+    try {
+      const cmd = ButtplugSDK.DeviceOutput.Scalar.percent(pct);
+      await device.runOutput(cmd);
+    } catch (err) {
+      console.debug('[Buttplug] Scalar error:', err?.message || err);
     }
   }
 
@@ -242,10 +267,12 @@ export class ButtplugManager {
     let canVibrate = false;
     let canLinear = false;
     let canRotate = false;
+    let canScalar = false;
 
     try { canVibrate = device.hasOutput('Vibrate'); } catch(e) {}
     try { canLinear = device.hasOutput('Position'); } catch(e) {}
     try { canRotate = device.hasOutput('Rotate'); } catch(e) {}
+    try { canScalar = device.hasOutput('Scalar'); } catch(e) {}
 
     return {
       index: device.index,
@@ -253,6 +280,7 @@ export class ButtplugManager {
       canVibrate,
       canLinear,
       canRotate,
+      canScalar,
     };
   }
 
@@ -277,12 +305,39 @@ export class ButtplugManager {
   get primaryDevice() {
     for (const device of this._devices.values()) {
       const info = this._serializeDevice(device);
-      if (info.canVibrate || info.canLinear) return device.index;
+      if (info.canVibrate || info.canLinear || info.canScalar || info.canRotate) return device.index;
     }
     return null;
   }
 
   // --- Internal ---
+
+  _attemptReconnect() {
+    if (this._intentionalDisconnect) {
+      this._intentionalDisconnect = false;
+      return;
+    }
+    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
+      console.log('[Buttplug] Max reconnect attempts reached');
+      this._reconnectAttempts = 0;
+      return;
+    }
+
+    this._reconnectAttempts++;
+    const delay = Math.min(2000 * Math.pow(2, this._reconnectAttempts - 1), 10000);
+    console.log(`[Buttplug] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts}/${this._maxReconnectAttempts})`);
+
+    setTimeout(async () => {
+      if (this._connected) return; // already reconnected
+      const success = await this.connect(this._port);
+      if (success) {
+        console.log('[Buttplug] Reconnected successfully');
+        this._reconnectAttempts = 0;
+        // Re-scan for devices
+        try { await this.startScanning(); } catch {}
+      }
+    }, delay);
+  }
 
   _emitError(message) {
     console.error(`[ButtplugManager] ${message}`);

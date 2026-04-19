@@ -31,8 +31,19 @@ export class ButtplugSync {
     this._vibActionIndex = -1;
     this._lastVibSendTime = 0;
     this._lastVibSentIntensity = -1;
+
+    // Multi-axis action arrays: tcode → { actions, index, lastSendTime, lastSentValue }
+    this._axisActions = new Map();
+    // Per-device axis assignment: deviceIndex → tcode (e.g. 'L0', 'R0', 'V0')
+    this._axisAssignmentMap = new Map();
     this._invertedDevices = new Set();
-    this._vibeModeMap = new Map();
+    this._vibeModeMap = new Map();          // deviceIndex → 'speed'|'position'|'intensity'
+    this._scalarModeMap = new Map();        // deviceIndex → 'speed'|'position'|'intensity'
+    this._rotateModeMap = new Map();        // deviceIndex → 'speed'|'position'|'intensity'
+    this._maxIntensityMap = new Map();      // deviceIndex → 0-100 (safety cap for e-stim)
+    this._rampUpMap = new Map();            // deviceIndex → true/false
+    this._rampUpStartTime = 0;             // timestamp when playback started (for ramp-up calc)
+    this._rampUpDuration = 2000;           // ms for ramp-up
 
     // Interpolation
     this._interpolationMode = 'linear';
@@ -40,8 +51,12 @@ export class ButtplugSync {
     this._speedLimit = 0; // 0 = disabled, otherwise pos-units per second
     this._vibInterpolationMode = 'step'; // vibration defaults to step
 
+    // Custom routing mode — when active, only explicitly assigned devices get commands
+    this._customRoutingActive = false;
+
     // Callbacks
     this.onSyncStatus = null; // (status: 'synced'|'idle') => {}
+    this.onCommandSent = null; // () => {} — fires when a command is dispatched (for activity indicator)
   }
 
   /**
@@ -60,6 +75,7 @@ export class ButtplugSync {
       this._resetVibIndex();
       this._lastSentPos = -1;
       this._lastVibSentIntensity = -1;
+      this._rampUpStartTime = performance.now();
       this._startScheduler();
     }
 
@@ -92,6 +108,11 @@ export class ButtplugSync {
     this._lastSentPos = -1;
     this._vibActionIndex = -1;
     this._lastVibSentIntensity = -1;
+    for (const [, state] of this._axisActions) {
+      state.index = -1;
+      state.lastSentValue = -1;
+      state.lastSendTime = 0;
+    }
   }
 
   get hasVibScript() {
@@ -146,8 +167,10 @@ export class ButtplugSync {
     if (!this._active) return;
     this._resetIndex();
     this._resetVibIndex();
+    this._resetAxisIndices();
     this._lastSentPos = -1;
     this._lastVibSentIntensity = -1;
+    this._rampUpStartTime = performance.now();
     this._startScheduler();
     this._emitStatus('synced');
   }
@@ -166,7 +189,9 @@ export class ButtplugSync {
     this._resetIndex();
     this._lastSentPos = -1;
     this._resetVibIndex();
+    this._resetAxisIndices();
     this._lastVibSentIntensity = -1;
+    this._rampUpStartTime = performance.now(); // reset ramp-up on seek
   }
 
   _handleEnded() {
@@ -229,6 +254,21 @@ export class ButtplugSync {
     this._vibActionIndex = result;
   }
 
+  _resetAxisIndices() {
+    const timeMs = this.player.currentTime * 1000;
+    for (const [, state] of this._axisActions) {
+      let lo = 0, hi = state.actions.length - 1, result = -1;
+      while (lo <= hi) {
+        const mid = (lo + hi) >>> 1;
+        if (state.actions[mid].at <= timeMs) { result = mid; lo = mid + 1; }
+        else hi = mid - 1;
+      }
+      state.index = result;
+      state.lastSentValue = -1;
+      state.lastSendTime = 0;
+    }
+  }
+
   _startScheduler() {
     if (this._intervalId) return;
 
@@ -236,6 +276,7 @@ export class ButtplugSync {
       if (!this._active || this.player.paused) return;
       this._sendPendingActions();
       if (this._vibActions) this._sendPendingVibActions();
+      if (this._axisActions.size > 0) this._sendPendingAxisActions();
     }, TICK_INTERVAL_MS);
   }
 
@@ -297,6 +338,7 @@ export class ButtplugSync {
     this._sendToDevices(targetPos, duration, prevPos);
     this._lastSendTime = now;
     this._lastSentPos = targetPos;
+    if (this.onCommandSent) this.onCommandSent();
   }
 
   /**
@@ -309,6 +351,14 @@ export class ButtplugSync {
     const devices = this.buttplug.devices;
 
     for (const dev of devices) {
+      // Skip devices assigned to a specific axis — they're driven by _sendPendingAxisActions
+      const assigned = this._axisAssignmentMap.get(dev.index);
+      if (assigned && assigned !== 'L0') continue;
+
+      // In custom routing mode, only devices explicitly assigned to L0 get main script
+      // (unassigned devices should not receive any commands)
+      if (this._customRoutingActive && !assigned) continue;
+
       const inverted = this._invertedDevices.has(dev.index);
       const pos = inverted ? 100 - position : position;
       const prevPos = inverted ? 100 - prevPosition : prevPosition;
@@ -322,7 +372,52 @@ export class ButtplugSync {
         const intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
         this.buttplug.sendVibrate(dev.index, intensity);
       }
+      // E-stim / scalar devices (skip if dedicated vib script is loaded — vib path drives them)
+      if (dev.canScalar && !this._vibActions) {
+        const mode = this._scalarModeMap.get(dev.index) || 'position';
+        let intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+        intensity = this._applyScalarSafety(dev.index, intensity);
+        this.buttplug.sendScalar(dev.index, intensity);
+      }
+      // Rotation devices
+      if (dev.canRotate) {
+        const mode = this._rotateModeMap.get(dev.index) || 'speed';
+        if (mode === 'position') {
+          const clockwise = pos < 50;
+          const speed = pos < 50 ? ((50 - pos) / 50) * 100 : ((pos - 50) / 50) * 100;
+          this.buttplug.sendRotate(dev.index, speed, clockwise);
+        } else {
+          const intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+          const clockwise = pos >= prevPos;
+          this.buttplug.sendRotate(dev.index, intensity, clockwise);
+        }
+      }
     }
+  }
+
+  /**
+   * Apply e-stim safety: max intensity cap + ramp-up.
+   * @param {number} deviceIndex
+   * @param {number} intensity — raw intensity 0–100
+   * @returns {number} capped and ramped intensity 0–100
+   */
+  _applyScalarSafety(deviceIndex, intensity) {
+    // Apply max intensity cap
+    const maxCap = this._maxIntensityMap.get(deviceIndex);
+    const cap = maxCap !== undefined ? maxCap : 70; // default 70% for e-stim
+    intensity = Math.min(intensity, cap);
+
+    // Apply ramp-up if enabled
+    const rampEnabled = this._rampUpMap.get(deviceIndex);
+    if (rampEnabled !== false) { // default on
+      const elapsed = performance.now() - this._rampUpStartTime;
+      if (elapsed < this._rampUpDuration) {
+        const rampFactor = elapsed / this._rampUpDuration;
+        intensity *= rampFactor;
+      }
+    }
+
+    return Math.max(0, Math.min(100, intensity));
   }
 
   /**
@@ -354,13 +449,93 @@ export class ButtplugSync {
 
     const devices = this.buttplug.devices;
     for (const dev of devices) {
+      // Skip devices assigned to non-default axes — they're driven by _sendPendingAxisActions
+      const assigned = this._axisAssignmentMap.get(dev.index);
+      if (assigned && assigned !== 'L0' && assigned !== 'V0') continue;
+      if (this._customRoutingActive && !assigned) continue;
+
       if (dev.canVibrate) {
         this.buttplug.sendVibrate(dev.index, intensity);
+      }
+      if (dev.canScalar) {
+        let scalarIntensity = intensity;
+        scalarIntensity = this._applyScalarSafety(dev.index, scalarIntensity);
+        this.buttplug.sendScalar(dev.index, scalarIntensity);
       }
     }
 
     this._lastVibSendTime = now;
     this._lastVibSentIntensity = intensity;
+  }
+
+  /**
+   * Send pending multi-axis actions to devices assigned to those axes.
+   * Each axis has independent action tracking.
+   */
+  _sendPendingAxisActions() {
+    if (!this.buttplug.connected) return;
+
+    const now = performance.now();
+    const timeMs = this.player.currentTime * 1000;
+    const devices = this.buttplug.devices;
+
+    for (const [tcode, state] of this._axisActions) {
+      if (!state.actions || state.actions.length < 2) continue;
+      if (now - state.lastSendTime < MIN_SEND_INTERVAL_MS) continue;
+
+      // Catch up index
+      while (state.index + 1 < state.actions.length &&
+             state.actions[state.index + 1].at <= timeMs) {
+        state.index++;
+      }
+
+      if (state.index < 0 || state.index + 1 >= state.actions.length) continue;
+
+      const action = state.actions[state.index];
+      const nextAction = state.actions[state.index + 1];
+      const duration = Math.max(MIN_SEND_INTERVAL_MS, nextAction.at - timeMs);
+      if (duration > MAX_GAP_MS) continue;
+
+      // Linear interpolation for axis position
+      const span = nextAction.at - action.at;
+      const t = span > 0 ? (timeMs - action.at) / span : 0;
+      const value = Math.max(0, Math.min(100, action.pos + t * (nextAction.pos - action.pos)));
+
+      if (state.lastSentValue >= 0 && Math.abs(value - state.lastSentValue) < MIN_POS_DELTA) continue;
+
+      // Route to devices assigned to this axis
+      const featureType = tcode.charAt(0); // L, R, V, A, C (custom)
+      for (const dev of devices) {
+        const assigned = this._axisAssignmentMap.get(dev.index);
+        if (assigned !== tcode) continue;
+
+        const inverted = this._invertedDevices.has(dev.index);
+        const pos = inverted ? 100 - value : value;
+
+        if (featureType === 'C') {
+          // Custom route: send based on device capabilities
+          if (dev.canLinear) this.buttplug.sendLinear(dev.index, pos, duration);
+          else if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, pos);
+          else if (dev.canRotate) this.buttplug.sendRotate(dev.index, pos, pos >= 50);
+          else if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
+        } else if (featureType === 'L' || featureType === 'A') {
+          if (dev.canLinear) this.buttplug.sendLinear(dev.index, pos, duration);
+          if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
+        } else if (featureType === 'R') {
+          if (dev.canRotate) {
+            const clockwise = pos < 50;
+            const speed = pos < 50 ? ((50 - pos) / 50) * 100 : ((pos - 50) / 50) * 100;
+            this.buttplug.sendRotate(dev.index, speed, clockwise);
+          }
+        } else if (featureType === 'V') {
+          if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, pos);
+          if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
+        }
+      }
+
+      state.lastSendTime = now;
+      state.lastSentValue = value;
+    }
   }
 
   // --- Per-device settings ---
@@ -380,6 +555,87 @@ export class ButtplugSync {
 
   getVibeMode(deviceIndex) {
     return this._vibeModeMap.get(deviceIndex) || 'speed';
+  }
+
+  /**
+   * Set actions for a specific TCode axis (multi-axis companion scripts).
+   * @param {string} tcode — e.g. 'L1', 'R0', 'V0'
+   * @param {Array<{at: number, pos: number}>|null} actions
+   */
+  setAxisActions(tcode, actions) {
+    if (!actions || actions.length < 2) {
+      this._axisActions.delete(tcode);
+    } else {
+      this._axisActions.set(tcode, {
+        actions,
+        index: -1,
+        lastSendTime: 0,
+        lastSentValue: -1,
+      });
+    }
+  }
+
+  /** Clear all axis actions (on video change). */
+  clearAxisActions() {
+    this._axisActions.clear();
+  }
+
+  /** Get loaded axis tcodes. */
+  getLoadedAxes() {
+    return [...this._axisActions.keys()];
+  }
+
+  /**
+   * Assign a device to a specific axis.
+   * @param {number} deviceIndex
+   * @param {string|null} tcode — null means 'L0' (main stroke, default)
+   */
+  setAxisAssignment(deviceIndex, tcode) {
+    if (!tcode) {
+      this._axisAssignmentMap.delete(deviceIndex);
+    } else {
+      // Store all assignments including L0 (needed for custom routing to know which
+      // devices are explicitly assigned vs unassigned)
+      this._axisAssignmentMap.set(deviceIndex, tcode);
+    }
+  }
+
+  getAxisAssignment(deviceIndex) {
+    return this._axisAssignmentMap.get(deviceIndex) || 'L0';
+  }
+
+  setScalarMode(deviceIndex, mode) {
+    this._scalarModeMap.set(deviceIndex, mode);
+  }
+
+  getScalarMode(deviceIndex) {
+    return this._scalarModeMap.get(deviceIndex) || 'position';
+  }
+
+  setRotateMode(deviceIndex, mode) {
+    this._rotateModeMap.set(deviceIndex, mode);
+  }
+
+  getRotateMode(deviceIndex) {
+    return this._rotateModeMap.get(deviceIndex) || 'speed';
+  }
+
+  setMaxIntensity(deviceIndex, maxPercent) {
+    this._maxIntensityMap.set(deviceIndex, Math.max(0, Math.min(100, maxPercent)));
+  }
+
+  getMaxIntensity(deviceIndex) {
+    const v = this._maxIntensityMap.get(deviceIndex);
+    return v !== undefined ? v : 70;
+  }
+
+  setRampUp(deviceIndex, enabled) {
+    this._rampUpMap.set(deviceIndex, !!enabled);
+  }
+
+  getRampUp(deviceIndex) {
+    const v = this._rampUpMap.get(deviceIndex);
+    return v !== undefined ? v : true;
   }
 
   setInterpolationMode(mode) {

@@ -199,16 +199,16 @@ export class NavBar {
 
     // Close on outside click (clean up previous listener)
     if (this._libraryDropdownClose) {
-      document.removeEventListener('click', this._libraryDropdownClose, true);
+      document.removeEventListener('pointerdown', this._libraryDropdownClose, true);
     }
     this._libraryDropdownClose = (e) => {
-      if (!this._libraryDropdown.contains(e.target)) {
-        this._libraryDropdown.hidden = true;
-        document.removeEventListener('click', this._libraryDropdownClose, true);
-        this._libraryDropdownClose = null;
-      }
+      const arrow = this._el?.querySelector('.nav-bar__library-arrow');
+      if (this._libraryDropdown.contains(e.target) || (arrow && arrow.contains(e.target))) return;
+      this._libraryDropdown.hidden = true;
+      document.removeEventListener('pointerdown', this._libraryDropdownClose, true);
+      this._libraryDropdownClose = null;
     };
-    setTimeout(() => document.addEventListener('click', this._libraryDropdownClose, true), 0);
+    setTimeout(() => document.addEventListener('pointerdown', this._libraryDropdownClose, true), 0);
   }
 
   _renderLibraryDropdown() {

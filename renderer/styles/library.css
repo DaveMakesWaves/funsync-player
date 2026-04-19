@@ -91,6 +91,50 @@
   font-size: 15px;
 }
 
+.library__loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 0;
+  grid-column: 1 / -1;
+}
+
+.library__loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 3px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.library__loading-text {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.library__empty-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 24px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+
+.library__empty-btn:hover {
+  background: var(--accent-hover, #c0392b);
+}
+
 .library__select-dir-btn {
   background: var(--accent);
   color: #fff;
@@ -118,6 +162,12 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   gap: 16px;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+.library__grid--loading {
+  opacity: 0;
 }
 
 .library__grid--list {
@@ -464,7 +514,7 @@
   border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  z-index: 20;
+  z-index: 100;
   min-width: 180px;
   padding: 4px 0;
 }
@@ -1209,4 +1259,47 @@
   content: '•';
   margin-right: 6px;
   color: var(--text-secondary);
+}
+
+/* Custom Routing */
+.library__custom-route {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 10px;
+  margin-bottom: 8px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.library__custom-route-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.library__custom-route-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.library__custom-route-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.library__custom-route-field select {
+  flex: 1;
+}
+
+.library__custom-route-script {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
 }

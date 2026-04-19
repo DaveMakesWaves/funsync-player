@@ -3,10 +3,14 @@
 import { icon, X, Info } from '../js/icons.js';
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, settings }) {
+  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, settings }) {
     this.handy = handyManager;
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
+    this.tcodeManager = tcodeManager || null;
+    this.tcodeSync = tcodeSync || null;
+    this.autoblowManager = autoblowManager || null;
+    this.autoblowSync = autoblowSync || null;
     this.settings = settings;
     this._panel = null;
     this._visible = false;
@@ -29,6 +33,8 @@ export class ConnectionPanel {
         <div class="connection-panel__tabs">
           <button class="connection-panel__tab connection-panel__tab--active" data-tab="handy">Handy</button>
           <button class="connection-panel__tab" data-tab="buttplug">Buttplug.io</button>
+          <button class="connection-panel__tab" data-tab="tcode">TCode</button>
+          <button class="connection-panel__tab" data-tab="autoblow">Autoblow</button>
           <button class="connection-panel__tab" data-tab="settings">Settings</button>
         </div>
         <button class="connection-panel__close control-btn" aria-label="Close"><i data-lucide="x"></i></button>
@@ -143,6 +149,80 @@ export class ConnectionPanel {
       </div>
 
       </div><!-- end tab-buttplug -->
+
+      <div class="connection-panel__tab-content" id="tab-tcode" hidden>
+
+      <div class="connection-panel__status">
+        <span class="connection-panel__led" id="tcode-led"></span>
+        <span class="connection-panel__status-text" id="tcode-status-text">Disconnected</span>
+      </div>
+
+      <div class="connection-panel__form">
+        <label class="connection-panel__label">Serial Port</label>
+        <div class="connection-panel__input-row">
+          <select id="tcode-port-select" class="connection-panel__input" style="flex:1" aria-label="Serial port"></select>
+          <button id="tcode-refresh-btn" class="connection-panel__btn" style="min-width:auto;padding:6px 10px" title="Refresh ports">↻</button>
+        </div>
+
+        <label class="connection-panel__label" style="margin-top:8px">Baud Rate</label>
+        <select id="tcode-baud-select" class="connection-panel__input" aria-label="Baud rate">
+          <option value="9600">9600</option>
+          <option value="19200">19200</option>
+          <option value="38400">38400</option>
+          <option value="57600">57600</option>
+          <option value="115200" selected>115200</option>
+          <option value="250000">250000</option>
+        </select>
+
+        <div class="connection-panel__input-row" style="margin-top:10px">
+          <button id="tcode-connect-btn" class="connection-panel__btn" style="flex:1">Connect</button>
+        </div>
+      </div>
+
+      <div id="tcode-axis-settings" class="connection-panel__section" hidden>
+        <label class="connection-panel__section-label">Axis Ranges</label>
+        <div id="tcode-axis-list"></div>
+      </div>
+
+      </div><!-- end tab-tcode -->
+
+      <div class="connection-panel__tab-content" id="tab-autoblow" hidden>
+
+      <div class="connection-panel__status">
+        <span class="connection-panel__led" id="ab-led"></span>
+        <span class="connection-panel__status-text" id="ab-status-text">Disconnected</span>
+      </div>
+
+      <div class="connection-panel__form">
+        <label for="ab-token-input" class="connection-panel__label">Device Token</label>
+        <div class="connection-panel__input-row">
+          <input type="password" id="ab-token-input"
+                 class="connection-panel__input"
+                 placeholder="Enter device token"
+                 aria-label="Autoblow device token">
+          <button id="ab-connect-btn" class="connection-panel__btn">Connect</button>
+        </div>
+      </div>
+
+      <div id="ab-device-info" class="connection-panel__section" hidden>
+        <label class="connection-panel__section-label">Device</label>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Type</span>
+          <span id="ab-device-type" class="connection-panel__setting-value">—</span>
+        </div>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Latency</span>
+          <span id="ab-latency" class="connection-panel__setting-value">—</span>
+          <button id="ab-latency-btn" class="connection-panel__btn" style="min-width:auto;padding:4px 10px;font-size:11px">Measure</button>
+        </div>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Offset</span>
+          <input type="range" id="ab-offset" min="-500" max="500" value="0" class="connection-panel__safety-slider" style="flex:1">
+          <span id="ab-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
+        </div>
+      </div>
+
+      </div><!-- end tab-autoblow -->
 
       <div class="connection-panel__tab-content" id="tab-settings" hidden>
 
@@ -321,6 +401,59 @@ export class ConnectionPanel {
       this.buttplug.onDeviceAdded = (dev) => this._updateButtplugDeviceList();
       this.buttplug.onDeviceRemoved = (dev) => this._updateButtplugDeviceList();
       this.buttplug.onError = (msg) => this._showButtplugError(msg);
+    }
+
+    // TCode callbacks + events
+    if (this.tcodeManager) {
+      this._panel.querySelector('#tcode-connect-btn').addEventListener('click', () => this._onTCodeConnect());
+      this._panel.querySelector('#tcode-refresh-btn').addEventListener('click', () => this._refreshTCodePorts());
+
+      // Restore saved settings
+      const savedPort = this.settings.get('tcode.port') || '';
+      const savedBaud = this.settings.get('tcode.baudRate') || 115200;
+      this._panel.querySelector('#tcode-baud-select').value = String(savedBaud);
+
+      this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
+      this.tcodeManager.onDisconnect = () => this._updateTCodeStatus('disconnected');
+
+      // Initial port scan
+      this._refreshTCodePorts(savedPort);
+    }
+
+    // Autoblow callbacks + events
+    if (this.autoblowManager) {
+      this._panel.querySelector('#ab-connect-btn').addEventListener('click', () => this._onAutoblowConnect());
+
+      const savedToken = this.settings.get('autoblow.token') || '';
+      if (savedToken) this._panel.querySelector('#ab-token-input').value = savedToken;
+
+      const savedOffset = this.settings.get('autoblow.offset') || 0;
+      this._panel.querySelector('#ab-offset').value = String(savedOffset);
+      this._panel.querySelector('#ab-offset-value').textContent = `${savedOffset}ms`;
+
+      this._panel.querySelector('#ab-offset').addEventListener('input', (e) => {
+        const v = parseInt(e.target.value, 10);
+        this._panel.querySelector('#ab-offset-value').textContent = `${v}ms`;
+      });
+      this._panel.querySelector('#ab-offset').addEventListener('change', (e) => {
+        const v = parseInt(e.target.value, 10);
+        this.settings.set('autoblow.offset', v);
+        if (this.autoblowManager?.connected) this.autoblowManager.syncOffset(v);
+      });
+
+      this._panel.querySelector('#ab-latency-btn')?.addEventListener('click', async () => {
+        const btn = this._panel.querySelector('#ab-latency-btn');
+        const display = this._panel.querySelector('#ab-latency');
+        btn.disabled = true;
+        btn.textContent = '...';
+        const latency = await this.autoblowManager.estimateLatency();
+        display.textContent = `${latency}ms`;
+        btn.textContent = 'Measure';
+        btn.disabled = false;
+      });
+
+      this.autoblowManager.onConnect = () => this._updateAutoblowStatus('connected');
+      this.autoblowManager.onDisconnect = () => this._updateAutoblowStatus('disconnected');
     }
 
     // Export/Import buttons
@@ -604,6 +737,8 @@ export class ConnectionPanel {
 
     this._panel.querySelector('#tab-handy').hidden = tabId !== 'handy';
     this._panel.querySelector('#tab-buttplug').hidden = tabId !== 'buttplug';
+    this._panel.querySelector('#tab-tcode').hidden = tabId !== 'tcode';
+    this._panel.querySelector('#tab-autoblow').hidden = tabId !== 'autoblow';
     this._panel.querySelector('#tab-settings').hidden = tabId !== 'settings';
   }
 
@@ -693,56 +828,109 @@ export class ConnectionPanel {
 
     list.innerHTML = '';
     for (const dev of devices) {
-      const caps = [];
-      if (dev.canLinear) caps.push('Linear');
-      if (dev.canVibrate) caps.push('Vibrate');
-      if (dev.canRotate) caps.push('Rotate');
-
       const row = document.createElement('div');
       row.className = 'connection-panel__device-row';
 
-      const info = document.createElement('div');
-      info.className = 'connection-panel__device-info';
-      info.innerHTML = `<span class="connection-panel__device-name">${_esc(dev.name)}</span><span class="connection-panel__device-caps">${caps.join(', ')}</span>`;
+      // Header: name + badges + test button
+      const header = document.createElement('div');
+      header.className = 'connection-panel__device-header';
 
-      const controls = document.createElement('div');
-      controls.className = 'connection-panel__device-controls';
+      const nameEl = document.createElement('span');
+      nameEl.className = 'connection-panel__device-name';
+      nameEl.textContent = dev.name;
+      header.appendChild(nameEl);
 
-      // Vibe mode selector (only for vibrate-capable devices)
-      if (dev.canVibrate) {
-        const modeSelect = document.createElement('select');
-        modeSelect.className = 'connection-panel__device-select connection-panel__vib-control';
-        modeSelect.title = 'Vibration mapping mode';
-        const modes = [
-          { value: 'speed', label: 'Speed' },
-          { value: 'position', label: 'Position' },
-          { value: 'intensity', label: 'Hybrid' },
-        ];
-        for (const m of modes) {
-          const opt = document.createElement('option');
-          opt.value = m.value;
-          opt.textContent = m.label;
-          modeSelect.appendChild(opt);
+      const badges = document.createElement('span');
+      badges.className = 'connection-panel__device-badges';
+      if (dev.canLinear) badges.appendChild(this._makeBadge('Linear', 'linear'));
+      if (dev.canVibrate) badges.appendChild(this._makeBadge('Vibrate', 'vibrate'));
+      if (dev.canRotate) badges.appendChild(this._makeBadge('Rotate', 'rotate'));
+      if (dev.canScalar) badges.appendChild(this._makeBadge('E-Stim', 'estim'));
+      header.appendChild(badges);
+
+      const testBtn = document.createElement('button');
+      testBtn.className = 'connection-panel__device-test';
+      testBtn.textContent = 'Test';
+      testBtn.title = 'Send a brief test movement';
+      testBtn.addEventListener('click', () => this._testDevice(dev));
+      header.appendChild(testBtn);
+
+      row.appendChild(header);
+
+      // Axis assignment
+      const axisRow = document.createElement('div');
+      axisRow.className = 'connection-panel__device-axis-row';
+      const axisLabel = document.createElement('span');
+      axisLabel.className = 'connection-panel__device-axis-label';
+      axisLabel.textContent = 'Source:';
+      const axisSelect = document.createElement('select');
+      axisSelect.className = 'connection-panel__device-select';
+      axisSelect.title = 'What drives this device';
+
+      const axisOptions = [
+        { value: 'L0', label: 'Main Script' },
+        { value: '__custom__', label: 'Follow Custom Routing' },
+        { value: 'L1', label: 'Surge (L1)' },
+        { value: 'L2', label: 'Sway (L2)' },
+        { value: 'R0', label: 'Twist (R0)' },
+        { value: 'R1', label: 'Roll (R1)' },
+        { value: 'R2', label: 'Pitch (R2)' },
+        { value: 'V0', label: 'Vibe (V0)' },
+        { value: 'V1', label: 'Lube/Pump (V1)' },
+        { value: 'V2', label: 'Suction (V2)' },
+        { value: 'A0', label: 'Valve (A0)' },
+      ];
+      for (const opt of axisOptions) {
+        const o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        axisSelect.appendChild(o);
+      }
+
+      // Determine current value
+      const currentAssignment = this.buttplugSync?.getAxisAssignment(dev.index) || 'L0';
+      const isCustomRouted = this.buttplugSync?._customRoutingActive &&
+        currentAssignment.startsWith('CR');
+      axisSelect.value = isCustomRouted ? '__custom__' : currentAssignment;
+
+      axisSelect.addEventListener('change', () => {
+        if (!this.buttplugSync) return;
+        const val = axisSelect.value;
+        if (val === '__custom__') {
+          // Don't change assignment — custom routing manages it per-video
+          // Just clear any manual override so custom routing takes effect
+          this.buttplugSync.setAxisAssignment(dev.index, null);
+        } else {
+          this.buttplugSync.setAxisAssignment(dev.index, val);
         }
-        modeSelect.value = this.buttplugSync?.getVibeMode(dev.index) || 'speed';
-        modeSelect.addEventListener('change', () => {
-          if (this.buttplugSync) {
-            this.buttplugSync.setVibeMode(dev.index, modeSelect.value);
-            this._saveButtplugDeviceSettings();
-          }
-        });
-        controls.appendChild(modeSelect);
+        this._saveButtplugDeviceSettings();
+      });
 
-        // Info button
-        const infoBtn = document.createElement('button');
-        infoBtn.className = 'connection-panel__device-info-btn';
-        infoBtn.title = 'What do these modes do?';
-        infoBtn.appendChild(icon(Info, { width: 14, height: 14 }));
-        infoBtn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          this._showVibeModeHelp(infoBtn);
-        });
-        controls.appendChild(infoBtn);
+      axisRow.appendChild(axisLabel);
+      axisRow.appendChild(axisSelect);
+      row.appendChild(axisRow);
+
+      // Quick settings row: mode + invert (compact inline)
+      const quickRow = document.createElement('div');
+      quickRow.className = 'connection-panel__device-quick';
+
+      if (dev.canVibrate) {
+        quickRow.appendChild(this._makeModeSelect(dev, 'vibe', 'Vibration mode', 'speed',
+          () => this.buttplugSync?.getVibeMode(dev.index) || 'speed',
+          (val) => { if (this.buttplugSync) this.buttplugSync.setVibeMode(dev.index, val); }
+        ));
+      }
+      if (dev.canRotate) {
+        quickRow.appendChild(this._makeModeSelect(dev, 'rotate', 'Rotation mode', 'speed',
+          () => this.buttplugSync?.getRotateMode(dev.index) || 'speed',
+          (val) => { if (this.buttplugSync) this.buttplugSync.setRotateMode(dev.index, val); }
+        ));
+      }
+      if (dev.canScalar) {
+        quickRow.appendChild(this._makeModeSelect(dev, 'scalar', 'E-stim mode', 'position',
+          () => this.buttplugSync?.getScalarMode(dev.index) || 'position',
+          (val) => { if (this.buttplugSync) this.buttplugSync.setScalarMode(dev.index, val); }
+        ));
       }
 
       // Invert toggle
@@ -759,10 +947,89 @@ export class ConnectionPanel {
       });
       invertLabel.appendChild(invertCheck);
       invertLabel.appendChild(document.createTextNode(' Invert'));
-      controls.appendChild(invertLabel);
+      quickRow.appendChild(invertLabel);
 
-      row.appendChild(info);
-      row.appendChild(controls);
+      // Info button
+      if (dev.canVibrate || dev.canScalar || dev.canRotate) {
+        const infoBtn = document.createElement('button');
+        infoBtn.className = 'connection-panel__device-info-btn';
+        infoBtn.title = 'What do these modes do?';
+        infoBtn.appendChild(icon(Info, { width: 14, height: 14 }));
+        infoBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this._showVibeModeHelp(infoBtn);
+        });
+        quickRow.appendChild(infoBtn);
+      }
+
+      row.appendChild(quickRow);
+
+      // E-stim safety section (only for scalar devices)
+      if (dev.canScalar) {
+        const safetySection = document.createElement('div');
+        safetySection.className = 'connection-panel__device-safety-section';
+
+        const maxRow = document.createElement('div');
+        maxRow.className = 'connection-panel__device-safety';
+        const maxLabel = document.createElement('span');
+        maxLabel.textContent = 'Max:';
+        const maxVal = document.createElement('span');
+        maxVal.className = 'connection-panel__safety-value';
+        const currentMax = this.buttplugSync?.getMaxIntensity(dev.index) ?? 70;
+        maxVal.textContent = `${currentMax}%`;
+        const maxSlider = document.createElement('input');
+        maxSlider.type = 'range';
+        maxSlider.min = '0';
+        maxSlider.max = '100';
+        maxSlider.value = String(currentMax);
+        maxSlider.className = 'connection-panel__safety-slider';
+        maxSlider.addEventListener('input', () => {
+          const v = parseInt(maxSlider.value, 10);
+          maxVal.textContent = `${v}%`;
+          if (v > 80) maxVal.classList.add('connection-panel__safety-value--warn');
+          else maxVal.classList.remove('connection-panel__safety-value--warn');
+        });
+        maxSlider.addEventListener('change', async () => {
+          const v = parseInt(maxSlider.value, 10);
+          if (v > 90) {
+            const { Modal } = await import('./modal.js');
+            const confirmed = await Modal.confirm('High Intensity',
+              `Setting e-stim intensity to ${v}% — high levels can cause discomfort. Continue?`);
+            if (!confirmed) {
+              maxSlider.value = '70';
+              maxVal.textContent = '70%';
+              maxVal.classList.remove('connection-panel__safety-value--warn');
+              if (this.buttplugSync) this.buttplugSync.setMaxIntensity(dev.index, 70);
+              this._saveButtplugDeviceSettings();
+              return;
+            }
+          }
+          if (this.buttplugSync) this.buttplugSync.setMaxIntensity(dev.index, v);
+          this._saveButtplugDeviceSettings();
+        });
+        maxRow.appendChild(maxLabel);
+        maxRow.appendChild(maxSlider);
+        maxRow.appendChild(maxVal);
+        safetySection.appendChild(maxRow);
+
+        const rampLabel = document.createElement('label');
+        rampLabel.className = 'connection-panel__device-toggle';
+        const rampCheck = document.createElement('input');
+        rampCheck.type = 'checkbox';
+        rampCheck.checked = this.buttplugSync?.getRampUp(dev.index) ?? true;
+        rampCheck.addEventListener('change', () => {
+          if (this.buttplugSync) {
+            this.buttplugSync.setRampUp(dev.index, rampCheck.checked);
+            this._saveButtplugDeviceSettings();
+          }
+        });
+        rampLabel.appendChild(rampCheck);
+        rampLabel.appendChild(document.createTextNode(' Ramp-up (2s)'));
+        safetySection.appendChild(rampLabel);
+
+        row.appendChild(safetySection);
+      }
+
       list.appendChild(row);
     }
 
@@ -773,14 +1040,101 @@ export class ConnectionPanel {
     this.updateVibControlState();
   }
 
+  async _testDevice(dev) {
+    if (!this.buttplug || this._testingDevice) return;
+    this._testingDevice = true;
+    const idx = dev.index;
+    try {
+      if (dev.canLinear) {
+        await this.buttplug.sendLinear(idx, 0, 300);
+        await new Promise(r => setTimeout(r, 350));
+        await this.buttplug.sendLinear(idx, 80, 400);
+        await new Promise(r => setTimeout(r, 450));
+        await this.buttplug.sendLinear(idx, 20, 400);
+        await new Promise(r => setTimeout(r, 450));
+        await this.buttplug.sendLinear(idx, 50, 300);
+      } else if (dev.canVibrate) {
+        await this.buttplug.sendVibrate(idx, 30);
+        await new Promise(r => setTimeout(r, 400));
+        await this.buttplug.sendVibrate(idx, 70);
+        await new Promise(r => setTimeout(r, 400));
+        await this.buttplug.sendVibrate(idx, 0);
+      } else if (dev.canRotate) {
+        await this.buttplug.sendRotate(idx, 40, true);
+        await new Promise(r => setTimeout(r, 500));
+        await this.buttplug.sendRotate(idx, 40, false);
+        await new Promise(r => setTimeout(r, 500));
+        await this.buttplug.sendRotate(idx, 0);
+      } else if (dev.canScalar) {
+        // E-stim test: very gentle pulse, respecting safety cap
+        const cap = this.buttplugSync?.getMaxIntensity(idx) ?? 70;
+        const testIntensity = Math.min(20, cap);
+        await this.buttplug.sendScalar(idx, testIntensity);
+        await new Promise(r => setTimeout(r, 500));
+        await this.buttplug.sendScalar(idx, 0);
+      }
+    } catch (err) {
+      console.warn('[Test] Device test failed:', err.message);
+    } finally {
+      this._testingDevice = false;
+    }
+  }
+
+  _makeBadge(text, variant) {
+    const badge = document.createElement('span');
+    badge.className = 'connection-panel__device-badge';
+    if (variant) badge.classList.add(`connection-panel__device-badge--${variant}`);
+    badge.textContent = text;
+    return badge;
+  }
+
+  _makeModeSelect(dev, type, title, defaultMode, getter, setter) {
+    const modeSelect = document.createElement('select');
+    modeSelect.className = 'connection-panel__device-select connection-panel__vib-control';
+    modeSelect.title = title;
+    const modes = [
+      { value: 'speed', label: 'Speed' },
+      { value: 'position', label: 'Position' },
+      { value: 'intensity', label: 'Hybrid' },
+    ];
+    for (const m of modes) {
+      const opt = document.createElement('option');
+      opt.value = m.value;
+      opt.textContent = m.label;
+      modeSelect.appendChild(opt);
+    }
+    modeSelect.value = getter() || defaultMode;
+    modeSelect.addEventListener('change', () => {
+      setter(modeSelect.value);
+      this._saveButtplugDeviceSettings();
+    });
+    return modeSelect;
+  }
+
   _saveButtplugDeviceSettings() {
     if (!this.buttplug || !this.buttplugSync) return;
     const perDevice = {};
     for (const dev of this.buttplug.devices) {
       const settings = {};
       if (this.buttplugSync.isInverted(dev.index)) settings.inverted = true;
-      const mode = this.buttplugSync.getVibeMode(dev.index);
-      if (mode !== 'speed') settings.vibeMode = mode;
+      const axisAssignment = this.buttplugSync.getAxisAssignment(dev.index);
+      // Save axis assignment (always save when not default, or when L0 is explicitly chosen
+      // to override custom routing)
+      if (axisAssignment !== 'L0') {
+        settings.axisAssignment = axisAssignment;
+      } else if (this.buttplugSync._customRoutingActive && this.buttplugSync._axisAssignmentMap.has(dev.index)) {
+        settings.axisAssignment = 'L0'; // explicit L0 override during custom routing
+      }
+      const vibeMode = this.buttplugSync.getVibeMode(dev.index);
+      if (vibeMode !== 'speed') settings.vibeMode = vibeMode;
+      const scalarMode = this.buttplugSync.getScalarMode(dev.index);
+      if (scalarMode !== 'position') settings.scalarMode = scalarMode;
+      const rotateMode = this.buttplugSync.getRotateMode(dev.index);
+      if (rotateMode !== 'speed') settings.rotateMode = rotateMode;
+      const maxIntensity = this.buttplugSync.getMaxIntensity(dev.index);
+      if (maxIntensity !== 70) settings.maxIntensity = maxIntensity;
+      const rampUp = this.buttplugSync.getRampUp(dev.index);
+      if (!rampUp) settings.rampUp = false;
       if (Object.keys(settings).length > 0) {
         perDevice[dev.name] = settings;
       }
@@ -796,8 +1150,13 @@ export class ConnectionPanel {
     for (const dev of devices) {
       const saved = perDevice[dev.name];
       if (saved) {
+        if (saved.axisAssignment) this.buttplugSync.setAxisAssignment(dev.index, saved.axisAssignment);
         if (saved.inverted) this.buttplugSync.setInverted(dev.index, true);
         if (saved.vibeMode) this.buttplugSync.setVibeMode(dev.index, saved.vibeMode);
+        if (saved.scalarMode) this.buttplugSync.setScalarMode(dev.index, saved.scalarMode);
+        if (saved.rotateMode) this.buttplugSync.setRotateMode(dev.index, saved.rotateMode);
+        if (saved.maxIntensity !== undefined) this.buttplugSync.setMaxIntensity(dev.index, saved.maxIntensity);
+        if (saved.rampUp === false) this.buttplugSync.setRampUp(dev.index, false);
       }
     }
 
@@ -877,6 +1236,137 @@ export class ConnectionPanel {
     console.error('[ConnectionPanel/Buttplug]', message);
     const text = this._panel.querySelector('#bp-connection-status-text');
     if (text) text.textContent = message;
+  }
+
+  // --- TCode Serial ---
+
+  async _onTCodeConnect() {
+    if (!this.tcodeManager) return;
+
+    if (this.tcodeManager.connected) {
+      await this.tcodeManager.disconnect();
+      this._updateTCodeStatus('disconnected');
+      return;
+    }
+
+    const portSelect = this._panel.querySelector('#tcode-port-select');
+    const baudSelect = this._panel.querySelector('#tcode-baud-select');
+    const portPath = portSelect.value;
+    const baudRate = parseInt(baudSelect.value, 10) || 115200;
+
+    if (!portPath) {
+      this._updateTCodeStatus('disconnected');
+      const text = this._panel.querySelector('#tcode-status-text');
+      if (text) text.textContent = 'Select a port';
+      return;
+    }
+
+    this._updateTCodeStatus('connecting');
+    const success = await this.tcodeManager.connect(portPath, baudRate);
+
+    if (success) {
+      this.settings.set('tcode.port', portPath);
+      this.settings.set('tcode.baudRate', baudRate);
+    }
+  }
+
+  async _refreshTCodePorts(selectPort) {
+    if (!this.tcodeManager) return;
+    const ports = await this.tcodeManager.listPorts();
+    const select = this._panel.querySelector('#tcode-port-select');
+    if (!select) return;
+
+    select.innerHTML = '';
+    if (ports.length === 0) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = 'No ports found';
+      select.appendChild(opt);
+    } else {
+      for (const p of ports) {
+        const opt = document.createElement('option');
+        opt.value = p.path;
+        opt.textContent = p.manufacturer ? `${p.path} — ${p.manufacturer}` : p.path;
+        select.appendChild(opt);
+      }
+      if (selectPort) select.value = selectPort;
+    }
+  }
+
+  _updateTCodeStatus(status) {
+    const led = this._panel.querySelector('#tcode-led');
+    const text = this._panel.querySelector('#tcode-status-text');
+    const btn = this._panel.querySelector('#tcode-connect-btn');
+    const axisSection = this._panel.querySelector('#tcode-axis-settings');
+
+    if (led) {
+      led.className = 'connection-panel__led';
+      if (status === 'connected') led.classList.add('connection-panel__led--connected');
+      else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
+    }
+    if (text) {
+      text.textContent = status === 'connected' ? 'Connected'
+        : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+    }
+    if (btn) {
+      btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
+    }
+    if (axisSection) {
+      axisSection.hidden = status !== 'connected';
+    }
+  }
+
+  // --- Autoblow ---
+
+  async _onAutoblowConnect() {
+    if (!this.autoblowManager) return;
+
+    if (this.autoblowManager.connected) {
+      await this.autoblowManager.disconnect();
+      return;
+    }
+
+    const tokenInput = this._panel.querySelector('#ab-token-input');
+    const token = tokenInput.value.trim();
+    if (!token) {
+      const text = this._panel.querySelector('#ab-status-text');
+      if (text) text.textContent = 'Enter device token';
+      return;
+    }
+
+    this._updateAutoblowStatus('connecting');
+    const success = await this.autoblowManager.connect(token);
+
+    if (success) {
+      this.settings.set('autoblow.token', token);
+    }
+  }
+
+  _updateAutoblowStatus(status) {
+    const led = this._panel.querySelector('#ab-led');
+    const text = this._panel.querySelector('#ab-status-text');
+    const btn = this._panel.querySelector('#ab-connect-btn');
+    const infoSection = this._panel.querySelector('#ab-device-info');
+    const typeEl = this._panel.querySelector('#ab-device-type');
+
+    if (led) {
+      led.className = 'connection-panel__led';
+      if (status === 'connected') led.classList.add('connection-panel__led--connected');
+      else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
+    }
+    if (text) {
+      text.textContent = status === 'connected' ? 'Connected'
+        : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+    }
+    if (btn) {
+      btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
+    }
+    if (infoSection) {
+      infoSection.hidden = status !== 'connected';
+    }
+    if (typeEl && this.autoblowManager?.deviceType) {
+      typeEl.textContent = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
+    }
   }
 
   // --- Data Export/Import ---

@@ -276,6 +276,7 @@
   border-radius: 50%;
   background: #666;
   flex-shrink: 0;
+  transition: box-shadow 150ms ease;
 }
 
 .nav-bar__handy-led--connected {
@@ -286,6 +287,10 @@
 .nav-bar__handy-led--connecting {
   background: #ff9800;
   animation: pulse 1s ease-in-out infinite;
+}
+
+.nav-bar__handy-led--active {
+  box-shadow: 0 0 8px 2px #4caf50;
 }
 
 .nav-bar__handy-label {

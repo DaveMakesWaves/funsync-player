@@ -62,6 +62,28 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // Shell
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
+
+  // TCode Serial
+  tcodeListPorts: () => ipcRenderer.invoke('tcode-list-ports'),
+  tcodeConnect: (portPath, baudRate) => ipcRenderer.invoke('tcode-connect', portPath, baudRate),
+  tcodeDisconnect: () => ipcRenderer.invoke('tcode-disconnect'),
+  tcodeSend: (command) => ipcRenderer.invoke('tcode-send', command),
+  tcodeStatus: () => ipcRenderer.invoke('tcode-status'),
+  onTcodeDisconnected: (callback) => {
+    ipcRenderer.on('tcode-disconnected', callback);
+    return () => ipcRenderer.removeListener('tcode-disconnected', callback);
+  },
+
+  // Autoblow
+  autoblowConnect: (token) => ipcRenderer.invoke('autoblow-connect', token),
+  autoblowDisconnect: () => ipcRenderer.invoke('autoblow-disconnect'),
+  autoblowStatus: () => ipcRenderer.invoke('autoblow-status'),
+  autoblowUploadScript: (content) => ipcRenderer.invoke('autoblow-upload-script', content),
+  autoblowSyncStart: (startTimeMs) => ipcRenderer.invoke('autoblow-sync-start', startTimeMs),
+  autoblowSyncStop: () => ipcRenderer.invoke('autoblow-sync-stop'),
+  autoblowSyncOffset: (offsetMs) => ipcRenderer.invoke('autoblow-sync-offset', offsetMs),
+  autoblowLatency: () => ipcRenderer.invoke('autoblow-latency'),
 
   // EroScripts
   eroscriptsLogin: (username, password) => ipcRenderer.invoke('eroscripts-login', username, password),

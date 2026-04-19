@@ -277,6 +277,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
   const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 
   let entries = [];
+  const failedPaths = [];
   const scanStart = Date.now();
   for (const dp of dirPaths) {
     if (!dp) continue;
@@ -285,6 +286,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
       entries.push(...dirEntries);
     } catch (err) {
       log.warn(`[Library] Failed to scan ${dp}: ${err.message}`);
+      failedPaths.push(dp);
     }
   }
   log.info(`[Library] Scanned ${entries.length} entries in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
@@ -445,6 +447,55 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
     });
   }
 
+  // Fuzzy match pass: pair unmatched videos with high-confidence funscript matches
+  // Uses token overlap (Jaccard index) — same logic as renderer fuzzy-match.js
+  const fuzzyTokenize = (s) => s.toLowerCase().replace(/[_.\-()[\]{}]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
+  const fuzzyScore = (a, b) => {
+    const tokA = new Set(fuzzyTokenize(a));
+    const tokB = new Set(fuzzyTokenize(b));
+    if (tokA.size === 0 || tokB.size === 0) return 0;
+    let inter = 0;
+    for (const t of tokA) if (tokB.has(t)) inter++;
+    const union = new Set([...tokA, ...tokB]).size;
+    return Math.round((inter / union) * 100);
+  };
+
+  for (const video of videos) {
+    if (video.hasFunscript) continue; // already matched
+    const videoBase = path.basename(video.name, path.extname(video.name));
+    let bestFs = null;
+    let bestScore = 0;
+    for (const fs of funscriptList) {
+      if (fs._used || fs.isAxis) continue;
+      const fsBase = path.basename(fs.name, '.funscript');
+      const score = fuzzyScore(videoBase, fsBase);
+      if (score > bestScore) { bestScore = score; bestFs = fs; }
+    }
+    if (bestFs && bestScore >= 98) {
+      video.hasFunscript = true;
+      video.funscriptPath = bestFs.path;
+      video._fuzzyMatched = true;
+      bestFs._used = true;
+
+      // Also collect variants for this fuzzy match
+      const fuzzyVariants = [];
+      const seenPaths = new Set();
+      for (const fs of funscriptList) {
+        if (fs.isAxis) continue;
+        const fsBase = path.basename(fs.name, '.funscript');
+        const s = fuzzyScore(videoBase, fsBase);
+        if (s >= 98 && !seenPaths.has(fs.path)) {
+          seenPaths.add(fs.path);
+          fuzzyVariants.push({ label: fs.variantLabel || 'Default', path: fs.path, name: fs.name });
+        }
+      }
+      if (fuzzyVariants.length > 1) {
+        fuzzyVariants.sort((a, b) => a.label === 'Default' ? -1 : b.label === 'Default' ? 1 : a.label.localeCompare(b.label));
+        video.variants = fuzzyVariants;
+      }
+    }
+  }
+
   // Collect unmatched funscripts (not paired to any video)
   const unmatchedFunscripts = [];
   for (const fs of funscriptList) {
@@ -473,7 +524,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
   // Sort alphabetically
   videos.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   log.info(`[Library] Result: ${videos.length} videos, ${unmatchedFunscripts.length} unmatched fs, ${allFunscripts.length} total fs (${Date.now() - scanStart}ms total)`);
-  return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts };
+  return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts, failedPaths };
 });
 
 ipcMain.handle('select-funscript', async () => {
@@ -618,6 +669,169 @@ ipcMain.handle('open-external', async (_event, url) => {
   const { shell } = require('electron');
   if (url && (url.startsWith('https://') || url.startsWith('http://'))) {
     await shell.openExternal(url);
+  }
+});
+
+ipcMain.handle('show-in-folder', (_event, filePath) => {
+  const { shell } = require('electron');
+  if (filePath) shell.showItemInFolder(filePath);
+});
+
+// --- IPC Handlers: TCode Serial ---
+
+let tcodePort = null; // active SerialPort instance
+
+ipcMain.handle('tcode-list-ports', async () => {
+  try {
+    const { SerialPort } = require('serialport');
+    const ports = await SerialPort.list();
+    return ports.map(p => ({
+      path: p.path,
+      manufacturer: p.manufacturer || '',
+      vendorId: p.vendorId || '',
+      productId: p.productId || '',
+    }));
+  } catch (err) {
+    log.warn('[TCode] Failed to list ports:', err.message);
+    return [];
+  }
+});
+
+ipcMain.handle('tcode-connect', async (_event, portPath, baudRate = 115200) => {
+  try {
+    if (tcodePort) {
+      tcodePort.removeAllListeners();
+      if (tcodePort.isOpen) tcodePort.close();
+      tcodePort = null;
+    }
+    const { SerialPort } = require('serialport');
+    tcodePort = new SerialPort({
+      path: portPath,
+      baudRate,
+      dataBits: 8,
+      stopBits: 1,
+      parity: 'none',
+      autoOpen: false,
+    });
+
+    return new Promise((resolve) => {
+      tcodePort.open((err) => {
+        if (err) {
+          log.warn('[TCode] Open failed:', err.message);
+          tcodePort = null;
+          resolve({ success: false, error: err.message });
+        } else {
+          log.info(`[TCode] Connected to ${portPath} @ ${baudRate}`);
+
+          tcodePort.on('close', () => {
+            log.info('[TCode] Port closed');
+            tcodePort = null;
+            BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tcode-disconnected'));
+          });
+
+          tcodePort.on('error', (e) => {
+            log.warn('[TCode] Port error:', e.message);
+          });
+
+          resolve({ success: true });
+        }
+      });
+    });
+  } catch (err) {
+    log.warn('[TCode] Connect error:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('tcode-disconnect', () => {
+  if (tcodePort && tcodePort.isOpen) {
+    tcodePort.close();
+    tcodePort = null;
+    log.info('[TCode] Disconnected');
+  }
+  return { success: true };
+});
+
+ipcMain.handle('tcode-send', (_event, command) => {
+  if (!tcodePort || !tcodePort.isOpen) return false;
+  try {
+    tcodePort.write(command);
+    return true;
+  } catch (err) {
+    log.debug('[TCode] Write error:', err.message);
+    return false;
+  }
+});
+
+ipcMain.handle('tcode-status', () => {
+  return { connected: !!(tcodePort && tcodePort.isOpen) };
+});
+
+// --- IPC Handlers: Autoblow ---
+
+const autoblowApi = require('./autoblow-api.js');
+
+ipcMain.handle('autoblow-connect', async (_event, token) => {
+  try {
+    const result = await autoblowApi.connect(token);
+    return { success: true, ...result };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('autoblow-disconnect', () => {
+  autoblowApi.disconnect();
+  return { success: true };
+});
+
+ipcMain.handle('autoblow-status', () => ({
+  connected: autoblowApi.isConnected(),
+  deviceType: autoblowApi.getDeviceType(),
+}));
+
+ipcMain.handle('autoblow-upload-script', async (_event, funscriptContent) => {
+  try {
+    await autoblowApi.syncScriptUploadFunscript(funscriptContent);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('autoblow-sync-start', async (_event, startTimeMs) => {
+  try {
+    await autoblowApi.syncScriptStart(startTimeMs);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('autoblow-sync-stop', async () => {
+  try {
+    await autoblowApi.syncScriptStop();
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('autoblow-sync-offset', async (_event, offsetMs) => {
+  try {
+    await autoblowApi.syncScriptOffset(offsetMs);
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('autoblow-latency', async () => {
+  try {
+    const latency = await autoblowApi.estimateLatency();
+    return { success: true, latency };
+  } catch (err) {
+    return { success: false, error: err.message };
   }
 });
 

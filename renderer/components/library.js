@@ -10,9 +10,10 @@ import * as thumbCache from '../js/thumbnail-cache.js';
 const MAX_CONCURRENT_THUMBNAILS = 3;
 
 export class Library {
-  constructor({ onPlayVideo, onBack, settings }) {
+  constructor({ onPlayVideo, onBack, onAddSource, settings }) {
     this._onPlayVideo = onPlayVideo;
     this._onBack = onBack;
+    this._onAddSource = onAddSource || null;
     this._settings = settings;
     this._container = null;
     this._videos = [];
@@ -32,6 +33,8 @@ export class Library {
     this._sortKey = 'name:asc';
     this._viewMode = 'grid';
     this._unavailablePaths = new Set();
+    this._scanning = false;
+    this._lastScanKey = null;
 
     // Hover preview state (singleton video element — avoids Electron memory leak #18277)
     this._previewVideo = null;
@@ -64,9 +67,35 @@ export class Library {
 
     this._dirPath = scanPaths.length > 0 ? scanPaths[0] : null;
 
+    // Determine header title and subtitle based on active view
+    const availableSources = sources.filter(s => s.enabled !== false && !unavailable.has(s.path));
+    if (this._activeCollectionId) {
+      const collections = this._settings.get('library.collections') || [];
+      const col = collections.find(c => c.id === this._activeCollectionId);
+      this._headerTitle = col ? col.name : 'Library';
+      this._headerPath = availableSources.length === 1
+        ? availableSources[0].path
+        : `${availableSources.length} source${availableSources.length !== 1 ? 's' : ''}`;
+    } else {
+      this._headerTitle = 'Library';
+      this._headerPath = availableSources.length > 1
+        ? availableSources.map(s => s.name).join(', ')
+        : (this._dirPath || '');
+    }
+
+    // Check if we can skip re-scan (same paths, already have videos)
+    const scanKey = scanPaths.sort().join('\0');
+    const canSkip = this._lastScanKey === scanKey && this._videos.length > 0;
+
     if (scanPaths.length > 0) {
       this._renderWithHeader();
-      this._scanDirectory(scanPaths.length === 1 ? scanPaths[0] : scanPaths);
+      if (canSkip) {
+        // Re-render with cached videos (no re-scan needed)
+        this._applyFilters();
+      } else {
+        this._lastScanKey = scanKey;
+        this._scanDirectory(scanPaths.length === 1 ? scanPaths[0] : scanPaths);
+      }
     } else {
       this._renderEmpty();
     }
@@ -76,9 +105,7 @@ export class Library {
     this._closeMenu();
     this._exitSelectMode();
     this._stopPreview();
-    this._activeTab = 'matched';
-    this._searchQuery = '';
-    this._sortKey = 'name:asc';
+    // Preserve _activeTab, _searchQuery, _sortKey, _viewMode across hide/show
     if (this._observer) {
       this._observer.disconnect();
       this._observer = null;
@@ -95,18 +122,20 @@ export class Library {
       <div class="library__empty">
         <div class="library__empty-icon"></div>
         <div class="library__empty-text">Add a source folder to browse your video library</div>
-        <div class="library__empty-hint">Use the Library dropdown in the nav bar to add source folders</div>
+        <button class="library__empty-btn">+ Add Source Folder</button>
       </div>
     `;
     this._container.querySelector('.library__empty-icon')
       .appendChild(icon(FolderOpen, { width: 48, height: 48 }));
+    this._container.querySelector('.library__empty-btn')
+      .addEventListener('click', () => { if (this._onAddSource) this._onAddSource(); });
   }
 
   _renderWithHeader() {
     this._container.innerHTML = `
       <div class="library__header">
-        <span class="library__title">Library</span>
-        <span class="library__dir-path" title="${this._escapeHtml(this._dirPath || '')}">${this._escapeHtml(this._dirPath || '')}</span>
+        <span class="library__title">${this._escapeHtml(this._headerTitle || 'Library')}</span>
+        <span class="library__dir-path" title="${this._escapeHtml(this._headerPath || '')}">${this._escapeHtml(this._headerPath || '')}</span>
         <span class="library__video-count"></span>
         <div class="library__search">
           <input type="text" class="library__search-input" placeholder="Search..." aria-label="Search videos">
@@ -145,41 +174,49 @@ export class Library {
     `;
 
 
-    // Search
+    // Search — restore previous query
     const searchInput = this._container.querySelector('.library__search-input');
     const searchClear = this._container.querySelector('.library__search-clear');
     searchClear.appendChild(icon(X, { width: 14, height: 14 }));
+    if (this._searchQuery) {
+      searchInput.value = this._searchQuery;
+      searchClear.hidden = false;
+    }
     searchInput.addEventListener('input', () => {
       this._searchQuery = searchInput.value;
       searchClear.hidden = !searchInput.value;
-      this._applyFilters();
+      if (!this._scanning) this._applyFilters();
     });
     searchClear.addEventListener('click', () => {
       searchInput.value = '';
       this._searchQuery = '';
       searchClear.hidden = true;
-      this._applyFilters();
+      if (!this._scanning) this._applyFilters();
     });
 
-    // Sort dropdown
+    // Sort dropdown — restore previous sort
     const sortSelect = this._container.querySelector('.library__sort-select');
     sortSelect.value = this._sortKey;
     sortSelect.addEventListener('change', () => {
       this._sortKey = sortSelect.value;
-      this._applyFilters();
+      if (!this._scanning) this._applyFilters();
     });
 
-    // Tab switching
+    // Tab switching — restore active tab
     this._container.querySelectorAll('.library__tab').forEach((tab) => {
-      tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
+      tab.classList.toggle('library__tab--active', tab.dataset.tab === this._activeTab);
+      tab.addEventListener('click', () => {
+        if (!this._scanning) this._switchTab(tab.dataset.tab);
+      });
     });
 
-    // View toggle
+    // View toggle — restore previous mode
     const btnGrid = this._container.querySelector('.view-toggle--grid');
     const btnList = this._container.querySelector('.view-toggle--list');
     btnGrid.appendChild(icon(LayoutGrid, { width: 16, height: 16 }));
     btnList.appendChild(icon(LayoutList, { width: 16, height: 16 }));
-    btnGrid.classList.add('view-toggle--active');
+    btnGrid.classList.toggle('view-toggle--active', this._viewMode !== 'list');
+    btnList.classList.toggle('view-toggle--active', this._viewMode === 'list');
     btnGrid.addEventListener('click', () => this._setViewMode('grid'));
     btnList.addEventListener('click', () => this._setViewMode('list'));
 
@@ -207,6 +244,9 @@ export class Library {
   }
 
   async _scanDirectory(dirPath) {
+    this._scanning = true;
+    this._showLoadingState();
+
     const result = await window.funsync.scanDirectory(dirPath);
     // Handle both old (array) and new ({ videos, unmatchedFunscripts }) return shapes
     const videos = Array.isArray(result) ? result : result.videos;
@@ -215,20 +255,51 @@ export class Library {
     this._allFunscripts = Array.isArray(result) ? [] : (result.allFunscripts || []);
     this._videos = videos;
 
+    // Warn about failed source paths (disconnected drives)
+    const failedPaths = result?.failedPaths || [];
+    if (failedPaths.length > 0) {
+      const { showToast } = await import('../js/toast.js');
+      const names = failedPaths.map(p => p.split(/[\\/]/).pop());
+      showToast(`Source unavailable: ${names.join(', ')}`, 'warn', 5000);
+    }
+
     // Apply manual funscript associations from settings
+    // Uses exact path match first, then filename fallback (handles drive letter changes)
     const associations = this._settings.get('library.associations') || {};
+    let assocMigrated = false;
     for (const video of this._videos) {
-      const assoc = associations[video.path];
+      let assoc = associations[video.path];
+      if (!assoc) {
+        // Fallback: match by filename when drive letter changed
+        const videoName = video.path.split(/[\\/]/).pop().toLowerCase();
+        for (const [oldPath, oldAssoc] of Object.entries(associations)) {
+          if (oldPath === video.path) continue;
+          if (oldPath.split(/[\\/]/).pop().toLowerCase() === videoName) {
+            assoc = oldAssoc;
+            // Migrate to new path
+            associations[video.path] = assoc;
+            delete associations[oldPath];
+            assocMigrated = true;
+            break;
+          }
+        }
+      }
       if (!assoc) continue;
       if (typeof assoc === 'string') {
-        // Single axis association
         if (!video.hasFunscript) {
           video.hasFunscript = true;
           video.funscriptPath = assoc;
           video._manualAssociation = true;
         }
+      } else if (assoc.mode === 'custom') {
+        const mainRoute = (assoc.routes || []).find(r => r.role === 'main');
+        if (mainRoute?.scriptPath) {
+          video.hasFunscript = true;
+          video.funscriptPath = mainRoute.scriptPath;
+          video._manualAssociation = true;
+          video._customRouting = assoc.routes;
+        }
       } else if (typeof assoc === 'object') {
-        // Multi axis association
         const hasAnyScript = !!assoc.main || Object.values(assoc.axes || {}).some(Boolean);
         if (hasAnyScript) {
           video.hasFunscript = true;
@@ -238,16 +309,33 @@ export class Library {
         }
       }
     }
+    if (assocMigrated) this._settings.set('library.associations', associations);
 
-    // Apply manual subtitle associations from settings
+    // Apply manual subtitle associations from settings (with filename fallback)
     const subAssociations = this._settings.get('library.subtitleAssociations') || {};
+    let subMigrated = false;
     for (const video of this._videos) {
-      if (!video.hasSubtitle && subAssociations[video.path]) {
+      let subPath = subAssociations[video.path];
+      if (!subPath) {
+        const videoName = video.path.split(/[\\/]/).pop().toLowerCase();
+        for (const [oldPath, oldSub] of Object.entries(subAssociations)) {
+          if (oldPath === video.path) continue;
+          if (oldPath.split(/[\\/]/).pop().toLowerCase() === videoName) {
+            subPath = oldSub;
+            subAssociations[video.path] = subPath;
+            delete subAssociations[oldPath];
+            subMigrated = true;
+            break;
+          }
+        }
+      }
+      if (!video.hasSubtitle && subPath) {
         video.hasSubtitle = true;
-        video.subtitlePath = subAssociations[video.path];
+        video.subtitlePath = subPath;
         video._manualSubtitle = true;
       }
     }
+    if (subMigrated) this._settings.set('library.subtitleAssociations', subAssociations);
 
     // Restore cached durations from previous scans
     for (const video of this._videos) {
@@ -257,6 +345,8 @@ export class Library {
 
     // Compute funscript speed stats for paired videos (non-blocking)
     this._loadSpeedStats(this._videos);
+
+    this._scanning = false;
 
     if (videos.length === 0) {
       const countEl = this._container.querySelector('.library__video-count');
@@ -275,9 +365,26 @@ export class Library {
     this._applyFilters();
   }
 
+  _showLoadingState() {
+    const countEl = this._container?.querySelector('.library__video-count');
+    if (countEl) countEl.textContent = 'Loading...';
+    const grid = this._container?.querySelector('.library__grid');
+    if (grid) {
+      grid.innerHTML = `
+        <div class="library__loading">
+          <div class="library__loading-spinner"></div>
+          <div class="library__loading-text">Scanning library...</div>
+        </div>
+      `;
+    }
+  }
+
   _renderGrid(videos) {
     const grid = this._container.querySelector('.library__grid');
     if (!grid) return;
+
+    // Fade out, rebuild, fade in to prevent visual stutter
+    grid.classList.add('library__grid--loading');
     grid.innerHTML = '';
 
     // Toggle grid/list class
@@ -307,6 +414,11 @@ export class Library {
       grid.appendChild(el);
       this._observer.observe(el);
     }
+
+    // Fade in after DOM is built (next frame so the browser paints the loading state first)
+    requestAnimationFrame(() => {
+      grid.classList.remove('library__grid--loading');
+    });
   }
 
   _setViewMode(mode) {
@@ -576,7 +688,6 @@ export class Library {
         if (duration) {
           const video = this._videos.find(v => v.path === videoPath);
           if (video) video.duration = duration;
-          if (this._durationCache.size > 5000) this._durationCache.clear();
           this._durationCache.set(videoPath, duration);
         }
       }
@@ -773,6 +884,10 @@ export class Library {
     // Gate: don't preview if a video is actively playing
     if (this._isVideoPlaying) return;
 
+    // Gate: skip audio-only files (no video to preview)
+    const ext = videoPath.split('.').pop().toLowerCase();
+    if (['mp3', 'wav', 'ogg', 'flac', 'aac', 'wma', 'm4a'].includes(ext)) return;
+
     this._ensurePreviewVideo();
     this._previewGeneration++;
     const gen = this._previewGeneration;
@@ -784,10 +899,11 @@ export class Library {
     video.addEventListener('loadeddata', () => {
       if (gen !== this._previewGeneration) return;
 
+      // Skip if no video track (audio-only file that slipped through)
+      if (video.videoWidth === 0 || video.videoHeight === 0) return;
+
       // Set canvas aspect ratio
-      if (video.videoWidth > 0 && video.videoHeight > 0) {
-        this._previewCanvas.height = Math.round(320 * (video.videoHeight / video.videoWidth));
-      }
+      this._previewCanvas.height = Math.round(320 * (video.videoHeight / video.videoWidth));
 
       // Seek to 25% of duration
       if (isFinite(video.duration) && video.duration > 0) {
@@ -977,8 +1093,21 @@ export class Library {
       menu.appendChild(libBtn);
     }
 
+    // Open file location
+    const openLocBtn = document.createElement('button');
+    openLocBtn.className = 'library__kebab-menu-item';
+    openLocBtn.textContent = 'Open File Location';
+    openLocBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeMenu();
+      window.funsync.showInFolder(video.path);
+    });
+    menu.appendChild(openLocBtn);
+
     cardEl.appendChild(menu);
+    cardEl.style.zIndex = '50';
     this._openMenu = menu;
+    this._openMenuCard = cardEl;
     this._openMenuButton = buttonEl;
 
     // Close on outside click (next tick to avoid immediate close)
@@ -991,6 +1120,10 @@ export class Library {
     if (this._openMenu) {
       this._openMenu.remove();
       this._openMenu = null;
+    }
+    if (this._openMenuCard) {
+      this._openMenuCard.style.zIndex = '';
+      this._openMenuCard = null;
     }
     this._openMenuButton = null;
     document.removeEventListener('click', this._boundCloseMenu);
@@ -1010,10 +1143,11 @@ export class Library {
     const allPaths = allScripts.map(f => f.name);
     const detected = mainFsPath ? detectCompanionFiles(mainFsPath.split(/[\\/]/).pop(), allPaths) : [];
 
-    // Load existing multi-axis config
+    // Load existing config
     const existingAssoc = this._settings.get('library.associations') || {};
     const existing = existingAssoc[video.path];
-    const isMulti = existing && typeof existing === 'object';
+    const isMulti = existing && typeof existing === 'object' && !existing.mode;
+    const isCustom = existing && existing.mode === 'custom';
 
     const chosen = await Modal.open({
       title: 'Associate Funscript',
@@ -1027,7 +1161,7 @@ export class Library {
         radioSingle.name = 'assoc-mode';
         radioSingle.id = 'assoc-single';
         radioSingle.value = 'single';
-        radioSingle.checked = !isMulti;
+        radioSingle.checked = !isMulti && !isCustom;
 
         const labelSingle = document.createElement('label');
         labelSingle.htmlFor = 'assoc-single';
@@ -1044,16 +1178,29 @@ export class Library {
         labelMulti.htmlFor = 'assoc-multi';
         labelMulti.textContent = 'Multi Axis';
 
+        const radioCustom = document.createElement('input');
+        radioCustom.type = 'radio';
+        radioCustom.name = 'assoc-mode';
+        radioCustom.id = 'assoc-custom';
+        radioCustom.value = 'custom';
+        radioCustom.checked = isCustom;
+
+        const labelCustom = document.createElement('label');
+        labelCustom.htmlFor = 'assoc-custom';
+        labelCustom.textContent = 'Custom Routing';
+
         modeRow.appendChild(radioSingle);
         modeRow.appendChild(labelSingle);
         modeRow.appendChild(radioMulti);
         modeRow.appendChild(labelMulti);
+        modeRow.appendChild(radioCustom);
+        modeRow.appendChild(labelCustom);
         body.appendChild(modeRow);
 
         // --- Single axis panel ---
         const singlePanel = document.createElement('div');
         singlePanel.className = 'library__assoc-panel';
-        singlePanel.hidden = isMulti;
+        singlePanel.hidden = isMulti || isCustom;
 
         // Current script info
         const currentSection = document.createElement('div');
@@ -1166,8 +1313,7 @@ export class Library {
         addVarBtn.className = 'modal-list-item library__browse-fallback';
         addVarBtn.textContent = '+ Add Variation...';
         addVarBtn.addEventListener('click', async () => {
-          const result = await window.funsync.selectFunscript();
-          if (result) close({ mode: 'addVariant', path: result.path, name: result.name });
+          close({ mode: 'addVariantFlow' });
         });
         varSection.appendChild(addVarBtn);
 
@@ -1244,19 +1390,157 @@ export class Library {
 
         body.appendChild(multiPanel);
 
+        // --- Custom Routing panel ---
+        const customPanel = document.createElement('div');
+        customPanel.className = 'library__assoc-panel';
+        customPanel.hidden = !isCustom;
+
+        const knownDevices = this._settings.get('knownDevices') || [];
+        const existingRoutes = isCustom ? (existing.routes || []) : [];
+        const routes = existingRoutes.length > 0
+          ? existingRoutes.map(r => ({ ...r }))
+          : [{ deviceId: '', scriptPath: video.funscriptPath || '', scriptName: video.funscriptPath?.split(/[\\/]/).pop() || '', role: 'main' }];
+
+        const renderCustomRoutes = () => {
+          customPanel.innerHTML = '';
+
+          for (let i = 0; i < routes.length; i++) {
+            const route = routes[i];
+            const isMain = route.role === 'main';
+
+            const row = document.createElement('div');
+            row.className = 'library__custom-route';
+
+            // Header
+            const header = document.createElement('div');
+            header.className = 'library__custom-route-header';
+            const title = document.createElement('span');
+            title.textContent = isMain ? '★ Main (supports variations)' : `Route ${i + 1}`;
+            title.className = 'library__custom-route-title';
+            header.appendChild(title);
+            if (!isMain) {
+              const delBtn = document.createElement('button');
+              delBtn.className = 'library__assoc-current-clear';
+              delBtn.textContent = '✕';
+              delBtn.title = 'Remove route';
+              delBtn.addEventListener('click', () => { routes.splice(i, 1); renderCustomRoutes(); });
+              header.appendChild(delBtn);
+            }
+            row.appendChild(header);
+
+            // Device dropdown
+            const devRow = document.createElement('div');
+            devRow.className = 'library__custom-route-field';
+            const devLabel = document.createElement('span');
+            devLabel.textContent = 'Device:';
+            devLabel.className = 'library__assoc-axis-label';
+            const devSelect = document.createElement('select');
+            devSelect.className = 'connection-panel__device-select';
+            const defaultOpt = document.createElement('option');
+            defaultOpt.value = '';
+            defaultOpt.textContent = knownDevices.length > 0 ? '-- Select device --' : 'Connect a device first';
+            devSelect.appendChild(defaultOpt);
+            for (const kd of knownDevices) {
+              const opt = document.createElement('option');
+              opt.value = kd.id;
+              opt.textContent = kd.label;
+              devSelect.appendChild(opt);
+            }
+            devSelect.value = route.deviceId || '';
+            devSelect.addEventListener('change', () => { route.deviceId = devSelect.value; });
+            devRow.appendChild(devLabel);
+            devRow.appendChild(devSelect);
+            row.appendChild(devRow);
+
+            // Script picker
+            const scriptRow = document.createElement('div');
+            scriptRow.className = 'library__custom-route-field';
+            const scriptLabel = document.createElement('span');
+            scriptLabel.textContent = 'Script:';
+            scriptLabel.className = 'library__assoc-axis-label';
+            const scriptName = document.createElement('span');
+            scriptName.className = 'library__custom-route-script';
+            scriptName.textContent = route.scriptName || route.scriptPath?.split(/[\\/]/).pop() || '(none)';
+            scriptName.title = route.scriptPath || '';
+            const browseBtn = document.createElement('button');
+            browseBtn.className = 'connection-panel__btn';
+            browseBtn.style.cssText = 'min-width:auto;padding:4px 10px;font-size:11px';
+            browseBtn.textContent = 'Select';
+            browseBtn.addEventListener('click', async () => {
+              const picked = await this._showVariantSearchModal(video);
+              if (picked) {
+                route.scriptPath = picked.path;
+                route.scriptName = picked.name;
+                scriptName.textContent = picked.name;
+                scriptName.title = picked.path;
+              }
+            });
+            scriptRow.appendChild(scriptLabel);
+            scriptRow.appendChild(scriptName);
+            scriptRow.appendChild(browseBtn);
+            row.appendChild(scriptRow);
+
+            customPanel.appendChild(row);
+          }
+
+          // Add Route button
+          const addBtn = document.createElement('button');
+          addBtn.className = 'modal-list-item library__browse-fallback';
+          addBtn.textContent = '+ Add Route';
+          addBtn.addEventListener('click', () => {
+            routes.push({ deviceId: '', scriptPath: '', scriptName: '', role: 'axis' });
+            renderCustomRoutes();
+          });
+          customPanel.appendChild(addBtn);
+
+          // Save button
+          const saveBtn = document.createElement('button');
+          saveBtn.className = 'library__assoc-save-btn';
+          saveBtn.style.marginTop = '12px';
+          saveBtn.textContent = 'Save';
+          saveBtn.addEventListener('click', () => {
+            const mainRoute = routes.find(r => r.role === 'main');
+            if (!mainRoute || !mainRoute.scriptPath) return;
+            close({ mode: 'custom', routes: routes.filter(r => r.scriptPath) });
+          });
+          customPanel.appendChild(saveBtn);
+        };
+
+        renderCustomRoutes();
+        body.appendChild(customPanel);
+
         // --- Radio toggle ---
         radioSingle.addEventListener('change', () => {
           singlePanel.hidden = false;
           multiPanel.hidden = true;
+          customPanel.hidden = true;
         });
         radioMulti.addEventListener('change', () => {
           singlePanel.hidden = true;
           multiPanel.hidden = false;
+          customPanel.hidden = true;
+        });
+        radioCustom.addEventListener('change', () => {
+          singlePanel.hidden = true;
+          multiPanel.hidden = true;
+          customPanel.hidden = false;
         });
       },
     });
 
     if (!chosen) return;
+
+    // Warn if overwriting a more complex config with a simpler one
+    if (chosen.mode === 'single' && (isMulti || isCustom)) {
+      const prevType = isCustom ? 'Custom Routing' : 'Multi Axis';
+      const confirmed = await Modal.confirm('Change Association',
+        `This video has a ${prevType} config. Switching to Single Axis will replace it. Continue?`);
+      if (!confirmed) return;
+    } else if (chosen.mode === 'multi' && isCustom) {
+      const confirmed = await Modal.confirm('Change Association',
+        'This video has a Custom Routing config. Switching to Multi Axis will replace it. Continue?');
+      if (!confirmed) return;
+    }
 
     if (chosen.mode === 'single') {
       this._applyAssociation(video, cardEl, chosen.path, chosen.name);
@@ -1264,19 +1548,178 @@ export class Library {
       const hasAny = !!chosen.main || Object.values(chosen.axes || {}).some(Boolean);
       if (!hasAny) return;
       this._applyMultiAxisAssociation(video, cardEl, chosen);
+    } else if (chosen.mode === 'custom') {
+      this._applyCustomRoutingAssociation(video, cardEl, chosen.routes);
     } else if (chosen.mode === 'remove') {
       this._removeAssociation(video, cardEl);
       this._applyFilters();
     } else if (chosen.mode === 'addVariant') {
-      // Add a variant without changing the main script
-      const nameNoExt = chosen.name.replace(/\.funscript$/i, '');
-      const parenMatch = nameNoExt.match(/\(([^)]+)\)/);
-      const label = parenMatch ? parenMatch[1].trim() : nameNoExt;
-      const manualVariants = this._settings.get('library.manualVariants') || {};
-      if (!manualVariants[video.path]) manualVariants[video.path] = [];
-      manualVariants[video.path].push({ label, path: chosen.path, name: chosen.name });
-      this._settings.set('library.manualVariants', manualVariants);
+      await this._addVariantWithNaming(video.path, chosen.path, chosen.name);
+    } else if (chosen.mode === 'addVariantFlow') {
+      // Full flow: fuzzy search → naming → reopen association modal
+      const picked = await this._showVariantSearchModal(video);
+      if (picked) {
+        await this._addVariantWithNaming(video.path, picked.path, picked.name);
+      }
+      // Reopen the association modal so the user can continue
+      this._associateFunscript(video, cardEl);
+      return;
     }
+  }
+
+  _applyCustomRoutingAssociation(video, cardEl, routes) {
+    const associations = this._settings.get('library.associations') || {};
+    associations[video.path] = { mode: 'custom', routes };
+    this._settings.set('library.associations', associations);
+
+    const mainRoute = routes.find(r => r.role === 'main');
+    if (mainRoute) {
+      video.hasFunscript = true;
+      video.funscriptPath = mainRoute.scriptPath;
+      video._manualAssociation = true;
+      video._customRouting = routes;
+    }
+    this._applyFilters();
+  }
+
+  /**
+   * Show fuzzy-ranked funscript search modal for adding a variation.
+   * Returns { path, name } or null if cancelled.
+   */
+  async _showVariantSearchModal(video) {
+    const allScripts = this._allFunscripts || [];
+    const ranked = allScripts.length > 0 ? rankFunscriptMatches(video.name, allScripts, 0) : [];
+
+    return Modal.open({
+      title: 'Select Script for Variation',
+      onRender: (body, close) => {
+        if (ranked.length > 0) {
+          const list = document.createElement('div');
+          list.className = 'modal-list';
+
+          for (const match of ranked.slice(0, 30)) {
+            const row = document.createElement('button');
+            row.className = 'modal-list-item';
+
+            const label = document.createElement('span');
+            label.className = 'modal-list-item-label';
+            label.textContent = match.name;
+            row.appendChild(label);
+
+            if (match.score > 0) {
+              const badge = document.createElement('span');
+              const scoreClass = match.score >= 70 ? '--high' : match.score >= 40 ? '--medium' : '--low';
+              badge.className = `library__match-score library__match-score${scoreClass}`;
+              badge.textContent = `${match.score}%`;
+              row.appendChild(badge);
+            }
+
+            row.addEventListener('click', () => close({ path: match.path, name: match.name }));
+            list.appendChild(row);
+          }
+          body.appendChild(list);
+        }
+
+        const divider = document.createElement('div');
+        divider.className = 'library__suggestion-divider';
+        body.appendChild(divider);
+
+        const browseRow = document.createElement('button');
+        browseRow.className = 'modal-list-item library__browse-fallback';
+        browseRow.textContent = 'Browse...';
+        browseRow.addEventListener('click', async () => {
+          const result = await window.funsync.selectFunscript();
+          if (result) close(result);
+        });
+        body.appendChild(browseRow);
+      },
+    });
+  }
+
+  /**
+   * Show naming modal for a variant, then save it.
+   * Reuses the same flow as the player's "Add variation" naming modal.
+   */
+  async _addVariantWithNaming(videoPath, fsPath, fsName) {
+    const nameNoExt = fsName.replace(/\.funscript$/i, '');
+    const parenMatches = [...nameNoExt.matchAll(/\(([^)]+)\)/g)].map(m => m[1].trim());
+    const dotParts = nameNoExt.split('.');
+    const dotSuffix = dotParts.length > 1 ? dotParts[dotParts.length - 1].trim() : null;
+
+    const suggestions = [];
+    const seen = new Set();
+    for (const s of parenMatches) {
+      const lower = s.toLowerCase();
+      if (!seen.has(lower)) { seen.add(lower); suggestions.push(s); }
+    }
+    if (dotSuffix && !seen.has(dotSuffix.toLowerCase())) suggestions.push(dotSuffix);
+    if (!seen.has(nameNoExt.toLowerCase())) suggestions.push(nameNoExt);
+
+    const label = await Modal.open({
+      title: 'Name This Variation',
+      onRender: (body, close) => {
+        const hint = document.createElement('div');
+        hint.className = 'library__collection-count';
+        hint.style.marginBottom = '10px';
+        hint.textContent = fsName;
+        body.appendChild(hint);
+
+        if (suggestions.length > 0) {
+          const sugLabel = document.createElement('div');
+          sugLabel.className = 'library__collection-count';
+          sugLabel.style.marginBottom = '6px';
+          sugLabel.textContent = 'Suggestions:';
+          body.appendChild(sugLabel);
+
+          const sugList = document.createElement('div');
+          sugList.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px';
+          for (const sug of suggestions) {
+            const btn = document.createElement('button');
+            btn.className = 'library__assoc-save-btn';
+            btn.style.cssText = 'padding:6px 14px;font-size:13px';
+            btn.textContent = sug;
+            btn.addEventListener('click', () => close(sug));
+            sugList.appendChild(btn);
+          }
+          body.appendChild(sugList);
+        }
+
+        const divider = document.createElement('div');
+        divider.className = 'nav-bar__library-divider';
+        divider.style.margin = '8px 0';
+        body.appendChild(divider);
+
+        const customLabel = document.createElement('div');
+        customLabel.className = 'library__collection-count';
+        customLabel.style.marginBottom = '6px';
+        customLabel.textContent = 'Custom name:';
+        body.appendChild(customLabel);
+
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.className = 'modal-input';
+        input.placeholder = 'Enter a name...';
+        input.style.marginBottom = '12px';
+        body.appendChild(input);
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'library__assoc-save-btn';
+        confirmBtn.style.cssText = 'display:block;width:66%;margin:0 auto';
+        confirmBtn.textContent = 'OK';
+        confirmBtn.addEventListener('click', () => { const v = input.value.trim(); if (v) close(v); });
+        body.appendChild(confirmBtn);
+
+        input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const v = input.value.trim(); if (v) close(v); } });
+        input.focus();
+      },
+    });
+
+    if (!label) return;
+
+    const manualVariants = this._settings.get('library.manualVariants') || {};
+    if (!manualVariants[videoPath]) manualVariants[videoPath] = [];
+    manualVariants[videoPath].push({ label, path: fsPath, name: fsName });
+    this._settings.set('library.manualVariants', manualVariants);
   }
 
   _createAxisDropdown(label, key, allScripts, preValue, videoName) {
@@ -1495,16 +1938,14 @@ export class Library {
       filtered = filtered.filter((v) => !v.hasFunscript);
     }
 
-    // Search: fuzzy matching (replaces simple includes)
+    // Search: fuzzy matching
     if (this._searchQuery) {
       filtered = fuzzySearch(filtered, this._searchQuery);
     }
 
-    // Sort (format: "field:direction")
-    if (!this._searchQuery) {
-      const [sortField, sortDir] = (this._sortKey || 'name:asc').split(':');
-      filtered = sortVideos(filtered, sortField, sortDir || 'asc');
-    }
+    // Sort (always applied — as primary when no search, as secondary after fuzzy ranking)
+    const [sortField, sortDir] = (this._sortKey || 'name:asc').split(':');
+    filtered = sortVideos(filtered, sortField, sortDir || 'asc');
 
     // Update count
     const countEl = this._container.querySelector('.library__video-count');
@@ -1661,6 +2102,10 @@ export class Library {
           if (video._multiAxis) {
             funscriptData._multiAxis = video._multiAxis;
           }
+          // Attach custom routing config if present
+          if (video._customRouting) {
+            funscriptData._customRouting = video._customRouting;
+          }
         }
       } catch (err) {
         console.warn('Failed to read funscript:', err.message);
@@ -1670,6 +2115,10 @@ export class Library {
     // Attach multi-axis config even without a main funscript (vib-only case)
     if (!funscriptData && video._multiAxis) {
       funscriptData = { name: '', textContent: null, _multiAxis: video._multiAxis };
+    }
+    // Attach custom routing even if main script couldn't be read
+    if (!funscriptData && video._customRouting) {
+      funscriptData = { name: '', textContent: null, _customRouting: video._customRouting };
     }
 
     // If subtitle is available, read it and build a subtitle file-like object

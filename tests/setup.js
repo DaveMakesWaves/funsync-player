@@ -33,6 +33,25 @@ window.funsync = {
 
   // Shell
   openExternal: vi.fn().mockResolvedValue(undefined),
+  showInFolder: vi.fn().mockResolvedValue(undefined),
+
+  // Autoblow
+  autoblowConnect: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
+  autoblowDisconnect: vi.fn().mockResolvedValue({ success: true }),
+  autoblowStatus: vi.fn().mockResolvedValue({ connected: false }),
+  autoblowUploadScript: vi.fn().mockResolvedValue({ success: true }),
+  autoblowSyncStart: vi.fn().mockResolvedValue({ success: true }),
+  autoblowSyncStop: vi.fn().mockResolvedValue({ success: true }),
+  autoblowSyncOffset: vi.fn().mockResolvedValue({ success: true }),
+  autoblowLatency: vi.fn().mockResolvedValue({ success: true, latency: 50 }),
+
+  // TCode Serial
+  tcodeListPorts: vi.fn().mockResolvedValue([]),
+  tcodeConnect: vi.fn().mockResolvedValue({ success: true }),
+  tcodeDisconnect: vi.fn().mockResolvedValue({ success: true }),
+  tcodeSend: vi.fn().mockResolvedValue(true),
+  tcodeStatus: vi.fn().mockResolvedValue({ connected: false }),
+  onTcodeDisconnected: vi.fn().mockReturnValue(() => {}),
 
   // EroScripts
   eroscriptsLogin: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
@@ -82,6 +101,7 @@ window.funsync = {
         directory: '',
         sources: [],
         associations: {},
+        manualVariants: {},
         collections: [],
         activeCollectionId: null,
       },
@@ -89,8 +109,19 @@ window.funsync = {
         defaultCreator: '',
         patternPresets: [],
       },
+      knownDevices: [],
       buttplug: {
         port: 12345,
+      },
+      tcode: {
+        port: '',
+        baudRate: 115200,
+        axisRanges: {},
+        axisEnabled: {},
+      },
+      autoblow: {
+        token: '',
+        offset: 0,
       },
     },
     playlists: [],

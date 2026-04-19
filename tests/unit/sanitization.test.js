@@ -93,12 +93,14 @@ describe('sanitization', () => {
     expect(riskyPatterns.length).toBeLessThan(10);
   });
 
-  it('connection panel device names are escaped', () => {
+  it('connection panel device names are safely rendered', () => {
     const cpFile = path.join(RENDERER_DIR, 'components', 'connection-panel.js');
     const content = fs.readFileSync(cpFile, 'utf-8');
 
-    // Verify _esc is used for device name rendering
-    expect(content).toContain('_esc(dev.name)');
+    // Device name must use textContent (safe) or _esc (escaped) — not raw innerHTML
+    const usesTextContent = content.includes('.textContent = dev.name');
+    const usesEsc = content.includes('_esc(dev.name)');
+    expect(usesTextContent || usesEsc).toBe(true);
   });
 
   it('script editor metadata modal escapes user input', () => {
