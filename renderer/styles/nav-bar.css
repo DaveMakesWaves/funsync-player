@@ -302,3 +302,23 @@
   color: var(--text-secondary);
   line-height: 1;
 }
+
+/* Settings Button */
+.nav-bar__settings {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  margin-left: 4px;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.nav-bar__settings:hover {
+  color: var(--text-primary);
+  background: var(--control-hover);
+}

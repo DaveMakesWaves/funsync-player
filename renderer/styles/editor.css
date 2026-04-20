@@ -98,6 +98,43 @@
 }
 
 /* Speed select */
+.editor__script-select {
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: var(--accent);
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 500;
+  padding: 3px 8px;
+  cursor: pointer;
+  outline: none;
+  max-width: 200px;
+}
+
+.editor__script-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+.editor__script-select:focus {
+  border-color: var(--accent);
+}
+
+.editor__toggle-label {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.editor__toggle-label input {
+  accent-color: var(--accent);
+}
+
 .editor__speed-select {
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.12);

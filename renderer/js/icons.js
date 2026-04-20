@@ -55,6 +55,7 @@ export { default as Download } from '../../node_modules/lucide/dist/esm/icons/do
 export { default as LayoutGrid } from '../../node_modules/lucide/dist/esm/icons/layout-grid.js';
 export { default as LayoutList } from '../../node_modules/lucide/dist/esm/icons/layout-list.js';
 export { default as Unplug } from '../../node_modules/lucide/dist/esm/icons/unplug.js';
+export { default as Settings } from '../../node_modules/lucide/dist/esm/icons/settings.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

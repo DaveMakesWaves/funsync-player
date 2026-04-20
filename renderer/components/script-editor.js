@@ -61,6 +61,19 @@ export class ScriptEditor {
     /** @type {Function|null} Callback for when we create/load a funscript in editor */
     this.onFunscriptCreated = null;
 
+    // Multi-script editing
+    this._availableScripts = []; // [{ label, path }] — populated by app.js
+    this._scriptSelect = null;
+
+    // Undo stack cache per path (survives script switching)
+    this._undoCache = new Map(); // path → { actions, undoStack, redoStack, selectedIndices, bookmarks }
+
+    // Snap-to-frame
+    this._snapToFrame = true;
+
+    // Live device preview
+    this._livePreview = false;
+
     this._buildPanel();
     this._bindEvents();
 
@@ -177,14 +190,37 @@ export class ScriptEditor {
     this._statusEl = document.createElement('span');
     this._statusEl.className = 'editor__status';
 
+    // Script selector (multi-axis / custom routing)
+    this._scriptSelect = document.createElement('select');
+    this._scriptSelect.className = 'editor__script-select';
+    this._scriptSelect.title = 'Select which script to edit';
+    this._scriptSelect.hidden = true; // shown when multiple scripts available
+    this._scriptSelect.addEventListener('change', () => this._onScriptSelectChange());
+
+    const sepScript = this._makeSeparator();
+    sepScript.classList.add('editor__script-sep');
+    sepScript.hidden = true;
+
+    // Snap-to-frame toggle
+    const snapLabel = document.createElement('label');
+    snapLabel.className = 'editor__toggle-label';
+    const snapCheck = document.createElement('input');
+    snapCheck.type = 'checkbox';
+    snapCheck.checked = this._snapToFrame;
+    snapCheck.addEventListener('change', () => { this._snapToFrame = snapCheck.checked; });
+    snapLabel.appendChild(snapCheck);
+    snapLabel.appendChild(document.createTextNode(' Snap'));
+    snapLabel.title = 'Snap action timestamps to video frame boundaries';
+
     toolbar.append(
+      this._scriptSelect, sepScript,
       this._btnUndo, this._btnRedo, sep1,
       btnDelete, btnCut, btnInvert, btnSimplify, sep1b,
       this._modifySelect, sep1c,
       btnMetadata, btnBookmark, btnFillGaps, this._btnWaveform, btnBeats, sep1d,
       btnZoomIn, btnZoomOut, btnFitAll, sep2,
       speedLabel, this._speedSelect, sep3,
-      btnSave, autosaveGroup, this._statusEl,
+      btnSave, autosaveGroup, snapLabel, this._statusEl,
     );
 
     // Canvas container
@@ -505,12 +541,14 @@ export class ScriptEditor {
         const newIdx = this.editableScript.updateAction(idx, { pos });
         this.editableScript.select(newIdx);
         this._lastSelectedIndex = newIdx;
+        this._sendLivePreview(pos);
       } else {
         // No selection (or multi) — insert new action at current video time
-        const timeMs = this.videoPlayer.currentTime * 1000;
+        const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
         const newIdx = this.editableScript.insertAction(timeMs, pos);
         this.editableScript.select(newIdx);
         this._lastSelectedIndex = newIdx;
+        this._sendLivePreview(pos);
       }
       return;
     }
@@ -1689,6 +1727,160 @@ export class ScriptEditor {
     // The app stores _currentVideoPath — we need to access it
     // We'll use a data attribute set by app.js
     return document.getElementById('player-container')?.dataset?.videoPath || null;
+  }
+
+  // --- Multi-Script Selector ---
+
+  /**
+   * Set available scripts for the dropdown (called by app.js when multi-axis/custom routing is active).
+   * @param {Array<{label: string, path: string}>} scripts
+   */
+  setAvailableScripts(scripts) {
+    this._availableScripts = scripts || [];
+    this._updateScriptSelect();
+  }
+
+  _updateScriptSelect() {
+    if (!this._scriptSelect) return;
+    const show = this._availableScripts.length > 1;
+    this._scriptSelect.hidden = !show;
+
+    // Also show/hide the separator
+    const sep = this._panel?.querySelector('.editor__script-sep');
+    if (sep) sep.hidden = !show;
+
+    if (!show) return;
+
+    this._scriptSelect.innerHTML = '';
+    for (const s of this._availableScripts) {
+      const opt = document.createElement('option');
+      opt.value = s.path;
+      opt.textContent = s.label;
+      this._scriptSelect.appendChild(opt);
+    }
+    if (this._funscriptPath) {
+      this._scriptSelect.value = this._funscriptPath;
+    }
+  }
+
+  async _onScriptSelectChange() {
+    const newPath = this._scriptSelect.value;
+    if (!newPath || newPath === this._funscriptPath) return;
+
+    // Cache current undo state before switching
+    this._cacheUndoState();
+
+    // Flush pending autosave
+    if (this._autosaveTimer) {
+      clearTimeout(this._autosaveTimer);
+      this._autosaveTimer = null;
+      if (this._autosaveEnabled && this.editableScript.dirty && this._funscriptPath) {
+        await this._autosave();
+      }
+    }
+
+    // Load the new script from disk
+    this._funscriptPath = newPath;
+    try {
+      const content = await window.funsync.readFunscript(newPath);
+      if (content) {
+        const parsed = JSON.parse(content);
+        this.editableScript.loadFromData(parsed);
+
+        // Restore undo/redo stacks if we have a cache (but keep fresh actions from disk)
+        const cached = this._undoCache.get(newPath);
+        if (cached) {
+          const deserializeStack = (stack) => stack.map(entry => ({
+            ...entry,
+            selectedIndices: new Set(entry.selectedIndices || []),
+          }));
+          this.editableScript._undoStack = deserializeStack(JSON.parse(JSON.stringify(cached.undoStack)));
+          this.editableScript._redoStack = deserializeStack(JSON.parse(JSON.stringify(cached.redoStack)));
+          this.editableScript._selectedIndices = new Set(cached.selectedIndices);
+          this.editableScript._dirty = cached.dirty;
+        }
+
+        this.graph?.fitAll();
+        this._updateToolbarState();
+        this._statusEl.textContent = newPath.split(/[\\/]/).pop();
+      }
+    } catch (err) {
+      console.warn('[Editor] Failed to load script:', err.message);
+    }
+  }
+
+  // --- Undo Stack Cache ---
+
+  clearUndoCache() {
+    this._undoCache.clear();
+  }
+
+  _cacheUndoState() {
+    if (!this._funscriptPath) return;
+    // Deep clone everything — undo/redo stacks contain objects with Set selectedIndices
+    // which JSON.stringify can't handle, so we serialize Sets as arrays
+    const serializeStack = (stack) => stack.map(entry => ({
+      ...entry,
+      selectedIndices: entry.selectedIndices ? [...entry.selectedIndices] : [],
+    }));
+    this._undoCache.set(this._funscriptPath, {
+      actions: JSON.parse(JSON.stringify(this.editableScript.actions)),
+      undoStack: JSON.parse(JSON.stringify(serializeStack(this.editableScript._undoStack))),
+      redoStack: JSON.parse(JSON.stringify(serializeStack(this.editableScript._redoStack))),
+      selectedIndices: [...this.editableScript._selectedIndices],
+      bookmarks: JSON.parse(JSON.stringify(this.editableScript._bookmarks || [])),
+      dirty: this.editableScript.dirty,
+    });
+  }
+
+  _restoreUndoState() {
+    if (!this._funscriptPath) return;
+    const cached = this._undoCache.get(this._funscriptPath);
+    if (!cached) return;
+    // Deep clone from cache so the cache itself isn't mutated
+    const deserializeStack = (stack) => stack.map(entry => ({
+      ...entry,
+      selectedIndices: new Set(entry.selectedIndices || []),
+    }));
+    this.editableScript._actions = JSON.parse(JSON.stringify(cached.actions));
+    this.editableScript._undoStack = deserializeStack(JSON.parse(JSON.stringify(cached.undoStack)));
+    this.editableScript._redoStack = deserializeStack(JSON.parse(JSON.stringify(cached.redoStack)));
+    this.editableScript._selectedIndices = new Set(cached.selectedIndices);
+    this.editableScript._bookmarks = JSON.parse(JSON.stringify(cached.bookmarks));
+    this.editableScript._dirty = cached.dirty;
+  }
+
+  // --- Snap to Frame ---
+
+  /**
+   * Snap a timestamp to the nearest video frame boundary.
+   * @param {number} timeMs — timestamp in milliseconds
+   * @returns {number} snapped timestamp
+   */
+  snapTime(timeMs) {
+    if (!this._snapToFrame) return timeMs;
+    if (!this.videoPlayer?.video || !isFinite(this.videoPlayer.video.duration)) return timeMs;
+
+    // Use 30fps as default snap grid — reliable across all videos
+    // (getVideoPlaybackQuality().totalVideoFrames is unreliable for FPS estimation)
+    const frameDurationMs = 1000 / 30;
+    return Math.round(timeMs / frameDurationMs) * frameDurationMs;
+  }
+
+  // --- Live Device Preview ---
+
+  /**
+   * Send a position preview to connected HDSP-capable devices.
+   * Called when dragging actions or placing via numpad.
+   * @param {number} position — 0-100
+   */
+  _sendLivePreview(position) {
+    if (!this.handyManager?.connected) return;
+    // Only send HDSP when sync is NOT active (would break HSSP)
+    if (this.syncEngine?._active) return;
+    try {
+      this.handyManager.hdspMove(position, 150);
+    } catch { /* ignore */ }
   }
 }
 

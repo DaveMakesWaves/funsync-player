@@ -62,9 +62,22 @@
   --progress-buffered: rgba(255, 255, 255, 0.35);
   --progress-filled: #e94560;
   --control-hover: rgba(255, 255, 255, 0.1);
+  --bg-modal: #1c2a4a;
+  --text-dropdown: #c8c8d0;
+  --bg-dropdown-option: #1e2d50;
   --font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
+}
+
+/* Global dropdown styling */
+select {
+  color: var(--text-dropdown);
+}
+
+select option {
+  background: var(--bg-dropdown-option);
+  color: var(--text-dropdown);
 }
 
 html, body {
@@ -660,12 +673,12 @@ html, body {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--bg-modal);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: 12px;
   padding: 24px;
-  min-width: 380px;
-  max-width: 480px;
+  min-width: 520px;
+  max-width: 650px;
   z-index: 1000;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
@@ -1026,8 +1039,8 @@ html, body {
 .connection-panel__device-row {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
+  gap: 4px;
+  padding: 8px 10px;
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: 6px;
   background: rgba(255, 255, 255, 0.02);
@@ -1036,12 +1049,12 @@ html, body {
 .connection-panel__device-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .connection-panel__device-name {
   color: var(--text-primary, #eee);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
 }
 
@@ -1069,28 +1082,34 @@ html, body {
   background: rgba(255, 255, 255, 0.08);
 }
 
-.connection-panel__device-axis-row {
+.connection-panel__device-controls-row {
   display: flex;
   align-items: center;
   gap: 6px;
+  flex-wrap: wrap;
+}
+
+.connection-panel__device-controls-row select {
+  font-size: 11px;
+  padding: 2px 5px;
+}
+
+.connection-panel__device-axis-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .connection-panel__device-axis-label {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-secondary);
   flex-shrink: 0;
 }
 
 .connection-panel__device-axis-row select {
-  flex: 1;
-  font-size: 12px;
-}
-
-.connection-panel__device-quick {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
+  font-size: 11px;
+  padding: 2px 5px;
+  max-width: 160px;
 }
 
 .connection-panel__device-safety-section {
@@ -1099,6 +1118,40 @@ html, body {
   gap: 4px;
   padding-top: 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.connection-panel__vr-help {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.connection-panel__vr-help-step {
+  font-size: 12px;
+  color: var(--text-secondary);
+  padding: 2px 0;
+  line-height: 1.5;
+}
+
+.connection-panel__vr-help-step strong {
+  color: var(--text-primary);
+}
+
+.connection-panel__vr-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.08);
+  margin: 12px 0;
+}
+
+.connection-panel__vr-help-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  padding: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 4px;
+  line-height: 1.5;
+  border-left: 2px solid var(--accent);
 }
 
 .connection-panel__device-caps {

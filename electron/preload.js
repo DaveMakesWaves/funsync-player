@@ -75,6 +75,20 @@ contextBridge.exposeInMainWorld('funsync', {
     return () => ipcRenderer.removeListener('tcode-disconnected', callback);
   },
 
+  // VR Bridge
+  vrConnect: (host, port) => ipcRenderer.invoke('vr-connect', host, port),
+  vrDisconnect: () => ipcRenderer.invoke('vr-disconnect'),
+  vrSend: (jsonStr) => ipcRenderer.invoke('vr-send', jsonStr),
+  onVrState: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('vr-state', handler);
+    return () => ipcRenderer.removeListener('vr-state', handler);
+  },
+  onVrDisconnected: (callback) => {
+    ipcRenderer.on('vr-disconnected', callback);
+    return () => ipcRenderer.removeListener('vr-disconnected', callback);
+  },
+
   // Autoblow
   autoblowConnect: (token) => ipcRenderer.invoke('autoblow-connect', token),
   autoblowDisconnect: () => ipcRenderer.invoke('autoblow-disconnect'),

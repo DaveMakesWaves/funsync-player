@@ -1,11 +1,12 @@
 // NavBar — Persistent top navigation bar
 
-import { icon, Library, ListVideo, Tag, Download, Unplug } from '../js/icons.js';
+import { icon, Library, ListVideo, Tag, Download, Unplug, Settings } from '../js/icons.js';
 
 export class NavBar {
-  constructor({ onNavigate, onHandyClick, onEroScriptsClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
+  constructor({ onNavigate, onHandyClick, onSettingsClick, onEroScriptsClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
     this._onNavigate = onNavigate;
     this._onHandyClick = onHandyClick;
+    this._onSettingsClick = onSettingsClick;
     this._onEroScriptsClick = onEroScriptsClick;
     this._onLibraryCollectionChange = onLibraryCollectionChange;
     this._onNewCollection = onNewCollection;
@@ -135,6 +136,16 @@ export class NavBar {
     });
 
     this._el.appendChild(this._handyBtn);
+
+    // Settings button
+    this._settingsBtn = document.createElement('button');
+    this._settingsBtn.className = 'nav-bar__settings';
+    this._settingsBtn.title = 'Settings';
+    this._settingsBtn.appendChild(icon(Settings, { width: 16, height: 16 }));
+    this._settingsBtn.addEventListener('click', () => {
+      if (this._onSettingsClick) this._onSettingsClick();
+    });
+    this._el.appendChild(this._settingsBtn);
 
     // Insert at the top of the parent
     parentEl.prepend(this._el);

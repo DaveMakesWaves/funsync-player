@@ -35,6 +35,13 @@ window.funsync = {
   openExternal: vi.fn().mockResolvedValue(undefined),
   showInFolder: vi.fn().mockResolvedValue(undefined),
 
+  // VR Bridge
+  vrConnect: vi.fn().mockResolvedValue({ success: true }),
+  vrDisconnect: vi.fn().mockResolvedValue({ success: true }),
+  vrSend: vi.fn().mockResolvedValue(true),
+  onVrState: vi.fn().mockReturnValue(() => {}),
+  onVrDisconnected: vi.fn().mockReturnValue(() => {}),
+
   // Autoblow
   autoblowConnect: vi.fn().mockResolvedValue({ success: false, error: 'mock' }),
   autoblowDisconnect: vi.fn().mockResolvedValue({ success: true }),

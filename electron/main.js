@@ -28,6 +28,21 @@ if (!gotTheLock) {
 }
 
 function createWindow() {
+  // Show splash screen immediately while main window loads
+  const splash = new BrowserWindow({
+    width: 320,
+    height: 200,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    icon: path.join(__dirname, '..', 'assets', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
+    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  });
+  splash.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html'));
+  splash.center();
+
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -49,6 +64,7 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
+    splash.destroy();
     mainWindow.show();
     if (app.isPackaged) {
       initAutoUpdater(mainWindow);
@@ -524,6 +540,18 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
   // Sort alphabetically
   videos.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   log.info(`[Library] Result: ${videos.length} videos, ${unmatchedFunscripts.length} unmatched fs, ${allFunscripts.length} total fs (${Date.now() - scanStart}ms total)`);
+
+  // Register videos with backend for VR content server (fire-and-forget)
+  try {
+    const { app } = require('electron');
+    const thumbDir = path.join(app.getPath('userData'), 'thumb-cache');
+    fetch('http://127.0.0.1:5123/api/media/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ videos, thumbCacheDir: thumbDir }),
+    }).catch(() => {}); // ignore if backend not running
+  } catch { /* ignore */ }
+
   return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts, failedPaths };
 });
 
@@ -765,6 +793,131 @@ ipcMain.handle('tcode-send', (_event, command) => {
 
 ipcMain.handle('tcode-status', () => {
   return { connected: !!(tcodePort && tcodePort.isOpen) };
+});
+
+// --- IPC Handlers: VR Bridge (TCP) ---
+
+let vrSocket = null;
+let vrKeepAliveTimer = null;
+
+ipcMain.handle('vr-connect', async (_event, host, port) => {
+  const net = require('net');
+
+  // Clean up existing connection
+  if (vrSocket) {
+    vrSocket.removeAllListeners();
+    vrSocket.destroy();
+    vrSocket = null;
+  }
+  if (vrKeepAliveTimer) {
+    clearInterval(vrKeepAliveTimer);
+    vrKeepAliveTimer = null;
+  }
+
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let connected = false;
+    let buffer = Buffer.alloc(0);
+
+    socket.setTimeout(5000);
+
+    socket.connect(port || 23554, host || '127.0.0.1', () => {
+      connected = true;
+      resolved = true;
+      vrSocket = socket;
+      log.info(`[VR] Connected to ${host}:${port}`);
+
+      // Keep-alive: send zero-length packet every 1s (4 bytes of zeros)
+      // This matches MultiFunPlayer's protocol — DeoVR/HereSphere drop after 3s of silence
+      vrKeepAliveTimer = setInterval(() => {
+        if (vrSocket) {
+          try {
+            vrSocket.write(Buffer.alloc(4, 0)); // [0,0,0,0] = zero-length packet
+          } catch { /* ignore write errors */ }
+        }
+      }, 1000);
+
+      resolve({ success: true });
+    });
+
+    socket.on('data', (chunk) => {
+      buffer = Buffer.concat([buffer, chunk]);
+
+      // Parse packets: 4-byte LE length + JSON payload
+      while (buffer.length >= 4) {
+        const len = buffer.readUInt32LE(0);
+        if (buffer.length < 4 + len) break; // incomplete packet
+
+        const json = buffer.slice(4, 4 + len).toString('utf-8');
+        buffer = buffer.slice(4 + len);
+
+        try {
+          const data = JSON.parse(json);
+          BrowserWindow.getAllWindows().forEach(w =>
+            w.webContents.send('vr-state', data)
+          );
+        } catch (err) {
+          log.debug('[VR] Failed to parse JSON:', err.message);
+        }
+      }
+    });
+
+    let resolved = false;
+
+    socket.on('close', () => {
+      if (vrKeepAliveTimer) { clearInterval(vrKeepAliveTimer); vrKeepAliveTimer = null; }
+      // Only send disconnected event if we were previously connected
+      if (connected) {
+        log.info('[VR] Connection closed');
+        vrSocket = null;
+        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('vr-disconnected'));
+      }
+      connected = false;
+    });
+
+    socket.on('error', (err) => {
+      log.warn('[VR] Socket error:', err.message);
+      if (!resolved) {
+        resolved = true;
+        vrSocket = null;
+        resolve({ success: false, error: err.message });
+      }
+    });
+
+    socket.on('timeout', () => {
+      if (!resolved) {
+        resolved = true;
+        socket.destroy();
+        vrSocket = null;
+        resolve({ success: false, error: 'Connection timed out' });
+      }
+    });
+  });
+});
+
+ipcMain.handle('vr-disconnect', () => {
+  if (vrSocket) {
+    vrSocket.removeAllListeners();
+    vrSocket.destroy();
+    vrSocket = null;
+  }
+  if (vrKeepAliveTimer) {
+    clearInterval(vrKeepAliveTimer);
+    vrKeepAliveTimer = null;
+  }
+  log.info('[VR] Disconnected');
+  return { success: true };
+});
+
+ipcMain.handle('vr-send', (_event, jsonStr) => {
+  if (!vrSocket) return false;
+  try {
+    const payload = Buffer.from(jsonStr);
+    const header = Buffer.alloc(4);
+    header.writeUInt32LE(payload.length, 0);
+    vrSocket.write(Buffer.concat([header, payload]));
+    return true;
+  } catch { return false; }
 });
 
 // --- IPC Handlers: Autoblow ---

@@ -11,6 +11,8 @@ import { TCodeManager } from './tcode-manager.js';
 import { TCodeSync } from './tcode-sync.js';
 import { AutoblowManager } from './autoblow-manager.js';
 import { AutoblowSync } from './autoblow-sync.js';
+import { VRBridge } from './vr-bridge.js';
+import { SettingsPanel } from '../components/settings-panel.js';
 import { ConnectionPanel } from '../components/connection-panel.js';
 import { DragDrop } from './drag-drop.js';
 import { KeyboardHandler } from './keyboard.js';
@@ -45,6 +47,7 @@ class App {
     this.tcodeSync = null;
     this.autoblowManager = null;
     this.autoblowSync = null;
+    this.vrBridge = null;
     this.connectionPanel = null;
     this.settings = dataService;
     this.scriptEditor = null;
@@ -120,9 +123,31 @@ class App {
     });
 
     // Nav Bar
+    this.settingsPanel = new SettingsPanel({
+      settings: this.settings,
+      onSourcesChanged: () => {
+        this._refreshCollectionsUI();
+        if (this.library) this.library._lastScanKey = null;
+        if (this._currentView() === 'library') this.library.show(this._getViewEl('library'));
+      },
+      onGapSkipChanged: (mode, threshold) => {
+        if (this.gapSkipEngine) {
+          this.gapSkipEngine.setSettings(mode, threshold);
+          if (this.funscriptEngine.isLoaded) this._startGapSkip();
+        }
+      },
+      onSmoothingChanged: (mode) => {
+        if (this.buttplugSync) this.buttplugSync.setInterpolationMode(mode);
+      },
+      onSpeedLimitChanged: (maxSpeed) => {
+        if (this.buttplugSync) this.buttplugSync.setSpeedLimit(maxSpeed);
+      },
+    });
+
     this.navBar = new NavBar({
       onNavigate: (viewId) => this._navigateTo(viewId),
       onHandyClick: () => { if (this.connectionPanel) this.connectionPanel.toggle(); },
+      onSettingsClick: () => { this.settingsPanel.show(); },
       onEroScriptsClick: () => {
         if (!this.eroscriptsPanel) return;
         if (this._currentVideoName && !this.funscriptEngine.isLoaded && !this.eroscriptsPanel._visible) {
@@ -272,6 +297,13 @@ class App {
         console.warn('Autoblow integration unavailable:', err.message);
       }
 
+      // Initialize VR bridge (non-critical)
+      try {
+        this.vrBridge = new VRBridge();
+      } catch (err) {
+        console.warn('VR bridge unavailable:', err.message);
+      }
+
       this.connectionPanel = new ConnectionPanel({
         handyManager: this.handyManager,
         buttplugManager: this.buttplugManager,
@@ -280,16 +312,9 @@ class App {
         tcodeSync: this.tcodeSync,
         autoblowManager: this.autoblowManager,
         autoblowSync: this.autoblowSync,
+        vrBridge: this.vrBridge,
         settings: this.settings,
       });
-
-      // Wire smoothing settings change from connection panel
-      this.connectionPanel.onSmoothingChanged = (mode) => {
-        if (this.buttplugSync) this.buttplugSync.setInterpolationMode(mode);
-      };
-      this.connectionPanel.onSpeedLimitChanged = (maxSpeed) => {
-        if (this.buttplugSync) this.buttplugSync.setSpeedLimit(maxSpeed);
-      };
 
       // Load saved smoothing settings into buttplug sync
       if (this.buttplugSync) {
@@ -312,16 +337,6 @@ class App {
           }
         };
       }
-
-      // Wire gap skip settings change from connection panel
-      this.connectionPanel.onGapSkipChanged = (mode, threshold) => {
-        if (this.gapSkipEngine) {
-          this.gapSkipEngine.setSettings(mode, threshold);
-          if (this.funscriptEngine.isLoaded) {
-            this._startGapSkip();
-          }
-        }
-      };
 
       // ConnectionPanel sets handyManager.onConnect/onDisconnect for its own UI updates.
       // Wrap them so we also get notified (to upload pending scripts + update indicators).
@@ -408,6 +423,26 @@ class App {
           if (panelAbDisconnect) panelAbDisconnect();
           if (this.autoblowSync) this.autoblowSync.stop();
           this._updateDeviceIndicators();
+        };
+      }
+
+      // Wire VR bridge callbacks
+      if (this.vrBridge) {
+        const panelVrConnect = this.vrBridge.onConnect;
+        this.vrBridge.onConnect = () => {
+          if (panelVrConnect) panelVrConnect();
+          this._updateDeviceIndicators();
+        };
+
+        const panelVrDisconnect = this.vrBridge.onDisconnect;
+        this.vrBridge.onDisconnect = () => {
+          if (panelVrDisconnect) panelVrDisconnect();
+          this._stopVRSync();
+          this._updateDeviceIndicators();
+        };
+
+        this.vrBridge.onVideoChanged = (normalizedName, rawPath) => {
+          this._onVRVideoChanged(normalizedName, rawPath);
         };
       }
 
@@ -524,6 +559,7 @@ class App {
     window.addEventListener('beforeunload', () => {
       try {
         if (this._sourcePollingInterval) clearInterval(this._sourcePollingInterval);
+        if (this._vrActivityInterval) clearInterval(this._vrActivityInterval);
         if (this.syncEngine) this.syncEngine.stop();
         if (this.buttplugSync) this.buttplugSync.stop();
         if (this.tcodeSync) this.tcodeSync.stop();
@@ -556,6 +592,10 @@ class App {
 
     // Poll source availability every 30s (detect external drive connect/disconnect)
     this._sourcePollingInterval = setInterval(() => this._pollSourceAvailability(), 30000);
+
+    // Poll VR activity every 2s (auto-connect companion bridge when Quest picks a video)
+    this._vrActivityInterval = setInterval(() => this._pollVRActivity(), 2000);
+    this._lastVrActivityTs = 0;
 
     console.log('FunSync Player initialized');
   }
@@ -629,12 +669,197 @@ class App {
         this.buttplugSync.setAxisAssignment(matchedDev.index, 'L0');
       }
     }
+
+    // Update editor script list for custom routing
+    if (this.scriptEditor) {
+      const knownDevices = this.settings.get('knownDevices') || [];
+      const scripts = [];
+      for (const route of routes) {
+        if (!route.scriptPath) continue;
+        const device = knownDevices.find(d => d.id === route.deviceId);
+        const deviceLabel = device ? device.label : (route.deviceId || '');
+        const prefix = route.role === 'main' ? '★ ' : '';
+        const scriptName = route.scriptName || route.scriptPath.split(/[\\/]/).pop();
+        scripts.push({ label: `${prefix}${deviceLabel}: ${scriptName}`, path: route.scriptPath });
+      }
+      if (scripts.length > 1) this.scriptEditor.setAvailableScripts(scripts);
+    }
   }
 
   _isDeviceOnMainRoute(deviceId) {
     if (!this._currentCustomRoutes) return false;
     const mainRoute = this._currentCustomRoutes.find(r => r.role === 'main');
     return mainRoute && mainRoute.deviceId === deviceId;
+  }
+
+  /**
+   * Handle VR player reporting a new video. Match to library, load script, start sync.
+   */
+  async _onVRVideoChanged(normalizedName, rawPath) {
+    console.log(`[VR] Video changed: ${rawPath}`);
+
+    // Guard against concurrent calls (rapid video browsing in VR player)
+    this._vrMatchGeneration = (this._vrMatchGeneration || 0) + 1;
+    const gen = this._vrMatchGeneration;
+
+    // Update UI
+    const displayName = rawPath.split(/[\\/]/).pop() || normalizedName;
+    if (this.connectionPanel) this.connectionPanel.updateVRVideoName(displayName);
+
+    // Stop existing sync engines (they'll be rebound to VR proxy)
+    this._stopVRSync();
+
+    // Search library for matching video (cache scan results to avoid repeated filesystem hits)
+    const sources = this.settings.get('library.sources') || [];
+    const allPaths = sources.filter(s => s.enabled !== false).map(s => s.path);
+    if (allPaths.length === 0) {
+      showToast('No library sources configured — cannot match VR script', 'warn');
+      return;
+    }
+
+    const scanKey = allPaths.sort().join('\0');
+    if (!this._vrScanCache || this._vrScanCacheKey !== scanKey) {
+      const scanResult = await window.funsync.scanDirectory(allPaths.length === 1 ? allPaths[0] : allPaths);
+      this._vrScanCache = scanResult?.videos || [];
+      this._vrScanCacheKey = scanKey;
+    }
+
+    // Abort if a newer video change arrived while we were scanning
+    if (gen !== this._vrMatchGeneration) return;
+
+    const videos = this._vrScanCache;
+
+    // Match by normalized basename
+    const basename = normalizedName.toLowerCase();
+    let matched = videos.find(v => {
+      const vName = v.name.replace(/\.[^/.]+$/, '').toLowerCase()
+        .replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
+      return vName === basename;
+    });
+
+    // Fuzzy fallback
+    if (!matched) {
+      const { fuzzyMatchScore } = await import('./fuzzy-match.js');
+      let bestScore = 0;
+      for (const v of videos) {
+        const score = fuzzyMatchScore(displayName, v.name);
+        if (score > bestScore) { bestScore = score; matched = v; }
+      }
+      if (bestScore < 70) matched = null;
+    }
+
+    if (!matched || !matched.hasFunscript) {
+      showToast(`No script found for: ${displayName}`, 'info', 4000);
+      return;
+    }
+
+    // Load the funscript
+    try {
+      const content = await window.funsync.readFunscript(matched.funscriptPath);
+      if (!content) return;
+
+      const fsName = matched.funscriptPath.split(/[\\/]/).pop();
+      await this.funscriptEngine.loadContent(content, fsName);
+      showToast(`VR script loaded: ${fsName}`, 'info', 3000);
+
+      // Build a player-like wrapper around the VR proxy
+      // Sync engines read player.video for event binding and player.currentTime/paused/duration for state
+      const vrVideo = this.vrBridge.proxy;
+      const vrPlayer = { video: vrVideo, get currentTime() { return vrVideo.currentTime; }, get paused() { return vrVideo.paused; }, get duration() { return vrVideo.duration; } };
+      this._vrPlayerRef = vrPlayer; // keep reference for cleanup
+
+      // Bind sync engines to VR proxy (stop was already called in _stopVRSync)
+      if (this.buttplugSync && this.buttplugManager?.connected) {
+        this.buttplugSync.player = vrPlayer;
+        this.buttplugSync.reloadActions();
+        this.buttplugSync.start();
+      }
+
+      if (this.tcodeSync && this.tcodeManager?.connected) {
+        this.tcodeSync.player = vrPlayer;
+        this.tcodeSync.reloadActions();
+        this.tcodeSync.start();
+      }
+
+      // Handy: upload and sync to VR proxy timeline
+      if (this.handyManager?.connected) {
+        await this.handyManager.uploadAndSetScript(content);
+        if (this.syncEngine) {
+          this.syncEngine.player = vrPlayer;
+          this.syncEngine._scriptReady = true;
+          this.syncEngine.start();
+        }
+      }
+
+      // Autoblow
+      if (this.autoblowManager?.connected && this.autoblowSync) {
+        await this.autoblowSync.uploadScript(content);
+        this.autoblowSync.player = vrPlayer;
+        this.autoblowSync.start();
+      }
+
+      // Load custom routing if exists
+      const associations = this.settings.get('library.associations') || {};
+      const assoc = associations[matched.path];
+      if (assoc?.mode === 'custom') {
+        this._customRoutingActive = true;
+        await this._loadCustomRouting(assoc.routes);
+      }
+
+    } catch (err) {
+      console.warn('[VR] Failed to load script:', err.message);
+      showToast('Failed to load VR script', 'error');
+    }
+  }
+
+  _stopVRSync() {
+    if (this.syncEngine?._active) this.syncEngine.stop();
+    if (this.buttplugSync?._active) this.buttplugSync.stop();
+    if (this.tcodeSync?._active) this.tcodeSync.stop();
+    if (this.autoblowSync?._active) this.autoblowSync.stop();
+    if (this.handyManager?.connected) this.handyManager.hsspStop();
+    if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
+
+    // Restore sync engines to local video player (so local playback works after VR disconnect)
+    if (this._vrPlayerRef) {
+      const localPlayer = this.videoPlayer;
+      if (this.buttplugSync) this.buttplugSync.player = localPlayer;
+      if (this.tcodeSync) this.tcodeSync.player = localPlayer;
+      if (this.syncEngine) this.syncEngine.player = localPlayer;
+      if (this.autoblowSync) this.autoblowSync.player = localPlayer;
+      this._vrPlayerRef = null;
+    }
+  }
+
+  async _pollVRActivity() {
+    if (!this.vrBridge) return;
+    // Don't poll if companion bridge is already connected
+    if (this.vrBridge.connected) return;
+
+    try {
+      const port = this.settings.get('backend.port') || 5123;
+      const res = await fetch(`http://127.0.0.1:${port}/api/media/vr-activity`);
+      if (!res.ok) return;
+      const data = await res.json();
+
+      if (!data.clientIp || !data.videoId || !data.timestamp) return;
+      if (data.timestamp <= this._lastVrActivityTs) return; // already handled
+
+      this._lastVrActivityTs = data.timestamp;
+
+      console.log(`[VR] Quest activity detected: ${data.clientIp} playing ${data.videoId}`);
+
+      // Auto-connect companion bridge to the Quest's timestamp server
+      const success = await this.vrBridge.connect('heresphere', data.clientIp, 23554);
+      if (success) {
+        showToast('VR companion connected — devices syncing', 'info', 3000);
+        if (this.connectionPanel) {
+          this.connectionPanel._updateVRStatus('connected');
+        }
+      }
+    } catch {
+      // Backend not running or fetch failed — ignore
+    }
   }
 
   _registerKnownDevice(id, label, type) {
@@ -685,6 +910,18 @@ class App {
     console.log('[Handy] Device connected — checking for pending funscript...');
     this._updateHandyIndicators('connected');
     this._updateDeviceIndicators();
+
+    // Apply saved stroke zone and offset immediately after connection
+    try {
+      const slideMin = this.settings.get('handy.slideMin') ?? 0;
+      const slideMax = this.settings.get('handy.slideMax') ?? 100;
+      const offset = this.settings.get('handy.defaultOffset') || 0;
+      await this.handyManager.setStrokeZone(slideMin, slideMax);
+      await this.handyManager.setOffset(offset);
+      console.log(`[Handy] Applied stroke zone ${slideMin}-${slideMax}, offset ${offset}ms`);
+    } catch (err) {
+      console.warn('[Handy] Failed to apply saved settings:', err.message);
+    }
 
     if (!this.funscriptEngine.isLoaded || !this.syncEngine) {
       console.log('[Handy] No funscript loaded yet, will upload when funscript loads');
@@ -983,10 +1220,12 @@ class App {
     this._activeVariantIndex = 0;
     this._activeVariantPath = null;
 
-    // Hide editor, clear funscript path, and show editor toggle button
+    // Hide editor, clear funscript path and script list, show editor toggle button
     if (this.scriptEditor) {
       if (this.scriptEditor.isOpen) this.scriptEditor.hide();
       this.scriptEditor.setFunscriptPath(null);
+      this.scriptEditor.setAvailableScripts([]);
+      this.scriptEditor.clearUndoCache();
     }
     document.getElementById('btn-editor').hidden = false;
 
@@ -1482,6 +1721,17 @@ class App {
         if (this.connectionPanel) this.connectionPanel._loadButtplugDeviceSettings();
         this.buttplugSync.start();
       }
+    }
+
+    // Update editor script list for multi-axis
+    if (this.scriptEditor) {
+      const scripts = [{ label: 'Main (L0)', path: this.scriptEditor?._funscriptPath || '' }];
+      for (const [suffix, axisPath] of axisEntries) {
+        if (!axisPath) continue;
+        const SUFFIX_LABELS = { surge: 'Surge', sway: 'Sway', twist: 'Twist', roll: 'Roll', pitch: 'Pitch', vib: 'Vibe', lube: 'Lube', pump: 'Pump', suction: 'Suction', valve: 'Valve' };
+        scripts.push({ label: SUFFIX_LABELS[suffix] || suffix, path: axisPath });
+      }
+      if (scripts.length > 1) this.scriptEditor.setAvailableScripts(scripts);
     }
   }
 
@@ -2036,7 +2286,10 @@ class App {
         }
       }
     }
-    const allVariants = [...baseVariants, ...manual];
+    // Merge base + manual, deduplicating by path (manual variants may overlap with auto-detected)
+    const seenPaths = new Set(baseVariants.map(v => v.path));
+    const deduped = manual.filter(v => !seenPaths.has(v.path));
+    const allVariants = [...baseVariants, ...deduped];
 
     // Resolve active index from stored path (array may have been rebuilt)
     if (this._activeVariantPath) {

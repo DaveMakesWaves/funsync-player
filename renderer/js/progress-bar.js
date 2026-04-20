@@ -84,13 +84,31 @@ export class ProgressBar {
 
   /**
    * Update the thumbnail preview for the given timestamp.
-   * Called on progress bar hover.
+   * Called on progress bar hover. Throttled to avoid hardware decoder contention.
    */
   updateThumbnailPreview(timeSeconds) {
     if (!this._thumbReady || !this._thumbVideo || !this.tooltipThumbnail) return;
 
+    // Throttle: skip if less than 150ms since last seek request
+    const now = performance.now();
+    if (now - (this._lastThumbRequestTime || 0) < 150) {
+      // Queue the latest position for when throttle expires
+      if (!this._thumbThrottleTimer) {
+        this._thumbThrottleTimer = setTimeout(() => {
+          this._thumbThrottleTimer = null;
+          if (this._thumbLatestTime !== null) {
+            this._seekThumbVideo(this._thumbLatestTime);
+            this._thumbLatestTime = null;
+          }
+        }, 150);
+      }
+      this._thumbLatestTime = timeSeconds;
+      return;
+    }
+    this._lastThumbRequestTime = now;
+    this._thumbLatestTime = null;
+
     if (this._thumbSeeking) {
-      // A seek is already in progress — queue this one
       this._thumbPending = timeSeconds;
       return;
     }
@@ -116,9 +134,15 @@ export class ProgressBar {
 
     try {
       ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const dataUrl = canvas.toDataURL('image/jpeg', 0.6);
-      this.tooltipThumbnail.style.backgroundImage = `url('${dataUrl}')`;
-      this.tooltipThumbnail.style.backgroundSize = 'cover';
+      // Use canvas element directly instead of expensive toDataURL encoding
+      if (!this._thumbCanvasAttached) {
+        this.tooltipThumbnail.innerHTML = '';
+        this.tooltipThumbnail.appendChild(canvas);
+        canvas.style.width = '100%';
+        canvas.style.height = '100%';
+        canvas.style.display = 'block';
+        this._thumbCanvasAttached = true;
+      }
     } catch {
       // Cross-origin or other capture error — ignore
     }
@@ -141,9 +165,14 @@ export class ProgressBar {
     this._thumbReady = false;
     this._thumbSeeking = false;
     this._thumbPending = null;
+    this._thumbCanvasAttached = false;
+    this._thumbLatestTime = null;
+    this._lastThumbRequestTime = 0;
+    if (this._thumbThrottleTimer) { clearTimeout(this._thumbThrottleTimer); this._thumbThrottleTimer = null; }
 
-    // Clear thumbnail display
+    // Clear thumbnail display (remove canvas child and background)
     if (this.tooltipThumbnail) {
+      this.tooltipThumbnail.innerHTML = '';
       this.tooltipThumbnail.style.backgroundImage = '';
     }
   }

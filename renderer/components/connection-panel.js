@@ -3,7 +3,7 @@
 import { icon, X, Info } from '../js/icons.js';
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, settings }) {
+  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings }) {
     this.handy = handyManager;
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
@@ -11,6 +11,7 @@ export class ConnectionPanel {
     this.tcodeSync = tcodeSync || null;
     this.autoblowManager = autoblowManager || null;
     this.autoblowSync = autoblowSync || null;
+    this.vrBridge = vrBridge || null;
     this.settings = settings;
     this._panel = null;
     this._visible = false;
@@ -35,7 +36,7 @@ export class ConnectionPanel {
           <button class="connection-panel__tab" data-tab="buttplug">Buttplug.io</button>
           <button class="connection-panel__tab" data-tab="tcode">TCode</button>
           <button class="connection-panel__tab" data-tab="autoblow">Autoblow</button>
-          <button class="connection-panel__tab" data-tab="settings">Settings</button>
+          <button class="connection-panel__tab" data-tab="vr">VR</button>
         </div>
         <button class="connection-panel__close control-btn" aria-label="Close"><i data-lucide="x"></i></button>
       </div>
@@ -224,59 +225,68 @@ export class ConnectionPanel {
 
       </div><!-- end tab-autoblow -->
 
-      <div class="connection-panel__tab-content" id="tab-settings" hidden>
+      <div class="connection-panel__tab-content" id="tab-vr" hidden>
 
+      <!-- VR Server Mode (Quest standalone) -->
       <div class="connection-panel__section">
-        <label class="connection-panel__section-label">Gap Skip</label>
+        <label class="connection-panel__section-label">VR Server (Quest)</label>
+        <div class="connection-panel__vr-help-note" style="margin-bottom:8px">
+          Stream your library to DeoVR or HereSphere on Quest. No file transfers needed.
+        </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Mode</span>
-          <select id="gap-skip-mode" class="connection-panel__device-select connection-panel__setting-select">
-            <option value="off">Off</option>
-            <option value="auto">Auto (countdown)</option>
-            <option value="button">Show Skip Button</option>
-          </select>
+          <span class="connection-panel__setting-label">DeoVR URL</span>
+          <input type="text" id="vr-server-deovr-url" class="connection-panel__input" readonly style="flex:1;font-size:11px;cursor:text">
         </div>
-        <div class="connection-panel__setting-row" id="gap-skip-threshold-row" hidden>
-          <span class="connection-panel__setting-label">Threshold</span>
-          <input type="range" id="gap-skip-threshold" class="connection-panel__setting-slider"
-                 min="5" max="60" value="10" aria-label="Gap skip threshold">
-          <span id="gap-skip-threshold-val" class="connection-panel__setting-value">10s</span>
+        <div class="connection-panel__setting-row" style="margin-top:4px">
+          <span class="connection-panel__setting-label">HereSphere URL</span>
+          <input type="text" id="vr-server-hs-url" class="connection-panel__input" readonly style="flex:1;font-size:11px;cursor:text">
         </div>
-        <div class="connection-panel__setting-hint" id="gap-skip-hint" hidden>
-          Gaps shorter than the threshold are ignored. Press G to skip manually anytime.
+        <div class="connection-panel__vr-help" style="margin-top:8px">
+          <div class="connection-panel__vr-help-step">1. Open DeoVR or HereSphere on your Quest</div>
+          <div class="connection-panel__vr-help-step">2. Add the URL above as a <strong>custom server</strong></div>
+          <div class="connection-panel__vr-help-step">3. Browse your library and play — videos stream from this PC</div>
+          <div class="connection-panel__vr-help-step">4. Funscripts auto-load. Connected devices sync automatically.</div>
         </div>
       </div>
 
+      <div class="connection-panel__vr-divider"></div>
+
+      <!-- PCVR Companion Mode -->
       <div class="connection-panel__section">
-        <label class="connection-panel__section-label">Motion Smoothing</label>
-        <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Interpolation</span>
-          <select id="smoothing-mode" class="connection-panel__device-select connection-panel__setting-select">
-            <option value="linear">Linear (default)</option>
-            <option value="pchip">Smooth (PCHIP)</option>
-            <option value="makima">Extra Smooth (Makima)</option>
-          </select>
+        <label class="connection-panel__section-label">PCVR Companion</label>
+        <div class="connection-panel__vr-help-note" style="margin-bottom:8px">
+          Sync devices with DeoVR or HereSphere running on this PC.
         </div>
-        <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Speed Limit</span>
-          <input type="range" id="speed-limit-slider" class="connection-panel__setting-slider"
-                 min="0" max="500" value="0" step="10" aria-label="Speed limit">
-          <span id="speed-limit-val" class="connection-panel__setting-value">Off</span>
+        <div class="connection-panel__status">
+          <span class="connection-panel__led" id="vr-led"></span>
+          <span class="connection-panel__status-text" id="vr-status-text">Disconnected</span>
         </div>
-        <div class="connection-panel__setting-hint">
-          Smoothing affects Buttplug.io linear devices. Handy uses its own interpolation.
+        <div class="connection-panel__form">
+          <div class="connection-panel__input-row">
+            <select id="vr-player-select" class="connection-panel__input" style="width:auto" aria-label="VR player">
+              <option value="deovr">DeoVR</option>
+              <option value="heresphere">HereSphere</option>
+            </select>
+            <input type="text" id="vr-host-input" class="connection-panel__input" value="127.0.0.1" placeholder="127.0.0.1" aria-label="Host" style="flex:1">
+            <button id="vr-connect-btn" class="connection-panel__btn">Connect</button>
+          </div>
+        </div>
+
+        <div id="vr-now-playing" class="connection-panel__section" hidden style="margin-top:8px">
+          <div class="connection-panel__setting-row">
+            <span class="connection-panel__setting-label">Playing</span>
+            <span id="vr-video-name" class="connection-panel__setting-value" style="font-size:11px;word-break:break-all">—</span>
+          </div>
+          <div class="connection-panel__setting-row">
+            <span class="connection-panel__setting-label">Offset</span>
+            <input type="range" id="vr-offset" min="-500" max="500" value="0" class="connection-panel__safety-slider" style="flex:1">
+            <span id="vr-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
+          </div>
         </div>
       </div>
 
-      <div class="connection-panel__section">
-        <label class="connection-panel__section-label">Data</label>
-        <div class="connection-panel__data-row">
-          <button id="btn-export-data" class="connection-panel__btn connection-panel__btn--secondary">Export Backup</button>
-          <button id="btn-import-data" class="connection-panel__btn connection-panel__btn--secondary">Import Backup</button>
-        </div>
-      </div>
+      </div><!-- end tab-vr -->
 
-      </div><!-- end tab-settings -->
     `;
 
     document.getElementById('app').appendChild(this._panel);
@@ -456,76 +466,35 @@ export class ConnectionPanel {
       this.autoblowManager.onDisconnect = () => this._updateAutoblowStatus('disconnected');
     }
 
-    // Export/Import buttons
-    this._panel.querySelector('#btn-export-data')?.addEventListener('click', () => this._onExportData());
-    this._panel.querySelector('#btn-import-data')?.addEventListener('click', () => this._onImportData());
+    // VR Bridge callbacks + events
+    if (this.vrBridge) {
+      this._panel.querySelector('#vr-connect-btn').addEventListener('click', () => this._onVRConnect());
 
-    // Gap skip settings
-    const gapModeSelect = this._panel.querySelector('#gap-skip-mode');
-    const gapThresholdSlider = this._panel.querySelector('#gap-skip-threshold');
-    const gapThresholdVal = this._panel.querySelector('#gap-skip-threshold-val');
-    const gapThresholdRow = this._panel.querySelector('#gap-skip-threshold-row');
-    const gapHint = this._panel.querySelector('#gap-skip-hint');
-
-    if (gapModeSelect) {
-      // Load saved settings
-      const saved = this.settings.get('player.gapSkip') || {};
-      gapModeSelect.value = saved.mode || 'off';
-      if (gapThresholdSlider) gapThresholdSlider.value = Math.round((saved.threshold || 10000) / 1000);
-      if (gapThresholdVal) gapThresholdVal.textContent = `${gapThresholdSlider?.value || 10}s`;
-
-      const showThreshold = saved.mode && saved.mode !== 'off';
-      if (gapThresholdRow) gapThresholdRow.hidden = !showThreshold;
-      if (gapHint) gapHint.hidden = !showThreshold;
-
-      gapModeSelect.addEventListener('change', () => {
-        const mode = gapModeSelect.value;
-        const threshold = (parseInt(gapThresholdSlider?.value, 10) || 10) * 1000;
-        this.settings.set('player.gapSkip', { mode, threshold });
-        if (gapThresholdRow) gapThresholdRow.hidden = mode === 'off';
-        if (gapHint) gapHint.hidden = mode === 'off';
-        if (this.onGapSkipChanged) this.onGapSkipChanged(mode, threshold);
+      // Offset slider
+      this._panel.querySelector('#vr-offset')?.addEventListener('input', (e) => {
+        this._panel.querySelector('#vr-offset-value').textContent = `${e.target.value}ms`;
       });
+      this._panel.querySelector('#vr-offset')?.addEventListener('change', (e) => {
+        const v = parseInt(e.target.value, 10);
+        this.settings.set('vr.offset', v);
+        // Apply offset to VR playback proxy in real-time
+        if (this.vrBridge?.proxy) this.vrBridge.proxy.setOffset(v);
+      });
+
+      // Restore saved offset and apply to proxy
+      const savedOffset = this.settings.get('vr.offset') || 0;
+      const offsetSlider = this._panel.querySelector('#vr-offset');
+      if (offsetSlider) { offsetSlider.value = String(savedOffset); }
+      const offsetVal = this._panel.querySelector('#vr-offset-value');
+      if (offsetVal) offsetVal.textContent = `${savedOffset}ms`;
+      if (this.vrBridge?.proxy) this.vrBridge.proxy.setOffset(savedOffset);
+
+      this.vrBridge.onConnect = () => this._updateVRStatus('connected');
+      this.vrBridge.onDisconnect = () => this._updateVRStatus('disconnected');
     }
 
-    if (gapThresholdSlider) {
-      gapThresholdSlider.addEventListener('input', () => {
-        const seconds = parseInt(gapThresholdSlider.value, 10) || 10;
-        if (gapThresholdVal) gapThresholdVal.textContent = `${seconds}s`;
-        const mode = gapModeSelect?.value || 'off';
-        const threshold = seconds * 1000;
-        this.settings.set('player.gapSkip', { mode, threshold });
-        if (this.onGapSkipChanged) this.onGapSkipChanged(mode, threshold);
-      });
-    }
-
-    // Smoothing settings
-    const smoothingSelect = this._panel.querySelector('#smoothing-mode');
-    const speedLimitSlider = this._panel.querySelector('#speed-limit-slider');
-    const speedLimitVal = this._panel.querySelector('#speed-limit-val');
-
-    if (smoothingSelect) {
-      const savedSmoothing = this.settings.get('player.smoothing') || 'linear';
-      smoothingSelect.value = savedSmoothing;
-
-      smoothingSelect.addEventListener('change', () => {
-        this.settings.set('player.smoothing', smoothingSelect.value);
-        if (this.onSmoothingChanged) this.onSmoothingChanged(smoothingSelect.value);
-      });
-    }
-
-    if (speedLimitSlider) {
-      const savedLimit = this.settings.get('player.speedLimit') || 0;
-      speedLimitSlider.value = savedLimit;
-      speedLimitVal.textContent = savedLimit > 0 ? `${savedLimit}` : 'Off';
-
-      speedLimitSlider.addEventListener('input', () => {
-        const val = parseInt(speedLimitSlider.value, 10) || 0;
-        speedLimitVal.textContent = val > 0 ? `${val}` : 'Off';
-        this.settings.set('player.speedLimit', val);
-        if (this.onSpeedLimitChanged) this.onSpeedLimitChanged(val);
-      });
-    }
+    // Populate VR server URLs
+    this._updateVRServerUrls();
   }
 
   _loadSavedSettings() {
@@ -739,7 +708,10 @@ export class ConnectionPanel {
     this._panel.querySelector('#tab-buttplug').hidden = tabId !== 'buttplug';
     this._panel.querySelector('#tab-tcode').hidden = tabId !== 'tcode';
     this._panel.querySelector('#tab-autoblow').hidden = tabId !== 'autoblow';
-    this._panel.querySelector('#tab-settings').hidden = tabId !== 'settings';
+    this._panel.querySelector('#tab-vr').hidden = tabId !== 'vr';
+
+    // Refresh VR server URLs when switching to VR tab
+    if (tabId === 'vr') this._updateVRServerUrls();
   }
 
   // --- Buttplug ---
@@ -906,28 +878,28 @@ export class ConnectionPanel {
         this._saveButtplugDeviceSettings();
       });
 
+      // Single controls row: source + mode + invert
+      const controlsRow = document.createElement('div');
+      controlsRow.className = 'connection-panel__device-controls-row';
+
       axisRow.appendChild(axisLabel);
       axisRow.appendChild(axisSelect);
-      row.appendChild(axisRow);
-
-      // Quick settings row: mode + invert (compact inline)
-      const quickRow = document.createElement('div');
-      quickRow.className = 'connection-panel__device-quick';
+      controlsRow.appendChild(axisRow);
 
       if (dev.canVibrate) {
-        quickRow.appendChild(this._makeModeSelect(dev, 'vibe', 'Vibration mode', 'speed',
+        controlsRow.appendChild(this._makeModeSelect(dev, 'vibe', 'Vibration mode', 'speed',
           () => this.buttplugSync?.getVibeMode(dev.index) || 'speed',
           (val) => { if (this.buttplugSync) this.buttplugSync.setVibeMode(dev.index, val); }
         ));
       }
       if (dev.canRotate) {
-        quickRow.appendChild(this._makeModeSelect(dev, 'rotate', 'Rotation mode', 'speed',
+        controlsRow.appendChild(this._makeModeSelect(dev, 'rotate', 'Rotation mode', 'speed',
           () => this.buttplugSync?.getRotateMode(dev.index) || 'speed',
           (val) => { if (this.buttplugSync) this.buttplugSync.setRotateMode(dev.index, val); }
         ));
       }
       if (dev.canScalar) {
-        quickRow.appendChild(this._makeModeSelect(dev, 'scalar', 'E-stim mode', 'position',
+        controlsRow.appendChild(this._makeModeSelect(dev, 'scalar', 'E-stim mode', 'position',
           () => this.buttplugSync?.getScalarMode(dev.index) || 'position',
           (val) => { if (this.buttplugSync) this.buttplugSync.setScalarMode(dev.index, val); }
         ));
@@ -947,7 +919,7 @@ export class ConnectionPanel {
       });
       invertLabel.appendChild(invertCheck);
       invertLabel.appendChild(document.createTextNode(' Invert'));
-      quickRow.appendChild(invertLabel);
+      controlsRow.appendChild(invertLabel);
 
       // Info button
       if (dev.canVibrate || dev.canScalar || dev.canRotate) {
@@ -959,10 +931,10 @@ export class ConnectionPanel {
           e.stopPropagation();
           this._showVibeModeHelp(infoBtn);
         });
-        quickRow.appendChild(infoBtn);
+        controlsRow.appendChild(infoBtn);
       }
 
-      row.appendChild(quickRow);
+      row.appendChild(controlsRow);
 
       // E-stim safety section (only for scalar devices)
       if (dev.canScalar) {
@@ -1118,12 +1090,10 @@ export class ConnectionPanel {
       const settings = {};
       if (this.buttplugSync.isInverted(dev.index)) settings.inverted = true;
       const axisAssignment = this.buttplugSync.getAxisAssignment(dev.index);
-      // Save axis assignment (always save when not default, or when L0 is explicitly chosen
-      // to override custom routing)
       if (axisAssignment !== 'L0') {
         settings.axisAssignment = axisAssignment;
       } else if (this.buttplugSync._customRoutingActive && this.buttplugSync._axisAssignmentMap.has(dev.index)) {
-        settings.axisAssignment = 'L0'; // explicit L0 override during custom routing
+        settings.axisAssignment = 'L0';
       }
       const vibeMode = this.buttplugSync.getVibeMode(dev.index);
       if (vibeMode !== 'speed') settings.vibeMode = vibeMode;
@@ -1136,7 +1106,9 @@ export class ConnectionPanel {
       const rampUp = this.buttplugSync.getRampUp(dev.index);
       if (!rampUp) settings.rampUp = false;
       if (Object.keys(settings).length > 0) {
-        perDevice[dev.name] = settings;
+        // Key by index:name — stable across sessions (Intiface preserves device indices)
+        // Allows two identical devices to have separate settings
+        perDevice[`${dev.index}:${dev.name}`] = settings;
       }
     }
     this.settings.set('buttplug.deviceSettings', perDevice);
@@ -1148,7 +1120,8 @@ export class ConnectionPanel {
     const devices = this.buttplug.devices;
 
     for (const dev of devices) {
-      const saved = perDevice[dev.name];
+      // Try index:name key first (new format), fall back to name-only (backwards compat)
+      const saved = perDevice[`${dev.index}:${dev.name}`] || perDevice[dev.name];
       if (saved) {
         if (saved.axisAssignment) this.buttplugSync.setAxisAssignment(dev.index, saved.axisAssignment);
         if (saved.inverted) this.buttplugSync.setInverted(dev.index, true);
@@ -1369,46 +1342,88 @@ export class ConnectionPanel {
     }
   }
 
-  // --- Data Export/Import ---
+  // --- VR Bridge ---
 
-  async _onExportData() {
-    const btn = this._panel.querySelector('#btn-export-data');
-    btn.disabled = true;
-    btn.textContent = 'Exporting...';
+  async _onVRConnect() {
+    if (!this.vrBridge) return;
 
-    try {
-      const result = await window.funsync.exportData();
-      if (result.success) {
-        btn.textContent = 'Exported!';
-        setTimeout(() => { btn.textContent = 'Export Backup'; btn.disabled = false; }, 2000);
-      } else {
-        btn.textContent = result.error || 'Export failed';
-        setTimeout(() => { btn.textContent = 'Export Backup'; btn.disabled = false; }, 2000);
-      }
-    } catch (err) {
-      btn.textContent = 'Export failed';
-      setTimeout(() => { btn.textContent = 'Export Backup'; btn.disabled = false; }, 2000);
+    const btn = this._panel.querySelector('#vr-connect-btn');
+    if (btn) btn.disabled = true;
+
+    if (this.vrBridge.connected) {
+      await this.vrBridge.disconnect();
+      if (btn) btn.disabled = false;
+      return;
     }
+
+    const playerSelect = this._panel.querySelector('#vr-player-select');
+    const hostInput = this._panel.querySelector('#vr-host-input');
+    const playerType = playerSelect.value;
+    const host = hostInput.value.trim() || '127.0.0.1';
+
+    this._updateVRStatus('connecting');
+    const success = await this.vrBridge.connect(playerType, host, 23554);
+
+    if (!success) {
+      this._updateVRStatus('disconnected');
+      const text = this._panel.querySelector('#vr-status-text');
+      if (text) text.textContent = 'Failed — check VR player settings';
+    }
+    if (btn) btn.disabled = false;
   }
 
-  async _onImportData() {
-    const btn = this._panel.querySelector('#btn-import-data');
-    btn.disabled = true;
-    btn.textContent = 'Importing...';
+  _updateVRStatus(status) {
+    const led = this._panel.querySelector('#vr-led');
+    const text = this._panel.querySelector('#vr-status-text');
+    const btn = this._panel.querySelector('#vr-connect-btn');
+    const nowPlaying = this._panel.querySelector('#vr-now-playing');
+    const setupHelp = this._panel.querySelector('#vr-setup-help');
+
+    if (led) {
+      led.className = 'connection-panel__led';
+      if (status === 'connected') led.classList.add('connection-panel__led--connected');
+      else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
+    }
+    if (text) {
+      text.textContent = status === 'connected' ? 'Connected'
+        : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+    }
+    if (btn) {
+      btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
+    }
+    if (nowPlaying) nowPlaying.hidden = status !== 'connected';
+    if (setupHelp) setupHelp.hidden = status === 'connected';
+  }
+
+  updateVRVideoName(name) {
+    const el = this._panel.querySelector('#vr-video-name');
+    if (el) el.textContent = name || '—';
+  }
+
+  async _updateVRServerUrls() {
+    const port = this.settings.get('backend.port') || 5123;
+    const deovrUrl = this._panel.querySelector('#vr-server-deovr-url');
+    const hsUrl = this._panel.querySelector('#vr-server-hs-url');
 
     try {
-      const result = await window.funsync.importData();
-      if (result.success) {
-        btn.textContent = 'Imported!';
-        setTimeout(() => { btn.textContent = 'Import Backup'; btn.disabled = false; }, 2000);
+      const res = await fetch(`http://127.0.0.1:${port}/network-info`);
+      if (res.ok) {
+        const data = await res.json();
+        const ip = data.ip || '127.0.0.1';
+        if (deovrUrl) deovrUrl.value = `http://${ip}:${port}/deovr`;
+        if (hsUrl) hsUrl.value = `http://${ip}:${port}/heresphere`;
       } else {
-        btn.textContent = result.error || 'Import failed';
-        setTimeout(() => { btn.textContent = 'Import Backup'; btn.disabled = false; }, 2000);
+        if (deovrUrl) deovrUrl.value = 'Backend not running';
+        if (hsUrl) hsUrl.value = 'Backend not running';
       }
-    } catch (err) {
-      btn.textContent = 'Import failed';
-      setTimeout(() => { btn.textContent = 'Import Backup'; btn.disabled = false; }, 2000);
+    } catch {
+      if (deovrUrl) deovrUrl.value = 'Backend not running';
+      if (hsUrl) hsUrl.value = 'Backend not running';
     }
+
+    // Click-to-select on readonly inputs
+    deovrUrl?.addEventListener('click', () => deovrUrl.select());
+    hsUrl?.addEventListener('click', () => hsUrl.select());
   }
 
   // --- Public API ---

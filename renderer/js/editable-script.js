@@ -42,6 +42,22 @@ export class EditableScript {
   }
 
   /**
+   * Load from parsed funscript data (for multi-script editing).
+   * @param {object} data — parsed funscript JSON { actions, metadata, bookmarks, ... }
+   */
+  loadFromData(data) {
+    this._actions = (data.actions || []).map(a => ({ at: a.at, pos: a.pos }));
+    this._actions.sort((a, b) => a.at - b.at);
+    this._selectedIndices = new Set();
+    this._undoStack = [];
+    this._redoStack = [];
+    this._clipboard = [];
+    this._dirty = false;
+    this._metadata = data.metadata ? JSON.parse(JSON.stringify(data.metadata)) : {};
+    this._bookmarks = data.metadata?.bookmarks ? [...data.metadata.bookmarks] : [];
+  }
+
+  /**
    * Initialize with an empty action array (create-from-scratch mode).
    */
   loadEmpty() {
