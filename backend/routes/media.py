@@ -577,15 +577,15 @@ def _queue_thumb_generation(video_id, filepath, thumb_path):
     def _generate():
         _thumb_semaphore.acquire()
         try:
-            from services.ffmpeg import _find_binary
+            from services.ffmpeg import _find_binary, run_silent
             ffmpeg_path = _find_binary("ffmpeg")
-            result = subprocess.run(
+            result = run_silent(
                 [ffmpeg_path, "-i", filepath, "-ss", "25%", "-frames:v", "1",
                  "-q:v", "5", "-vf", "scale=320:-1", thumb_path, "-y"],
                 capture_output=True, timeout=30,
             )
             if result.returncode != 0 or not os.path.isfile(thumb_path):
-                subprocess.run(
+                run_silent(
                     [ffmpeg_path, "-i", filepath, "-ss", "5", "-frames:v", "1",
                      "-q:v", "5", "-vf", "scale=320:-1", thumb_path, "-y"],
                     capture_output=True, timeout=30,

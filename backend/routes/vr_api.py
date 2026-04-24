@@ -261,10 +261,9 @@ def _get_duration(video):
 def _probe_video_info(path):
     """Run ffprobe to get resolution and codec. Blocking — call from background thread."""
     try:
-        from services.ffmpeg import _find_binary
-        import subprocess
+        from services.ffmpeg import _find_binary, run_silent
         ffprobe = _find_binary('ffprobe')
-        result = subprocess.run(
+        result = run_silent(
             [ffprobe, '-v', 'quiet', '-print_format', 'json',
              '-show_streams', '-select_streams', 'v:0', path],
             capture_output=True, text=True,

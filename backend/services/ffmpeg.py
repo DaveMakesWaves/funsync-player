@@ -35,6 +35,26 @@ FFPROBE = _find_binary("ffprobe")
 FFMPEG = _find_binary("ffmpeg")
 
 
+# Suppress the cmd.exe window that Windows creates for every ffmpeg /
+# ffprobe subprocess when the parent is a GUI app. The PyInstaller spec
+# ships the backend as `console=False` (windowed exe), and under those
+# conditions Windows spawns a fresh console per child. Without this flag
+# the user sees hundreds of console windows flashing during library scan
+# (one per thumbnail / metadata probe / VR info probe). On non-Windows
+# platforms the flag evaluates to 0 and is a no-op.
+NO_WINDOW_CREATIONFLAGS = 0x08000000 if sys.platform == "win32" else 0
+
+
+def run_silent(*args, **kwargs):
+    """`subprocess.run` wrapper that hides the Windows console popup for
+    GUI-parent subprocess calls. Use for every ffmpeg / ffprobe call
+    anywhere in the backend — the default `subprocess.run` flashes a
+    console per call in packaged Windows builds."""
+    if sys.platform == "win32":
+        kwargs.setdefault("creationflags", NO_WINDOW_CREATIONFLAGS)
+    return subprocess.run(*args, **kwargs)
+
+
 # In-memory metadata cache. Keyed by (path, size, mtime) so file edits
 # invalidate naturally. The thumbnail-single endpoint calls
 # get_metadata for EVERY thumbnail to know the duration; without
@@ -70,7 +90,7 @@ def get_metadata(video_path: str) -> dict[str, Any]:
         return cached
 
     try:
-        result = subprocess.run(
+        result = run_silent(
             [
                 FFPROBE,
                 "-v", "quiet",
@@ -197,7 +217,7 @@ def generate_thumbnails(
     output_pattern = os.path.join(output_dir, "thumb_%04d.jpg")
 
     try:
-        result = subprocess.run(
+        result = run_silent(
             [
                 FFMPEG,
                 "-i", video_path,
@@ -315,7 +335,7 @@ def generate_single_thumbnail(
     seek_time = min(duration * seek_pct, 5.0) if duration > 50 else duration * seek_pct
 
     try:
-        result = subprocess.run(
+        result = run_silent(
             [
                 FFMPEG,
                 # -ss BEFORE -i = fast seek (skips ahead via container
