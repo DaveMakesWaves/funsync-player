@@ -1,12 +1,14 @@
 // NavBar — Persistent top navigation bar
 
-import { icon, Library, ListVideo, Tag, Download, Unplug, Settings } from '../js/icons.js';
+import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles } from '../js/icons.js';
 
 export class NavBar {
-  constructor({ onNavigate, onHandyClick, onSettingsClick, onEroScriptsClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
+  constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
     this._onNavigate = onNavigate;
     this._onHandyClick = onHandyClick;
     this._onSettingsClick = onSettingsClick;
+    this._onRemoteClick = onRemoteClick;
+    this._onVRClick = onVRClick;
     this._onEroScriptsClick = onEroScriptsClick;
     this._onLibraryCollectionChange = onLibraryCollectionChange;
     this._onNewCollection = onNewCollection;
@@ -137,6 +139,28 @@ export class NavBar {
 
     this._el.appendChild(this._handyBtn);
 
+    // Web Remote button — opens the phone/tablet connection modal.
+    this._remoteBtn = document.createElement('button');
+    this._remoteBtn.className = 'nav-bar__settings';  // same styling as settings
+    this._remoteBtn.title = 'Web Remote — open on phone';
+    this._remoteBtn.appendChild(icon(Smartphone, { width: 16, height: 16 }));
+    this._remoteBtn.addEventListener('click', () => {
+      if (this._onRemoteClick) this._onRemoteClick();
+    });
+    this._el.appendChild(this._remoteBtn);
+
+    // VR button — opens the VR server / PCVR companion modal. Tints
+    // accent when the PCVR companion bridge is actively connected so
+    // users see state without opening the modal.
+    this._vrBtn = document.createElement('button');
+    this._vrBtn.className = 'nav-bar__settings nav-bar__vr-btn';
+    this._vrBtn.title = 'VR — Quest server + PCVR companion';
+    this._vrBtn.appendChild(icon(Goggles, { width: 18, height: 18 }));
+    this._vrBtn.addEventListener('click', () => {
+      if (this._onVRClick) this._onVRClick();
+    });
+    this._el.appendChild(this._vrBtn);
+
     // Settings button
     this._settingsBtn = document.createElement('button');
     this._settingsBtn.className = 'nav-bar__settings';
@@ -157,6 +181,42 @@ export class NavBar {
     for (const btn of this._el.querySelectorAll('.nav-bar__item')) {
       btn.classList.toggle('nav-bar__item--active', btn.dataset.viewId === viewId);
     }
+  }
+
+  /**
+   * Toggle the VR toolbar button's connected-state tint. Matches the
+   * Web Remote button's pattern — visible signal without opening the
+   * modal.
+   */
+  setVRConnected(connected) {
+    if (this._vrBtn) {
+      this._vrBtn.classList.toggle('nav-bar__vr-btn--connected', !!connected);
+    }
+  }
+
+  /**
+   * Update the nav-bar VR button's tooltip to reflect bridge state.
+   * Lets the user see reconnect progress without opening the VR modal.
+   * @param {'connected'|'connecting'|'reconnecting'|'disconnected'} status
+   * @param {object} [detail]
+   * @param {string} [detail.host] — remote host, for connected state
+   * @param {number} [detail.attempt] — retry attempt #, for reconnecting state
+   */
+  setVRTooltip(status, detail = {}) {
+    if (!this._vrBtn) return;
+    let title;
+    if (status === 'connected') {
+      title = detail.host ? `VR — connected to ${detail.host}` : 'VR — connected';
+    } else if (status === 'reconnecting') {
+      title = detail.attempt
+        ? `VR — reconnecting... (attempt ${detail.attempt})`
+        : 'VR — reconnecting...';
+    } else if (status === 'connecting') {
+      title = 'VR — connecting...';
+    } else {
+      title = 'VR — Quest server + PCVR companion';
+    }
+    this._vrBtn.title = title;
   }
 
   setHandyStatus(status, deviceCount = 0) {
@@ -255,6 +315,19 @@ export class NavBar {
         const nameSpan = document.createElement('span');
         nameSpan.textContent = col.name;
         btn.appendChild(nameSpan);
+
+        // Synced collections get a small ↻ badge so users can see at a
+        // glance which libraries auto-update when files are added. The
+        // badge has a tooltip describing the sync target.
+        if (col.syncSource?.sourceId || col.syncSource?.folderPath) {
+          const syncBadge = document.createElement('span');
+          syncBadge.className = 'nav-bar__library-sync-badge';
+          syncBadge.textContent = '↻';
+          syncBadge.title = col.syncSource.folderPath
+            ? `Synced with folder: ${col.syncSource.folderPath}`
+            : 'Synced with source';
+          btn.appendChild(syncBadge);
+        }
 
         if (isUnavailable) {
           const unplugIcon = icon(Unplug, { width: 12, height: 12 });

@@ -1,6 +1,29 @@
 // ConnectionPanel — UI for connecting to Handy or Buttplug.io devices
 
 import { icon, X, Info } from '../js/icons.js';
+import {
+  classifyTransport,
+  computeSuggestedOffset,
+  DEVICE_OFFSET_PRESETS,
+} from '../js/auto-offset.js';
+import { eventBus } from '../js/event-bus.js';
+// TCode v0.3 axes exposed in the Axis Ranges UI. Naming + type match the
+// multi-axis spec module (renderer/js/multi-axis.js) and the official TCode
+// specification. L0 is the main stroke; R0-R2 are rotation, V* are vibration,
+// A0 is the first auxiliary channel (typically a valve/aux output on the SR6).
+// Order matters — rendered top→bottom.
+const TCODE_UI_AXES = [
+  { tcode: 'L0', label: 'Stroke (main)',   type: 'linear'  },
+  { tcode: 'L1', label: 'Surge',           type: 'linear'  },
+  { tcode: 'L2', label: 'Sway',            type: 'linear'  },
+  { tcode: 'R0', label: 'Twist',           type: 'rotate'  },
+  { tcode: 'R1', label: 'Roll',            type: 'rotate'  },
+  { tcode: 'R2', label: 'Pitch',           type: 'rotate'  },
+  { tcode: 'V0', label: 'Vibe',            type: 'vibrate' },
+  { tcode: 'V1', label: 'Lube / Pump',     type: 'vibrate' },
+  { tcode: 'V2', label: 'Suction',         type: 'vibrate' },
+  { tcode: 'A0', label: 'Valve',           type: 'linear'  },
+];
 
 export class ConnectionPanel {
   constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings }) {
@@ -36,7 +59,7 @@ export class ConnectionPanel {
           <button class="connection-panel__tab" data-tab="buttplug">Buttplug.io</button>
           <button class="connection-panel__tab" data-tab="tcode">TCode</button>
           <button class="connection-panel__tab" data-tab="autoblow">Autoblow</button>
-          <button class="connection-panel__tab" data-tab="vr">VR</button>
+          <button class="connection-panel__tab" data-tab="sync">Sync</button>
         </div>
         <button class="connection-panel__close control-btn" aria-label="Close"><i data-lucide="x"></i></button>
       </div>
@@ -89,10 +112,10 @@ export class ConnectionPanel {
         <label class="connection-panel__section-label">Sync Offset</label>
         <div class="connection-panel__offset-row">
           <input type="range" class="connection-panel__offset-slider" id="offset-slider"
-                 min="-500" max="500" step="10" value="0"
+                 min="-1000" max="1000" step="10" value="0"
                  aria-label="Script offset in milliseconds">
           <input type="number" class="connection-panel__offset-number" id="offset-number"
-                 min="-500" max="500" step="10" value="0"
+                 min="-1000" max="1000" step="10" value="0"
                  aria-label="Script offset value">
           <span class="connection-panel__offset-unit">ms</span>
         </div>
@@ -218,74 +241,51 @@ export class ConnectionPanel {
         </div>
         <div class="connection-panel__setting-row">
           <span class="connection-panel__setting-label">Offset</span>
-          <input type="range" id="ab-offset" min="-500" max="500" value="0" class="connection-panel__safety-slider" style="flex:1">
+          <input type="range" id="ab-offset" min="-1000" max="1000" value="0" class="connection-panel__safety-slider" style="flex:1">
           <span id="ab-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
         </div>
       </div>
 
       </div><!-- end tab-autoblow -->
 
-      <div class="connection-panel__tab-content" id="tab-vr" hidden>
+      <div class="connection-panel__tab-content" id="tab-sync" hidden>
 
-      <!-- VR Server Mode (Quest standalone) -->
+      <div class="connection-panel__section" style="padding:8px 12px;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:6px;margin-bottom:10px">
+        <span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px">EXPERIMENTAL</span>
+        <span style="font-size:11px;opacity:0.85;margin-left:6px">Auto-offset is a first-pass implementation — preset values are placeholders and unmeasured display lag means manual fine-tuning may still be needed.</span>
+      </div>
+
       <div class="connection-panel__section">
-        <label class="connection-panel__section-label">VR Server (Quest)</label>
-        <div class="connection-panel__vr-help-note" style="margin-bottom:8px">
-          Stream your library to DeoVR or HereSphere on Quest. No file transfers needed.
+        <label class="connection-panel__section-label">Measured Latency</label>
+        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7">
+          Auto-suggested offsets are computed from the measurable components. VR display lag is unmeasurable from outside the headset, so a per-player preset is added; you can fine-tune the slider afterward.
         </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">DeoVR URL</span>
-          <input type="text" id="vr-server-deovr-url" class="connection-panel__input" readonly style="flex:1;font-size:11px;cursor:text">
+          <span class="connection-panel__setting-label">VR network jitter</span>
+          <span id="sync-vr-jitter" class="connection-panel__setting-value">—</span>
         </div>
-        <div class="connection-panel__setting-row" style="margin-top:4px">
-          <span class="connection-panel__setting-label">HereSphere URL</span>
-          <input type="text" id="vr-server-hs-url" class="connection-panel__input" readonly style="flex:1;font-size:11px;cursor:text">
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">Handy RTD</span>
+          <span id="sync-handy-rtd" class="connection-panel__setting-value">—</span>
         </div>
-        <div class="connection-panel__vr-help" style="margin-top:8px">
-          <div class="connection-panel__vr-help-step">1. Open DeoVR or HereSphere on your Quest</div>
-          <div class="connection-panel__vr-help-step">2. Add the URL above as a <strong>custom server</strong></div>
-          <div class="connection-panel__vr-help-step">3. Browse your library and play — videos stream from this PC</div>
-          <div class="connection-panel__vr-help-step">4. Funscripts auto-load. Connected devices sync automatically.</div>
+        <div class="connection-panel__setting-row">
+          <span class="connection-panel__setting-label">VR transport</span>
+          <span id="sync-vr-transport" class="connection-panel__setting-value">—</span>
+        </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:6px">
+          <button id="sync-refresh-btn" class="connection-panel__btn" style="min-width:auto;padding:4px 10px;font-size:11px">Refresh</button>
         </div>
       </div>
 
-      <div class="connection-panel__vr-divider"></div>
-
-      <!-- PCVR Companion Mode -->
       <div class="connection-panel__section">
-        <label class="connection-panel__section-label">PCVR Companion</label>
-        <div class="connection-panel__vr-help-note" style="margin-bottom:8px">
-          Sync devices with DeoVR or HereSphere running on this PC.
+        <label class="connection-panel__section-label">Per-Device Offsets</label>
+        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7">
+          Each device has its own offset to compensate for its specific command latency. Negative values fire commands earlier.
         </div>
-        <div class="connection-panel__status">
-          <span class="connection-panel__led" id="vr-led"></span>
-          <span class="connection-panel__status-text" id="vr-status-text">Disconnected</span>
-        </div>
-        <div class="connection-panel__form">
-          <div class="connection-panel__input-row">
-            <select id="vr-player-select" class="connection-panel__input" style="width:auto" aria-label="VR player">
-              <option value="deovr">DeoVR</option>
-              <option value="heresphere">HereSphere</option>
-            </select>
-            <input type="text" id="vr-host-input" class="connection-panel__input" value="127.0.0.1" placeholder="127.0.0.1" aria-label="Host" style="flex:1">
-            <button id="vr-connect-btn" class="connection-panel__btn">Connect</button>
-          </div>
-        </div>
-
-        <div id="vr-now-playing" class="connection-panel__section" hidden style="margin-top:8px">
-          <div class="connection-panel__setting-row">
-            <span class="connection-panel__setting-label">Playing</span>
-            <span id="vr-video-name" class="connection-panel__setting-value" style="font-size:11px;word-break:break-all">—</span>
-          </div>
-          <div class="connection-panel__setting-row">
-            <span class="connection-panel__setting-label">Offset</span>
-            <input type="range" id="vr-offset" min="-500" max="500" value="0" class="connection-panel__safety-slider" style="flex:1">
-            <span id="vr-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
-          </div>
-        </div>
+        <div id="sync-device-rows"></div>
       </div>
 
-      </div><!-- end tab-vr -->
+      </div><!-- end tab-sync -->
 
     `;
 
@@ -327,10 +327,38 @@ export class ConnectionPanel {
     });
 
     offsetNumber.addEventListener('change', (e) => {
-      const val = Math.max(-500, Math.min(500, parseInt(e.target.value, 10) || 0));
+      const val = Math.max(-1000, Math.min(1000, parseInt(e.target.value, 10) || 0));
       offsetSlider.value = val;
       offsetNumber.value = val;
       this._onOffsetChange(val);
+    });
+
+    // Keep the Handy tab slider + Sync tab Handy row in sync with each
+    // other. Both write the same `handy.defaultOffset` setting, so
+    // whichever the user adjusts, the other one mirrors it without
+    // needing a panel rebuild. Without this, each view read its value
+    // once at panel-show and showed stale numbers after the user moved
+    // the other control — confusing and easy to accidentally double-tune.
+    eventBus.on('settings:changed', ({ path, value }) => {
+      if (path === 'handy.defaultOffset') {
+        if (offsetSlider && String(offsetSlider.value) !== String(value)) {
+          offsetSlider.value = value;
+        }
+        if (offsetNumber && String(offsetNumber.value) !== String(value)) {
+          offsetNumber.value = value;
+        }
+      }
+      // Refresh the Sync tab if it's the one being viewed — device
+      // offsets or VR offset just changed and the row values (plus the
+      // "total effective" hint in VR mode) need to reflect it.
+      if (this._activeTab === 'sync' && (
+        path === 'handy.defaultOffset'
+        || path === 'buttplug.defaultOffset'
+        || path === 'tcode.defaultOffset'
+        || path === 'vr.offset'
+      )) {
+        this._refreshSyncTab();
+      }
     });
 
     // Stroke range sliders (dual-thumb)
@@ -426,6 +454,10 @@ export class ConnectionPanel {
       this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
       this.tcodeManager.onDisconnect = () => this._updateTCodeStatus('disconnected');
 
+      // Push saved axis ranges/enabled state into tcodeSync so they apply
+      // as soon as the device connects — no need to open the panel first.
+      this._applyTCodeAxisSettings();
+
       // Initial port scan
       this._refreshTCodePorts(savedPort);
     }
@@ -466,35 +498,9 @@ export class ConnectionPanel {
       this.autoblowManager.onDisconnect = () => this._updateAutoblowStatus('disconnected');
     }
 
-    // VR Bridge callbacks + events
-    if (this.vrBridge) {
-      this._panel.querySelector('#vr-connect-btn').addEventListener('click', () => this._onVRConnect());
-
-      // Offset slider
-      this._panel.querySelector('#vr-offset')?.addEventListener('input', (e) => {
-        this._panel.querySelector('#vr-offset-value').textContent = `${e.target.value}ms`;
-      });
-      this._panel.querySelector('#vr-offset')?.addEventListener('change', (e) => {
-        const v = parseInt(e.target.value, 10);
-        this.settings.set('vr.offset', v);
-        // Apply offset to VR playback proxy in real-time
-        if (this.vrBridge?.proxy) this.vrBridge.proxy.setOffset(v);
-      });
-
-      // Restore saved offset and apply to proxy
-      const savedOffset = this.settings.get('vr.offset') || 0;
-      const offsetSlider = this._panel.querySelector('#vr-offset');
-      if (offsetSlider) { offsetSlider.value = String(savedOffset); }
-      const offsetVal = this._panel.querySelector('#vr-offset-value');
-      if (offsetVal) offsetVal.textContent = `${savedOffset}ms`;
-      if (this.vrBridge?.proxy) this.vrBridge.proxy.setOffset(savedOffset);
-
-      this.vrBridge.onConnect = () => this._updateVRStatus('connected');
-      this.vrBridge.onDisconnect = () => this._updateVRStatus('disconnected');
-    }
-
-    // Populate VR server URLs
-    this._updateVRServerUrls();
+    // VR Bridge UI + offset slider live in components/vr-modal.js now —
+    // this panel stays focused on physical devices (Handy / Buttplug /
+    // TCode / Autoblow). The bridge itself still runs; only the UI moved.
   }
 
   _loadSavedSettings() {
@@ -708,10 +714,8 @@ export class ConnectionPanel {
     this._panel.querySelector('#tab-buttplug').hidden = tabId !== 'buttplug';
     this._panel.querySelector('#tab-tcode').hidden = tabId !== 'tcode';
     this._panel.querySelector('#tab-autoblow').hidden = tabId !== 'autoblow';
-    this._panel.querySelector('#tab-vr').hidden = tabId !== 'vr';
-
-    // Refresh VR server URLs when switching to VR tab
-    if (tabId === 'vr') this._updateVRServerUrls();
+    this._panel.querySelector('#tab-sync').hidden = tabId !== 'sync';
+    if (tabId === 'sync') this._refreshSyncTab();
   }
 
   // --- Buttplug ---
@@ -1090,9 +1094,14 @@ export class ConnectionPanel {
       const settings = {};
       if (this.buttplugSync.isInverted(dev.index)) settings.inverted = true;
       const axisAssignment = this.buttplugSync.getAxisAssignment(dev.index);
-      if (axisAssignment !== 'L0') {
+      // Don't persist CR-prefixed axes — those are synthetic identifiers
+      // belonging to a specific video's custom routing, not a per-device
+      // user choice. Persisting them would silently filter the device out
+      // of the main-stroke loop on the NEXT video (since assigned !== 'L0').
+      const isCustomRouteAxis = typeof axisAssignment === 'string' && axisAssignment.startsWith('CR');
+      if (axisAssignment !== 'L0' && !isCustomRouteAxis) {
         settings.axisAssignment = axisAssignment;
-      } else if (this.buttplugSync._customRoutingActive && this.buttplugSync._axisAssignmentMap.has(dev.index)) {
+      } else if (this.buttplugSync._customRoutingActive && this.buttplugSync._axisAssignmentMap.has(dev.index) && !isCustomRouteAxis) {
         settings.axisAssignment = 'L0';
       }
       const vibeMode = this.buttplugSync.getVibeMode(dev.index);
@@ -1123,7 +1132,13 @@ export class ConnectionPanel {
       // Try index:name key first (new format), fall back to name-only (backwards compat)
       const saved = perDevice[`${dev.index}:${dev.name}`] || perDevice[dev.name];
       if (saved) {
-        if (saved.axisAssignment) this.buttplugSync.setAxisAssignment(dev.index, saved.axisAssignment);
+        // Defensive: ignore stale CR-prefixed assignments that may have
+        // been written before the save-side filter existed. Re-applying
+        // a synthetic axis here would filter the device out of the main
+        // loop on the current (possibly unrouted) video.
+        if (saved.axisAssignment && !String(saved.axisAssignment).startsWith('CR')) {
+          this.buttplugSync.setAxisAssignment(dev.index, saved.axisAssignment);
+        }
         if (saved.inverted) this.buttplugSync.setInverted(dev.index, true);
         if (saved.vibeMode) this.buttplugSync.setVibeMode(dev.index, saved.vibeMode);
         if (saved.scalarMode) this.buttplugSync.setScalarMode(dev.index, saved.scalarMode);
@@ -1286,7 +1301,158 @@ export class ConnectionPanel {
     }
     if (axisSection) {
       axisSection.hidden = status !== 'connected';
+      if (status === 'connected') this._renderTCodeAxes();
     }
+  }
+
+  /**
+   * Read saved `tcode.axes` settings and push each axis's enabled/range into
+   * tcodeSync so the engine applies them regardless of whether the panel has
+   * been opened. Safe to call multiple times — setAxisRange/setAxisEnabled
+   * are idempotent.
+   */
+  _applyTCodeAxisSettings() {
+    if (!this.tcodeSync) return;
+    const saved = this.settings.get('tcode.axes') || {};
+    for (const { tcode } of TCODE_UI_AXES) {
+      const cfg = saved[tcode] || {};
+      const enabled = cfg.enabled !== false;  // default on
+      const min = Number.isFinite(cfg.min) ? cfg.min : 0;
+      const max = Number.isFinite(cfg.max) ? cfg.max : 100;
+      this.tcodeSync.setAxisEnabled(tcode, enabled);
+      this.tcodeSync.setAxisRange(tcode, min, max);
+    }
+  }
+
+  /**
+   * Render the per-axis enable + min/max range controls into #tcode-axis-list.
+   * Idempotent — clears the container first, so it's safe to call on every
+   * connect. Values reflect saved settings; edits persist immediately and push
+   * through to tcodeSync so live playback reflects the new range.
+   */
+  _renderTCodeAxes() {
+    const list = this._panel.querySelector('#tcode-axis-list');
+    if (!list) return;
+
+    list.replaceChildren();
+    const saved = this.settings.get('tcode.axes') || {};
+
+    for (const { tcode, label, type } of TCODE_UI_AXES) {
+      const cfg = saved[tcode] || {};
+      const enabled = cfg.enabled !== false;
+      const min = Number.isFinite(cfg.min) ? cfg.min : 0;
+      const max = Number.isFinite(cfg.max) ? cfg.max : 100;
+
+      const row = document.createElement('div');
+      row.className = 'connection-panel__tcode-axis-row';
+      row.dataset.axis = tcode;
+      if (!enabled) row.classList.add('connection-panel__tcode-axis-row--disabled');
+
+      // Header: enable toggle + axis code + human label + type pill
+      const head = document.createElement('div');
+      head.className = 'connection-panel__tcode-axis-head';
+
+      const toggleLabel = document.createElement('label');
+      toggleLabel.className = 'connection-panel__device-toggle';
+      const toggle = document.createElement('input');
+      toggle.type = 'checkbox';
+      toggle.checked = enabled;
+      toggleLabel.appendChild(toggle);
+      const codeSpan = document.createElement('span');
+      codeSpan.className = 'connection-panel__tcode-axis-code';
+      codeSpan.textContent = tcode;
+      toggleLabel.appendChild(codeSpan);
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'connection-panel__tcode-axis-label';
+      labelSpan.textContent = label;
+      toggleLabel.appendChild(labelSpan);
+      head.appendChild(toggleLabel);
+
+      const typePill = document.createElement('span');
+      typePill.className = `connection-panel__tcode-axis-type connection-panel__tcode-axis-type--${type}`;
+      typePill.textContent = type;
+      head.appendChild(typePill);
+
+      row.appendChild(head);
+
+      // Range: min slider + max slider + live readout
+      const rangeRow = document.createElement('div');
+      rangeRow.className = 'connection-panel__device-safety';
+
+      const minLabel = document.createElement('span');
+      minLabel.textContent = 'Min';
+      minLabel.className = 'connection-panel__tcode-range-label';
+      const minSlider = document.createElement('input');
+      minSlider.type = 'range';
+      minSlider.min = '0';
+      minSlider.max = '99';
+      minSlider.value = String(min);
+      minSlider.className = 'connection-panel__safety-slider';
+      if (!enabled) minSlider.disabled = true;
+
+      const maxLabel = document.createElement('span');
+      maxLabel.textContent = 'Max';
+      maxLabel.className = 'connection-panel__tcode-range-label';
+      const maxSlider = document.createElement('input');
+      maxSlider.type = 'range';
+      maxSlider.min = '1';
+      maxSlider.max = '100';
+      maxSlider.value = String(max);
+      maxSlider.className = 'connection-panel__safety-slider';
+      if (!enabled) maxSlider.disabled = true;
+
+      const valReadout = document.createElement('span');
+      valReadout.className = 'connection-panel__safety-value';
+      valReadout.textContent = `${min}-${max}%`;
+
+      const commit = () => {
+        let mn = parseInt(minSlider.value, 10);
+        let mx = parseInt(maxSlider.value, 10);
+        // Clamp so min < max (prevents collapsed range that would freeze the axis)
+        if (mn >= mx) {
+          if (document.activeElement === minSlider) {
+            mn = mx - 1;
+            minSlider.value = String(mn);
+          } else {
+            mx = mn + 1;
+            maxSlider.value = String(mx);
+          }
+        }
+        valReadout.textContent = `${mn}-${mx}%`;
+        if (this.tcodeSync) this.tcodeSync.setAxisRange(tcode, mn, mx);
+        this._saveTCodeAxis(tcode, { enabled: toggle.checked, min: mn, max: mx });
+      };
+      minSlider.addEventListener('input', commit);
+      maxSlider.addEventListener('input', commit);
+
+      toggle.addEventListener('change', () => {
+        const on = toggle.checked;
+        minSlider.disabled = !on;
+        maxSlider.disabled = !on;
+        row.classList.toggle('connection-panel__tcode-axis-row--disabled', !on);
+        if (this.tcodeSync) this.tcodeSync.setAxisEnabled(tcode, on);
+        this._saveTCodeAxis(tcode, {
+          enabled: on,
+          min: parseInt(minSlider.value, 10),
+          max: parseInt(maxSlider.value, 10),
+        });
+      });
+
+      rangeRow.appendChild(minLabel);
+      rangeRow.appendChild(minSlider);
+      rangeRow.appendChild(maxLabel);
+      rangeRow.appendChild(maxSlider);
+      rangeRow.appendChild(valReadout);
+      row.appendChild(rangeRow);
+
+      list.appendChild(row);
+    }
+  }
+
+  _saveTCodeAxis(tcode, cfg) {
+    const all = { ...(this.settings.get('tcode.axes') || {}) };
+    all[tcode] = cfg;
+    this.settings.set('tcode.axes', all);
   }
 
   // --- Autoblow ---
@@ -1342,89 +1508,8 @@ export class ConnectionPanel {
     }
   }
 
-  // --- VR Bridge ---
-
-  async _onVRConnect() {
-    if (!this.vrBridge) return;
-
-    const btn = this._panel.querySelector('#vr-connect-btn');
-    if (btn) btn.disabled = true;
-
-    if (this.vrBridge.connected) {
-      await this.vrBridge.disconnect();
-      if (btn) btn.disabled = false;
-      return;
-    }
-
-    const playerSelect = this._panel.querySelector('#vr-player-select');
-    const hostInput = this._panel.querySelector('#vr-host-input');
-    const playerType = playerSelect.value;
-    const host = hostInput.value.trim() || '127.0.0.1';
-
-    this._updateVRStatus('connecting');
-    const success = await this.vrBridge.connect(playerType, host, 23554);
-
-    if (!success) {
-      this._updateVRStatus('disconnected');
-      const text = this._panel.querySelector('#vr-status-text');
-      if (text) text.textContent = 'Failed — check VR player settings';
-    }
-    if (btn) btn.disabled = false;
-  }
-
-  _updateVRStatus(status) {
-    const led = this._panel.querySelector('#vr-led');
-    const text = this._panel.querySelector('#vr-status-text');
-    const btn = this._panel.querySelector('#vr-connect-btn');
-    const nowPlaying = this._panel.querySelector('#vr-now-playing');
-    const setupHelp = this._panel.querySelector('#vr-setup-help');
-
-    if (led) {
-      led.className = 'connection-panel__led';
-      if (status === 'connected') led.classList.add('connection-panel__led--connected');
-      else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
-    }
-    if (text) {
-      text.textContent = status === 'connected' ? 'Connected'
-        : status === 'connecting' ? 'Connecting...' : 'Disconnected';
-    }
-    if (btn) {
-      btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
-    }
-    if (nowPlaying) nowPlaying.hidden = status !== 'connected';
-    if (setupHelp) setupHelp.hidden = status === 'connected';
-  }
-
-  updateVRVideoName(name) {
-    const el = this._panel.querySelector('#vr-video-name');
-    if (el) el.textContent = name || '—';
-  }
-
-  async _updateVRServerUrls() {
-    const port = this.settings.get('backend.port') || 5123;
-    const deovrUrl = this._panel.querySelector('#vr-server-deovr-url');
-    const hsUrl = this._panel.querySelector('#vr-server-hs-url');
-
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/network-info`);
-      if (res.ok) {
-        const data = await res.json();
-        const ip = data.ip || '127.0.0.1';
-        if (deovrUrl) deovrUrl.value = `http://${ip}:${port}/deovr`;
-        if (hsUrl) hsUrl.value = `http://${ip}:${port}/heresphere`;
-      } else {
-        if (deovrUrl) deovrUrl.value = 'Backend not running';
-        if (hsUrl) hsUrl.value = 'Backend not running';
-      }
-    } catch {
-      if (deovrUrl) deovrUrl.value = 'Backend not running';
-      if (hsUrl) hsUrl.value = 'Backend not running';
-    }
-
-    // Click-to-select on readonly inputs
-    deovrUrl?.addEventListener('click', () => deovrUrl.select());
-    hsUrl?.addEventListener('click', () => hsUrl.select());
-  }
+  // VR Bridge UI is now in components/vr-modal.js. The panel still
+  // accepts `vrBridge` in the constructor but doesn't own any UI for it.
 
   // --- Public API ---
 
@@ -1503,6 +1588,233 @@ export class ConnectionPanel {
     } else if (!hasVibScript && existingNote) {
       existingNote.remove();
     }
+  }
+
+  // ===== Sync tab — auto-offset diagnostic + per-device offsets =====
+
+  /**
+   * Repaint the Sync tab from current latency measurements + per-device
+   * offset state. Called when the tab opens and on Refresh button click.
+   */
+  _refreshSyncTab() {
+    if (!this._panel) return;
+
+    // 1) Latency readouts
+    const jitter = this.vrBridge?.getNetworkJitterMs?.();
+    const handyRtd = this.handy?.syncQuality?.avgRtd
+      ?? this.handy?._syncQuality?.avgRtd
+      ?? null;
+    const transport = jitter != null ? classifyTransport(jitter) : null;
+
+    const set = (id, txt) => {
+      const el = this._panel.querySelector(id);
+      if (el) el.textContent = txt;
+    };
+    set('#sync-vr-jitter', jitter != null ? `${jitter} ms` : 'no VR session');
+    set('#sync-handy-rtd', handyRtd != null ? `${Math.round(handyRtd)} ms` : 'Handy not connected');
+    set('#sync-vr-transport', transport ?? '—');
+
+    // 2) Per-device offset rows
+    const rowsEl = this._panel.querySelector('#sync-device-rows');
+    if (!rowsEl) return;
+    rowsEl.innerHTML = '';
+
+    const ctx = this.vrBridge?.connected ? 'vr' : 'desktop';
+    const vrPlayerType = this.vrBridge?._playerType || null;
+    // When VR is driving playback, the VR proxy applies `vr.offset`
+    // BEFORE each sync engine reads currentTime, so the per-device
+    // offset stacks on top. Pass it into each row so the user sees the
+    // total effective fire-time instead of only their device slider.
+    // Outside VR the proxy isn't in the pipeline — pass 0 so the row
+    // hides the stacking hint.
+    const vrOffsetMs = this.vrBridge?.connected
+      ? (this.settings.get('vr.offset') || 0)
+      : 0;
+
+    // Handy device row (only meaningful when Handy is connected via WiFi API)
+    if (this.handy?.connected) {
+      const suggested = computeSuggestedOffset({
+        device: 'handy', context: ctx,
+        handyRtdMs: handyRtd ?? 0,
+        vrJitterMs: jitter ?? 0,
+        vrPlayerType,
+      });
+      rowsEl.appendChild(this._buildSyncRow({
+        label: 'The Handy (WiFi)',
+        currentMs: this.settings.get('handy.defaultOffset') || 0,
+        suggestedMs: suggested,
+        vrOffsetMs,
+        onChange: async (v) => {
+          this.settings.set('handy.defaultOffset', v);
+          this.settings.set('handy.defaultOffsetSource', 'user');
+          if (this.handy.connected) await this.handy.setOffset(v);
+        },
+        onApply: async (v) => {
+          this.settings.set('handy.defaultOffset', v);
+          this.settings.set('handy.defaultOffsetSource', 'user');
+          if (this.handy.connected) await this.handy.setOffset(v);
+          this._refreshSyncTab();
+        },
+      }));
+    }
+
+    // Buttplug device row (single global offset for all Intiface devices)
+    if (this.buttplug?.connected) {
+      const suggested = computeSuggestedOffset({
+        device: 'buttplug', context: ctx,
+        // No real BLE-RTT measurement yet — use the device preset as the
+        // baseline component so the suggestion still moves with VR
+        // jitter + display-lag changes.
+        buttplugPingMs: Math.abs(DEVICE_OFFSET_PRESETS.buttplug) * 2,
+        vrJitterMs: jitter ?? 0,
+        vrPlayerType,
+      });
+      rowsEl.appendChild(this._buildSyncRow({
+        label: 'Buttplug.io devices',
+        currentMs: this.settings.get('buttplug.defaultOffset') || 0,
+        suggestedMs: suggested,
+        vrOffsetMs,
+        onChange: (v) => {
+          this.settings.set('buttplug.defaultOffset', v);
+          this.settings.set('buttplug.defaultOffsetSource', 'user');
+          if (this.buttplugSync) this.buttplugSync.setOffsetMs(v);
+        },
+        onApply: (v) => {
+          this.settings.set('buttplug.defaultOffset', v);
+          this.settings.set('buttplug.defaultOffsetSource', 'user');
+          if (this.buttplugSync) this.buttplugSync.setOffsetMs(v);
+          this._refreshSyncTab();
+        },
+      }));
+    }
+
+    // TCode device row
+    if (this.tcodeManager?.connected) {
+      const suggested = computeSuggestedOffset({
+        device: 'tcode', context: ctx,
+        // TCode is serial so device-side latency is negligible. Suggested
+        // value is dominated by VR display lag (when in VR).
+        vrJitterMs: jitter ?? 0,
+        vrPlayerType,
+      });
+      rowsEl.appendChild(this._buildSyncRow({
+        label: 'TCode (serial)',
+        currentMs: this.settings.get('tcode.defaultOffset') || 0,
+        suggestedMs: suggested,
+        vrOffsetMs,
+        onChange: (v) => {
+          this.settings.set('tcode.defaultOffset', v);
+          this.settings.set('tcode.defaultOffsetSource', 'user');
+          if (this.tcodeSync) this.tcodeSync.setOffsetMs(v);
+        },
+        onApply: (v) => {
+          this.settings.set('tcode.defaultOffset', v);
+          this.settings.set('tcode.defaultOffsetSource', 'user');
+          if (this.tcodeSync) this.tcodeSync.setOffsetMs(v);
+          this._refreshSyncTab();
+        },
+      }));
+    }
+
+    if (rowsEl.children.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'connection-panel__hint';
+      empty.style.cssText = 'padding:12px;text-align:center;opacity:0.6';
+      empty.textContent = 'Connect a device to see its offset controls.';
+      rowsEl.appendChild(empty);
+    }
+
+    // Wire the Refresh button (idempotent — replaceWith strips old listeners)
+    const refreshBtn = this._panel.querySelector('#sync-refresh-btn');
+    if (refreshBtn && !refreshBtn._wired) {
+      refreshBtn._wired = true;
+      refreshBtn.addEventListener('click', async () => {
+        // Re-measure Handy RTD; the SDK's measurement cycle returns a
+        // refreshed avgRtd. Rest is read fresh on every paint.
+        if (this.handy?.connected && this.handy.syncTime) {
+          await this.handy.syncTime(10);
+        }
+        this._refreshSyncTab();
+      });
+    }
+  }
+
+  /**
+   * Build one device's offset control row: label, current value, suggested
+   * value with Apply button, and the slider for live tuning. Centralised
+   * so adding a new device type is just one more call site.
+   */
+  _buildSyncRow({ label, currentMs, suggestedMs, onChange, onApply, vrOffsetMs }) {
+    const row = document.createElement('div');
+    row.className = 'connection-panel__section';
+    row.style.cssText = 'padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:6px;margin-bottom:8px';
+
+    const head = document.createElement('div');
+    head.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px';
+    const labelEl = document.createElement('span');
+    labelEl.style.cssText = 'font-size:12px;font-weight:600';
+    labelEl.textContent = label;
+    const valEl = document.createElement('span');
+    valEl.style.cssText = 'font-size:11px;opacity:0.7';
+    valEl.textContent = `${currentMs} ms`;
+    head.appendChild(labelEl);
+    head.appendChild(valEl);
+    row.appendChild(head);
+
+    // "Total effective" hint — only when VR is driving playback. The VR
+    // proxy offset and the per-device offset stack additively, which is
+    // correct per the auto-offset formula but easy to miss when tuning.
+    // Surface the stacked total so users don't double-compensate.
+    const fmt = (ms) => (ms >= 0 ? `+${ms}` : `${ms}`);
+    let totalEl = null;
+    if (Number.isFinite(vrOffsetMs) && vrOffsetMs !== 0) {
+      totalEl = document.createElement('div');
+      totalEl.className = 'connection-panel__sync-row-total';
+      totalEl.style.cssText = 'font-size:11px;opacity:0.6;margin-bottom:6px';
+      const total = currentMs + vrOffsetMs;
+      totalEl.textContent = `VR mode: ${fmt(currentMs)} (device) ${fmt(vrOffsetMs)} (VR) = ${fmt(total)} ms effective`;
+      row.appendChild(totalEl);
+    }
+
+    // Suggested + Apply
+    const sugRow = document.createElement('div');
+    sugRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:11px';
+    const sugTxt = document.createElement('span');
+    sugTxt.style.opacity = '0.7';
+    sugTxt.textContent = `Suggested: ${suggestedMs} ms`;
+    const applyBtn = document.createElement('button');
+    applyBtn.className = 'connection-panel__btn';
+    applyBtn.style.cssText = 'min-width:auto;padding:3px 10px;font-size:11px';
+    applyBtn.textContent = 'Apply';
+    applyBtn.disabled = currentMs === suggestedMs;
+    applyBtn.addEventListener('click', () => onApply(suggestedMs));
+    sugRow.appendChild(sugTxt);
+    sugRow.appendChild(applyBtn);
+    row.appendChild(sugRow);
+
+    // Slider
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.min = '-1000'; slider.max = '1000'; slider.step = '10';
+    slider.value = String(currentMs);
+    slider.style.width = '100%';
+    slider.addEventListener('input', () => {
+      const v = parseInt(slider.value, 10) || 0;
+      valEl.textContent = `${v} ms`;
+      if (totalEl) {
+        const total = v + vrOffsetMs;
+        totalEl.textContent = `VR mode: ${fmt(v)} (device) ${fmt(vrOffsetMs)} (VR) = ${fmt(total)} ms effective`;
+      }
+    });
+    slider.addEventListener('change', () => {
+      const v = parseInt(slider.value, 10) || 0;
+      onChange(v);
+      // Also disable Apply when slider matches suggested.
+      applyBtn.disabled = v === suggestedMs;
+    });
+    row.appendChild(slider);
+
+    return row;
   }
 }
 

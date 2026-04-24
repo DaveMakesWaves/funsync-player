@@ -8,8 +8,14 @@ router = APIRouter()
 
 
 @router.get("/")
-async def metadata(video_path: str = Query(..., description="Absolute path to video file")):
-    """Extract metadata from a video file using ffprobe."""
+def metadata(video_path: str = Query(..., description="Absolute path to video file")):
+    """Extract metadata from a video file using ffprobe.
+
+    Declared `def` (not `async def`) because `get_metadata` calls
+    `subprocess.run(ffprobe, timeout=10)` synchronously. FastAPI runs
+    sync handlers in its threadpool, so a slow ffprobe doesn't stall the
+    event loop and block concurrent /stream, /register, or VR requests.
+    """
     try:
         result = get_metadata(video_path)
         return result

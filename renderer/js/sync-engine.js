@@ -12,6 +12,7 @@ export class SyncEngine {
     this._lastCheckTime = 0;
     this._playingTimer = null; // for double-play correction
     this._secondPlayDelay = 2500; // ms — matches SDK's videoPlayerDelayForSecondPlay
+    this._seekGen = 0;  // monotonic counter so rapid seeks supersede in-flight handlers
 
     // Callbacks
     this.onDriftDetected = null;  // (driftMs) => {}
@@ -66,11 +67,18 @@ export class SyncEngine {
   _bindVideoEvents() {
     const video = this.player.video;
     // Use 'playing' not 'play' — 'playing' fires after buffering completes,
-    // 'play' fires when play is requested (might still be buffering)
-    this._onPlaying = () => this._handlePlaying();
-    this._onPause = () => this._handlePause();
-    this._onSeeked = () => this._handleSeeked();
-    this._onEnded = () => this._handleEnded();
+    // 'play' fires when play is requested (might still be buffering).
+    //
+    // Each handler is async; swallow rejections at the listener boundary so
+    // a failing Handy call (network drop, device disconnect) doesn't become
+    // an unhandled promise rejection that muddies the console.
+    const guard = (fn, label) => () => fn().catch(err =>
+      console.warn(`[Sync] ${label} failed: ${err?.message || err}`)
+    );
+    this._onPlaying = guard(() => this._handlePlaying(), '_handlePlaying');
+    this._onPause   = guard(() => this._handlePause(),   '_handlePause');
+    this._onSeeked  = guard(() => this._handleSeeked(),  '_handleSeeked');
+    this._onEnded   = guard(() => this._handleEnded(),   '_handleEnded');
 
     video.addEventListener('playing', this._onPlaying);
     video.addEventListener('pause', this._onPause);
@@ -97,13 +105,20 @@ export class SyncEngine {
     await this.handy.hsspPlay(timeMs);
 
     // Double-play pattern (matches SDK's setVideoPlayer behavior):
-    // Send a second hsspPlay after a delay to correct for video startup buffering.
-    // By this time the video's currentTime is more accurate.
+    // Send a second hsspPlay after a delay to correct for video startup
+    // buffering. By this time the video's currentTime is more accurate.
+    // Detached from any await chain (lives on a setTimeout), so we catch
+    // internally — otherwise a network-level hsspPlay rejection would
+    // surface as an unhandled promise rejection.
     this._playingTimer = setTimeout(async () => {
       if (!this._active || this.player.paused || !this.handy.connected) return;
       const correctedTimeMs = Math.round(this.player.currentTime * 1000);
       console.log(`[Sync] correction hsspPlay at ${correctedTimeMs}ms`);
-      await this.handy.hsspPlay(correctedTimeMs);
+      try {
+        await this.handy.hsspPlay(correctedTimeMs);
+      } catch (err) {
+        console.warn(`[Sync] correction hsspPlay failed: ${err?.message || err}`);
+      }
     }, this._secondPlayDelay);
 
     this._emitStatus('synced');
@@ -123,13 +138,23 @@ export class SyncEngine {
 
     clearTimeout(this._playingTimer);
 
-    // Stop then restart at new position
+    // Generation token: rapid back-to-back seeks (e.g. J/L key spam) kick
+    // off multiple handlers in parallel. Without this, a slow Stop from an
+    // earlier handler can resolve AFTER a newer handler's Play and silently
+    // halt the device for up to ~2s until drift monitor corrects. Bump the
+    // gen on entry; bail out after each await if we've been superseded.
+    const gen = ++this._seekGen;
+
+    // Stop still runs for every seek — the device should pause regardless
+    // of which handler wins the race to restart.
     await this.handy.hsspStop();
+    if (gen !== this._seekGen) return;
 
     if (!this.player.paused) {
       const timeMs = Math.round(this.player.currentTime * 1000);
       console.log(`[Sync] seeked → hsspPlay at ${timeMs}ms`);
       await this.handy.hsspPlay(timeMs);
+      if (gen !== this._seekGen) return;
       this._emitStatus('synced');
     }
   }

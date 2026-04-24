@@ -17,8 +17,13 @@ function initAutoUpdater(mainWindow) {
   // Don't auto-download — let the user decide
   autoUpdater.autoDownload = false;
 
-  // Don't auto-install on quit — we control when
-  autoUpdater.autoInstallOnAppQuit = true;
+  // Don't auto-install on quit either — the user controls every step of
+  // the update flow (download + install). Closing the app without clicking
+  // "Restart Now" leaves the downloaded update cached; next launch the
+  // renderer shows the update-available toast again, Download short-
+  // circuits (electron-updater returns the cached artifact), and the user
+  // can install on their own schedule.
+  autoUpdater.autoInstallOnAppQuit = false;
 
   // --- Events ---
 

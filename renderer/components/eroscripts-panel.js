@@ -455,22 +455,24 @@ export class EroScriptsPanel {
   async _downloadAttachment(attachment, btn) {
     if (btn) { btn.disabled = true; btn.textContent = 'Saving script...'; }
 
-    const sources = this._settings.get('library.sources') || [];
-    const libraryDir = sources.length > 0 ? sources[0].path : this._settings.get('library.directory');
+    const sources = (this._settings.get('library.sources') || []).filter(s => s.enabled !== false);
     const playerContainer = document.getElementById('player-container');
     const videoPath = playerContainer?.dataset?.videoPath;
 
     let savePath;
     let savedName = attachment.name;
-    if (videoPath && videoPath.includes('/') || videoPath?.includes('\\')) {
+    if (videoPath && (videoPath.includes('/') || videoPath.includes('\\'))) {
       // Auto-rename to match video filename for auto-pairing
       const videoDir = videoPath.replace(/[\\/][^\\/]+$/, '');
       const videoBase = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
       savedName = `${videoBase}.funscript`;
       savePath = `${videoDir}/${savedName}`;
-    } else if (libraryDir) {
-      savePath = `${libraryDir}/${attachment.name}`;
+    } else if (sources.length === 1) {
+      // Exactly one source → safe to save there without asking
+      savePath = `${sources[0].path}/${attachment.name}`;
     } else {
+      // No open video, OR multi-source library — ask the user where to save rather
+      // than arbitrarily picking sources[0]. Dialog pre-fills the attachment name.
       const result = await window.funsync.saveFunscript('', attachment.name);
       if (!result) { if (btn) { btn.disabled = false; btn.textContent = 'Get Script'; } return; }
       savePath = result;

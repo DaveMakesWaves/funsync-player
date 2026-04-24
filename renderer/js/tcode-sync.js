@@ -45,6 +45,11 @@ export class TCodeSync {
     // Track last sent values for delta optimization
     this._lastSentAxes = {};
 
+    // Per-device sync offset in ms. NEGATIVE = fire commands earlier.
+    // Same semantics as buttplug-sync._offsetMs — see that module's
+    // setOffsetMs comment for the formula and rationale.
+    this._offsetMs = 0;
+
     // Callbacks
     this.onSyncStatus = null;
   }
@@ -115,6 +120,24 @@ export class TCodeSync {
     this._speedLimit = maxSpeed || 0;
   }
 
+  /**
+   * Per-device sync offset in ms. Negative = fire commands earlier.
+   * Same model as buttplug-sync; centralised time computation in
+   * _currentTimeMs so adding the offset doesn't require updating every
+   * scheduler branch.
+   */
+  setOffsetMs(ms) {
+    this._offsetMs = Math.max(-2000, Math.min(2000, Number(ms) || 0));
+  }
+
+  getOffsetMs() {
+    return this._offsetMs;
+  }
+
+  _currentTimeMs() {
+    return this.player.currentTime * 1000 - this._offsetMs;
+  }
+
   // --- Internal ---
 
   _cacheActions() {
@@ -129,7 +152,7 @@ export class TCodeSync {
   }
 
   _resetIndices() {
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
 
     // Main axis
     if (this._actions && this._actions.length > 0) {
@@ -206,7 +229,7 @@ export class TCodeSync {
     const now = performance.now();
     if (now - this._lastSendTime < MIN_SEND_INTERVAL_MS) return;
 
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
     const axisValues = {};
     let durationMs = MIN_SEND_INTERVAL_MS;
 

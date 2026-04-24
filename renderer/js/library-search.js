@@ -11,67 +11,129 @@
  * @property {number} [lastPlayed] — timestamp of last playback (if tracked)
  */
 
+const DIACRITICS_RE = new RegExp('[\\u0300-\\u036f]', 'g');
+const SEPARATOR_RE = /[._\-\[\]()\/\\&+]/g;
+
 /**
- * Fuzzy search across video names. Matches if all query characters appear
- * in order within the name (case-insensitive). Results are sorted by match quality.
+ * Token-based fuzzy search across video names. The query is split on
+ * whitespace; every token must match (in any order). Separators
+ * (`.`, `_`, `-`, brackets, etc.) are flattened to spaces so
+ * "my video title" matches "My.Video.Title.mp4".
  *
- * @param {VideoEntry[]} videos — list of videos to search
- * @param {string} query — search query
- * @returns {VideoEntry[]} filtered and sorted results
+ * Match tiers (lower score = better, top of results):
+ *   -100  — exact filename match incl. extension
+ *   -50   — exact filename match minus media extension
+ *    0..N — name fuzzy score (prefix 0, word-bound 0.5, substring 1, fuzzy 2+)
+ *    +10  — path-only hit (e.g. typing a studio/folder name)
+ *    +20  — context-only hit (collection/category name)
+ *
+ * @param {VideoEntry[]} videos
+ * @param {string} query
+ * @param {{ searchPaths?: boolean, contextMap?: Map<string,string[]>|Object<string,string[]> }} [options]
+ * @returns {VideoEntry[]} filtered, ranked results
  */
-export function fuzzySearch(videos, query) {
+export function fuzzySearch(videos, query, options = {}) {
   if (!videos || videos.length === 0) return [];
   if (!query || query.trim() === '') return videos;
 
-  const q = query.toLowerCase().trim();
-  const results = [];
+  const normQuery = _normalize(query);
+  if (!normQuery) return videos;
+  const tokens = normQuery.split(' ').filter(Boolean);
+  if (tokens.length === 0) return videos;
 
+  const searchPaths = options.searchPaths !== false;
+  const contextMap = options.contextMap || null;
+
+  const results = [];
   for (const video of videos) {
-    const name = (video.name || '').toLowerCase();
-    const score = _fuzzyScore(name, q);
-    if (score >= 0) {
-      results.push({ video, score });
+    const normName = _normalize(video.name || '');
+
+    // Tier 0: exact title match (with or without media extension).
+    if (normName === normQuery) { results.push({ video, score: -100 }); continue; }
+    if (_stripMediaExt(normName) === normQuery) { results.push({ video, score: -50 }); continue; }
+
+    // Tier 1: name fuzzy score.
+    const nameScore = _scoreAll(normName, normQuery, tokens);
+    if (nameScore >= 0) { results.push({ video, score: nameScore }); continue; }
+
+    // Tier 2: path-only hit — user typed studio/folder name.
+    // Penalty keeps name matches above path-only matches.
+    if (searchPaths && video.path) {
+      const pathScore = _scoreAll(_normalize(video.path), normQuery, tokens);
+      if (pathScore >= 0) { results.push({ video, score: pathScore + 10 }); continue; }
+    }
+
+    // Tier 3: context strings (collection / category names). Weakest match.
+    if (contextMap) {
+      const ctxList = typeof contextMap.get === 'function'
+        ? contextMap.get(video.path)
+        : contextMap[video.path];
+      if (ctxList && ctxList.length) {
+        let best = Infinity;
+        for (const s of ctxList) {
+          const ns = _normalize(s);
+          if (!ns) continue;
+          const cs = _scoreAll(ns, normQuery, tokens);
+          if (cs >= 0 && cs < best) best = cs;
+        }
+        if (Number.isFinite(best)) results.push({ video, score: best + 20 });
+      }
     }
   }
 
-  // Sort by score (lower = better match), then alphabetically
-  results.sort((a, b) => a.score - b.score || a.video.name.localeCompare(b.video.name));
-
+  results.sort((a, b) => a.score - b.score || (a.video.name || '').localeCompare(b.video.name || ''));
   return results.map(r => r.video);
 }
 
-/**
- * Score a fuzzy match. Returns -1 if no match.
- * Lower score = better match. Exact match = 0, substring = 1, fuzzy = distance-based.
- * @param {string} name — lowercase name
- * @param {string} query — lowercase query
- * @returns {number} match score (-1 = no match)
- */
-function _fuzzyScore(name, query) {
-  // Exact match
-  if (name === query) return 0;
+// After normalization "foo.mp4" becomes "foo mp4". Trim the trailing media
+// extension token so exact-title match works whether or not the user typed it.
+const _MEDIA_EXT_RE = / (mp4|mkv|webm|avi|mov|wmv|flv|m4v|mpg|mpeg|ts|m3u8|funscript)$/;
+function _stripMediaExt(normName) {
+  return normName.replace(_MEDIA_EXT_RE, '');
+}
 
-  // Substring match
-  if (name.includes(query)) return 1;
+// Normalize for matching: lowercase, strip diacritics, flatten separators
+// to spaces, collapse runs.
+function _normalize(s) {
+  return String(s)
+    .toLowerCase()
+    .normalize('NFD').replace(DIACRITICS_RE, '')
+    .replace(SEPARATOR_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-  // Fuzzy: all query chars must appear in order
+function _scoreAll(name, fullQuery, tokens) {
+  if (name === fullQuery) return 0;
+  if (name.includes(fullQuery)) return tokens.length * 0.4;
+
+  let total = 0;
+  for (const tok of tokens) {
+    const s = _scoreToken(name, tok);
+    if (s < 0) return -1;
+    total += s;
+  }
+  return total;
+}
+
+function _scoreToken(name, token) {
+  if (!token) return 0;
+  const idx = name.indexOf(token);
+  if (idx === 0) return 0;
+  if (idx > 0) return name[idx - 1] === ' ' ? 0.5 : 1;
+
   let qi = 0;
   let gaps = 0;
-  let lastMatchIdx = -1;
-
-  for (let ni = 0; ni < name.length && qi < query.length; ni++) {
-    if (name[ni] === query[qi]) {
-      if (lastMatchIdx >= 0) {
-        gaps += ni - lastMatchIdx - 1;
-      }
-      lastMatchIdx = ni;
+  let last = -1;
+  for (let ni = 0; ni < name.length && qi < token.length; ni++) {
+    if (name[ni] === token[qi]) {
+      if (last >= 0) gaps += ni - last - 1;
+      last = ni;
       qi++;
     }
   }
-
-  if (qi < query.length) return -1; // Not all chars matched
-
-  return 2 + gaps; // Base score 2 + penalty for gaps
+  if (qi < token.length) return -1;
+  return 2 + Math.min(gaps, 100) * 0.05;
 }
 
 /**

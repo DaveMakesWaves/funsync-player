@@ -180,6 +180,18 @@
   background: rgba(244, 67, 54, 0.1);
 }
 
+/* Sync-with-source badge on synced collections — small ↻ glyph
+ * appended to the library-option button's name. Intent: make it
+ * obvious at a glance which libraries auto-include new files vs
+ * frozen snapshots. */
+.nav-bar__library-sync-badge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 11px;
+  opacity: 0.7;
+  color: var(--accent);
+}
+
 /* Unavailable (disconnected source) */
 
 .nav-bar__library-option--unavailable {
@@ -321,4 +333,13 @@
 .nav-bar__settings:hover {
   color: var(--text-primary);
   background: var(--control-hover);
+}
+
+/* VR toolbar button — tints accent when the PCVR companion bridge is
+   connected, same signal pattern as the Handy LED. Without this the user
+   has no way to tell from the toolbar whether the VR bridge is live. */
+.nav-bar__vr-btn--connected,
+.nav-bar__vr-btn--connected:hover {
+  color: var(--accent, #e94560);
+  background: var(--accent-soft, rgba(233, 69, 96, 0.14));
 }

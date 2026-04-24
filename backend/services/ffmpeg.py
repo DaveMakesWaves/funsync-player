@@ -16,17 +16,32 @@ def _find_binary(name: str) -> str:
         bundled = os.path.join(os.path.dirname(sys.executable), name)
         if os.path.exists(bundled):
             return bundled
-    # Check in a sibling ffmpeg/ directory (dev layout)
+    # Check sibling dev directories. Windows keeps ffmpeg in `ffmpeg/`;
+    # Linux keeps it in `ffmpeg-linux/` (the CI build downloads platform-
+    # specific static binaries into each). Probe both so dev runs work on
+    # either OS without a reshuffle.
     project_root = os.path.join(os.path.dirname(__file__), "..", "..")
-    dev_path = os.path.join(project_root, "ffmpeg", name + (".exe" if os.name == "nt" else ""))
-    if os.path.exists(dev_path):
-        return os.path.abspath(dev_path)
+    exe_suffix = ".exe" if os.name == "nt" else ""
+    dev_dirs = ("ffmpeg-linux", "ffmpeg") if os.name != "nt" else ("ffmpeg",)
+    for d in dev_dirs:
+        dev_path = os.path.join(project_root, d, name + exe_suffix)
+        if os.path.exists(dev_path):
+            return os.path.abspath(dev_path)
     # Fall back to PATH
     return name
 
 
 FFPROBE = _find_binary("ffprobe")
 FFMPEG = _find_binary("ffmpeg")
+
+
+# In-memory metadata cache. Keyed by (path, size, mtime) so file edits
+# invalidate naturally. The thumbnail-single endpoint calls
+# get_metadata for EVERY thumbnail to know the duration; without
+# caching, that doubles the per-thumbnail cost (ffprobe + ffmpeg).
+# Cache survives the lifetime of the backend process; no need to bound
+# growth — entries are tiny dicts and a library of 10k videos is < 1MB.
+_metadata_cache: dict[str, dict[str, Any]] = {}
 
 
 def get_metadata(video_path: str) -> dict[str, Any]:
@@ -45,6 +60,15 @@ def get_metadata(video_path: str) -> dict[str, Any]:
     if not os.path.exists(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
 
+    # Cache lookup — most callers will hit this for the same files
+    # repeatedly during a session (each thumbnail call previously
+    # re-ran ffprobe wastefully).
+    stat = os.stat(video_path)
+    cache_key = f"{video_path}:{stat.st_size}:{stat.st_mtime}"
+    cached = _metadata_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     try:
         result = subprocess.run(
             [
@@ -57,6 +81,13 @@ def get_metadata(video_path: str) -> dict[str, Any]:
             ],
             capture_output=True,
             text=True,
+            # ffmpeg/ffprobe write UTF-8 to stdout/stderr (file paths, codec
+            # messages). Without an explicit encoding here Python's reader
+            # thread defaults to the OS locale — cp1252 on Windows — and any
+            # byte that doesn't map (smart quotes, accented chars, raw codec
+            # output) crashes the reader thread with UnicodeDecodeError.
+            encoding="utf-8",
+            errors="replace",
             timeout=30,
         )
     except FileNotFoundError:
@@ -90,6 +121,7 @@ def get_metadata(video_path: str) -> dict[str, Any]:
             "fps": _parse_fps(video_stream.get("r_frame_rate", "0/1")),
         })
 
+    _metadata_cache[cache_key] = metadata
     return metadata
 
 
@@ -176,6 +208,11 @@ def generate_thumbnails(
             ],
             capture_output=True,
             text=True,
+            # See get_metadata above for why explicit utf-8/replace matters
+            # on Windows — ffmpeg's stderr crashes the reader thread under
+            # cp1252 when the input path or codec message has unmappable bytes.
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
     except FileNotFoundError:
@@ -209,3 +246,104 @@ def generate_thumbnails(
         json.dump(manifest, f)
 
     return manifest
+
+
+def generate_single_thumbnail(
+    video_path: str,
+    seek_pct: float = 0.1,
+    width: int = 320,
+) -> dict[str, Any]:
+    """Generate ONE thumbnail frame for a library card. Single ffmpeg
+    invocation — much cheaper than the multi-frame preview generator
+    above, since library cards only need a single representative image.
+
+    Cached on disk by content hash; subsequent calls return the cached
+    path immediately. Auto-rejects audio-only files (no video stream).
+
+    Args:
+        video_path: Absolute path to the video file.
+        seek_pct: Where in the video to grab (0.0 - 1.0). Default 10%.
+        width: Output width in pixels. Height auto-scales.
+
+    Returns:
+        Dict with:
+            path: absolute path to generated JPEG
+            duration: video duration in seconds (so caller can cache it)
+            width / height: actual dimensions
+
+    Raises:
+        FileNotFoundError: video doesn't exist.
+        RuntimeError: ffmpeg failed.
+    """
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+
+    video_hash = _get_video_hash(video_path)
+    output_dir = os.path.join(tempfile.gettempdir(), "funsync_thumbs", video_hash)
+    os.makedirs(output_dir, exist_ok=True)
+
+    # Cache key includes width + seek_pct so different requested sizes
+    # don't collide. Most callers will use the defaults — single file.
+    cache_name = f"single_{int(seek_pct * 1000):04d}_{width}.jpg"
+    output_path = os.path.join(output_dir, cache_name)
+
+    # Need duration to compute seek time AND to return alongside the
+    # thumbnail (callers cache it on the video object). Cheap when
+    # ffprobe-cached.
+    metadata = get_metadata(video_path)
+    duration = metadata.get("duration") or 0
+    out_width = metadata.get("width") or width
+    out_height = metadata.get("height") or 0
+
+    # Cache hit — bail early.
+    if os.path.exists(output_path):
+        return {
+            "path": output_path,
+            "duration": duration,
+            "width": width,
+            "height": (round(width * out_height / out_width)
+                       if out_width and out_height else 0),
+        }
+
+    if duration <= 0:
+        raise RuntimeError("Video has no duration; cannot grab thumbnail")
+
+    # Pick a sensible seek time. Cap at min(seek_pct * duration, 5s) for
+    # the same reason the renderer's previous _captureVideoFrame did:
+    # title cards / studio idents are usually past the first 5 seconds,
+    # but for short clips the 10% mark stays representative.
+    seek_time = min(duration * seek_pct, 5.0) if duration > 50 else duration * seek_pct
+
+    try:
+        result = subprocess.run(
+            [
+                FFMPEG,
+                # -ss BEFORE -i = fast seek (skips ahead via container
+                # index instead of decoding from the start). Order matters.
+                "-ss", str(seek_time),
+                "-i", video_path,
+                "-frames:v", "1",
+                "-vf", f"scale={width}:-2",  # -2 = preserve AR, even-rounded
+                "-q:v", "5",
+                "-y",
+                output_path,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
+
+    if result.returncode != 0 or not os.path.exists(output_path):
+        raise RuntimeError(f"ffmpeg single-thumbnail failed: {result.stderr}")
+
+    return {
+        "path": output_path,
+        "duration": duration,
+        "width": width,
+        "height": (round(width * out_height / out_width)
+                   if out_width and out_height else 0),
+    }

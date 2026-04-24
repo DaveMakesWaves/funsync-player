@@ -5,7 +5,10 @@ a = Analysis(
     ['main.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    # Bundle the web remote SPA alongside the backend exe so the StaticFiles
+    # mount at /remote/ works in the packaged app. `sys._MEIPASS` resolution
+    # in main.py picks this up automatically at runtime.
+    datas=[('web-remote', 'web-remote')],
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',
@@ -15,8 +18,12 @@ a = Analysis(
         'uvicorn.protocols.http.auto',
         'uvicorn.protocols.websockets',
         'uvicorn.protocols.websockets.auto',
+        'uvicorn.protocols.websockets.websockets_impl',  # loaded only when a WS connects
         'uvicorn.lifespan',
         'uvicorn.lifespan.on',
+        'websockets',
+        'websockets.legacy',
+        'websockets.legacy.server',
     ],
     hookspath=[],
     hooksconfig={},

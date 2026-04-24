@@ -83,15 +83,24 @@ export class VRPlaybackProxy extends EventTarget {
    */
   updateFromVR(state) {
     const wasPaused = this._paused;
-    const prevTime = this._currentTime;
+    const now = performance.now();
 
     this._duration = state.duration || 0;
     this._playbackSpeed = state.playbackSpeed || 1;
 
+    const newTime = state.currentTime || 0;
+
+    // Calculate where we EXPECTED the position to be based on interpolation
+    let expectedTime = this._currentTime;
+    if (!wasPaused && this._lastUpdateTime > 0) {
+      const elapsed = (now - this._lastUpdateTime) / 1000;
+      expectedTime = this._lastReportedTime + (elapsed * this._playbackSpeed);
+    }
+
     // Update position
-    this._lastReportedTime = state.currentTime || 0;
-    this._lastUpdateTime = performance.now();
-    this._currentTime = this._lastReportedTime;
+    this._lastReportedTime = newTime;
+    this._lastUpdateTime = now;
+    this._currentTime = newTime;
 
     // Detect state changes
     const nowPaused = state.playerState === 1;
@@ -104,13 +113,11 @@ export class VRPlaybackProxy extends EventTarget {
       this.dispatchEvent(new Event('pause'));
     }
 
-    // Detect seek (position jump > 2s from expected interpolated position)
-    if (!wasPaused && !nowPaused) {
-      const expectedTime = prevTime + ((performance.now() - this._lastUpdateTime) / 1000 * this._playbackSpeed);
-      // Use a simple check: if reported time differs from previous by more than 3s
-      // and the jump isn't explainable by normal playback progression
-      const timeDelta = Math.abs(this._currentTime - prevTime);
-      if (timeDelta > 3) {
+    // Detect seek: new position differs from EXPECTED interpolated position by > 5s
+    // Normal playback drift is < 2s even with infrequent updates
+    if (!wasPaused && !nowPaused && this._lastUpdateTime > 0) {
+      const drift = Math.abs(newTime - expectedTime);
+      if (drift > 5) {
         this.dispatchEvent(new Event('seeked'));
       }
     }

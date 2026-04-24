@@ -83,6 +83,215 @@ class TestVRFormatDetection:
         st, sm, is3d = detect_vr_format(None)
         assert st == 'flat'
 
+    # --- Studio prefix detection with per-studio projection ---
+
+    def test_sivr_studio_fisheye(self):
+        """SIVR (S1 VR) — modern fisheye MKX200."""
+        st, sm, is3d = detect_vr_format("SIVR-178-A.mp4")
+        assert st == 'mkx200'
+        assert sm == 'sbs'
+        assert is3d is True
+
+    def test_kavr_studio_fisheye(self):
+        st, sm, is3d = detect_vr_format("KAVR-483-A.mp4")
+        assert st == 'mkx200' and sm == 'sbs' and is3d is True
+
+    def test_savr_studio_fisheye(self):
+        st, sm, is3d = detect_vr_format("SAVR-278c-4k60fps_P2_.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_cjvr_studio_equirect(self):
+        """CJVR (Caribbean VR) — uses equirectangular, not fisheye."""
+        st, sm, is3d = detect_vr_format("CJVR-043-B-Decensored.mp4")
+        assert st == 'dome' and sm == 'sbs' and is3d is True
+
+    def test_ipvr_studio_fisheye(self):
+        st, sm, is3d = detect_vr_format("IPVR-215.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_vrkm_studio_fisheye(self):
+        """VRKM has VR at the start, not the end."""
+        st, sm, is3d = detect_vr_format("VRKM-912.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_kiwvr_studio_fisheye(self):
+        """5-letter prefix."""
+        st, sm, is3d = detect_vr_format("KIWVR-382.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_studio_in_path(self):
+        """Studio code in full path."""
+        st, sm, is3d = detect_vr_format("D:\\VR\\SIVR-178-A.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_explicit_format_overrides_studio(self):
+        """If both studio prefix AND explicit format tag exist, explicit wins."""
+        st, sm, is3d = detect_vr_format("KAVR-428-2-Mayuki Ito_8K_180_3DH.mp4")
+        assert st == 'dome' and sm == 'sbs' and is3d is True
+
+    def test_unknown_vr_catalog_heuristic_fisheye(self):
+        """Unknown studio but matches XXVR-### pattern — defaults to fisheye."""
+        st, sm, is3d = detect_vr_format("ZZVR-999.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_non_vr_catalog_not_matched(self):
+        """Regular catalog codes without VR should NOT match."""
+        st, sm, is3d = detect_vr_format("ABP-123.mp4")
+        assert is3d is False
+
+    def test_vr_in_random_word_not_matched(self):
+        """Avoid false positives from words containing 'vr'."""
+        st, sm, is3d = detect_vr_format("Overview-Report.mp4")
+        assert is3d is False
+
+    # --- Permissive separator handling (mirrors renderer/js/vr-detect.js) ---
+
+    def test_dot_separated_sbs(self):
+        """Dot separators should work the same as underscores."""
+        st, sm, is3d = detect_vr_format("Movie.Title.SBS.mp4")
+        assert is3d is True and sm == 'sbs'
+
+    def test_dash_separated_mkx200(self):
+        st, sm, is3d = detect_vr_format("Scene-MKX200-7K.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_space_separated_sbs(self):
+        st, sm, is3d = detect_vr_format("Movie Title SBS 180.mp4")
+        assert is3d is True
+
+    def test_bracketed_vr_tag(self):
+        """Bracketed VR tags like `[VR]` should match."""
+        st, sm, is3d = detect_vr_format("[VR] My Movie.mp4")
+        assert is3d is True
+
+    def test_parenthesized_vr_tag(self):
+        st, sm, is3d = detect_vr_format("My Movie (VR).mp4")
+        assert is3d is True
+
+    def test_bare_vr_token_mid_name(self):
+        """Bare 'VR' between separators anywhere in the name."""
+        st, sm, is3d = detect_vr_format("Studio.Title.4K.VR.180.SBS.mkv")
+        assert is3d is True
+
+    def test_vr_resolution_tag_vr180(self):
+        st, sm, is3d = detect_vr_format("VR180-title.mp4")
+        assert is3d is True
+
+    def test_vr_resolution_tag_vr360(self):
+        st, sm, is3d = detect_vr_format("VR360_movie.mp4")
+        assert st == 'sphere' or is3d is True  # accept either; what matters is VR
+
+    def test_vr_resolution_tag_8kvr(self):
+        st, sm, is3d = detect_vr_format("8KVR_scene.mp4")
+        assert is3d is True
+
+    def test_studio_combo_no_dash(self):
+        """`SIVR178` without a dash should still match."""
+        st, sm, is3d = detect_vr_format("SIVR178.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_studio_with_dots(self):
+        st, sm, is3d = detect_vr_format("SIVR.178.Title.mkv")
+        assert st == 'mkx200' and is3d is True
+
+    def test_fb360_projection(self):
+        st, sm, is3d = detect_vr_format("Movie_FB360_8K.mp4")
+        assert st == 'sphere' and is3d is True
+
+    def test_folder_based_vr_organization(self):
+        """Video in a 'VR' parent folder is detected via the path."""
+        st, sm, is3d = detect_vr_format("C:\\Downloads\\VR\\movie.mp4")
+        assert is3d is True
+        st, sm, is3d = detect_vr_format("/home/me/Videos/VR/title.mp4")
+        assert is3d is True
+
+    def test_community_encode_pattern(self):
+        """Re-encode style naming."""
+        st, sm, is3d = detect_vr_format("hhb3d-sivr-178.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_no_false_positive_on_8k_hdr(self):
+        """8K alone (no VR tag) should NOT be flagged as VR."""
+        st, sm, is3d = detect_vr_format("Movie.2023.8K.HDR.mp4")
+        assert is3d is False
+
+    def test_no_false_positive_on_embedded_vr_letters(self):
+        """'server', 'carving', 'swerve' should not be flagged as VR."""
+        assert detect_vr_format("server-backup.mp4")[2] is False
+        assert detect_vr_format("carving_wood.mp4")[2] is False
+
+    def test_no_false_positive_on_bluray_rip(self):
+        st, sm, is3d = detect_vr_format("Documentary.2023.1080p.BluRay.x264.mkv")
+        assert is3d is False
+
+    # --- Western studio catalog (equirect 180 SBS) ---
+
+    def test_wankzvr_equirect(self):
+        st, sm, is3d = detect_vr_format("WankzVR - Scene Title.mp4")
+        assert st == 'dome' and sm == 'sbs' and is3d is True
+
+    def test_naughtyamericavr_equirect(self):
+        st, sm, is3d = detect_vr_format("NaughtyAmericaVR.Scene.Title.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_badoinkvr_equirect(self):
+        st, sm, is3d = detect_vr_format("BadoinkVR - Scene.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_milfvr_equirect(self):
+        st, sm, is3d = detect_vr_format("MilfVR scene title.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_czechvr_equirect(self):
+        st, sm, is3d = detect_vr_format("CzechVR_0123_title.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_groobyvr_equirect(self):
+        st, sm, is3d = detect_vr_format("GroobyVR - Daisy Taylor - Roommate Wanted VR.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_grovr_equirect(self):
+        """Alt Grooby code seen in rip-group filenames."""
+        st, sm, is3d = detect_vr_format("2.GroVR_30 35_title_TMAL.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_realjamvr_equirect(self):
+        st, sm, is3d = detect_vr_format("RealJamVR.scene.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_sinsvr_equirect(self):
+        st, sm, is3d = detect_vr_format("SinsVR-title.mp4")
+        assert st == 'dome' and is3d is True
+
+    # --- Western studios that migrated to fisheye ---
+
+    def test_vrbangers_fisheye(self):
+        """VRBangers switched to fisheye ~200° around 2022."""
+        st, sm, is3d = detect_vr_format("VRBangers - Scene Title.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    def test_vrconk_fisheye(self):
+        st, sm, is3d = detect_vr_format("VRConk.scene.mp4")
+        assert st == 'mkx200' and is3d is True
+
+    # --- Rip-group / obfuscated codes (user library patterns) ---
+
+    def test_vrbts_equirect(self):
+        st, sm, is3d = detect_vr_format("9.VRBTS_46 20_Naie Mars_the_nutcracker_tmal.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_vrbans_equirect(self):
+        st, sm, is3d = detect_vr_format("8.vrbans_33 19_slty_receptionist_TMAL.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_vrbs_equirect(self):
+        st, sm, is3d = detect_vr_format("6.VRBS_42 15_Alise_Game Over TraR Pn_tmal.mp4")
+        assert st == 'dome' and is3d is True
+
+    def test_vrbtns_equirect(self):
+        st, sm, is3d = detect_vr_format("5.VRBTNS_34 04_AIA RAE_watch_and_learn_TMAL.mp4")
+        assert st == 'dome' and is3d is True
+
 
 # --- DeoVR API ---
 
@@ -116,7 +325,7 @@ async def test_deovr_library(client):
     assert response.status_code == 200
     data = response.json()
     assert "scenes" in data
-    assert data["authorized"] == "1"
+    assert data["authorized"] == "0"
     assert len(data["scenes"]) >= 1
 
     # Check scenes have required fields

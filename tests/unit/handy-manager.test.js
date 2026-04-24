@@ -1,5 +1,5 @@
 // Unit tests for HandyManager — imports from real source with mocked SDK
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock the SDK dynamic import before importing HandyManager
 const mockHandy = {
@@ -22,6 +22,11 @@ const mockHandy = {
   hampStop: vi.fn().mockResolvedValue(undefined),
   hdsp: vi.fn().mockResolvedValue(undefined),
   on: vi.fn(),
+  API: {
+    get: {
+      connected: vi.fn().mockResolvedValue({ connected: true }),
+    },
+  },
 };
 
 // Mock the SDK module at the exact import path used by source
@@ -95,6 +100,78 @@ describe('HandyManager', () => {
       await manager.connect('key');
       await manager.disconnect(); // should not throw
       expect(manager.connected).toBe(false);
+    });
+
+  });
+
+  describe('cloud health check', () => {
+    // Regression guard for the "shows WiFi connected after device switched
+    // to BT mode" bug. The SDK's internal 'disconnect' event doesn't fire
+    // for that transition (SDK → cloud HTTP stays alive, only cloud →
+    // device breaks), so we need an explicit poll of handyfeeling's
+    // `/connected` endpoint to notice.
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('starts polling /connected after a successful connect', async () => {
+      await manager.connect('key');
+      mockHandy.API.get.connected.mockClear();
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs + 10);
+      expect(mockHandy.API.get.connected).toHaveBeenCalledWith('key');
+    });
+
+    it('flips state to disconnected when cloud reports connected:false', async () => {
+      const onDisconnect = vi.fn();
+      manager.onDisconnect = onDisconnect;
+      await manager.connect('key');
+      expect(manager.connected).toBe(true);
+
+      mockHandy.API.get.connected.mockResolvedValueOnce({ connected: false });
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs + 10);
+
+      expect(manager.connected).toBe(false);
+      expect(manager.deviceInfo).toBeNull();
+      expect(onDisconnect).toHaveBeenCalled();
+    });
+
+    it('stops polling after device lost', async () => {
+      await manager.connect('key');
+      mockHandy.API.get.connected.mockResolvedValueOnce({ connected: false });
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs + 10);
+      expect(manager.connected).toBe(false);
+
+      // No further polls should happen once state has flipped.
+      mockHandy.API.get.connected.mockClear();
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs * 3);
+      expect(mockHandy.API.get.connected).not.toHaveBeenCalled();
+    });
+
+    it('preserves state on transient network error (tolerant)', async () => {
+      await manager.connect('key');
+      mockHandy.API.get.connected.mockRejectedValueOnce(new Error('fetch failed'));
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs + 10);
+      // One flaky poll should NOT disconnect — only an explicit cloud false.
+      expect(manager.connected).toBe(true);
+    });
+
+    it('stops polling on explicit disconnect', async () => {
+      await manager.connect('key');
+      await manager.disconnect();
+      mockHandy.API.get.connected.mockClear();
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs * 2);
+      expect(mockHandy.API.get.connected).not.toHaveBeenCalled();
+    });
+
+    it('tick is a no-op when not connected', async () => {
+      // Never connected — health check should not probe the cloud.
+      await vi.advanceTimersByTimeAsync(manager._healthCheckIntervalMs * 2);
+      expect(mockHandy.API.get.connected).not.toHaveBeenCalled();
     });
   });
 

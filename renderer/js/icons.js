@@ -12,6 +12,11 @@ export { default as Pause } from '../../node_modules/lucide/dist/esm/icons/pause
 export { default as Volume2 } from '../../node_modules/lucide/dist/esm/icons/volume-2.js';
 export { default as VolumeX } from '../../node_modules/lucide/dist/esm/icons/volume-x.js';
 export { default as FolderOpen } from '../../node_modules/lucide/dist/esm/icons/folder-open.js';
+export { default as Folder } from '../../node_modules/lucide/dist/esm/icons/folder.js';
+export { default as ChevronRight } from '../../node_modules/lucide/dist/esm/icons/chevron-right.js';
+export { default as GripVertical } from '../../node_modules/lucide/dist/esm/icons/grip-vertical.js';
+export { default as Smartphone } from '../../node_modules/lucide/dist/esm/icons/smartphone.js';
+export { default as Goggles } from '../../node_modules/lucide/dist/esm/icons/rectangle-goggles.js';
 export { default as Bluetooth } from '../../node_modules/lucide/dist/esm/icons/bluetooth.js';
 export { default as Maximize } from '../../node_modules/lucide/dist/esm/icons/maximize.js';
 export { default as Minimize } from '../../node_modules/lucide/dist/esm/icons/minimize.js';

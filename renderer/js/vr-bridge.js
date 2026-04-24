@@ -14,7 +14,18 @@ export class VRBridge {
     this._currentVideoPath = null;
     this._reconnectTimer = null;
     this._reconnectAttempts = 0;
-    this._maxReconnectAttempts = 5;
+    // Network-jitter ring buffer: deltas between consecutive packet
+    // arrivals. HereSphere/DeoVR push timestamp packets at a fairly
+    // steady cadence (~10Hz); the spread of inter-arrival deltas
+    // approximates the network jitter component of latency. Used by
+    // the auto-offset diagnostic to classify transport quality
+    // (cable / wifi-fast / wifi-slow).
+    this._arrivalDeltas = [];
+    this._lastArrivalMs = 0;
+    // No retry cap. Closing HereSphere on the Quest (or headset battery
+    // dropping) often takes longer than a 44-second budget to recover
+    // from, and a TCP connect attempt is cheap. Keep trying until the
+    // user explicitly calls disconnect().
     this._intentionalDisconnect = false;
     this._cleanupStateListener = null;
     this._cleanupDisconnectListener = null;
@@ -117,6 +128,18 @@ export class VRBridge {
   _handleStateUpdate(data) {
     if (!data) return;
 
+    // Update jitter ring from main-process arrival timestamps. Skip
+    // the first arrival (no delta) and any abnormally large gap that's
+    // probably a pause/seek pause rather than network jitter.
+    if (data._arrivalMs && this._lastArrivalMs) {
+      const delta = data._arrivalMs - this._lastArrivalMs;
+      if (delta > 0 && delta < 500) {
+        this._arrivalDeltas.push(delta);
+        if (this._arrivalDeltas.length > 20) this._arrivalDeltas.shift();
+      }
+    }
+    if (data._arrivalMs) this._lastArrivalMs = data._arrivalMs;
+
     // Detect video change
     const rawPath = data.path || '';
     if (rawPath && rawPath !== this._currentVideoPath) {
@@ -132,6 +155,19 @@ export class VRBridge {
       playerState: data.playerState ?? 1,
       playbackSpeed: data.playbackSpeed || 1,
     });
+  }
+
+  /**
+   * Get current packet-arrival jitter in ms. Used by the auto-offset
+   * diagnostic to classify the transport (cable / wifi-fast / wifi-slow).
+   * Returns the standard deviation of the last 20 arrival deltas, or
+   * null if we don't have enough samples yet.
+   */
+  getNetworkJitterMs() {
+    if (this._arrivalDeltas.length < 4) return null;
+    const mean = this._arrivalDeltas.reduce((a, b) => a + b, 0) / this._arrivalDeltas.length;
+    const variance = this._arrivalDeltas.reduce((sum, d) => sum + (d - mean) ** 2, 0) / this._arrivalDeltas.length;
+    return Math.round(Math.sqrt(variance));
   }
 
   /**
@@ -152,9 +188,11 @@ export class VRBridge {
     // URL-decode (%20 → space, etc.)
     try { name = decodeURIComponent(name); } catch { /* keep as-is */ }
 
-    // Strip extension
-    const dotIdx = name.lastIndexOf('.');
-    if (dotIdx > 0) name = name.slice(0, dotIdx);
+    // Strip extension — whitelist of known video/audio extensions only.
+    // Headsets often report paths without an extension (e.g.
+    // `2.GroVR_30 35_ Lina Laon Amecan Bety2_TMAL`); a naive "strip after last
+    // dot" or `/\.[^/.]+$/` chops the stem in half for those cases.
+    name = name.replace(/\.(?:mp4|mkv|webm|avi|mov|wmv|flv|m4v|mp3|wav|ogg|flac|aac|m4a|3gp|ts|mts|m2ts)$/i, '');
 
     // Normalize separators and case for matching
     name = name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -165,16 +203,15 @@ export class VRBridge {
   _attemptReconnect() {
     if (this._intentionalDisconnect) return;
     if (this._reconnecting) return; // prevent concurrent reconnect attempts
-    if (this._reconnectAttempts >= this._maxReconnectAttempts) {
-      console.log('[VR] Max reconnect attempts reached');
-      this._reconnectAttempts = 0;
-      return;
-    }
 
     this._reconnectAttempts++;
     this._reconnecting = true;
+    // Exponential backoff 2s → 15s, then stay at 15s forever. Closing
+    // HereSphere on the Quest or the headset going to sleep can exceed
+    // any short reconnect budget; we'd rather poll quietly at 15s
+    // intervals than give up and leave the user disconnected.
     const delay = Math.min(2000 * Math.pow(2, this._reconnectAttempts - 1), 15000);
-    console.log(`[VR] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts}/${this._maxReconnectAttempts})`);
+    console.log(`[VR] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
 
     this._reconnectTimer = setTimeout(async () => {
       this._reconnecting = false;
@@ -187,6 +224,11 @@ export class VRBridge {
   }
 
   _emitError(message) {
+    // Stash the message so the caller of connect() can introspect WHY it
+    // failed without needing to subscribe to onError. The auto-connect
+    // loop in app.js uses this to recognise the "HereSphere timestamp
+    // server isn't running" case and surface a specific hint.
+    this._lastError = String(message || '');
     console.error(`[VRBridge] ${message}`);
     if (this.onError) this.onError(message);
   }

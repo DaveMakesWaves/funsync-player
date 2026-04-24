@@ -49,6 +49,14 @@ export class ActionGraph {
     this._zoomStartTime = 0;
     this._zoomFromDuration = 0;
 
+    // Idle mode — throttle to ~10fps after 3s of no interaction
+    this._lastInteractionTime = performance.now();
+    this._idleThresholdMs = 3000;
+    this._idleFrameSkip = 0;
+
+    // Spline vs linear rendering
+    this._splineMode = true;
+
     // Drawing constants
     this._padding = { top: 10, right: 20, bottom: 28, left: 40 };
     this._dotRadius = 5;
@@ -145,6 +153,13 @@ export class ActionGraph {
     this.draw();
   }
 
+  /** Zoom to a comfortable editing window around the given time. */
+  smartZoom(centerMs) {
+    const half = 5000; // 10s total window
+    this.setViewport(centerMs - half, centerMs + half);
+    this.draw();
+  }
+
   // --- Waveform ---
 
   /**
@@ -181,17 +196,19 @@ export class ActionGraph {
 
   // --- Coordinate mapping ---
 
-  /** Canvas drawing area (excludes padding). */
+  /** Canvas drawing area (excludes padding). Cached — invalidated on resize. */
   _drawArea() {
+    if (this._cachedArea) return this._cachedArea;
     const dpr = window.devicePixelRatio || 1;
     const w = this.canvas.width / dpr;
     const h = this.canvas.height / dpr;
-    return {
+    this._cachedArea = {
       x: this._padding.left,
       y: this._padding.top,
       w: w - this._padding.left - this._padding.right,
       h: h - this._padding.top - this._padding.bottom,
     };
+    return this._cachedArea;
   }
 
   timeToX(ms) {
@@ -215,15 +232,52 @@ export class ActionGraph {
     return Math.max(0, Math.min(100, (1 - (py - area.y) / area.h) * 100));
   }
 
+  // --- Binary search utilities ---
+
+  /**
+   * Binary search for the leftmost action index where action.at >= targetMs.
+   * Returns actions.length if all actions are before targetMs.
+   */
+  _lowerBound(actions, targetMs) {
+    let lo = 0, hi = actions.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (actions[mid].at < targetMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  /**
+   * Get the visible action index range for the current viewport.
+   * Includes 1 extra action on each side for connection line continuity.
+   * @returns {{ first: number, last: number }}
+   */
+  _visibleRange(actions) {
+    if (actions.length === 0) return { first: 0, last: -1 };
+    const first = Math.max(0, this._lowerBound(actions, this._viewStartMs) - 1);
+    const lastRaw = this._lowerBound(actions, this._viewEndMs);
+    const last = Math.min(actions.length - 1, lastRaw + 1);
+    return { first, last };
+  }
+
   // --- Hit testing ---
 
   hitTestAction(x, y, radius) {
     radius = radius || this._hitRadius;
     const actions = this.script.actions;
+    if (actions.length === 0) return -1;
+
+    // Narrow search to time range around mouse position
+    const tMin = this.xToTime(x - radius);
+    const tMax = this.xToTime(x + radius);
+    const lo = Math.max(0, this._lowerBound(actions, tMin) - 1);
+    const hi = Math.min(actions.length - 1, this._lowerBound(actions, tMax) + 1);
+
     let bestIdx = -1;
     let bestDist = Infinity;
 
-    for (let i = 0; i < actions.length; i++) {
+    for (let i = lo; i <= hi; i++) {
       const ax = this.timeToX(actions[i].at);
       const ay = this.posToY(actions[i].pos);
       const dx = x - ax;
@@ -241,12 +295,20 @@ export class ActionGraph {
   hitTestRect(rect) {
     const indices = new Set();
     const actions = this.script.actions;
+    if (actions.length === 0) return indices;
+
     const x1 = Math.min(rect.x1, rect.x2);
     const x2 = Math.max(rect.x1, rect.x2);
     const y1 = Math.min(rect.y1, rect.y2);
     const y2 = Math.max(rect.y1, rect.y2);
 
-    for (let i = 0; i < actions.length; i++) {
+    // Narrow to time range of the rect
+    const tMin = this.xToTime(x1);
+    const tMax = this.xToTime(x2);
+    const lo = Math.max(0, this._lowerBound(actions, tMin) - 1);
+    const hi = Math.min(actions.length - 1, this._lowerBound(actions, tMax) + 1);
+
+    for (let i = lo; i <= hi; i++) {
       const ax = this.timeToX(actions[i].at);
       const ay = this.posToY(actions[i].pos);
       if (ax >= x1 && ax <= x2 && ay >= y1 && ay <= y2) {
@@ -289,12 +351,29 @@ export class ActionGraph {
 
   // --- Animation ---
 
+  /** Mark user interaction — exits idle mode. */
+  markInteraction() {
+    this._lastInteractionTime = performance.now();
+  }
+
   startAnimation() {
     if (this._animating) return;
     this._animating = true;
+    this._idleFrameSkip = 0;
     const loop = () => {
       if (!this._animating) return;
       this._updateZoomEasing();
+
+      // Idle mode: skip 5 of every 6 frames (~10fps) after 3s of no interaction
+      const idle = performance.now() - this._lastInteractionTime > this._idleThresholdMs;
+      if (idle) {
+        this._idleFrameSkip = (this._idleFrameSkip + 1) % 6;
+        if (this._idleFrameSkip !== 0) {
+          this._rafId = requestAnimationFrame(loop);
+          return;
+        }
+      }
+
       this.draw();
       this._rafId = requestAnimationFrame(loop);
     };
@@ -338,6 +417,7 @@ export class ActionGraph {
     this.canvas.height = rect.height * dpr;
     this.canvas.style.width = rect.width + 'px';
     this.canvas.style.height = rect.height + 'px';
+    this._cachedArea = null; // invalidate draw area cache
     this.draw();
   }
 
@@ -350,29 +430,32 @@ export class ActionGraph {
    * @returns {string} CSS color
    */
   static speedToColor(speed) {
-    // Normalize speed: 0 = still, ~0.3 = max intensity
-    const t = Math.min(1, speed / 0.3);
+    // Use pre-computed LUT for O(1) lookup
+    if (!ActionGraph._speedColorLUT) {
+      ActionGraph._buildSpeedColorLUT();
+    }
+    const idx = Math.min(255, Math.floor(Math.min(1, speed / 0.3) * 255));
+    return ActionGraph._speedColorLUT[idx];
+  }
 
-    // 6-stop gradient: Black → Blue → Cyan → Green → Yellow → Red
+  static _buildSpeedColorLUT() {
     const stops = [
-      [0, 0, 0],       // 0.0 — black
-      [0, 0, 255],     // 0.2 — blue
-      [0, 255, 255],   // 0.4 — cyan
-      [0, 255, 0],     // 0.6 — green
-      [255, 255, 0],   // 0.8 — yellow
-      [255, 0, 0],     // 1.0 — red
+      [0, 0, 0], [0, 0, 255], [0, 255, 255],
+      [0, 255, 0], [255, 255, 0], [255, 0, 0],
     ];
-
-    const idx = t * (stops.length - 1);
-    const lo = Math.floor(idx);
-    const hi = Math.min(lo + 1, stops.length - 1);
-    const frac = idx - lo;
-
-    const r = Math.round(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac);
-    const g = Math.round(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac);
-    const b = Math.round(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac);
-
-    return `rgb(${r},${g},${b})`;
+    const lut = new Array(256);
+    for (let i = 0; i < 256; i++) {
+      const t = i / 255;
+      const idx = t * (stops.length - 1);
+      const lo = Math.floor(idx);
+      const hi = Math.min(lo + 1, stops.length - 1);
+      const frac = idx - lo;
+      const r = Math.round(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac);
+      const g = Math.round(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac);
+      const b = Math.round(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac);
+      lut[i] = `rgb(${r},${g},${b})`;
+    }
+    ActionGraph._speedColorLUT = lut;
   }
 
   // --- Drawing ---
@@ -539,21 +622,24 @@ export class ActionGraph {
 
     const selected = this.script.selectedIndices;
 
-    // Build screen-space points array
-    const n = actions.length;
-    const xs = new Array(n);
-    const ys = new Array(n);
-    for (let i = 0; i < n; i++) {
-      xs[i] = this.timeToX(actions[i].at);
-      ys[i] = this.posToY(actions[i].pos);
+    // Viewport culling — only draw visible slice + 1 on each side
+    const { first, last } = this._visibleRange(actions);
+    if (first >= last) return;
+
+    const sliceLen = last - first + 1;
+    const xs = new Array(sliceLen);
+    const ys = new Array(sliceLen);
+    for (let i = first; i <= last; i++) {
+      xs[i - first] = this.timeToX(actions[i].at);
+      ys[i - first] = this.posToY(actions[i].pos);
     }
 
-    // Compute monotone cubic Hermite tangents (Fritsch-Carlson method)
-    // This guarantees no overshoot — curves stay between adjacent point values
-    const tangents = this._monotoneTangents(xs, ys);
+    // Compute tangents only for spline mode
+    const tangents = this._splineMode ? this._monotoneTangents(xs, ys) : null;
 
-    // Draw each segment
-    for (let i = 0; i < n - 1; i++) {
+    // Draw each visible segment
+    for (let si = 0; si < sliceLen - 1; si++) {
+      const i = first + si;
       const bothSelected = selected.has(i) && selected.has(i + 1);
 
       let color;
@@ -566,39 +652,36 @@ export class ActionGraph {
         color = ActionGraph.speedToColor(speed);
       }
 
-      const x1 = xs[i], y1 = ys[i], x2 = xs[i + 1], y2 = ys[i + 1];
-      const dx = x2 - x1;
-      const m1 = tangents[i] * dx;
-      const m2 = tangents[i + 1] * dx;
+      const x1 = xs[si], y1 = ys[si], x2 = xs[si + 1], y2 = ys[si + 1];
 
-      // Build cubic Hermite path
       const path = new Path2D();
       path.moveTo(x1, y1);
 
-      const steps = 16;
-      for (let s = 1; s <= steps; s++) {
-        const t = s / steps;
-        const t2 = t * t;
-        const t3 = t2 * t;
-
-        // Hermite basis functions
-        const h00 = 2 * t3 - 3 * t2 + 1;
-        const h10 = t3 - 2 * t2 + t;
-        const h01 = -2 * t3 + 3 * t2;
-        const h11 = t3 - t2;
-
-        const sx = x1 + dx * t; // X is always linear (time axis)
-        const sy = h00 * y1 + h10 * m1 + h01 * y2 + h11 * m2;
-
-        path.lineTo(sx, sy);
+      if (tangents) {
+        // Cubic Hermite spline
+        const dx = x2 - x1;
+        const m1 = tangents[si] * dx;
+        const m2 = tangents[si + 1] * dx;
+        const steps = 16;
+        for (let s = 1; s <= steps; s++) {
+          const t = s / steps;
+          const t2 = t * t;
+          const t3 = t2 * t;
+          const h00 = 2 * t3 - 3 * t2 + 1;
+          const h10 = t3 - 2 * t2 + t;
+          const h01 = -2 * t3 + 3 * t2;
+          const h11 = t3 - t2;
+          path.lineTo(x1 + dx * t, h00 * y1 + h10 * m1 + h01 * y2 + h11 * m2);
+        }
+      } else {
+        // Linear mode — straight line
+        path.lineTo(x2, y2);
       }
 
-      // Background stroke for contrast
       ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)';
       ctx.lineWidth = 5;
       ctx.stroke(path);
 
-      // Colored stroke
       ctx.strokeStyle = color;
       ctx.lineWidth = 3;
       ctx.stroke(path);
@@ -664,13 +747,15 @@ export class ActionGraph {
     const actions = this.script.actions;
     const selected = this.script.selectedIndices;
 
+    // Viewport culling — only draw visible dots
+    const { first, last } = this._visibleRange(actions);
+
     // Draw non-selected dots first
-    for (let i = 0; i < actions.length; i++) {
+    for (let i = first; i <= last; i++) {
       if (selected.has(i) || i === this._hoveredIndex) continue;
       const x = this.timeToX(actions[i].at);
       const y = this.posToY(actions[i].pos);
 
-      // OFS style: red dot with dark border
       ctx.strokeStyle = this._colors.dotBorder;
       ctx.lineWidth = 1.5;
       ctx.fillStyle = this._colors.dot;
@@ -681,7 +766,7 @@ export class ActionGraph {
     }
 
     // Draw hovered dot (larger)
-    if (this._hoveredIndex >= 0 && !selected.has(this._hoveredIndex)) {
+    if (this._hoveredIndex >= 0 && this._hoveredIndex >= first && this._hoveredIndex <= last && !selected.has(this._hoveredIndex)) {
       const a = actions[this._hoveredIndex];
       const x = this.timeToX(a.at);
       const y = this.posToY(a.pos);
@@ -694,19 +779,17 @@ export class ActionGraph {
       ctx.stroke();
     }
 
-    // Draw selected dots on top (OFS green with glow)
+    // Draw selected dots on top — only those in visible range
     for (const i of selected) {
-      if (i >= actions.length) continue;
+      if (i < first || i > last || i >= actions.length) continue;
       const x = this.timeToX(actions[i].at);
       const y = this.posToY(actions[i].pos);
 
-      // Glow
       ctx.fillStyle = this._colors.selectedGlow;
       ctx.beginPath();
       ctx.arc(x, y, this._selectedDotRadius + 3, 0, Math.PI * 2);
       ctx.fill();
 
-      // Dot
       ctx.fillStyle = this._colors.selectedDot;
       ctx.strokeStyle = this._colors.dotBorder;
       ctx.lineWidth = 1.5;
@@ -749,26 +832,31 @@ export class ActionGraph {
     const barWidth = area.w;
 
     // Draw in pixel-width segments
-    const segments = Math.min(barWidth, 200); // cap for performance
+    const segments = Math.min(barWidth, 200);
     const segWidth = barWidth / segments;
 
+    // Binary search for starting action index, then scan forward
+    const startTime = this.xToTime(area.x);
+    let cursor = Math.max(0, this._lowerBound(actions, startTime) - 1);
+
+    ctx.globalAlpha = 0.6;
     for (let s = 0; s < segments; s++) {
       const x = area.x + s * segWidth;
       const timeAtX = this.xToTime(x);
 
-      // Find speed at this time
+      // Advance cursor to the enclosing interval
+      while (cursor < actions.length - 2 && actions[cursor + 1].at < timeAtX) {
+        cursor++;
+      }
+
       let speed = 0;
-      for (let i = 0; i < actions.length - 1; i++) {
-        if (actions[i].at <= timeAtX && actions[i + 1].at >= timeAtX) {
-          const dt = actions[i + 1].at - actions[i].at;
-          const dp = Math.abs(actions[i + 1].pos - actions[i].pos);
-          speed = dt > 0 ? dp / dt : 0;
-          break;
-        }
+      if (cursor < actions.length - 1 && actions[cursor].at <= timeAtX && actions[cursor + 1].at >= timeAtX) {
+        const dt = actions[cursor + 1].at - actions[cursor].at;
+        const dp = Math.abs(actions[cursor + 1].pos - actions[cursor].pos);
+        speed = dt > 0 ? dp / dt : 0;
       }
 
       ctx.fillStyle = ActionGraph.speedToColor(speed);
-      ctx.globalAlpha = 0.6;
       ctx.fillRect(x, barY, segWidth + 0.5, barHeight);
     }
     ctx.globalAlpha = 1;

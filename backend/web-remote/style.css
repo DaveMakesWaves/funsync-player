@@ -1,0 +1,806 @@
+/* FunSync Web Remote — mobile-first UI that mirrors the desktop app's
+   palette, typography, and component styling. Colour tokens match
+   renderer/styles/player.css so the two surfaces feel like one product. */
+
+:root {
+  /* Palette — identical to desktop player.css */
+  --bg-primary: #1a1a2e;
+  --bg-secondary: #16213e;
+  --bg-card: #1c2a4a;            /* matches --bg-modal on desktop */
+  --bg-card-hover: #233766;
+  --text-primary: #e0e0e0;
+  --text-secondary: #a0a0a0;
+  --accent: #e94560;
+  --accent-hover: #ff6b81;
+  --accent-soft: rgba(233, 69, 96, 0.14);
+  --control-hover: rgba(255, 255, 255, 0.08);
+  --border: rgba(255, 255, 255, 0.08);
+
+  /* Back-compat aliases for existing rules that still reference these */
+  --bg: var(--bg-primary);
+  --text: var(--text-primary);
+  --text-dim: var(--text-secondary);
+
+  --safe-top: env(safe-area-inset-top, 0);
+  --safe-bottom: env(safe-area-inset-bottom, 0);
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+/* HTML `hidden` attr must beat any `display:` we set elsewhere. Without this,
+   e.g. `.header__view { display: flex }` would resurrect a hidden button. */
+[hidden] { display: none !important; }
+
+/* Icon-button baseline — all header / inline buttons pick these up. Individual
+   classes (.header__view, .controls__search-clear) still override size/padding. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  transition: color 120ms, background 120ms, border-color 120ms;
+}
+.icon-btn:hover { color: var(--text-primary); }
+.icon-btn:active { color: var(--accent); }
+
+/* Wrapper around each inline SVG — lets the glyph inherit colour from the btn. */
+.icon { display: inline-flex; line-height: 0; }
+.icon svg { display: block; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 16px;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+/* Header */
+.header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: calc(12px + var(--safe-top)) 16px 12px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand-accent { color: var(--accent); }
+
+.header__title {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.header__count {
+  font-size: 12px;
+  color: var(--text-dim);
+  flex-shrink: 0;
+}
+
+.header__view {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  width: 32px;
+  height: 28px;
+  border-radius: 6px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms, color 150ms, border-color 150ms;
+}
+.header__view:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.18); }
+.header__view:active,
+.header__view[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.header__back {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-primary);
+  width: 36px;
+  height: 32px;
+  border-radius: 8px;
+  cursor: pointer;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms;
+}
+.header__back:hover { background: var(--control-hover); }
+.header__view--spinning {
+  animation: spin 0.4s linear;
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* Controls — search + tabs + sort + filter */
+.controls {
+  padding: 10px 16px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 9;
+}
+
+.controls--hidden { display: none; }
+
+.controls__search {
+  position: relative;
+}
+.controls__search-icon {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-secondary);
+  display: inline-flex;
+  pointer-events: none;
+}
+.controls__search-input {
+  width: 100%;
+  height: 36px;
+  padding: 0 36px 0 34px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+  transition: border-color 120ms;
+}
+.controls__search-input:focus {
+  border-color: var(--accent);
+}
+.controls__search-clear {
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+}
+.controls__search-clear:hover { background: var(--control-hover); }
+
+.controls__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.controls__row::-webkit-scrollbar { display: none; }
+.controls__row--hidden { display: none; }
+/* At the folder root, Sort doesn't apply (folders are alphabetical); the
+   tabs + VR filter are still useful for hiding empty sources. */
+.controls__row--folder-root #sortSelect { display: none; }
+
+/* Top-level mode tabs — Library / Collections / Playlists / Categories. */
+.controls__modes {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.controls__modes::-webkit-scrollbar { display: none; }
+
+.controls__mode {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 4px;
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  border-bottom: 2px solid transparent;
+  transition: color 120ms, border-color 120ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.controls__mode:hover { color: var(--text-primary); }
+.controls__mode--active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.controls__tabs {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.controls__tab {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.controls__tab:hover { color: var(--text-primary); }
+.controls__tab--active,
+.controls__tab--active:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.controls__select {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  padding: 6px 26px 6px 10px;
+  border-radius: 6px;
+  font-family: inherit;
+  -webkit-appearance: none;
+  appearance: none;
+  flex-shrink: 0;
+  cursor: pointer;
+  /* Inline chevron — matches Lucide 'chevron-down', stroked in --text-secondary */
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  transition: border-color 120ms, color 120ms;
+}
+.controls__select:focus { outline: none; border-color: var(--accent); }
+
+/* Main content area */
+.main {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: calc(16px + var(--safe-bottom));
+}
+
+/* List view */
+.list {
+  padding: 8px 0;
+}
+
+.list__row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 120ms;
+}
+
+.list__row:active {
+  background: var(--bg-card-hover);
+}
+.list__row:hover {
+  background: var(--control-hover);
+}
+
+.list__thumb {
+  width: 112px;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 6px;
+  flex-shrink: 0;
+  object-fit: cover;
+  overflow: hidden;
+}
+
+.list__thumb--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 24px;
+}
+
+.list__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.list__title {
+  font-size: 14px;
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.list__sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.list__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.empty {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-dim);
+}
+
+.empty__title { font-size: 16px; margin-bottom: 6px; color: var(--text); }
+
+/* Grouping list — collections / playlists / categories index view. */
+.grouping-list {
+  padding: 8px 0;
+}
+
+.grouping-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  cursor: pointer;
+  border-bottom: 1px solid var(--border);
+  transition: background 120ms;
+}
+.grouping-row:hover { background: var(--control-hover); }
+.grouping-row:active { background: var(--bg-card-hover); }
+
+.grouping-row__badge {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+.grouping-row__badge--dot {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: none;
+  margin: 0 9px;
+}
+
+.grouping-row__info {
+  flex: 1;
+  min-width: 0;
+}
+
+.grouping-row__name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+
+.grouping-row__sub {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.grouping-row__chev {
+  color: var(--text-dim);
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Folder-browse breadcrumb — sits above the grid when drilled into a
+   subfolder. Horizontal-scrolling on overflow so long paths don't break
+   the layout on narrow phones. */
+.folder-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 16px 6px;
+  font-size: 13px;
+  overflow-x: auto;
+  white-space: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--border);
+}
+.folder-breadcrumb::-webkit-scrollbar { display: none; }
+
+.folder-breadcrumb__item {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 4px;
+  transition: background 120ms, color 120ms;
+}
+.folder-breadcrumb__item:hover { color: var(--text-primary); background: var(--control-hover); }
+.folder-breadcrumb__item--current {
+  color: var(--text-primary);
+  font-weight: 600;
+  cursor: default;
+}
+.folder-breadcrumb__item--current:hover { background: none; }
+
+.folder-breadcrumb__sep {
+  color: var(--text-dim);
+  font-size: 14px;
+  user-select: none;
+}
+
+/* "In folder: X" jump bar shown inside grouping detail views. Matches
+   the desktop's auto-navigate-to-common-ancestor behaviour — tap to
+   drop into folder browse at that location. */
+.folder-jump {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 16px;
+  background: var(--bg-card);
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms, color 120ms;
+}
+.folder-jump:hover { background: var(--bg-card-hover); color: var(--text-primary); }
+
+.folder-jump__icon {
+  display: inline-flex;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.folder-jump__label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.folder-jump__label strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.folder-jump__chev {
+  color: var(--text-dim);
+  font-size: 20px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* Grid view */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  padding: 10px 12px calc(14px + var(--safe-bottom));
+}
+
+.card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  transition: background 150ms, border-color 150ms, transform 150ms;
+}
+.card:hover { border-color: rgba(255,255,255,0.14); }
+.card:active {
+  background: var(--bg-card-hover);
+  transform: scale(0.98);
+}
+
+.card__thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  position: relative;
+  display: block;
+  object-fit: cover;
+}
+.card__thumb--placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-dim);
+  font-size: 28px;
+}
+.card__thumb-dur {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+}
+.card__body {
+  padding: 8px 10px 10px;
+  min-height: 0;
+}
+.card__title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.3;
+}
+.card__meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.card__badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.card__badge--vr { background: rgba(120, 180, 255, 0.12); color: #82b4ff; }
+.card__badge--speed-slow   { background: rgba(120,180,255,0.12); color: #82b4ff; }
+.card__badge--speed-medium { background: rgba(0,200,180,0.12);   color: #4ecdc4; }
+.card__badge--speed-fast   { background: rgba(255,190,80,0.14);  color: #ffc15a; }
+.card__badge--speed-extreme{ background: rgba(255,130,60,0.14);  color: #ff925c; }
+.card__badge--speed-insane { background: rgba(255,70,90,0.14);   color: #ff5c74; }
+
+/* Speed-badge icon + optional number pair. Tight gap keeps it compact in
+   the 2-col phone grid. Tabular-nums so 3-digit values line up when
+   scrolling a grid of cards. */
+.card__badge--speed-slow,
+.card__badge--speed-medium,
+.card__badge--speed-fast,
+.card__badge--speed-extreme,
+.card__badge--speed-insane {
+  gap: 3px;
+}
+.card__badge-text {
+  font-variant-numeric: tabular-nums;
+  font-size: 9px;
+  letter-spacing: 0;
+}
+
+/* Player view */
+.player {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.player__video {
+  width: 100%;
+  background: #000;
+  aspect-ratio: 16 / 9;
+  display: block;
+}
+
+.player__sync-pill {
+  margin: 10px 16px 0;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  text-align: center;
+  transition: background 150ms, border-color 150ms, color 150ms;
+}
+.player__sync-pill[data-state="ready"],
+.player__sync-pill[data-state="connected"] {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.player__sync-pill[data-state="kicked"],
+.player__sync-pill[data-state="nomatch"] {
+  background: rgba(244, 67, 54, 0.08);
+  border-color: rgba(244, 67, 54, 0.4);
+  color: #f66;
+}
+
+/* Expandable variant — summary + per-device dropdown. When expanded the
+   border-radius eases off the pill shape so the list reads as attached. */
+.player__sync-pill--expandable {
+  cursor: pointer;
+  user-select: none;
+  text-align: left;
+}
+.player__sync-pill--open {
+  border-radius: 14px;
+}
+.player__sync-pill-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+.player__sync-pill-chev {
+  font-size: 10px;
+  opacity: 0.7;
+}
+.player__sync-pill-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 4px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.player__sync-pill-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 2px;
+  font-size: 12px;
+}
+.player__sync-pill-item-name {
+  flex: 1;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.player__sync-pill-item-kind {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  opacity: 0.6;
+  font-weight: 600;
+}
+
+.player__heatmap-wrapper {
+  padding: 12px 16px 0;
+}
+
+.player__heatmap-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-bottom: 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.player__heatmap {
+  width: 100%;
+  height: 32px;
+  display: block;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--accent);
+}
+
+.player__title {
+  padding: 14px 16px 4px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.player__meta {
+  padding: 0 16px 16px;
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 10px;
+}
+
+/* Speed stats on the player page — sits below meta, echoes the card
+   badge colour so the same "insane" script looks the same in both views. */
+.player__speed {
+  padding: 0 16px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-wrap: wrap;
+}
+.player__speed-badge {
+  padding: 3px 8px;
+  font-size: 11px;
+}
+.player__speed-stat strong {
+  color: var(--text-primary);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  margin: 0 2px;
+}
+.player__speed-unit {
+  color: var(--text-dim);
+  font-size: 10px;
+}
+
+/* Loading state */
+.loading {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
+}
+
+/* Landscape tweaks — hide chrome when video is near fullscreen */
+@media (orientation: landscape) and (max-height: 500px) {
+  .header { padding-top: 8px; padding-bottom: 8px; }
+  .player__video { aspect-ratio: auto; height: 55vh; }
+}

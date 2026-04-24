@@ -79,14 +79,42 @@ function createWindow() {
   if (process.argv.includes('--dev')) {
     mainWindow.webContents.openDevTools();
   }
+
+  // Always allow the user to toggle DevTools via F12 or Ctrl+Shift+I, even in
+  // packaged builds — useful for self-diagnostics (custom-routing logs, etc.).
+  // before-input-event fires in the main process before the renderer sees
+  // the key, so no application menu / renderer handler needed.
+  mainWindow.webContents.on('before-input-event', (_event, input) => {
+    if (input.type !== 'keyDown' || input.isAutoRepeat) return;
+    const isI = input.key === 'I' || input.key === 'i';
+    const isCtrlShiftI = input.control && input.shift && !input.alt && !input.meta && isI;
+    const isF12 = input.key === 'F12';
+    if (isCtrlShiftI || isF12) {
+      mainWindow.webContents.toggleDevTools();
+    }
+  });
 }
 
 app.whenReady().then(async () => {
-  await store.initStore();
-  log.info('Data store initialized');
+  // Startup timing — main-process side. Renderer-side is in
+  // renderer/js/startup-timer.js. Both end up in main.log via
+  // electron-log so we can correlate.
+  const _t0 = Date.now();
+  log.info(`[Timing main] app.whenReady fired at t=0`);
 
+  const _tStore = Date.now();
+  await store.initStore();
+  log.info(`[Timing main] store.initStore: ${Date.now() - _tStore}ms`);
+
+  const _tBackend = Date.now();
   await startBackend();
+  log.info(`[Timing main] startBackend (Python spawn + uvicorn boot): ${Date.now() - _tBackend}ms`);
+
+  const _tWindow = Date.now();
   createWindow();
+  log.info(`[Timing main] createWindow: ${Date.now() - _tWindow}ms`);
+
+  log.info(`[Timing main] total before window opens: ${Date.now() - _t0}ms`);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
@@ -106,6 +134,12 @@ app.on('before-quit', () => {
   stopBackend();
 });
 
+// Last-chance cleanup — runs even if a renderer crashed, a modal blocked
+// before-quit, or the OS sent SIGTERM. stopBackend is idempotent.
+app.on('will-quit', () => {
+  stopBackend();
+});
+
 // --- Global error handlers ---
 process.on('uncaughtException', (err) => log.error('Uncaught exception:', err));
 process.on('unhandledRejection', (reason) => log.error('Unhandled rejection:', reason));
@@ -119,6 +153,16 @@ ipcMain.handle('get-backend-port', () => {
 
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
+});
+
+// Renderer → main log forwarding for the startup-timer (and any other
+// callers that need a guaranteed-write path that doesn't depend on the
+// console.log forwarding transport, which can break if stdout is closed
+// by a parent process). Goes straight to electron-log's file transport.
+ipcMain.handle('log-line', (_event, level, message) => {
+  if (level === 'error') log.error(message);
+  else if (level === 'warn') log.warn(message);
+  else log.info(message);
 });
 
 // --- IPC Handlers: Data Store ---
@@ -244,12 +288,32 @@ ipcMain.handle('open-file-dialog', async () => {
 
 // --- IPC Handlers: Backend API Proxies ---
 
+/**
+ * fetch() with an AbortController timeout. Every backend call routes
+ * through this — a hung Python subprocess (deadlock, infinite loop,
+ * blocked on ffmpeg) would otherwise leave the renderer's IPC
+ * indefinitely pending and the UI frozen. Better to fail cleanly so
+ * the caller can toast "backend timed out" and move on.
+ */
+async function fetchWithTimeout(url, opts = {}, timeoutMs = 15000) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...opts, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 ipcMain.handle('fetch-metadata', async (_event, videoPath) => {
   const { getBackendPort } = require('./python-bridge');
   const port = getBackendPort();
   const url = `http://localhost:${port}/metadata/?video_path=${encodeURIComponent(videoPath)}`;
   try {
-    const resp = await fetch(url);
+    // 20s: ffprobe on very large / slow-disk files can take 5-10s; the
+    // rest is network + JSON parse. Anything beyond this is a hung
+    // backend, not slow I/O.
+    const resp = await fetchWithTimeout(url, {}, 20000);
     if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
     return await resp.json();
   } catch (err) {
@@ -264,11 +328,51 @@ ipcMain.handle('generate-thumbnails', async (_event, videoPath, interval) => {
   const params = new URLSearchParams({ video_path: videoPath, interval: String(interval || 10) });
   const url = `http://localhost:${port}/thumbnails/generate?${params}`;
   try {
-    const resp = await fetch(url, { method: 'POST' });
+    // 60s: thumbnail generation on a long video can genuinely take
+    // 10-30s of ffmpeg wall-time per pass. Hard ceiling at 60s to
+    // prevent a stuck ffmpeg from blocking the IPC pipeline forever.
+    const resp = await fetchWithTimeout(url, { method: 'POST' }, 60000);
     if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
     return await resp.json();
   } catch (err) {
     log.error('Thumbnail generation failed:', err.message);
+    return null;
+  }
+});
+
+/**
+ * Generate ONE thumbnail for library card display via the backend's
+ * ffmpeg, then read the resulting JPEG file and return it as a base64
+ * data URL. Replaces the renderer's hidden-<video> decode path which
+ * was 2-3 seconds per file because it loaded the entire video just to
+ * grab one frame; ffmpeg with `-ss before -i` (fast seek) does the
+ * same job in tens of ms.
+ *
+ * Returns { dataUrl, duration, width, height } or null on failure.
+ */
+ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {}) => {
+  const { getBackendPort } = require('./python-bridge');
+  const port = getBackendPort();
+  const params = new URLSearchParams({
+    video_path: videoPath,
+    seek_pct: String(opts.seekPct ?? 0.1),
+    width: String(opts.width ?? 320),
+  });
+  const url = `http://localhost:${port}/thumbnails/single?${params}`;
+  try {
+    // 15s: a single fast-seek thumbnail is ~50-500ms; ceiling protects
+    // against a hung ffmpeg.
+    const resp = await fetchWithTimeout(url, { method: 'POST' }, 15000);
+    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+    const meta = await resp.json();
+    if (!meta?.path || !fs.existsSync(meta.path)) {
+      throw new Error('Backend returned no thumbnail file');
+    }
+    const bytes = fs.readFileSync(meta.path);
+    const dataUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+    return { dataUrl, duration: meta.duration, width: meta.width, height: meta.height };
+  } catch (err) {
+    log.warn(`Single thumbnail failed for ${videoPath}: ${err.message}`);
     return null;
   }
 });
@@ -283,29 +387,56 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
-ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
+ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // Accept a single path or array of paths (multi-source)
+  // sourceMap: optional { path: sourceName } mapping for VR content server grouping
   const dirPaths = Array.isArray(dirPathOrPaths) ? dirPathOrPaths : [dirPathOrPaths];
   const dirPath = dirPaths[0]; // for backward compat logging
+  const _sourceMap = sourceMap || {};
   const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac'];
   const FUNSCRIPT_EXT = '.funscript';
   const SUBTITLE_EXTS = ['.srt', '.vtt'];
   const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 
+  // Canonicalise a path for cross-source dedup: forward slashes, lowercased
+  // drive letter. Matches renderer/js/path-utils.js::canonicalPath so the
+  // settings overlap warning and the scan dedup agree on identity.
+  const canonicalise = (p) => {
+    if (!p) return '';
+    let out = String(p).replace(/\\/g, '/');
+    while (out.length > 1 && out.endsWith('/')) out = out.slice(0, -1);
+    if (/^[A-Za-z]:/.test(out)) out = out[0].toLowerCase() + out.slice(1);
+    return out;
+  };
+
   let entries = [];
+  const seenPaths = new Set(); // canonical full paths — drops dupes when sources overlap
   const failedPaths = [];
+  let rawEntryCount = 0;
   const scanStart = Date.now();
   for (const dp of dirPaths) {
     if (!dp) continue;
     try {
-      const dirEntries = fs.readdirSync(dp, { withFileTypes: true, recursive: true });
-      entries.push(...dirEntries);
+      const dirEntries = await fs.promises.readdir(dp, { withFileTypes: true, recursive: true });
+      rawEntryCount += dirEntries.length;
+      for (const entry of dirEntries) {
+        const parent = entry.parentPath || entry.path || dp;
+        const full = canonicalise(path.join(parent, entry.name));
+        if (seenPaths.has(full)) continue;
+        seenPaths.add(full);
+        entries.push(entry);
+      }
     } catch (err) {
       log.warn(`[Library] Failed to scan ${dp}: ${err.message}`);
       failedPaths.push(dp);
     }
   }
-  log.info(`[Library] Scanned ${entries.length} entries in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
+  const dupesDropped = rawEntryCount - entries.length;
+  if (dupesDropped > 0) {
+    log.info(`[Library] Scanned ${entries.length} unique entries (${dupesDropped} duplicates dropped from overlapping sources) in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
+  } else {
+    log.info(`[Library] Scanned ${entries.length} entries in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
+  }
 
   // Normalize a basename for matching: lowercase, replace separators with spaces, collapse
   const normalizeName = (name) => name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
@@ -451,15 +582,25 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths) => {
       return a.label.localeCompare(b.label);
     });
 
+    // Resolve source name from sourceMap (match longest prefix)
+    const fullPath = entryPath(entry);
+    let sourceName = '';
+    for (const [srcPath, srcName] of Object.entries(_sourceMap)) {
+      if (fullPath.startsWith(srcPath) && srcPath.length > sourceName.length) {
+        sourceName = srcName;
+      }
+    }
+
     videos.push({
       name: entry.name,
-      path: entryPath(entry),
+      path: fullPath,
       ext,
       hasFunscript: funscriptPath !== null,
       funscriptPath,
       hasSubtitle: subtitlePath !== null,
       subtitlePath,
       variants: variants.length > 1 ? variants : [],
+      sourceName: sourceName || path.basename(path.dirname(fullPath)) || 'Library',
     });
   }
 
@@ -581,7 +722,7 @@ ipcMain.handle('select-subtitle', async () => {
 
 ipcMain.handle('read-funscript', async (_event, filePath) => {
   try {
-    return fs.readFileSync(filePath, 'utf-8');
+    return await fs.promises.readFile(filePath, 'utf-8');
   } catch (err) {
     log.error('read-funscript failed:', err.message);
     return null;
@@ -618,16 +759,38 @@ ipcMain.handle('write-funscript', async (_event, content, filePath) => {
 });
 
 // Backend API proxy — convert funscript to CSV
+/**
+ * Fetch the backend's computed speed-stats map, keyed by funscriptPath.
+ * Returns {} when nothing's computed yet. The renderer polls this after
+ * scan to hydrate per-video avgSpeed/maxSpeed without having to read
+ * every funscript itself — the backend's `_queue_speed_probes` worker
+ * has already done the parsing in a separate process.
+ */
+ipcMain.handle('get-speed-stats', async () => {
+  const { getBackendPort } = require('./python-bridge');
+  const port = getBackendPort();
+  const url = `http://localhost:${port}/api/media/speed-stats`;
+  try {
+    const resp = await fetchWithTimeout(url, {}, 5000);
+    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+    return await resp.json();
+  } catch (err) {
+    log.warn(`get-speed-stats failed: ${err.message}`);
+    return {};
+  }
+});
+
 ipcMain.handle('convert-funscript', async (_event, funscriptContent) => {
   const { getBackendPort } = require('./python-bridge');
   const port = getBackendPort();
   const url = `http://localhost:${port}/scripts/convert`;
   try {
-    const resp = await fetch(url, {
+    // 15s: conversion is pure CPU / JSON; anything over this is a hang.
+    const resp = await fetchWithTimeout(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: funscriptContent,
-    });
+    }, 15000);
     if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
     return await resp.json();
   } catch (err) {
@@ -853,6 +1016,12 @@ ipcMain.handle('vr-connect', async (_event, host, port) => {
 
         try {
           const data = JSON.parse(json);
+          // Attach a main-process arrival timestamp so the renderer can
+          // compute network jitter from the spread between consecutive
+          // arrivals. HereSphere/DeoVR send timestamp packets at a
+          // ~regular cadence; arrival jitter ≈ network jitter, the
+          // best proxy we can derive from a one-way protocol.
+          data._arrivalMs = Date.now();
           BrowserWindow.getAllWindows().forEach(w =>
             w.webContents.send('vr-state', data)
           );

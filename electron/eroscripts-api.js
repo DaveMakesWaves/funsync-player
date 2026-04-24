@@ -6,20 +6,12 @@ const log = require('./logger');
 const BASE_URL = 'https://discuss.eroscripts.com';
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
 
-// Debug log file for EroScripts API diagnostics
-const fs = require('fs');
-const path = require('path');
-
-function _getDebugLogPath() {
-  return path.join(__dirname, '..', 'eroscripts-debug.log');
-}
-
+// Diagnostic logging — routes through electron-log so entries land in the
+// rotating main log under %APPDATA%/funsync-player/logs/ (5MB cap) instead
+// of a hand-rolled file in the install dir that silently fails to write on
+// packaged Windows builds (Program Files is read-only).
 function _debugLog(msg) {
-  try {
-    const timestamp = new Date().toISOString();
-    const line = `[${timestamp}] ${msg}\n`;
-    fs.appendFileSync(_getDebugLogPath(), line);
-  } catch { /* ignore write errors */ }
+  try { log.debug(`[EroScripts] ${msg}`); } catch { /* log unavailable */ }
 }
 
 class EroScriptsAPI {
@@ -93,7 +85,7 @@ class EroScriptsAPI {
       log.info('[EroScripts] Login response:', JSON.stringify(data));
       _debugLog(`LOGIN response status: ${loginResp.status}`);
       _debugLog(`LOGIN response: ${JSON.stringify(data)}`);
-      _debugLog(`LOGIN cookies: ${this._sessionCookies.substring(0, 200)}`);
+      _debugLog(`LOGIN cookies len: ${this._sessionCookies.length}`);
 
       // Merge cookies from login response
       const loginCookies = this._extractCookies(loginResp);
@@ -303,7 +295,7 @@ class EroScriptsAPI {
 
       log.info(`[EroScripts] Search status: ${resp.status} for query: ${query}`);
       _debugLog(`SEARCH query="${query}" status=${resp.status}`);
-      _debugLog(`SEARCH cookies sent: ${(this._headers().Cookie || 'none').substring(0, 150)}`);
+      _debugLog(`SEARCH cookies sent: ${(this._headers().Cookie || '').length} bytes`);
       if (resp.status !== 200) {
         const bodyPreview = await resp.clone().text();
         _debugLog(`SEARCH error body: ${bodyPreview.substring(0, 500)}`);

@@ -259,20 +259,51 @@ export class ButtplugManager {
 
   /**
    * Serialize a ButtplugClientDevice for UI display.
-   * v4 API: capabilities checked via device.hasOutput('Vibrate') etc.
+   * v4 API: capabilities checked via device.hasOutput(OutputType).
+   *
+   * The OutputType enum in buttplug-js v4 is: Vibrate, Rotate, Oscillate,
+   * Constrict, Inflate, Position, HwPositionWithDuration, Temperature,
+   * Spray, Led. Different device drivers expose different output types
+   * for the same physical function — e.g. the FW4+ Handy driver in
+   * Intiface advertises HwPositionWithDuration (used by timed linear
+   * commands) but not the step-based Position. We accept both so the
+   * device is correctly flagged as linear.
+   *
    * @param {object} device
    * @returns {object}
    */
   _serializeDevice(device) {
-    let canVibrate = false;
-    let canLinear = false;
-    let canRotate = false;
-    let canScalar = false;
+    const probe = (type) => {
+      try { return !!device.hasOutput(type); } catch (e) { return false; }
+    };
 
-    try { canVibrate = device.hasOutput('Vibrate'); } catch(e) {}
-    try { canLinear = device.hasOutput('Position'); } catch(e) {}
-    try { canRotate = device.hasOutput('Rotate'); } catch(e) {}
-    try { canScalar = device.hasOutput('Scalar'); } catch(e) {}
+    const canVibrate = probe('Vibrate');
+    // Linear: our sendLinear sends HwPositionWithDuration; some drivers
+    // only expose plain Position (step-based). Accept either so the
+    // device is routable through L0 / the main stroke axis.
+    const canLinear = probe('HwPositionWithDuration') || probe('Position');
+    const canRotate = probe('Rotate');
+    // Scalar umbrella: older buttplug had a unified Scalar type; v4 split
+    // it into Constrict / Inflate / Vibrate. Keep the legacy name check
+    // for backward compat and also accept Constrict/Inflate so e-stim +
+    // inflation devices keep getting picked up.
+    const canScalar = probe('Scalar') || probe('Constrict') || probe('Inflate');
+
+    // Diagnostic — when a device connects but no known capability matches,
+    // dump the set of output types it actually exposes so we can add the
+    // mapping without guessing. Catches driver renames + new device types.
+    if (!canVibrate && !canLinear && !canRotate && !canScalar) {
+      const ALL_TYPES = [
+        'Vibrate', 'Rotate', 'Oscillate', 'Constrict', 'Inflate',
+        'Position', 'HwPositionWithDuration', 'Temperature', 'Spray', 'Led',
+      ];
+      const present = ALL_TYPES.filter(probe);
+      console.warn(
+        `[Buttplug] Device "${device.name}" reports no recognised capabilities. ` +
+        `Actual outputs: [${present.join(', ') || 'none'}]. ` +
+        `Commands will not be routed to it.`
+      );
+    }
 
     return {
       index: device.index,

@@ -3,6 +3,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('funsync', {
   getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  // Direct write to main.log via electron-log — used by startup-timer
+  // so timing data survives even if the console transport breaks
+  // (e.g. parent process closed stdout). Fire-and-forget.
+  logLine: (level, message) => ipcRenderer.invoke('log-line', level, message),
 
   // File handling — native Electron dialog
   openFileDialog: (options) => ipcRenderer.invoke('open-file-dialog', options),
@@ -39,7 +43,7 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // Library
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
-  scanDirectory: (dirPath) => ipcRenderer.invoke('scan-directory', dirPath),
+  scanDirectory: (dirPath, sourceMap) => ipcRenderer.invoke('scan-directory', dirPath, sourceMap),
   selectFunscript: () => ipcRenderer.invoke('select-funscript'),
   readFunscript: (filePath) => ipcRenderer.invoke('read-funscript', filePath),
   selectSubtitle: () => ipcRenderer.invoke('select-subtitle'),
@@ -58,6 +62,8 @@ contextBridge.exposeInMainWorld('funsync', {
   // Backend API proxies
   fetchMetadata: (videoPath) => ipcRenderer.invoke('fetch-metadata', videoPath),
   generateThumbnails: (videoPath, interval) => ipcRenderer.invoke('generate-thumbnails', videoPath, interval),
+  generateSingleThumbnail: (videoPath, opts) => ipcRenderer.invoke('generate-single-thumbnail', videoPath, opts),
+  getSpeedStats: () => ipcRenderer.invoke('get-speed-stats'),
   convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
 
   // Shell

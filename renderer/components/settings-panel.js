@@ -1,16 +1,20 @@
 // SettingsPanel — App settings modal with tabs (Sources, Playback, Data)
 
 import { Modal } from './modal.js';
-import { icon, Trash2, Pencil } from '../js/icons.js';
+import { icon, Trash2, Pencil, GripVertical } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
+import { classifyOverlap } from '../js/path-utils.js';
 
 export class SettingsPanel {
-  constructor({ settings, onSourcesChanged, onGapSkipChanged, onSmoothingChanged, onSpeedLimitChanged }) {
+  constructor({ settings, onSourcesChanged, onGapSkipChanged, onSmoothingChanged, onSpeedLimitChanged, onLinearStrategyChanged, onLinearLookaheadChanged, onMinStrokeChanged }) {
     this._settings = settings;
     this._onSourcesChanged = onSourcesChanged;
     this.onGapSkipChanged = onGapSkipChanged || null;
     this.onSmoothingChanged = onSmoothingChanged || null;
     this.onSpeedLimitChanged = onSpeedLimitChanged || null;
+    this.onLinearStrategyChanged = onLinearStrategyChanged || null;
+    this.onLinearLookaheadChanged = onLinearLookaheadChanged || null;
+    this.onMinStrokeChanged = onMinStrokeChanged || null;
   }
 
   async show() {
@@ -90,6 +94,73 @@ export class SettingsPanel {
         for (const src of sources) {
           const row = document.createElement('div');
           row.className = 'settings-panel__source-row';
+          row.dataset.sourceId = src.id;
+          row.draggable = true;
+          if (src.enabled === false) row.classList.add('settings-panel__source-row--disabled');
+
+          // Drag handle — reorder sources by dragging. Affects folder-view root
+          // display order and persistence ordering. Native HTML5 DnD: dragstart
+          // records the id, dragover targets highlight, drop swaps ids.
+          const grip = document.createElement('span');
+          grip.className = 'settings-panel__source-grip';
+          grip.title = 'Drag to reorder';
+          grip.appendChild(icon(GripVertical, { width: 14, height: 14 }));
+          row.appendChild(grip);
+
+          row.addEventListener('dragstart', (e) => {
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', src.id);
+            row.classList.add('settings-panel__source-row--dragging');
+          });
+          row.addEventListener('dragend', () => {
+            row.classList.remove('settings-panel__source-row--dragging');
+            sourcesList.querySelectorAll('.settings-panel__source-row--drop-target').forEach(el =>
+              el.classList.remove('settings-panel__source-row--drop-target'));
+          });
+          row.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            row.classList.add('settings-panel__source-row--drop-target');
+          });
+          row.addEventListener('dragleave', () => {
+            row.classList.remove('settings-panel__source-row--drop-target');
+          });
+          row.addEventListener('drop', (e) => {
+            e.preventDefault();
+            row.classList.remove('settings-panel__source-row--drop-target');
+            const draggedId = e.dataTransfer.getData('text/plain');
+            if (!draggedId || draggedId === src.id) return;
+            const srcs = this._settings.get('library.sources') || [];
+            const fromIdx = srcs.findIndex(s => s.id === draggedId);
+            const toIdx = srcs.findIndex(s => s.id === src.id);
+            if (fromIdx < 0 || toIdx < 0) return;
+            const [moved] = srcs.splice(fromIdx, 1);
+            srcs.splice(toIdx, 0, moved);
+            this._settings.set('library.sources', srcs);
+            renderSources();
+            if (this._onSourcesChanged) this._onSourcesChanged();
+          });
+
+          // Enable/disable toggle — click to include or exclude this source from scans
+          // without deleting it (useful for temporarily-offline drives or archive folders).
+          const toggle = document.createElement('button');
+          toggle.className = 'settings-panel__source-toggle';
+          toggle.setAttribute('role', 'switch');
+          const isEnabled = src.enabled !== false;
+          toggle.setAttribute('aria-checked', String(isEnabled));
+          toggle.classList.toggle('settings-panel__source-toggle--on', isEnabled);
+          toggle.title = isEnabled ? 'Enabled — click to disable' : 'Disabled — click to enable';
+          toggle.addEventListener('click', () => {
+            const srcs = this._settings.get('library.sources') || [];
+            const target = srcs.find(s => s.id === src.id);
+            if (!target) return;
+            target.enabled = target.enabled === false ? true : false;
+            this._settings.set('library.sources', srcs);
+            renderSources();
+            if (this._onSourcesChanged) this._onSourcesChanged();
+            showToast(`Source "${src.name}" ${target.enabled ? 'enabled' : 'disabled'}`, 'info');
+          });
+          row.appendChild(toggle);
 
           const info = document.createElement('div');
           info.className = 'settings-panel__source-info';
@@ -126,6 +197,31 @@ export class SettingsPanel {
           deleteBtn.addEventListener('click', async () => {
             const confirmed = await Modal.confirm('Remove Source', `Remove "${src.name}"? Your files won't be deleted.`);
             if (confirmed) {
+              // Auto-convert any synced collection that tracks this
+              // source by id → folder-path mode, snapshotting the
+              // source's path before it's deleted. Keeps the
+              // collection tracking the same physical folder (the user
+              // just needs to add it back as a source for videos to
+              // show). Without this, sourceId would dangle forever and
+              // the collection would silently empty.
+              const { convertSourceIdToFolderPath } = await import('../js/collection-sync.js');
+              const collections = this._settings.get('library.collections') || [];
+              let convertedCount = 0;
+              for (let i = 0; i < collections.length; i++) {
+                if (collections[i].syncSource?.sourceId === src.id) {
+                  collections[i] = convertSourceIdToFolderPath(collections[i], src.path);
+                  convertedCount++;
+                }
+              }
+              if (convertedCount > 0) {
+                this._settings.set('library.collections', collections);
+                showToast(
+                  `${convertedCount} synced collection${convertedCount !== 1 ? 's' : ''} now tracks the folder directly. Add the folder back as a source to see videos.`,
+                  'info',
+                  6000,
+                );
+              }
+
               const srcs = this._settings.get('library.sources') || [];
               this._settings.set('library.sources', srcs.filter(s => s.id !== src.id));
               renderSources();
@@ -153,11 +249,40 @@ export class SettingsPanel {
       const dirPath = await window.funsync.selectDirectory();
       if (!dirPath) return;
       const srcs = this._settings.get('library.sources') || [];
-      if (srcs.some(s => s.path === dirPath)) { showToast('Already a source', 'warn'); return; }
+
+      const overlap = classifyOverlap(dirPath, srcs);
+      let removeChildrenIds = null;
+
+      if (overlap.kind === 'exact') {
+        showToast(`Already added as "${overlap.source.name}"`, 'warn');
+        return;
+      }
+
+      if (overlap.kind === 'child') {
+        const proceed = await Modal.confirm(
+          'Folder already covered',
+          `"${dirPath}" is inside "${overlap.parent.name}" (${overlap.parent.path}). Files here are already scanned — adding it will double-count every video.\n\nAdd anyway?`
+        );
+        if (!proceed) return;
+      }
+
+      if (overlap.kind === 'parent') {
+        const childNames = overlap.children.map(c => `"${c.name}"`).join(', ');
+        const msg = `"${dirPath}" contains existing source${overlap.children.length !== 1 ? 's' : ''} ${childNames}. Those files will be scanned twice unless you remove the nested source${overlap.children.length !== 1 ? 's' : ''}.\n\nRemove nested source${overlap.children.length !== 1 ? 's' : ''} and add this one?`;
+        const confirmed = await Modal.confirm('Overlapping source', msg);
+        if (!confirmed) return;
+        removeChildrenIds = new Set(overlap.children.map(c => c.id));
+      }
+
       const name = await Modal.prompt('Name this source', 'Source name', dirPath.split(/[\\/]/).pop());
       if (!name) return;
-      srcs.push({ id: crypto.randomUUID(), name, path: dirPath, enabled: true });
-      this._settings.set('library.sources', srcs);
+
+      let nextSrcs = srcs;
+      if (removeChildrenIds) {
+        nextSrcs = nextSrcs.filter(s => !removeChildrenIds.has(s.id));
+      }
+      nextSrcs = [...nextSrcs, { id: crypto.randomUUID(), name, path: dirPath, enabled: true }];
+      this._settings.set('library.sources', nextSrcs);
       renderSources();
       if (this._onSourcesChanged) this._onSourcesChanged();
       showToast(`Source "${name}" added`, 'info');
@@ -215,6 +340,32 @@ export class SettingsPanel {
     `;
     panel.appendChild(smoothSection);
 
+    // Buttplug linear command strategy — BLE smoothness tuning
+    const bpSection = document.createElement('div');
+    bpSection.className = 'settings-panel__section';
+    bpSection.innerHTML = `
+      <div class="settings-panel__section-header">Buttplug Linear Output (BLE)</div>
+      <div class="settings-panel__field">
+        <span class="settings-panel__field-label">Strategy</span>
+        <select id="sp-linear-strategy" class="connection-panel__device-select">
+          <option value="action-boundary">Per-stroke (smoother on BLE)</option>
+          <option value="interpolated">Per-tick (legacy)</option>
+        </select>
+      </div>
+      <div class="settings-panel__field" id="sp-lookahead-row">
+        <span class="settings-panel__field-label">Lookahead</span>
+        <input type="range" id="sp-lookahead" min="0" max="200" value="60" step="10" style="flex:1">
+        <span id="sp-lookahead-val" class="settings-panel__field-value">60ms</span>
+      </div>
+      <div class="settings-panel__field" id="sp-min-stroke-row">
+        <span class="settings-panel__field-label">Min stroke</span>
+        <input type="range" id="sp-min-stroke" min="0" max="200" value="60" step="10" style="flex:1">
+        <span id="sp-min-stroke-val" class="settings-panel__field-value">60ms</span>
+      </div>
+      <div class="settings-panel__hint">Per-stroke sends one command per action and lets the device's firmware interpolate — matches how the Handy's WiFi API (HSSP) feels. Lookahead compensates for BLE round-trip; min stroke stretches too-short strokes up so BLE can honor them. For Handy via connection code (HSSP), these have no effect.</div>
+    `;
+    panel.appendChild(bpSection);
+
     // Wire events after DOM is built
     setTimeout(() => {
       const gapMode = panel.querySelector('#sp-gap-mode');
@@ -265,6 +416,60 @@ export class SettingsPanel {
           if (speedLimitVal) speedLimitVal.textContent = val > 0 ? `${val}` : 'Off';
           this._settings.set('player.speedLimit', val);
           if (this.onSpeedLimitChanged) this.onSpeedLimitChanged(val);
+        });
+      }
+
+      // Linear strategy + lookahead + min-stroke
+      const linearStrategy = panel.querySelector('#sp-linear-strategy');
+      const lookahead = panel.querySelector('#sp-lookahead');
+      const lookaheadVal = panel.querySelector('#sp-lookahead-val');
+      const lookaheadRow = panel.querySelector('#sp-lookahead-row');
+      const minStroke = panel.querySelector('#sp-min-stroke');
+      const minStrokeVal = panel.querySelector('#sp-min-stroke-val');
+      const minStrokeRow = panel.querySelector('#sp-min-stroke-row');
+
+      const applyStrategyVisibility = (strategy) => {
+        // Lookahead + min-stroke only apply to action-boundary mode
+        const show = strategy === 'action-boundary';
+        if (lookaheadRow) lookaheadRow.hidden = !show;
+        if (minStrokeRow) minStrokeRow.hidden = !show;
+      };
+
+      if (linearStrategy) {
+        const savedStrategy = this._settings.get('player.linearStrategy') || 'action-boundary';
+        linearStrategy.value = savedStrategy;
+        applyStrategyVisibility(savedStrategy);
+        linearStrategy.addEventListener('change', () => {
+          const val = linearStrategy.value;
+          this._settings.set('player.linearStrategy', val);
+          applyStrategyVisibility(val);
+          if (this.onLinearStrategyChanged) this.onLinearStrategyChanged(val);
+        });
+      }
+
+      if (lookahead) {
+        const savedLookahead = this._settings.get('player.linearLookaheadMs');
+        const lookaheadDefault = savedLookahead != null ? savedLookahead : 60;
+        lookahead.value = lookaheadDefault;
+        if (lookaheadVal) lookaheadVal.textContent = `${lookaheadDefault}ms`;
+        lookahead.addEventListener('input', () => {
+          const val = parseInt(lookahead.value, 10) || 0;
+          if (lookaheadVal) lookaheadVal.textContent = `${val}ms`;
+          this._settings.set('player.linearLookaheadMs', val);
+          if (this.onLinearLookaheadChanged) this.onLinearLookaheadChanged(val);
+        });
+      }
+
+      if (minStroke) {
+        const savedMinStroke = this._settings.get('player.minStrokeMs');
+        const minStrokeDefault = savedMinStroke != null ? savedMinStroke : 60;
+        minStroke.value = minStrokeDefault;
+        if (minStrokeVal) minStrokeVal.textContent = `${minStrokeDefault}ms`;
+        minStroke.addEventListener('input', () => {
+          const val = parseInt(minStroke.value, 10) || 0;
+          if (minStrokeVal) minStrokeVal.textContent = `${val}ms`;
+          this._settings.set('player.minStrokeMs', val);
+          if (this.onMinStrokeChanged) this.onMinStrokeChanged(val);
         });
       }
     }, 0);

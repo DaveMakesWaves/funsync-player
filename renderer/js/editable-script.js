@@ -7,7 +7,9 @@ export class EditableScript {
     this._undoStack = [];
     this._redoStack = [];
     this._clipboard = [];
+    this._clipboardAbsolute = [];
     this._dirty = false;
+    this._batching = false;
     this._maxUndoSteps = 100;
     this._metadata = {};
     this._bookmarks = [];
@@ -94,7 +96,21 @@ export class EditableScript {
 
   // --- Undo / Redo ---
 
+  /** Begin a batch — pushes undo state once, suppresses further pushes until endBatch(). */
+  beginBatch() {
+    if (this._batching) return;
+    this._batching = true;
+    this._pushState();
+  }
+
+  /** End a batch — current state is the post-batch result. */
+  endBatch() {
+    if (!this._batching) return;
+    this._batching = false;
+  }
+
   _pushState() {
+    if (this._batching) return;
     this._undoStack.push({
       actions: this._actions.map(a => ({ at: a.at, pos: a.pos })),
       selectedIndices: new Set(this._selectedIndices),
@@ -323,6 +339,11 @@ export class EditableScript {
       at: this._actions[i].at - first.at,
       pos: this._actions[i].pos,
     }));
+    // Also save absolute timestamps for pasteExact
+    this._clipboardAbsolute = selected.map(i => ({
+      at: this._actions[i].at,
+      pos: this._actions[i].pos,
+    }));
   }
 
   paste(atMs) {
@@ -333,7 +354,6 @@ export class EditableScript {
     for (const action of this._clipboard) {
       const insertAt = Math.round(atMs + action.at);
       const pos = action.pos;
-      // Binary insert
       let lo = 0, hi = this._actions.length;
       while (lo < hi) {
         const mid = (lo + hi) >>> 1;
@@ -342,14 +362,10 @@ export class EditableScript {
       }
       this._actions.splice(lo, 0, { at: insertAt, pos });
       newIndices.push(lo);
-      // Adjust subsequent newIndices for the insertion
     }
 
-    // Select the pasted actions
-    this._selectedIndices = new Set();
-    // Re-find pasted actions (indices may have shifted)
-    // Simplest: re-sort and select based on timestamps
     this._actions.sort((a, b) => a.at - b.at);
+    this._selectedIndices = new Set();
     const pastedTimes = this._clipboard.map(a => Math.round(atMs + a.at));
     const used = new Set();
     for (const t of pastedTimes) {
@@ -363,6 +379,51 @@ export class EditableScript {
     }
 
     this._dirty = true;
+    this._emit();
+  }
+
+  /** Paste at original absolute timestamps (not relative to cursor). */
+  pasteExact() {
+    if (this._clipboard.length === 0 || !this._clipboardAbsolute) return;
+    this._pushState();
+
+    for (const action of this._clipboardAbsolute) {
+      const insertAt = Math.round(action.at);
+      let lo = 0, hi = this._actions.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >>> 1;
+        if (this._actions[mid].at < insertAt) lo = mid + 1;
+        else hi = mid;
+      }
+      this._actions.splice(lo, 0, { at: insertAt, pos: action.pos });
+    }
+
+    this._actions.sort((a, b) => a.at - b.at);
+    this._selectedIndices = new Set();
+    const pastedTimes = this._clipboardAbsolute.map(a => Math.round(a.at));
+    const used = new Set();
+    for (const t of pastedTimes) {
+      for (let i = 0; i < this._actions.length; i++) {
+        if (this._actions[i].at === t && !used.has(i)) {
+          this._selectedIndices.add(i);
+          used.add(i);
+          break;
+        }
+      }
+    }
+
+    this._dirty = true;
+    this._emit();
+  }
+
+  /** Select actions by position range. */
+  selectByPositionRange(minPos, maxPos) {
+    this._selectedIndices = new Set();
+    for (let i = 0; i < this._actions.length; i++) {
+      if (this._actions[i].pos >= minPos && this._actions[i].pos <= maxPos) {
+        this._selectedIndices.add(i);
+      }
+    }
     this._emit();
   }
 

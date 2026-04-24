@@ -114,6 +114,7 @@ export class ScriptEditor {
       { value: 'remapRange', label: 'Remap Range\u2026' },
       { value: 'offsetTime', label: 'Offset Time\u2026' },
       { value: 'removePauses', label: 'Remove Pauses\u2026' },
+      { value: 'rangeExtend', label: 'Range Extend/Compress\u2026' },
       { value: 'generatePattern', label: 'Generate Pattern\u2026' },
     ];
     for (const o of modOpts) {
@@ -212,6 +213,31 @@ export class ScriptEditor {
     snapLabel.appendChild(document.createTextNode(' Snap'));
     snapLabel.title = 'Snap action timestamps to video frame boundaries';
 
+    // Spline/Linear toggle
+    const splineLabel = document.createElement('label');
+    splineLabel.className = 'editor__toggle-label';
+    const splineCheck = document.createElement('input');
+    splineCheck.type = 'checkbox';
+    splineCheck.checked = true; // splines on by default
+    this._splineMode = true;
+    splineCheck.addEventListener('change', () => {
+      this._splineMode = splineCheck.checked;
+      if (this.graph) {
+        this.graph._splineMode = this._splineMode;
+        this.graph.draw();
+      }
+    });
+    splineLabel.appendChild(splineCheck);
+    splineLabel.appendChild(document.createTextNode(' Curves'));
+    splineLabel.title = 'Toggle between curved (Hermite) and linear connection lines';
+
+    // Recording mode indicator
+    this._recordingIndicator = document.createElement('span');
+    this._recordingIndicator.className = 'editor__recording-indicator';
+    this._recordingIndicator.textContent = 'REC';
+    this._recordingIndicator.hidden = true;
+    this._recordingIndicator.style.cssText = 'color:#ff4444;font-weight:700;font-size:11px;margin-left:6px;animation:blink 1s step-end infinite';
+
     toolbar.append(
       this._scriptSelect, sepScript,
       this._btnUndo, this._btnRedo, sep1,
@@ -220,7 +246,7 @@ export class ScriptEditor {
       btnMetadata, btnBookmark, btnFillGaps, this._btnWaveform, btnBeats, sep1d,
       btnZoomIn, btnZoomOut, btnFitAll, sep2,
       speedLabel, this._speedSelect, sep3,
-      btnSave, autosaveGroup, snapLabel, this._statusEl,
+      btnSave, autosaveGroup, snapLabel, splineLabel, this._recordingIndicator, this._statusEl,
     );
 
     // Canvas container
@@ -307,7 +333,7 @@ export class ScriptEditor {
     this.videoPlayer.video.addEventListener('timeupdate', () => {
       if (this._open && this.graph) {
         this.graph.setCursorTime(this.videoPlayer.currentTime * 1000);
-        if (!this._dragMode) this.graph.draw();
+        if (!this._dragMode && !this.graph._animating) this.graph.draw();
         this._updateScrubber();
       }
     });
@@ -327,6 +353,7 @@ export class ScriptEditor {
   // --- Mouse Handlers (OFS style) ---
 
   _onMouseDown(e) {
+    this.graph.markInteraction();
     const { x, y } = this.graph.getCanvasCoords(e);
     const hitIdx = this.graph.hitTestAction(x, y);
 
@@ -361,10 +388,20 @@ export class ScriptEditor {
         this._dragStartTime = this.graph.xToTime(x);
         this._dragStartPos = this.graph.yToPos(y);
         this._canvasContainer.classList.add('editor__canvas-container--dragging');
+        this.editableScript.beginBatch(); // throttle undo during drag
       }
     } else {
       // Clicked on empty area
-      if (e.ctrlKey || e.metaKey) {
+      if (e.altKey) {
+        // Alt+click on empty = insert action at this position (OFS style)
+        const timeMs = this.snapTime(this.graph.xToTime(x));
+        const pos = Math.round(this.graph.yToPos(y));
+        const newIdx = this.editableScript.insertAction(timeMs, pos);
+        this.editableScript.select(newIdx);
+        this._lastSelectedIndex = newIdx;
+        this._sendLivePreview(pos);
+        return;
+      } else if (e.ctrlKey || e.metaKey) {
         // Ctrl+click empty = start rubber band (additive)
         this._dragMode = 'rubber';
         this._dragStartX = x;
@@ -375,10 +412,7 @@ export class ScriptEditor {
         this._dragStartX = x;
         this._dragStartY = y;
       } else {
-        // Plain left-click on empty area = INSERT action (OFS style)
-        // Only insert if it's a short click (not a drag start for rubber band)
-        // We'll detect this in mouseUp — for now set up rubber band mode
-        // so user can also drag to select
+        // Plain left-click on empty area — rubber band drag
         this._dragMode = 'click-or-rubber';
         this._dragStartX = x;
         this._dragStartY = y;
@@ -387,6 +421,7 @@ export class ScriptEditor {
   }
 
   _onMouseMove(e) {
+    this.graph.markInteraction();
     const { x, y } = this.graph.getCanvasCoords(e);
 
     if (this._dragMode === 'pan') {
@@ -473,6 +508,7 @@ export class ScriptEditor {
     }
 
     this._dragMode = null;
+    this.editableScript.endBatch(); // commit undo state for any drag
     this._canvasContainer.classList.remove('editor__canvas-container--dragging');
     this._canvasContainer.classList.remove('editor__canvas-container--panning');
     if (!this.graph._animating) this.graph.draw();
@@ -480,6 +516,7 @@ export class ScriptEditor {
 
   _onMouseLeave() {
     this.graph.clearHover();
+    this.editableScript.endBatch(); // safety: end any active drag batch
     if (!this.graph._animating) this.graph.draw();
   }
 
@@ -497,6 +534,7 @@ export class ScriptEditor {
 
   _onWheel(e) {
     e.preventDefault();
+    this.graph.markInteraction();
     const { x } = this.graph.getCanvasCoords(e);
     const centerMs = this.graph.xToTime(x);
 
@@ -516,6 +554,7 @@ export class ScriptEditor {
   // --- Canvas Keyboard (OFS style) ---
 
   _onCanvasKeyDown(e) {
+    this.graph.markInteraction();
     // Let Space propagate for play/pause
     if (e.key === ' ') return;
 
@@ -533,22 +572,27 @@ export class ScriptEditor {
       e.preventDefault();
       e.stopPropagation();
       const pos = numpadMap[e.code];
-      const sel = this.editableScript.selectedIndices;
 
-      if (sel.size === 1) {
-        // Move the selected point to the new position
-        const idx = [...sel][0];
-        const newIdx = this.editableScript.updateAction(idx, { pos });
-        this.editableScript.select(newIdx);
-        this._lastSelectedIndex = newIdx;
+      if (this._recordingMode) {
+        // Recording mode: insert at live playhead, don't select, don't pause
+        const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+        this.editableScript.insertAction(timeMs, pos);
         this._sendLivePreview(pos);
       } else {
-        // No selection (or multi) — insert new action at current video time
-        const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
-        const newIdx = this.editableScript.insertAction(timeMs, pos);
-        this.editableScript.select(newIdx);
-        this._lastSelectedIndex = newIdx;
-        this._sendLivePreview(pos);
+        const sel = this.editableScript.selectedIndices;
+        if (sel.size === 1) {
+          const idx = [...sel][0];
+          const newIdx = this.editableScript.updateAction(idx, { pos });
+          this.editableScript.select(newIdx);
+          this._lastSelectedIndex = newIdx;
+          this._sendLivePreview(pos);
+        } else {
+          const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+          const newIdx = this.editableScript.insertAction(timeMs, pos);
+          this.editableScript.select(newIdx);
+          this._lastSelectedIndex = newIdx;
+          this._sendLivePreview(pos);
+        }
       }
       return;
     }
@@ -641,7 +685,12 @@ export class ScriptEditor {
 
       case 'v':
       case 'V':
-        if (ctrl) {
+        if (ctrl && e.shiftKey) {
+          // Ctrl+Shift+V: Paste Exact (original timestamps)
+          e.preventDefault();
+          e.stopPropagation();
+          this.editableScript.pasteExact();
+        } else if (ctrl) {
           e.preventDefault();
           e.stopPropagation();
           const timeMs = this.videoPlayer.currentTime * 1000;
@@ -655,6 +704,39 @@ export class ScriptEditor {
           e.preventDefault();
           e.stopPropagation();
           this.editableScript.selectAll();
+        }
+        break;
+
+      // Ctrl+1/2/3: Select by position range (top/mid/bottom third)
+      case '1':
+        if (ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.editableScript.selectByPositionRange(67, 100); // top third
+        }
+        break;
+      case '2':
+        if (ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.editableScript.selectByPositionRange(34, 66); // middle third
+        }
+        break;
+      case '3':
+        if (ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this.editableScript.selectByPositionRange(0, 33); // bottom third
+        }
+        break;
+
+      // R: Toggle recording mode
+      case 'r':
+      case 'R':
+        if (!ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._toggleRecordingMode();
         }
         break;
 
@@ -924,6 +1006,9 @@ export class ScriptEditor {
       case 'removePauses':
         await this._openRemovePausesModal();
         break;
+      case 'rangeExtend':
+        await this._openRangeExtendModal();
+        break;
       case 'generatePattern':
         await this._openPatternModal();
         break;
@@ -1007,6 +1092,61 @@ export class ScriptEditor {
     if (result) {
       this.editableScript.applyModifier(removePauses, result.maxGapMs);
       showToast('Pauses removed', 'info');
+    }
+  }
+
+  async _openRangeExtendModal() {
+    const sel = this.editableScript.selectedIndices;
+    if (sel.size < 2) {
+      showToast('Select 2+ actions to extend/compress', 'warn');
+      return;
+    }
+    const result = await Modal.open({
+      title: 'Range Extend / Compress',
+      onRender(body, close) {
+        body.innerHTML = `
+          <div class="modal-form">
+            <label class="modal-label">Time Scale Factor<input type="number" id="extend-factor" value="1.0" step="0.1" min="0.1" max="10" class="modal-input"></label>
+            <div class="modal-hint">1.0 = no change, 2.0 = double duration, 0.5 = half duration</div>
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn modal-btn--secondary" id="extend-cancel">Cancel</button>
+            <button class="modal-btn modal-btn--primary" id="extend-ok">Apply</button>
+          </div>`;
+        body.querySelector('#extend-cancel').addEventListener('click', () => close(null));
+        body.querySelector('#extend-ok').addEventListener('click', () => {
+          close({ factor: parseFloat(body.querySelector('#extend-factor').value) || 1 });
+        });
+      },
+    });
+    if (result && result.factor !== 1) {
+      const sorted = [...sel].sort((a, b) => a - b);
+      const actions = this.editableScript.actions;
+      const anchorTime = actions[sorted[0]].at;
+      this.editableScript.beginBatch();
+      // Scale timestamps relative to first selected action
+      for (const i of sorted) {
+        const offset = actions[i].at - anchorTime;
+        const newAt = Math.round(anchorTime + offset * result.factor);
+        this.editableScript.updateAction(i, { at: newAt });
+      }
+      this.editableScript.endBatch();
+      showToast(`Time scaled by ${result.factor}x`, 'info');
+    }
+  }
+
+  _toggleRecordingMode() {
+    this._recordingMode = !this._recordingMode;
+    this._recordingIndicator.hidden = !this._recordingMode;
+
+    if (this._recordingMode) {
+      showToast('Recording mode ON — numpad keys insert at live playhead', 'info');
+      // In recording mode, start video if paused
+      if (this.videoPlayer.video.paused) {
+        this.videoPlayer.video.play();
+      }
+    } else {
+      showToast('Recording mode OFF', 'info');
     }
   }
 
@@ -1589,7 +1729,12 @@ export class ScriptEditor {
       this.graph.setVideoDuration(duration * 1000);
     }
 
-    this.graph.fitAll();
+    if (this.editableScript.actionCount > 100) {
+      const cursorMs = this.videoPlayer.currentTime * 1000;
+      this.graph.smartZoom(cursorMs);
+    } else {
+      this.graph.fitAll();
+    }
     this._updateStatus();
     this._updateToolbarState();
     this._updateScrubber();

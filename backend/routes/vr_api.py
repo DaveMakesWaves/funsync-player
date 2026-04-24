@@ -5,12 +5,14 @@ DeoVR: GET /deovr (library), GET /deovr/{id} (scene detail)
 HereSphere: GET /heresphere (library), GET /heresphere/{id} (scene detail)
 """
 
+import json
 import os
 import re
 import time
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
+from starlette.responses import Response
 
 from routes.media import get_video_registry, _path_to_id, record_vr_activity
 from services.network import get_local_ip
@@ -18,47 +20,233 @@ from services.network import get_local_ip
 router = APIRouter()
 
 # --- VR Format Detection ---
+#
+# Matching strategy mirrors renderer/js/vr-detect.js: any common separator
+# (`_ - . space / \ [ ] ( )`) is accepted around tokens so we catch dot-separated,
+# bracketed, and space-delimited filenames — not just underscore-delimited ones.
+
+# Character class matching any common filename separator.
+SEP = r'[_\-. /\\\[\]()]'
 
 VR_PATTERNS = [
     # 360° patterns (must be checked before 180° to avoid false matches)
-    (r'_360(?:x180)?_(?:3dh|sbs|LR)', 'sphere', 'sbs'),
-    (r'_360(?:x180)?_(?:3dv|TB)', 'sphere', 'tb'),
-    (r'(?:_mono360|_360_mono)', 'sphere', 'off'),
+    (rf'(?:^|{SEP})360(?:x180)?{SEP}(?:3dh|sbs|LR)(?={SEP}|$)', 'sphere', 'sbs'),
+    (rf'(?:^|{SEP})360(?:x180)?{SEP}(?:3dv|TB)(?={SEP}|$)', 'sphere', 'tb'),
+    (rf'(?:^|{SEP})(?:mono360|360{SEP}mono)(?={SEP}|$)', 'sphere', 'off'),
     # 180° TB (must be checked before generic 180° SBS)
-    (r'(?:_180(?:x180)?_(?:3dv|TB)|_TB_180|_3dv)', 'dome', 'tb'),
+    (rf'(?:^|{SEP})(?:180(?:x180)?{SEP}(?:3dv|TB)|TB{SEP}180|3dv)(?={SEP}|$)', 'dome', 'tb'),
     # 180° SBS
-    (r'(?:_180(?:x180)?(?:_3dh)?(?:_LR)?|_LR_180|_3dh)', 'dome', 'sbs'),
+    (rf'(?:^|{SEP})(?:180(?:x180)?(?:{SEP}3dh)?(?:{SEP}LR)?|LR{SEP}180|3dh)(?={SEP}|$)', 'dome', 'sbs'),
     # 180° mono
-    (r'(?:_mono180|_180_mono)', 'dome', 'off'),
+    (rf'(?:^|{SEP})(?:mono180|180{SEP}mono)(?={SEP}|$)', 'dome', 'off'),
     # Fisheye types
-    (r'_MKX200', 'mkx200', 'sbs'),
-    (r'_MKX220', 'mkx220', 'sbs'),
-    (r'_RF52', 'rf52', 'sbs'),
-    (r'_FISHEYE190', 'fisheye', 'sbs'),
-    (r'_VRCA220', 'fisheye', 'sbs'),
-    # Generic SBS/TB (no FOV specified — assume 180)
-    (r'_sbs', 'dome', 'sbs'),
-    (r'_(?:tb|ou)', 'dome', 'tb'),
+    (rf'(?:^|{SEP})MKX200(?={SEP}|$)', 'mkx200', 'sbs'),
+    (rf'(?:^|{SEP})MKX220(?={SEP}|$)', 'mkx220', 'sbs'),
+    (rf'(?:^|{SEP})RF52(?={SEP}|$)', 'rf52', 'sbs'),
+    (rf'(?:^|{SEP})FISHEYE190(?={SEP}|$)', 'fisheye', 'sbs'),
+    (rf'(?:^|{SEP})VRCA220(?={SEP}|$)', 'fisheye', 'sbs'),
+    (rf'(?:^|{SEP})FB360(?={SEP}|$)', 'sphere', 'sbs'),
+    (rf'(?:^|{SEP})EAC360(?={SEP}|$)', 'sphere', 'sbs'),
+    # Generic SBS/TB/LR/3DH/3DV (no FOV specified — assume 180)
+    (rf'(?:^|{SEP})sbs(?={SEP}|$)', 'dome', 'sbs'),
+    (rf'(?:^|{SEP})(?:tb|ou)(?={SEP}|$)', 'dome', 'tb'),
+    (rf'(?:^|{SEP})lr(?={SEP}|$)', 'dome', 'sbs'),
+    (rf'(?:^|{SEP})3dh(?={SEP}|$)', 'dome', 'sbs'),
+    (rf'(?:^|{SEP})3dv(?={SEP}|$)', 'dome', 'tb'),
 ]
+
+# Japanese VR studio catalog prefixes with per-studio projection defaults.
+# Value: (screenType, stereoMode) — fed directly into detect_vr_format return.
+#
+# Most modern FANZA/DMM studios shoot with fisheye lenses (~200° FOV, MKX200-like).
+# Older or Western-style studios tend to use equirectangular 180° SBS.
+# Mapping based on the dominant format each label ships on DMM/FANZA.
+#
+# screenType key:
+#   'mkx200'  → fisheye 200° SBS (most modern Japanese VR)
+#   'fisheye' → generic fisheye SBS
+#   'dome'    → equirectangular 180° SBS
+VR_STUDIO_FORMATS = {
+    # --- Major FANZA labels (fisheye ~200°) ---
+    'SIVR':    ('mkx200', 'sbs'),   # S1 VR
+    'KAVR':    ('mkx200', 'sbs'),   # Kawaii VR
+    'SAVR':    ('mkx200', 'sbs'),   # SOD Create VR
+    'DSVR':    ('mkx200', 'sbs'),   # Deeps VR
+    'PRVR':    ('mkx200', 'sbs'),   # Premium/Faleno VR
+    'IPVR':    ('mkx200', 'sbs'),   # IdeaPocket VR
+    'MDVR':    ('mkx200', 'sbs'),   # MOODYZ VR
+    'WAVR':    ('mkx200', 'sbs'),   # Wanz Factory VR
+    'NHVR':    ('mkx200', 'sbs'),   # Natural High VR
+    'EBVR':    ('mkx200', 'sbs'),   # E-Body VR
+    'HNVR':    ('mkx200', 'sbs'),   # HonNaka VR
+    'MTVR':    ('mkx200', 'sbs'),   # Muteki VR
+    'ATVR':    ('mkx200', 'sbs'),   # Attackers VR
+    'EXVR':    ('mkx200', 'sbs'),   # EX VR
+    'WPVR':    ('mkx200', 'sbs'),   # Waap VR
+    'PXVR':    ('mkx200', 'sbs'),   # Pixel VR
+    'TMAVR':   ('mkx200', 'sbs'),   # TMA VR
+    'FSVR':    ('mkx200', 'sbs'),   # First Star VR
+    'UNVR':    ('mkx200', 'sbs'),   # Unfinished VR
+    'DOVR':    ('mkx200', 'sbs'),   # Dogma VR
+    'JUVR':    ('mkx200', 'sbs'),   # S-Cute VR
+    'MXVR':    ('mkx200', 'sbs'),   # MAX-A VR
+    # --- KMP group (fisheye) ---
+    'KMVR':    ('mkx200', 'sbs'),   # KMP VR
+    'VRKM':    ('mkx200', 'sbs'),   # V&R KMP
+    'BIKMVR':  ('mkx200', 'sbs'),   # BIK VR
+    'CBIKMVR': ('mkx200', 'sbs'),   # CBIK VR
+    'KIWVR':   ('mkx200', 'sbs'),   # Kawaii (alt)
+    # --- Misc fisheye ---
+    'VRSP':    ('mkx200', 'sbs'),   # VR SP
+    'URVRSP':  ('mkx200', 'sbs'),   # URER VR SP
+    'AVOPVR':  ('mkx200', 'sbs'),   # AVO Premium VR
+    'GOPJ':    ('mkx200', 'sbs'),   # GO Pro Japan
+    # --- Caribbean/older equirect ---
+    'CJVR':    ('dome', 'sbs'),     # Caribbean VR — equirectangular 180°
+
+    # --- Western studios — equirectangular 180° SBS (the vast majority) ---
+    # Sourced from XBVR scraper definitions, SLR scene metadata, and
+    # studio sample filenames. Most Western VR is shot equirect 180 SBS.
+    'WANKZVR':          ('dome', 'sbs'),  # WankzVR
+    'NAVR':             ('dome', 'sbs'),  # NaughtyAmericaVR
+    'NAUGHTYAMERICAVR': ('dome', 'sbs'),
+    'BADOINKVR':        ('dome', 'sbs'),  # BadoinkVR
+    'BAVR':             ('dome', 'sbs'),
+    'MILFVR':           ('dome', 'sbs'),  # MilfVR (Badoink network)
+    'POVR':             ('dome', 'sbs'),  # POVR / POVRfilms
+    'SINSVR':           ('dome', 'sbs'),  # SinsVR
+    'REALJAMVR':        ('dome', 'sbs'),  # RealJamVR
+    'RJVR':             ('dome', 'sbs'),
+    'CZECHVR':          ('dome', 'sbs'),  # CzechVR
+    'CZECHVRCASTING':   ('dome', 'sbs'),
+    'CZECHVRFETISH':    ('dome', 'sbs'),
+    'CZECHVRNETWORK':   ('dome', 'sbs'),
+    'TMWVRNET':         ('dome', 'sbs'),  # TmwVRnet (TeenMegaWorld)
+    'VIRTUALREALPORN':  ('dome', 'sbs'),  # VRP
+    'VRP':              ('dome', 'sbs'),
+    'LETHALHARDCOREVR': ('dome', 'sbs'),
+    'LHVR':             ('dome', 'sbs'),
+    'SLRORIGINALS':     ('dome', 'sbs'),  # SLR Originals
+    'DARKROOMVR':       ('dome', 'sbs'),
+    'SWEETLIFEVR':      ('dome', 'sbs'),
+    'HOLOGIRLSVR':      ('dome', 'sbs'),
+    'STASYQVR':         ('dome', 'sbs'),
+    'VRALLURE':         ('dome', 'sbs'),
+    'VRHUSH':           ('dome', 'sbs'),
+    'GROOBYVR':         ('dome', 'sbs'),  # GroobyVR — trans
+    'GROVR':            ('dome', 'sbs'),  # Alt Grooby code
+    'KINKVR':           ('dome', 'sbs'),
+    '18VR':             ('dome', 'sbs'),  # 18VR (Badoink network)
+    'EVILANGELVR':      ('dome', 'sbs'),
+    'EAVR':             ('dome', 'sbs'),
+    'METAVERSEVR':      ('dome', 'sbs'),
+    'ZEXYVR':           ('dome', 'sbs'),
+    'REALHOTVR':        ('dome', 'sbs'),
+    'VRLATINA':         ('dome', 'sbs'),
+    'PORNHATVR':        ('dome', 'sbs'),
+    'COSPLAYBABESVR':   ('dome', 'sbs'),
+    'VRTRANSTASTY':     ('dome', 'sbs'),  # VRBangers trans brand
+
+    # --- Western studios — migrated to fisheye (~190–200°) ---
+    # VRBangers announced their fisheye migration in 2022; SLR/HereSphere
+    # auto-detect MKX200 on newer VRB scenes.
+    'VRBANGERS':        ('mkx200', 'sbs'),
+    'VRB':              ('mkx200', 'sbs'),  # Primary VRBangers code
+    'VRCONK':           ('mkx200', 'sbs'),  # VRBangers network brand
+
+    # --- Rip-group / obfuscated codes sometimes applied to Western
+    # equirect content (GroobyVR / VRBTrans / SLR bundles). Mapped to
+    # dome based on user testing — if you see these misbehave in future
+    # dumps, override via a manual association.
+    'VRBTS':            ('dome', 'sbs'),
+    'VRBTNS':           ('dome', 'sbs'),
+    'VRBS':             ('dome', 'sbs'),
+    'VRBANS':           ('dome', 'sbs'),
+}
+
+# VR resolution / projection tags (VR180, 8KVR, VR7K, 180VR, ...)
+_VR_TAG_RE = re.compile(
+    rf'(?:^|{SEP})(?:VR\d{{2,4}}|\d{{2,4}}VR|VR\d+K|\d+KVR)(?={SEP}|$)',
+    re.IGNORECASE,
+)
+
+# Broad XXVR-### / VRXX-### fallback for unlisted studios (any separator).
+_VR_STUDIO_RE = re.compile(
+    rf'(?:^|{SEP})(?:[A-Z]{{1,8}}VR[A-Z]{{0,3}}|VR[A-Z]{{1,4}}){SEP}*\d{{2,5}}',
+    re.IGNORECASE,
+)
+
+# Bare "VR" as its own whitespace/punctuation-delimited token.
+_BARE_VR_RE = re.compile(
+    rf'(?:^|{SEP})VR(?={SEP}|$)',
+    re.IGNORECASE,
+)
+
+# Token split (for studio-prefix lookup). Strips all separators.
+_SEP_SPLIT_RE = re.compile(rf'{SEP}+')
+
+# Studio code fused to a number: "SIVR178" (no separator).
+_STUDIO_COMBO_RE = re.compile(r'^([A-Z]{2,8})(\d{2,5})$')
 
 
 def detect_vr_format(filename):
     """Detect VR projection and stereo mode from filename.
 
-    Returns (screenType, stereoMode, is3d).
+    Returns (screenType, stereoMode, is3d). Mirrors renderer/js/vr-detect.js —
+    optimized for recall so the HereSphere/DeoVR VR group matches the library
+    VR filter.
+
+    Priority:
+      1. Explicit projection/stereo tags (return accurate defaults)
+      2. Known studio prefix — tokenised, separator-agnostic
+      3. Broad XXVR-### / VRXX-### fallback
+      4. VR resolution tags (VR180, 8KVR, ...)
+      5. Bare "VR" token
     """
     name = filename or ''
+    if not name:
+        return 'flat', 'off', False
+
+    # Strip trailing file extension so regex anchors work on the stem.
+    stem = re.sub(r'\.[^./\\]+$', '', name)
+
+    # 1. Explicit projection / stereo tags — most accurate defaults.
     for pattern, screen_type, stereo_mode in VR_PATTERNS:
-        if re.search(pattern, name, re.IGNORECASE):
+        if re.search(pattern, stem, re.IGNORECASE):
             return screen_type, stereo_mode, stereo_mode != 'off'
+
+    # 2. Known studio prefix — tokenise to catch both `SIVR-178` and `SIVR178`.
+    for tok in _SEP_SPLIT_RE.split(stem):
+        if not tok:
+            continue
+        upper = tok.upper()
+        if upper in VR_STUDIO_FORMATS:
+            screen_type, stereo_mode = VR_STUDIO_FORMATS[upper]
+            return screen_type, stereo_mode, True
+        m = _STUDIO_COMBO_RE.match(upper)
+        if m and m.group(1) in VR_STUDIO_FORMATS:
+            screen_type, stereo_mode = VR_STUDIO_FORMATS[m.group(1)]
+            return screen_type, stereo_mode, True
+
+    # 3. Broad XXVR-### / VRXX-### studio fallback.
+    if _VR_STUDIO_RE.search(stem):
+        return 'mkx200', 'sbs', True
+
+    # 4. VR resolution / projection tags (VR180, 8KVR, ...).
+    if _VR_TAG_RE.search(stem):
+        return 'mkx200', 'sbs', True
+
+    # 5. Bare "VR" as its own token — weakest signal.
+    if _BARE_VR_RE.search(stem):
+        return 'mkx200', 'sbs', True
+
     return 'flat', 'off', False
 
 
 def _get_base_url(request: Request):
     """Build base URL from request for constructing media URLs."""
-    # Use the request's host header (works behind reverse proxy too)
     host = request.headers.get('host', f'{get_local_ip()}:5123')
-    scheme = request.headers.get('x-forwarded-proto', 'http')
+    scheme = 'https' if request.url.scheme == 'https' else 'http'
     return f'{scheme}://{host}'
 
 
@@ -70,12 +258,8 @@ def _get_duration(video):
     return 0
 
 
-def _get_resolution(video):
-    """Get video resolution (width, height) via ffprobe if available."""
-    path = video.get('path', '')
-    if not path or not os.path.isfile(path):
-        return 1920, 1080  # fallback
-
+def _probe_video_info(path):
+    """Run ffprobe to get resolution and codec. Blocking — call from background thread."""
     try:
         from services.ffmpeg import _find_binary
         import subprocess
@@ -83,37 +267,64 @@ def _get_resolution(video):
         result = subprocess.run(
             [ffprobe, '-v', 'quiet', '-print_format', 'json',
              '-show_streams', '-select_streams', 'v:0', path],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True,
+            # Windows reader-thread crashes with UnicodeDecodeError when it
+            # falls back to cp1252 — pin to utf-8 with replacement so
+            # unmappable codec/path bytes don't kill the probe.
+            encoding='utf-8', errors='replace',
+            timeout=10,
         )
         if result.returncode == 0:
-            import json
             data = json.loads(result.stdout)
             streams = data.get('streams', [])
             if streams:
                 w = int(streams[0].get('width', 1920))
                 h = int(streams[0].get('height', 1080))
-                return w, h
+                codec = streams[0].get('codec_name', 'h264')
+                if codec in ('hevc', 'h265'):
+                    codec = 'h265'
+                elif codec in ('h264', 'avc', 'avc1'):
+                    codec = 'h264'
+                return w, h, codec
     except Exception:
         pass
-    return 1920, 1080
+    return None
 
 
-# Cache resolution per video_id to avoid repeated ffprobe calls
-_resolution_cache = {}
+# Cache video info per video_id — populated lazily in background
+_video_info_cache = {}
+_probe_pending = set()  # video_ids currently being probed
 
 
-def _get_cached_resolution(video_id, video):
-    if video_id not in _resolution_cache:
-        _resolution_cache[video_id] = _get_resolution(video)
-    return _resolution_cache[video_id]
+def _get_cached_video_info(video_id, video):
+    """Return cached info immediately, or defaults while probing in background."""
+    if video_id in _video_info_cache:
+        return _video_info_cache[video_id]
+
+    # Not cached — return defaults now, probe in background
+    path = video.get('path', '')
+    if path and os.path.isfile(path) and video_id not in _probe_pending:
+        _probe_pending.add(video_id)
+        import threading
+        def _bg_probe():
+            result = _probe_video_info(path)
+            if result:
+                _video_info_cache[video_id] = result
+            else:
+                _video_info_cache[video_id] = (1920, 1080, 'h264')
+            _probe_pending.discard(video_id)
+        threading.Thread(target=_bg_probe, daemon=True).start()
+
+    return _video_info_cache.get(video_id, (1920, 1080, 'h264'))
 
 
 # === DeoVR API ===
 
-@router.get("/deovr")
+@router.api_route("/deovr", methods=["GET", "POST"])
 async def deovr_library(request: Request):
     """DeoVR library listing — groups of scenes.
 
+    DeoVR sends both GET and POST to this endpoint.
     Query params:
       ?filter=vr    — only VR videos
       ?filter=flat  — only flat (non-VR) videos
@@ -156,26 +367,25 @@ async def deovr_library(request: Request):
         if has_script:
             scripted_group.append(item)
 
-        # Add to directory group
-        path = video.get('path', '')
-        dir_name = os.path.basename(os.path.dirname(path)) or 'Library'
-        if dir_name not in groups:
-            groups[dir_name] = []
-        groups[dir_name].append(item)
+        # Add to source group (uses source name from settings, falls back to parent folder)
+        group_name = video.get('sourceName') or os.path.basename(os.path.dirname(video.get('path', ''))) or 'Library'
+        if group_name not in groups:
+            groups[group_name] = []
+        groups[group_name].append(item)
 
     scenes = []
 
     # VR group first (if any VR videos exist)
     if vr_group and vr_filter != 'flat':
         scenes.append({
-            'name': '🥽 VR Videos',
+            'name': 'VR Videos',
             'list': sorted(vr_group, key=lambda x: x['title'].lower()),
         })
 
     # Scripted group (if any)
     if scripted_group and vr_filter != 'vr':
         scenes.append({
-            'name': '🎮 With Funscript',
+            'name': 'With Funscript',
             'list': sorted(scripted_group, key=lambda x: x['title'].lower()),
         })
 
@@ -186,13 +396,19 @@ async def deovr_library(request: Request):
             'list': sorted(items, key=lambda x: x['title'].lower()),
         })
 
-    return JSONResponse(
-        content={'scenes': scenes, 'authorized': '1'},
-        headers={'Access-Control-Allow-Origin': '*'},
+    # DeoVR requires Content-Length (chunked encoding breaks its JSON parser)
+    body = json.dumps({'scenes': scenes, 'authorized': '0'}, ensure_ascii=False)
+    return Response(
+        content=body,
+        media_type='application/json',
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'Content-Length': str(len(body.encode('utf-8'))),
+        },
     )
 
 
-@router.get("/deovr/{video_id}")
+@router.api_route("/deovr/{video_id}", methods=["GET", "POST"])
 async def deovr_scene(video_id: str, request: Request):
     """DeoVR scene detail — full metadata for one video."""
     registry = get_video_registry()
@@ -221,11 +437,10 @@ async def deovr_scene(video_id: str, request: Request):
 
     size_label = f'{file_size / (1024**3):.1f} GB' if file_size > 1024**3 else f'{file_size / (1024**2):.0f} MB'
 
-    width, height = _get_cached_resolution(video_id, video)
-    res_label = f'{height}p' if height else ''
+    width, height, codec = _get_cached_video_info(video_id, video)
 
     encodings = [{
-        'name': f'{res_label} - {size_label}',
+        'name': codec,
         'videoSources': [{
             'resolution': height,
             'height': height,
@@ -275,15 +490,20 @@ async def deovr_scene(video_id: str, request: Request):
         'fullAccess': True,
     }
 
-    return JSONResponse(
-        content=scene,
-        headers={'Access-Control-Allow-Origin': '*'},
+    body = json.dumps(scene, ensure_ascii=False)
+    return Response(
+        content=body,
+        media_type='application/json',
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'Content-Length': str(len(body.encode('utf-8'))),
+        },
     )
 
 
 # === HereSphere API ===
 
-@router.get("/heresphere")
+@router.api_route("/heresphere", methods=["GET", "POST"])
 async def heresphere_library(request: Request):
     """HereSphere library listing.
 
@@ -320,10 +540,10 @@ async def heresphere_library(request: Request):
             scripted_urls.append(url)
 
         path = video.get('path', '')
-        dir_name = os.path.basename(os.path.dirname(path)) or 'Library'
-        if dir_name not in groups:
-            groups[dir_name] = []
-        groups[dir_name].append(url)
+        group_name = video.get('sourceName') or os.path.basename(os.path.dirname(path)) or 'Library'
+        if group_name not in groups:
+            groups[group_name] = []
+        groups[group_name].append(url)
 
     library = []
 
@@ -345,7 +565,7 @@ async def heresphere_library(request: Request):
     )
 
 
-@router.get("/heresphere/{video_id}")
+@router.api_route("/heresphere/{video_id}", methods=["GET", "POST"])
 async def heresphere_scene(video_id: str, request: Request):
     """HereSphere scene detail."""
     registry = get_video_registry()
@@ -393,7 +613,7 @@ async def heresphere_scene(video_id: str, request: Request):
 
     size_label = f'{file_size / (1024**3):.1f} GB' if file_size > 1024**3 else f'{file_size / (1024**2):.0f} MB'
 
-    width, height = _get_cached_resolution(video_id, video)
+    width, height, codec = _get_cached_video_info(video_id, video)
 
     # Media sources
     media = [{
@@ -419,9 +639,9 @@ async def heresphere_scene(video_id: str, request: Request):
 
     # Tags
     tags = []
-    dir_name = os.path.basename(os.path.dirname(path))
-    if dir_name:
-        tags.append({'name': f'Studio:{dir_name}'})
+    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
+    if source_name:
+        tags.append({'name': f'Studio:{source_name}'})
     if video.get('hasFunscript'):
         tags.append({'name': 'Feature:Is scripted'})
 
@@ -438,6 +658,18 @@ async def heresphere_scene(video_id: str, request: Request):
                 'track': 0,
             })
             t += interval
+
+    # Subtitles
+    subtitles = []
+    sub_path = video.get('subtitlePath')
+    if sub_path:
+        sub_name = os.path.basename(sub_path)
+        sub_ext = os.path.splitext(sub_name)[1].lower()
+        subtitles.append({
+            'name': sub_name,
+            'language': 'English',
+            'url': f'{base_url}/api/media/subtitle/{video_id}',
+        })
 
     stereo_hs = 'sbs' if stereo_mode == 'sbs' else 'tb' if stereo_mode == 'tb' else 'mono'
 
@@ -456,6 +688,7 @@ async def heresphere_scene(video_id: str, request: Request):
         'fov': fov,
         'lens': lens,
         'scripts': scripts,
+        'subtitles': subtitles,
         'tags': tags,
         'media': media,
         'writeFavorite': False,

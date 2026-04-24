@@ -1,13 +1,32 @@
 // ButtplugSync — Reliable sync engine for Buttplug.io devices
 // Uses setInterval (not RAF) so it survives tab backgrounding.
 // Rate-limited to avoid overwhelming Bluetooth, with dirty-check to skip redundant sends.
+//
+// Linear strategy:
+//   - 'action-boundary' (default): one LinearCmd per funscript action transition,
+//     with duration = full stroke length. The device's firmware handles the
+//     in-stroke interpolation — no mid-stroke retargeting, much smoother on BLE
+//     (Handy / Kiiroo / Fredorch). This matches the semantics of the BLE
+//     protocol's "move to X over Y ms" command and avoids the ~10-commands-per-
+//     stroke flood the interpolated strategy produces.
+//   - 'interpolated' (legacy): re-samples between actions at ~20Hz and sends
+//     fresh LinearCmds with the remaining duration. Produces visibly smoother
+//     motion on devices that DON'T do their own firmware interpolation, but
+//     overwhelms BLE with mid-stroke retargets on devices that do.
+//
+// Derived-intensity paths (vibration/scalar/rotate inferred from stroke speed)
+// stay on the interpolated schedule regardless — those commands don't carry a
+// duration and need frequent re-sampling to track stroke speed.
 
 import { getInterpolator, applySpeedLimit, linearInterpolate } from './interpolation.js';
 
 const TICK_INTERVAL_MS = 40;     // ~25Hz polling — safe for BLE
-const MIN_SEND_INTERVAL_MS = 50; // Don't send commands faster than this
+const MIN_SEND_INTERVAL_MS = 50; // Don't send derived-intensity commands faster than this
 const MAX_GAP_MS = 5000;         // Don't send commands for actions more than 5s away
 const MIN_POS_DELTA = 0.5;       // Skip sends when position change is < 0.5 (out of 100)
+
+const DEFAULT_LOOKAHEAD_MS = 60;      // BLE round-trip compensation — fire command this far before action
+const DEFAULT_MIN_STROKE_MS = 60;     // Floor on stroke duration — clamp sub-BLE-roundtrip strokes up
 
 export class ButtplugSync {
   /**
@@ -50,6 +69,26 @@ export class ButtplugSync {
     this._interpolator = linearInterpolate;
     this._speedLimit = 0; // 0 = disabled, otherwise pos-units per second
     this._vibInterpolationMode = 'step'; // vibration defaults to step
+
+    // Linear command scheduling. action-boundary fires ONE LinearCmd per
+    // funscript action transition; interpolated resends every tick. See
+    // module header for the full rationale.
+    this._linearStrategy = 'action-boundary';
+    this._linearLookaheadMs = DEFAULT_LOOKAHEAD_MS;
+    this._minStrokeMs = DEFAULT_MIN_STROKE_MS;
+
+    // Per-device sync offset in ms. NEGATIVE = fire commands earlier
+    // (compensate for BLE latency / VR display lag). Applied to every
+    // time-read so the sync scheduler thinks the video is slightly
+    // further along than it actually is, which causes it to dispatch
+    // the action that's coming up.
+    this._offsetMs = 0;
+    // Tracks which action-boundary the linear commands have been dispatched
+    // for. Separate from _lastActionIndex (which is also updated by the
+    // derived-intensity path) so the two schedules don't clobber each other.
+    this._lastLinearSentForIdx = -1;
+    // Same per axis — tcode → index we've already sent a LinearCmd for.
+    this._axisLastLinearSentIdx = new Map();
 
     // Custom routing mode — when active, only explicitly assigned devices get commands
     this._customRoutingActive = false;
@@ -95,6 +134,8 @@ export class ButtplugSync {
     this._vibActionIndex = -1;
     this._lastVibSendTime = 0;
     this._lastVibSentIntensity = -1;
+    this._lastLinearSentForIdx = -1;
+    this._axisLastLinearSentIdx.clear();
 
     console.log('[ButtplugSync] Stopped');
   }
@@ -108,6 +149,8 @@ export class ButtplugSync {
     this._lastSentPos = -1;
     this._vibActionIndex = -1;
     this._lastVibSentIntensity = -1;
+    this._lastLinearSentForIdx = -1;
+    this._axisLastLinearSentIdx.clear();
     for (const [, state] of this._axisActions) {
       state.index = -1;
       state.lastSentValue = -1;
@@ -170,6 +213,8 @@ export class ButtplugSync {
     this._resetAxisIndices();
     this._lastSentPos = -1;
     this._lastVibSentIntensity = -1;
+    this._lastLinearSentForIdx = -1;
+    this._axisLastLinearSentIdx.clear();
     this._rampUpStartTime = performance.now();
     this._startScheduler();
     this._emitStatus('synced');
@@ -191,6 +236,8 @@ export class ButtplugSync {
     this._resetVibIndex();
     this._resetAxisIndices();
     this._lastVibSentIntensity = -1;
+    this._lastLinearSentForIdx = -1;
+    this._axisLastLinearSentIdx.clear();
     this._rampUpStartTime = performance.now(); // reset ramp-up on seek
   }
 
@@ -214,7 +261,7 @@ export class ButtplugSync {
       return;
     }
 
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
 
     let lo = 0;
     let hi = this._actions.length - 1;
@@ -238,7 +285,7 @@ export class ButtplugSync {
       this._vibActionIndex = -1;
       return;
     }
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
     let lo = 0;
     let hi = this._vibActions.length - 1;
     let result = -1;
@@ -255,7 +302,7 @@ export class ButtplugSync {
   }
 
   _resetAxisIndices() {
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
     for (const [, state] of this._axisActions) {
       let lo = 0, hi = state.actions.length - 1, result = -1;
       while (lo <= hi) {
@@ -290,16 +337,32 @@ export class ButtplugSync {
   /**
    * Core scheduling loop — runs every TICK_INTERVAL_MS.
    *
-   * Uses the configured interpolation method to compute smooth positions
-   * between action points. Rate-limited to avoid overwhelming BLE.
+   * Splits into two schedules:
+   *   1. Linear: action-boundary OR interpolated, depending on _linearStrategy.
+   *      Action-boundary fires ONE LinearCmd per funscript action transition;
+   *      the device's firmware handles in-stroke interpolation. Interpolated
+   *      resends at tick-rate with remaining duration (legacy).
+   *   2. Derived intensity (vibration/scalar/rotate inferred from stroke
+   *      speed): always on the interpolated schedule, rate-limited to
+   *      MIN_SEND_INTERVAL_MS. These commands have no duration field and
+   *      need frequent re-sampling to track the stroke.
    */
   _sendPendingActions() {
     if (!this._actions || this._actions.length < 2) return;
     if (!this.buttplug.connected) return;
 
     const now = performance.now();
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
 
+    // ---- Linear scheduling ----
+    if (this._linearStrategy === 'action-boundary') {
+      this._dispatchLinearAtBoundary(timeMs);
+    } else {
+      // Legacy interpolated mode — fall through to the same path as derived
+      // below but also emit linear from it.
+    }
+
+    // ---- Derived intensity + (legacy) interpolated linear ----
     // Rate limit — don't send faster than MIN_SEND_INTERVAL_MS
     if (now - this._lastSendTime < MIN_SEND_INTERVAL_MS) return;
 
@@ -335,10 +398,81 @@ export class ButtplugSync {
     if (this._lastSentPos >= 0 && Math.abs(targetPos - this._lastSentPos) < MIN_POS_DELTA) return;
 
     const prevPos = this._lastSentPos >= 0 ? this._lastSentPos : targetPos;
-    this._sendToDevices(targetPos, duration, prevPos);
+    // In action-boundary mode, skip linear emission here — it was handled above.
+    const emitLinear = this._linearStrategy !== 'action-boundary';
+    this._sendToDevices(targetPos, duration, prevPos, { emitLinear });
     this._lastSendTime = now;
     this._lastSentPos = targetPos;
     if (this.onCommandSent) this.onCommandSent();
+  }
+
+  /**
+   * Action-boundary linear scheduler. Fires ONE LinearCmd per action
+   * transition with the full stroke duration, pre-scheduled by
+   * _linearLookaheadMs to compensate for BLE round-trip. The Handy and
+   * similar BLE strokers handle their own in-stroke interpolation, so
+   * one command per stroke produces the smoothest motion.
+   */
+  _dispatchLinearAtBoundary(timeMs) {
+    if (!this._actions || this._actions.length < 2) return;
+    const lookahead = this._linearLookaheadMs || 0;
+
+    // Advance through any action boundaries we've crossed this tick (plus
+    // any we're about to cross within the lookahead window).
+    while (this._lastActionIndex + 1 < this._actions.length &&
+           this._actions[this._lastActionIndex + 1].at - lookahead <= timeMs) {
+      this._lastActionIndex++;
+    }
+
+    if (this._lastActionIndex < 0) return;
+    const nextIdx = this._lastActionIndex + 1;
+    if (nextIdx >= this._actions.length) return;
+
+    // Already dispatched for this boundary? Nothing to do until we cross
+    // the next one.
+    if (this._lastLinearSentForIdx >= nextIdx) return;
+
+    const currentAction = this._actions[this._lastActionIndex];
+    const nextAction = this._actions[nextIdx];
+    const strokeDuration = nextAction.at - currentAction.at;
+
+    // Skip silent gaps — don't slow-crawl the device to a position that's
+    // seconds away.
+    if (strokeDuration > MAX_GAP_MS) {
+      this._lastLinearSentForIdx = nextIdx;
+      return;
+    }
+
+    // Coalesce sub-BLE-roundtrip strokes: the device can't honor
+    // 20ms "move and arrive" commands over BLE. Floor the duration at
+    // _minStrokeMs so the device has time to actually execute.
+    const duration = Math.max(this._minStrokeMs || 0, strokeDuration);
+
+    const prevPos = this._lastSentPos >= 0 ? this._lastSentPos : currentAction.pos;
+    this._sendLinearToDevices(nextAction.pos, duration, prevPos);
+    this._lastLinearSentForIdx = nextIdx;
+    // Deliberately do NOT mutate _lastSentPos here — that field feeds the
+    // derived-intensity path's dirty check + speed-limit calc, and the
+    // derived path tracks interpolated position, not action targets.
+    if (this.onCommandSent) this.onCommandSent();
+  }
+
+  /**
+   * Emit LinearCmd to every linear-capable device that the main stroke
+   * script should drive. Separate from _sendToDevices so the derived
+   * path can opt out of linear emission (action-boundary gating).
+   */
+  _sendLinearToDevices(position, durationMs, prevPosition) {
+    const devices = this.buttplug.devices;
+    for (const dev of devices) {
+      if (!dev.canLinear) continue;
+      const assigned = this._axisAssignmentMap.get(dev.index);
+      if (assigned && assigned !== 'L0') continue;
+      if (this._customRoutingActive && !assigned) continue;
+      const inverted = this._invertedDevices.has(dev.index);
+      const pos = inverted ? 100 - position : position;
+      this.buttplug.sendLinear(dev.index, pos, durationMs);
+    }
   }
 
   /**
@@ -346,8 +480,11 @@ export class ButtplugSync {
    * @param {number} position — target position 0–100
    * @param {number} durationMs — time to reach position
    * @param {number} prevPosition — previous position 0–100
+   * @param {{emitLinear?: boolean}} [opts] — emitLinear:false skips linear
+   *        emission (used when action-boundary scheduler already handled it)
    */
-  _sendToDevices(position, durationMs, prevPosition) {
+  _sendToDevices(position, durationMs, prevPosition, opts = {}) {
+    const emitLinear = opts.emitLinear !== false;
     const devices = this.buttplug.devices;
 
     for (const dev of devices) {
@@ -363,7 +500,7 @@ export class ButtplugSync {
       const pos = inverted ? 100 - position : position;
       const prevPos = inverted ? 100 - prevPosition : prevPosition;
 
-      if (dev.canLinear) {
+      if (dev.canLinear && emitLinear) {
         this.buttplug.sendLinear(dev.index, pos, durationMs);
       }
       // Only drive vibrate from main script if no separate vib script is loaded
@@ -429,7 +566,7 @@ export class ButtplugSync {
     if (!this.buttplug.connected) return;
 
     const now = performance.now();
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
 
     if (now - this._lastVibSendTime < MIN_SEND_INTERVAL_MS) return;
 
@@ -471,16 +608,34 @@ export class ButtplugSync {
   /**
    * Send pending multi-axis actions to devices assigned to those axes.
    * Each axis has independent action tracking.
+   *
+   * Linear-family axes (L, A) and custom-routed linear devices go through
+   * the action-boundary scheduler for the same smoothness reasons as the
+   * main stroke script. Vibration/rotate/scalar axes stay on the
+   * interpolated tick-rate schedule (those commands have no duration
+   * field and need re-sampling).
    */
   _sendPendingAxisActions() {
     if (!this.buttplug.connected) return;
 
     const now = performance.now();
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._currentTimeMs();
     const devices = this.buttplug.devices;
 
     for (const [tcode, state] of this._axisActions) {
       if (!state.actions || state.actions.length < 2) continue;
+
+      const featureType = tcode.charAt(0); // L, R, V, A, C (custom)
+      const useActionBoundary = this._linearStrategy === 'action-boundary' &&
+        (featureType === 'L' || featureType === 'A' || featureType === 'C');
+
+      if (useActionBoundary) {
+        this._dispatchAxisLinearAtBoundary(tcode, state, timeMs, devices);
+        // Custom-routed axes may include non-linear devices (vibe/rotate/scalar).
+        // For those, fall through to the interpolated path below.
+        if (featureType !== 'C') continue;
+      }
+
       if (now - state.lastSendTime < MIN_SEND_INTERVAL_MS) continue;
 
       // Catch up index
@@ -504,7 +659,6 @@ export class ButtplugSync {
       if (state.lastSentValue >= 0 && Math.abs(value - state.lastSentValue) < MIN_POS_DELTA) continue;
 
       // Route to devices assigned to this axis
-      const featureType = tcode.charAt(0); // L, R, V, A, C (custom)
       for (const dev of devices) {
         const assigned = this._axisAssignmentMap.get(dev.index);
         if (assigned !== tcode) continue;
@@ -513,8 +667,10 @@ export class ButtplugSync {
         const pos = inverted ? 100 - value : value;
 
         if (featureType === 'C') {
-          // Custom route: send based on device capabilities
-          if (dev.canLinear) this.buttplug.sendLinear(dev.index, pos, duration);
+          // Custom route: send based on device capabilities. Linear was
+          // handled above by _dispatchAxisLinearAtBoundary when action-
+          // boundary mode is on; skip it here to avoid double-send.
+          if (dev.canLinear && !useActionBoundary) this.buttplug.sendLinear(dev.index, pos, duration);
           else if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, pos);
           else if (dev.canRotate) this.buttplug.sendRotate(dev.index, pos, pos >= 50);
           else if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
@@ -536,6 +692,52 @@ export class ButtplugSync {
       state.lastSendTime = now;
       state.lastSentValue = value;
     }
+  }
+
+  /**
+   * Axis-level action-boundary dispatcher. Mirror of _dispatchLinearAtBoundary
+   * for multi-axis scripts. Tracks per-axis "last dispatched index" so each
+   * axis schedules independently.
+   */
+  _dispatchAxisLinearAtBoundary(tcode, state, timeMs, devices) {
+    const lookahead = this._linearLookaheadMs || 0;
+
+    while (state.index + 1 < state.actions.length &&
+           state.actions[state.index + 1].at - lookahead <= timeMs) {
+      state.index++;
+    }
+
+    if (state.index < 0) return;
+    const nextIdx = state.index + 1;
+    if (nextIdx >= state.actions.length) return;
+
+    const lastSentIdx = this._axisLastLinearSentIdx.get(tcode) ?? -1;
+    if (lastSentIdx >= nextIdx) return;
+
+    const currentAction = state.actions[state.index];
+    const nextAction = state.actions[nextIdx];
+    const strokeDuration = nextAction.at - currentAction.at;
+
+    if (strokeDuration > MAX_GAP_MS) {
+      this._axisLastLinearSentIdx.set(tcode, nextIdx);
+      return;
+    }
+
+    const duration = Math.max(this._minStrokeMs || 0, strokeDuration);
+
+    for (const dev of devices) {
+      const assigned = this._axisAssignmentMap.get(dev.index);
+      if (assigned !== tcode) continue;
+      if (!dev.canLinear) continue;
+      const inverted = this._invertedDevices.has(dev.index);
+      const pos = inverted ? 100 - nextAction.pos : nextAction.pos;
+      this.buttplug.sendLinear(dev.index, pos, duration);
+    }
+
+    this._axisLastLinearSentIdx.set(tcode, nextIdx);
+    // Deliberately do NOT mutate state.lastSentValue — the interpolated
+    // fallback path (for non-linear devices on custom axes) uses it for
+    // dirty-checking derived intensity commands.
   }
 
   // --- Per-device settings ---
@@ -638,6 +840,28 @@ export class ButtplugSync {
     return v !== undefined ? v : true;
   }
 
+  /**
+   * Drop every per-device entry for `deviceIndex` from the in-memory maps.
+   * Called from app.js's `onDeviceRemoved` wiring so that if Intiface
+   * recycles the index (e.g. after a full disconnect + reconnect), a
+   * freshly-enumerated device at that index won't inherit stale axis,
+   * vibe/scalar/rotate mode, inverted flag, intensity cap, or ramp-up
+   * setting from whatever used to live at that slot.
+   *
+   * Persistent settings keyed by device name in `buttplug.deviceSettings`
+   * are unaffected — `_loadButtplugDeviceSettings` restores them per-name
+   * on reconnect.
+   */
+  clearDeviceState(deviceIndex) {
+    this._axisAssignmentMap.delete(deviceIndex);
+    this._invertedDevices.delete(deviceIndex);
+    this._vibeModeMap.delete(deviceIndex);
+    this._scalarModeMap.delete(deviceIndex);
+    this._rotateModeMap.delete(deviceIndex);
+    this._maxIntensityMap.delete(deviceIndex);
+    this._rampUpMap.delete(deviceIndex);
+  }
+
   setInterpolationMode(mode) {
     this._interpolationMode = mode || 'linear';
     this._interpolator = getInterpolator(this._interpolationMode);
@@ -653,6 +877,70 @@ export class ButtplugSync {
 
   getSpeedLimit() {
     return this._speedLimit;
+  }
+
+  /**
+   * Set the linear command scheduling strategy.
+   * @param {'action-boundary'|'interpolated'} strategy
+   */
+  setLinearStrategy(strategy) {
+    this._linearStrategy = strategy === 'interpolated' ? 'interpolated' : 'action-boundary';
+    this._lastLinearSentForIdx = -1;
+    this._axisLastLinearSentIdx.clear();
+  }
+
+  getLinearStrategy() {
+    return this._linearStrategy;
+  }
+
+  /**
+   * BLE round-trip compensation. Command fires this many ms before the
+   * action's wall-clock time so it arrives at the device on-time.
+   */
+  setLinearLookaheadMs(ms) {
+    this._linearLookaheadMs = Math.max(0, Math.min(500, Number(ms) || 0));
+  }
+
+  getLinearLookaheadMs() {
+    return this._linearLookaheadMs;
+  }
+
+  /**
+   * Floor on stroke duration. Sub-threshold strokes are stretched up so
+   * BLE has time to actually execute them.
+   */
+  setMinStrokeMs(ms) {
+    this._minStrokeMs = Math.max(0, Math.min(500, Number(ms) || 0));
+  }
+
+  getMinStrokeMs() {
+    return this._minStrokeMs;
+  }
+
+  /**
+   * Set the per-device sync offset. NEGATIVE values fire commands earlier
+   * (compensate for BLE latency / VR display lag). The scheduler reads
+   * effective time = real time − offset, so a negative offset increases
+   * the effective time, dispatching upcoming actions ahead of schedule.
+   *
+   * Range typically -1000 to +1000 ms. Live — takes effect immediately
+   * without restarting the scheduler.
+   */
+  setOffsetMs(ms) {
+    this._offsetMs = Math.max(-2000, Math.min(2000, Number(ms) || 0));
+  }
+
+  getOffsetMs() {
+    return this._offsetMs;
+  }
+
+  /**
+   * Effective video time in ms — real player time shifted by the
+   * configured offset. Centralised so adding/changing the formula
+   * affects every read site uniformly.
+   */
+  _currentTimeMs() {
+    return this.player.currentTime * 1000 - this._offsetMs;
   }
 
   /**

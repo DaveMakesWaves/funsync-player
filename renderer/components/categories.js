@@ -3,6 +3,9 @@
 import { Modal } from './modal.js';
 import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
 import { computeSpeedStats } from '../js/library-search.js';
+import { computeBins, renderBins } from '../js/heatmap-strip.js';
+import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
+import { pathToFileURL } from '../js/path-utils.js';
 
 const PRESET_COLORS = [
   '#e94560', '#ff6b81', '#f39c12', '#2ecc71',
@@ -11,13 +14,36 @@ const PRESET_COLORS = [
 ];
 
 export class Categories {
-  constructor({ settings, onPlayVideo }) {
+  constructor({ settings, onPlayVideo, library }) {
     this._settings = settings;
     this._onPlayVideo = onPlayVideo;
+    this._library = library || null;
     this._container = null;
     this._view = 'grid'; // 'grid' or 'detail'
     this._detailCategoryId = null;
     this._viewMode = 'grid';
+    this._binsByPath = new Map();
+  }
+
+  _resolveFunscriptPath(videoPath) {
+    // Library scan is the source of truth — it holds scanner-normalized
+    // auto-detects (e.g. "Foo (Part B).mp4" → "Foo (Part B).funscript") AND
+    // already-applied manual associations. Naive extension swap misses
+    // normalized matches, so try library first.
+    const libVideo = this._library?.getVideoByPath(videoPath);
+    if (libVideo?.funscriptPath) return libVideo.funscriptPath;
+
+    const associations = this._settings.get('library.associations') || {};
+    const resolved = resolveActiveConfig(normalizeAssociation(associations[videoPath]));
+    if (resolved) {
+      if (resolved.kind === 'single') return resolved.config;
+      if (resolved.kind === 'multi' && resolved.config.main) return resolved.config.main;
+      if (resolved.kind === 'custom') {
+        const mainRoute = (resolved.config.routes || []).find(r => r.role === 'main');
+        if (mainRoute?.scriptPath) return mainRoute.scriptPath;
+      }
+    }
+    return videoPath.replace(/\.[^/.]+$/, '.funscript');
   }
 
   show(containerEl) {
@@ -344,7 +370,23 @@ export class Categories {
     cardEl.title = `File not found: ${videoPath}`;
   }
 
-  _captureFrame(videoPath) {
+  /**
+   * Get a single representative frame for a card. Routes through the
+   * backend's ffmpeg by default — much cheaper than the renderer's old
+   * hidden-<video> decode. Falls back to the in-renderer path if the
+   * backend isn't reachable. Mirrors the same change in library.js.
+   */
+  async _captureFrame(videoPath) {
+    if (window.funsync?.generateSingleThumbnail) {
+      try {
+        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct: 0.1, width: 320 });
+        if (result?.dataUrl) return { dataUrl: result.dataUrl, duration: result.duration || 0 };
+      } catch { /* fall through */ }
+    }
+    return this._captureFrameViaVideoElement(videoPath);
+  }
+
+  _captureFrameViaVideoElement(videoPath) {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
@@ -383,7 +425,7 @@ export class Categories {
       }, { once: true });
 
       video.addEventListener('error', () => { clearTimeout(timeout); cleanup(); resolve(null); }, { once: true });
-      video.src = `file:///${videoPath.replace(/\\/g, '/')}`;
+      video.src = pathToFileURL(videoPath);
     });
   }
 
@@ -391,9 +433,10 @@ export class Categories {
     const fileName = videoPath.split(/[\\/]/).pop();
     const fileData = { name: fileName, path: videoPath, _isPathBased: true };
 
-    // Try to find a matching funscript (same base name, .funscript extension)
+    // Try to find a matching funscript — prefer library scan (auto-detects
+    // + manual associations) over naive extension swap.
     let funscriptData = null;
-    const funscriptPath = videoPath.replace(/\.[^/.]+$/, '') + '.funscript';
+    const funscriptPath = this._resolveFunscriptPath(videoPath);
     try {
       const content = await window.funsync.readFunscript(funscriptPath);
       if (content) {
@@ -406,7 +449,7 @@ export class Categories {
   }
 
   async _checkFunscriptBadge(cardEl, thumbnailEl, videoPath) {
-    const funscriptPath = videoPath.replace(/\.[^/.]+$/, '.funscript');
+    const funscriptPath = this._resolveFunscriptPath(videoPath);
     try {
       const content = await window.funsync.readFunscript(funscriptPath);
       if (!content) return;
@@ -638,16 +681,17 @@ export class Categories {
     title.textContent = fileName.replace(/\.[^/.]+$/, '');
     title.title = fileName;
 
+    const funscriptPath = this._resolveFunscriptPath(videoPath);
+    const heatmap = document.createElement('canvas');
+    heatmap.className = 'categories__list-heatmap';
+
     const badges = document.createElement('div');
     badges.className = 'categories__list-badges';
-
-    const funscriptPath = this._getFunscriptPath(videoPath);
-    if (funscriptPath) {
-      const fsBadge = document.createElement('span');
-      fsBadge.className = 'library__funscript-badge--inline library__funscript-badge--auto';
-      fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
-      badges.appendChild(fsBadge);
-    }
+    const fsBadge = document.createElement('span');
+    fsBadge.className = 'library__funscript-badge--inline library__funscript-badge--auto';
+    fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
+    fsBadge.hidden = true;
+    badges.appendChild(fsBadge);
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'categories__card-action-btn categories__card-action-btn--danger';
@@ -659,12 +703,49 @@ export class Categories {
       this._renderDetail(category.id);
     });
 
-    row.append(title, badges, removeBtn);
+    row.append(title, heatmap, badges, removeBtn);
 
     row.addEventListener('click', () => {
       this._playVideoByPath(videoPath);
     });
 
+    this._loadListStats(videoPath, funscriptPath, fsBadge, badges, heatmap, row);
+
     return row;
+  }
+
+  async _loadListStats(videoPath, funscriptPath, fsBadgeEl, badgesEl, heatmapEl, rowEl) {
+    const cachedBins = this._binsByPath.get(videoPath);
+    if (cachedBins && heatmapEl) {
+      requestAnimationFrame(() => renderBins(heatmapEl, cachedBins));
+    }
+    try {
+      const content = await window.funsync.readFunscript(funscriptPath);
+      if (!content) {
+        if (rowEl) rowEl.classList.add('categories__list-item--no-heatmap');
+        if (heatmapEl) heatmapEl.remove();
+        return;
+      }
+
+      if (fsBadgeEl) fsBadgeEl.hidden = false;
+
+      const parsed = JSON.parse(content);
+      const actions = parsed?.actions;
+      if (!actions || actions.length < 2) return;
+
+      if (badgesEl) {
+        const stats = computeSpeedStats(actions);
+        if (stats.maxSpeed > 0) this._addSpeedBadge(badgesEl, stats);
+      }
+
+      if (heatmapEl) {
+        const bins = cachedBins || computeBins(actions);
+        if (!cachedBins) this._binsByPath.set(videoPath, bins);
+        renderBins(heatmapEl, bins);
+      }
+    } catch {
+      if (rowEl) rowEl.classList.add('categories__list-item--no-heatmap');
+      if (heatmapEl) heatmapEl.remove();
+    }
   }
 }

@@ -144,7 +144,8 @@ describe('ButtplugSync', () => {
       sync._lastActionIndex = 0;
     });
 
-    it('sends LinearCmd with interpolated position', () => {
+    it('sends LinearCmd with interpolated position (legacy interpolated strategy)', () => {
+      sync.setLinearStrategy('interpolated');
       mockPlayer.currentTime = 0.25; // 250ms — halfway between 0ms and 500ms
       sync._sendPendingActions();
 
@@ -153,6 +154,94 @@ describe('ButtplugSync', () => {
       const call = mockButtplug.sendLinear.mock.calls[0];
       expect(call[0]).toBe(0); // device index
       expect(call[1]).toBeCloseTo(50, 0); // interpolated position
+    });
+
+    it('sends LinearCmd with NEXT action position + full stroke duration (action-boundary strategy)', () => {
+      // Default strategy is action-boundary. At t=0 we've just crossed the
+      // first action (at 0ms, pos=0) — fire ONE command targeting the next
+      // action (at 500ms, pos=100) with duration 500ms.
+      sync._lastActionIndex = 0;
+      sync._lastLinearSentForIdx = -1;
+      mockPlayer.currentTime = 0; // at first action boundary
+      sync._sendPendingActions();
+
+      expect(mockButtplug.sendLinear).toHaveBeenCalled();
+      const call = mockButtplug.sendLinear.mock.calls[0];
+      expect(call[0]).toBe(0);        // device index
+      expect(call[1]).toBe(100);      // NEXT action's position, not interpolated midpoint
+      expect(call[2]).toBe(500);      // full stroke duration, not remaining-to-next
+    });
+
+    it('action-boundary mode dispatches only once per action, not every tick', () => {
+      sync._lastActionIndex = 0;
+      sync._lastLinearSentForIdx = -1;
+      mockPlayer.currentTime = 0;
+      sync._sendPendingActions(); // fires command for action 0→1
+      sync._sendPendingActions(); // should be a no-op (still on same boundary)
+      sync._sendPendingActions();
+      expect(mockButtplug.sendLinear).toHaveBeenCalledTimes(1);
+    });
+
+    it('action-boundary mode fires new command when video crosses next action', () => {
+      sync._lastActionIndex = 0;
+      sync._lastLinearSentForIdx = -1;
+      mockPlayer.currentTime = 0;
+      sync._sendPendingActions(); // action 0→1
+
+      // Advance past the second action (at 500ms) plus lookahead.
+      mockPlayer.currentTime = 0.6;
+      sync._sendPendingActions(); // action 1→2
+
+      expect(mockButtplug.sendLinear).toHaveBeenCalledTimes(2);
+      const [first, second] = mockButtplug.sendLinear.mock.calls;
+      expect(first[1]).toBe(100);  // first target: action[1].pos
+      expect(second[1]).toBe(0);   // second target: action[2].pos
+    });
+
+    it('action-boundary lookahead fires command before action wall-clock time', () => {
+      // With 60ms lookahead and the second action at 500ms, the dispatcher
+      // should trigger at t = 440ms, not t = 500ms.
+      sync.setLinearLookaheadMs(60);
+      sync._lastActionIndex = 0;
+      sync._lastLinearSentForIdx = 1; // already dispatched for first boundary (0→1)
+
+      mockPlayer.currentTime = 0.439; // 439ms — before the lookahead window
+      sync._sendPendingActions();
+      expect(mockButtplug.sendLinear).not.toHaveBeenCalled();
+
+      mockPlayer.currentTime = 0.44; // 440ms — at the lookahead edge
+      sync._sendPendingActions();
+      expect(mockButtplug.sendLinear).toHaveBeenCalledTimes(1);
+    });
+
+    it('action-boundary mode stretches sub-minStroke strokes up to the floor', () => {
+      // Close-spaced actions: 0→30ms stroke is below the 60ms floor.
+      // Disable lookahead for this test so the dispatcher lands on the 0→1
+      // boundary (not pre-crossed by the lookahead window).
+      sync._actions = [
+        { at: 0, pos: 0 },
+        { at: 30, pos: 100 },
+        { at: 200, pos: 0 },
+      ];
+      sync.setLinearLookaheadMs(0);
+      sync.setMinStrokeMs(60);
+      sync._lastActionIndex = 0;
+      sync._lastLinearSentForIdx = -1;
+      mockPlayer.currentTime = 0;
+      sync._sendPendingActions();
+
+      const call = mockButtplug.sendLinear.mock.calls[0];
+      expect(call[1]).toBe(100);   // still targets action[1].pos
+      expect(call[2]).toBe(60);    // duration clamped up to min-stroke floor
+    });
+
+    it('setLinearStrategy resets boundary tracking so the next tick dispatches', () => {
+      sync._lastActionIndex = 0;
+      sync._lastLinearSentForIdx = 99; // pretend we'd already sent way ahead
+      sync.setLinearStrategy('action-boundary');
+      mockPlayer.currentTime = 0;
+      sync._sendPendingActions();
+      expect(mockButtplug.sendLinear).toHaveBeenCalled();
     });
 
     it('does not send when not connected', () => {
@@ -268,6 +357,57 @@ describe('ButtplugSync', () => {
       sync.reloadActions();
       expect(sync._actions).toEqual(newActions);
       expect(sync._lastActionIndex).toBe(-1);
+    });
+  });
+
+  describe('clearDeviceState', () => {
+    it('removes all per-device entries for the given index', () => {
+      sync.setAxisAssignment(0, 'L1');
+      sync.setInverted(0, true);
+      sync.setVibeMode(0, 'intensity');
+      sync.setScalarMode(0, 'speed');
+      sync.setRotateMode(0, 'position');
+      sync.setMaxIntensity(0, 45);
+      sync.setRampUp(0, false);
+
+      sync.clearDeviceState(0);
+
+      // Getters return the documented defaults once state is cleared
+      expect(sync.getAxisAssignment(0)).toBe('L0');
+      expect(sync.isInverted(0)).toBe(false);
+      expect(sync.getVibeMode(0)).toBe('speed');
+      expect(sync.getScalarMode(0)).toBe('position');
+      expect(sync.getRotateMode(0)).toBe('speed');
+      expect(sync.getMaxIntensity(0)).toBe(70);
+      expect(sync.getRampUp(0)).toBe(true);
+
+      // Underlying maps should no longer contain the index either
+      expect(sync._axisAssignmentMap.has(0)).toBe(false);
+      expect(sync._invertedDevices.has(0)).toBe(false);
+      expect(sync._vibeModeMap.has(0)).toBe(false);
+      expect(sync._scalarModeMap.has(0)).toBe(false);
+      expect(sync._rotateModeMap.has(0)).toBe(false);
+      expect(sync._maxIntensityMap.has(0)).toBe(false);
+      expect(sync._rampUpMap.has(0)).toBe(false);
+    });
+
+    it('leaves other device indices untouched', () => {
+      sync.setAxisAssignment(0, 'L1');
+      sync.setAxisAssignment(1, 'V0');
+      sync.setInverted(1, true);
+      sync.setMaxIntensity(1, 30);
+
+      sync.clearDeviceState(0);
+
+      expect(sync.getAxisAssignment(0)).toBe('L0');
+      expect(sync.getAxisAssignment(1)).toBe('V0');
+      expect(sync.isInverted(1)).toBe(true);
+      expect(sync.getMaxIntensity(1)).toBe(30);
+    });
+
+    it('is safe to call for an index with no recorded state', () => {
+      expect(() => sync.clearDeviceState(42)).not.toThrow();
+      expect(sync.getAxisAssignment(42)).toBe('L0');
     });
   });
 });

@@ -36,6 +36,51 @@ class TestFindBinary:
         if result != "ffprobe":  # If not falling back to PATH
             assert os.path.isabs(result)
 
+    def test_linux_dev_probes_ffmpeg_linux_directory(self, monkeypatch, tmp_path):
+        """On Linux dev (no frozen bundle), `_find_binary` must check
+        `ffmpeg-linux/` since the CI build puts static Linux binaries there.
+        The Windows-only `ffmpeg/` directory would miss it."""
+        # Pretend we're on Linux
+        monkeypatch.setattr(os, "name", "posix")
+
+        # Simulate a project layout where ffmpeg-linux/ has the binary
+        fake_root = tmp_path
+        (fake_root / "ffmpeg-linux").mkdir()
+        fake_bin = fake_root / "ffmpeg-linux" / "ffmpeg"
+        fake_bin.write_text("")  # just needs to exist
+        fake_bin.chmod(0o755)
+
+        # Point _find_binary's project_root at our fake tree by monkeypatching
+        # the module's __file__ to point inside fake_root/backend/services/
+        from services import ffmpeg as ffmpeg_mod
+        fake_file = fake_root / "backend" / "services" / "ffmpeg.py"
+        fake_file.parent.mkdir(parents=True)
+        fake_file.touch()
+        monkeypatch.setattr(ffmpeg_mod, "__file__", str(fake_file))
+
+        result = ffmpeg_mod._find_binary("ffmpeg")
+        assert result == str(fake_bin.resolve())
+
+    def test_windows_does_not_probe_ffmpeg_linux(self, monkeypatch, tmp_path):
+        """Symmetric: on Windows, the Linux dir is not probed. Catches the
+        reverse mistake (accidentally picking up a stale ffmpeg-linux/
+        binary on a Windows dev checkout)."""
+        monkeypatch.setattr(os, "name", "nt")
+
+        fake_root = tmp_path
+        (fake_root / "ffmpeg-linux").mkdir()
+        (fake_root / "ffmpeg-linux" / "ffmpeg").write_text("")  # Linux stub — should be ignored
+
+        from services import ffmpeg as ffmpeg_mod
+        fake_file = fake_root / "backend" / "services" / "ffmpeg.py"
+        fake_file.parent.mkdir(parents=True)
+        fake_file.touch()
+        monkeypatch.setattr(ffmpeg_mod, "__file__", str(fake_file))
+
+        result = ffmpeg_mod._find_binary("ffmpeg")
+        # No ffmpeg.exe in ffmpeg/ → falls back to PATH lookup (returns "ffmpeg")
+        assert result == "ffmpeg"
+
 
 class TestGetVideoHash:
     def test_hash_format(self):

@@ -50,6 +50,34 @@
   border-radius: 0 5px 5px 0;
 }
 
+/* Folder-browse button — standalone icon, separated from the grid/list
+   pair. Distinct from the joined button-bar styling so it reads as "this
+   is a different axis of control, not the third option in a toggle." */
+.folder-browse-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #a0a0a0);
+  width: 30px;
+  height: 30px;
+  margin-left: 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 150ms, color 150ms;
+}
+.folder-browse-btn:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text-primary, #e0e0e0);
+}
+.folder-browse-btn.view-toggle--active {
+  background: var(--accent-soft, rgba(233, 69, 96, 0.14));
+  color: var(--accent, #e94560);
+  border: none;
+}
+
 :root {
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
@@ -297,6 +325,12 @@ html, body {
   margin-bottom: 4px;
 }
 
+/* Suppress the browser's default focus ring on click / programmatic focus
+   (which shows up as the bright yellow outline) while keeping an
+   intentional accent ring for keyboard users via :focus-visible. */
+.controls__progress:focus {
+  outline: none;
+}
 .controls__progress:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
@@ -1112,6 +1146,60 @@ html, body {
   max-width: 160px;
 }
 
+/* TCode per-axis range rows — rendered inside #tcode-axis-list */
+.connection-panel__tcode-axis-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.connection-panel__tcode-axis-row:last-child { border-bottom: none; }
+.connection-panel__tcode-axis-row--disabled { opacity: 0.5; }
+
+.connection-panel__tcode-axis-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.connection-panel__tcode-axis-code {
+  font-family: 'Segoe UI Mono', 'Consolas', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--accent-soft);
+  letter-spacing: 0.3px;
+}
+
+.connection-panel__tcode-axis-label {
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.connection-panel__tcode-axis-type {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  padding: 1px 5px;
+  border-radius: 3px;
+}
+.connection-panel__tcode-axis-type--linear  { background: rgba(120,180,255,0.12); color: #82b4ff; }
+.connection-panel__tcode-axis-type--rotate  { background: rgba(0,200,180,0.12);   color: #4ecdc4; }
+.connection-panel__tcode-axis-type--vibrate { background: rgba(233,69,96,0.14);   color: var(--accent); }
+
+.connection-panel__tcode-range-label {
+  font-size: 10px;
+  color: var(--text-secondary);
+  min-width: 22px;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
 .connection-panel__device-safety-section {
   display: flex;
   flex-direction: column;
@@ -1153,6 +1241,8 @@ html, body {
   line-height: 1.5;
   border-left: 2px solid var(--accent);
 }
+
+/* Web Remote section moved to its own modal (renderer/components/web-remote-modal.js). */
 
 .connection-panel__device-caps {
   color: rgba(255, 255, 255, 0.4);
@@ -1528,7 +1618,19 @@ html, body {
   max-width: 400px;
   text-align: center;
   pointer-events: auto;
+  cursor: pointer;
+  user-select: none;
   animation: toast-in 250ms ease forwards;
+  transition: background 120ms ease;
+}
+
+.toast:hover {
+  background: rgba(0, 0, 0, 0.95);
+}
+
+.toast:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .toast--error {

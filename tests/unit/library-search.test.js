@@ -73,6 +73,113 @@ describe('library-search', () => {
       const results = fuzzySearch(videos, '.mp4');
       expect(results.length).toBeGreaterThan(0);
     });
+
+    // New tier-0 (exact title) behaviour — regression guard for the
+    // "typing the exact title doesn't put it first" bug.
+    describe('exact-title precedence', () => {
+      const realWorld = [
+        { name: 'Klixen HJ177a.mp4', path: '/v/a.mp4', hasFunscript: true },
+        { name: 'Klixen HJ177b Shoot Into My Mouth (Part A).mp4', path: '/v/b.mp4', hasFunscript: true },
+        { name: 'Klixen HJ177b Shoot Into My Mouth (Part B).mp4', path: '/v/c.mp4', hasFunscript: true },
+        { name: 'Klixen HJ177c.mp4', path: '/v/d.mp4', hasFunscript: true },
+      ];
+
+      it('puts exact title first when query matches filename verbatim', () => {
+        const q = 'Klixen HJ177b Shoot Into My Mouth (Part B).mp4';
+        const results = fuzzySearch(realWorld, q);
+        expect(results[0].name).toBe('Klixen HJ177b Shoot Into My Mouth (Part B).mp4');
+      });
+
+      it('puts exact title first when query omits the extension', () => {
+        const q = 'Klixen HJ177b Shoot Into My Mouth (Part B)';
+        const results = fuzzySearch(realWorld, q);
+        expect(results[0].name).toBe('Klixen HJ177b Shoot Into My Mouth (Part B).mp4');
+      });
+
+      it('beats shorter filename that is a substring of the query', () => {
+        const vids = [
+          { name: 'alpha.mp4', path: '/a' },
+          { name: 'alpha video full.mp4', path: '/b' },
+        ];
+        // Without tier-0, "alpha.mp4" (shorter) can sort first alphabetically.
+        const results = fuzzySearch(vids, 'alpha video full');
+        expect(results[0].name).toBe('alpha video full.mp4');
+      });
+    });
+
+    describe('path search', () => {
+      it('finds a video by folder name even when not in filename', () => {
+        const vids = [
+          { name: 'clip.mp4', path: '/media/Klixen/clip.mp4' },
+          { name: 'other.mp4', path: '/media/Misc/other.mp4' },
+        ];
+        const results = fuzzySearch(vids, 'klixen');
+        expect(results.length).toBe(1);
+        expect(results[0].name).toBe('clip.mp4');
+      });
+
+      it('ranks name match above path-only match', () => {
+        const vids = [
+          { name: 'other clip.mp4', path: '/media/Klixen/other clip.mp4' },
+          { name: 'klixen promo.mp4', path: '/media/Misc/klixen promo.mp4' },
+        ];
+        const results = fuzzySearch(vids, 'klixen');
+        expect(results[0].name).toBe('klixen promo.mp4');
+        expect(results[1].name).toBe('other clip.mp4');
+      });
+
+      it('can be disabled via searchPaths: false', () => {
+        const vids = [{ name: 'clip.mp4', path: '/media/Klixen/clip.mp4' }];
+        const results = fuzzySearch(vids, 'klixen', { searchPaths: false });
+        expect(results.length).toBe(0);
+      });
+    });
+
+    describe('context map', () => {
+      it('matches videos by collection / category name', () => {
+        const vids = [
+          { name: 'clip.mp4', path: '/a' },
+          { name: 'film.mp4', path: '/b' },
+        ];
+        const contextMap = new Map([
+          ['/a', ['Klixen Pack']],
+        ]);
+        const results = fuzzySearch(vids, 'klixen pack', { contextMap });
+        expect(results.length).toBe(1);
+        expect(results[0].name).toBe('clip.mp4');
+      });
+
+      it('accepts a plain object as contextMap', () => {
+        const vids = [{ name: 'clip.mp4', path: '/a' }];
+        const results = fuzzySearch(vids, 'favorites', { contextMap: { '/a': ['Favorites'] } });
+        expect(results.length).toBe(1);
+      });
+
+      it('ranks name > path > context', () => {
+        const vids = [
+          { name: 'klixen in name.mp4', path: '/a' },
+          { name: 'plain.mp4', path: '/media/klixen/plain.mp4' },
+          { name: 'contextonly.mp4', path: '/elsewhere/ctx.mp4' },
+        ];
+        const contextMap = new Map([['/elsewhere/ctx.mp4', ['Klixen Collection']]]);
+        const results = fuzzySearch(vids, 'klixen', { contextMap });
+        expect(results[0].name).toBe('klixen in name.mp4');
+        expect(results[1].name).toBe('plain.mp4');
+        expect(results[2].name).toBe('contextonly.mp4');
+      });
+    });
+
+    describe('ranking survives mixed result sets', () => {
+      it('exact match beats alphabetically-earlier partial matches', () => {
+        const vids = [
+          { name: 'A Klixen Test.mp4', path: '/a' },
+          { name: 'B Klixen Test.mp4', path: '/b' },
+          { name: 'Klixen Exact.mp4', path: '/c' },
+        ];
+        const results = fuzzySearch(vids, 'Klixen Exact.mp4');
+        expect(results[0].name).toBe('Klixen Exact.mp4');
+      });
+    });
   });
 
   describe('sortVideos', () => {

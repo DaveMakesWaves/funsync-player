@@ -407,6 +407,7 @@
   border-radius: 6px;
   cursor: pointer;
   transition: background 150ms;
+  container-type: inline-size;
 }
 
 .categories__list-item:hover {
@@ -421,14 +422,39 @@
 }
 
 .categories__list-name {
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 120px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+}
+
+.categories__list-item--no-heatmap .categories__list-name {
+  flex: 1 1 auto;
+}
+
+.categories__list-heatmap {
+  flex: 1 1 200px;
+  min-width: 80px;
+  max-width: 300px;
+  height: 24px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--accent);
+  pointer-events: none;
+  display: block;
+}
+
+@container (max-width: 600px) {
+  .categories__list-heatmap {
+    display: none;
+  }
+  .categories__list-name {
+    flex: 1 1 auto;
+  }
 }
 
 .categories__list-count {

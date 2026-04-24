@@ -138,6 +138,57 @@ describe('SyncEngine', () => {
       player.video.dispatchEvent(new Event('ended'));
       await vi.waitFor(() => expect(handy.hsspStop).toHaveBeenCalled());
     });
+
+    it('rapid seeks: superseded handler does not issue stale hsspPlay', async () => {
+      // Regression guard for the race where handler 1's slow hsspStop
+      // resolves AFTER handler 2's hsspPlay has already landed — the old
+      // handler would then fire hsspPlay(oldTime) and silently override
+      // the newer position until drift monitor caught up.
+      engine.start();
+      engine._scriptReady = true;
+      Object.defineProperty(player.video, 'paused', { value: false, configurable: true });
+
+      // Hold both hsspStop calls on manual promises so we can interleave.
+      let resolveStop1, resolveStop2;
+      handy.hsspStop
+        .mockReturnValueOnce(new Promise((r) => { resolveStop1 = r; }))
+        .mockReturnValueOnce(new Promise((r) => { resolveStop2 = r; }));
+
+      // First seek at 1s
+      player.video.currentTime = 1;
+      player.video.dispatchEvent(new Event('seeked'));
+      await Promise.resolve();
+
+      // Second seek at 2s before the first stop resolves
+      player.video.currentTime = 2;
+      player.video.dispatchEvent(new Event('seeked'));
+      await Promise.resolve();
+
+      // Resolve the older stop LAST — this is the order that would have
+      // caused the bug (old handler wakes up late and fires hsspPlay).
+      resolveStop2();
+      resolveStop1();
+
+      await vi.waitFor(() => {
+        expect(handy.hsspPlay).toHaveBeenCalledWith(2000);
+      });
+
+      // The superseded first handler must NOT have called hsspPlay at its
+      // stale 1000ms timestamp.
+      const playCalls = handy.hsspPlay.mock.calls;
+      expect(playCalls.some(args => args[0] === 1000)).toBe(false);
+    });
+
+    it('seek generation counter increments per seeked event', async () => {
+      engine.start();
+      engine._scriptReady = true;
+      Object.defineProperty(player.video, 'paused', { value: true, configurable: true });
+      expect(engine._seekGen).toBe(0);
+      player.video.dispatchEvent(new Event('seeked'));
+      await vi.waitFor(() => expect(engine._seekGen).toBe(1));
+      player.video.dispatchEvent(new Event('seeked'));
+      await vi.waitFor(() => expect(engine._seekGen).toBe(2));
+    });
   });
 
   describe('does not call Handy when inactive', () => {

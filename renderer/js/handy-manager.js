@@ -13,6 +13,16 @@ export class HandyManager {
     this._syncQuality = null;
     this._lastCloudUrl = null; // last uploaded script URL (for re-setup after mode switch)
 
+    // Cloud-reachability health check. The SDK's 'disconnect' event only
+    // fires for client-side socket drops — it does NOT fire when the
+    // physical Handy switches to BT mode (the SDK's HTTP session stays
+    // alive, only the cloud → device path breaks). Without this poll,
+    // `_connected` stayed `true` after a BT-mode switch and the UI kept
+    // showing the WiFi connection as live alongside the newly-enumerated
+    // Buttplug BT device.
+    this._healthCheckInterval = null;
+    this._healthCheckIntervalMs = 10000;
+
     // Callbacks
     this.onStateChange = null;   // (state) => {}
     this.onConnect = null;       // () => {}
@@ -41,10 +51,12 @@ export class HandyManager {
 
       this._handy.on('connect', () => {
         this._connected = true;
+        this._startHealthCheck();
         if (this.onConnect) this.onConnect();
       });
 
       this._handy.on('disconnect', () => {
+        this._stopHealthCheck();
         this._connected = false;
         this._deviceInfo = null;
         if (this.onDisconnect) this.onDisconnect();
@@ -58,7 +70,12 @@ export class HandyManager {
   }
 
   /**
-   * Connect to a Handy device using the connection key.
+   * Connect to a Handy device using the connection key. One-shot —
+   * callers who want retries should handle it themselves. We deliberately
+   * don't retry in here because an offline Handy is almost always a
+   * device-side or cloud-side issue (LED in wrong mode, WiFi creds stale,
+   * handyfeeling down) that the app can't resolve by retrying harder.
+   *
    * @param {string} connectionKey
    * @returns {boolean} True if connected successfully
    */
@@ -77,6 +94,7 @@ export class HandyManager {
       if (code === 1) {
         this._connected = true;
         await this._fetchDeviceInfo();
+        this._startHealthCheck();
         return true;
       } else {
         this._emitError('Connection failed — check your connection key');
@@ -93,6 +111,9 @@ export class HandyManager {
    */
   async disconnect() {
     if (!this._handy) return;
+
+    // Stop polling first so a tick mid-disconnect can't resurrect state.
+    this._stopHealthCheck();
 
     try {
       await this._handy.disconnect();
@@ -368,6 +389,55 @@ export class HandyManager {
       // HDSP errors are non-critical, don't spam the user
       console.debug('HDSP move error:', err.message);
     }
+  }
+
+  // --- Cloud-reachability health check ---
+
+  _startHealthCheck() {
+    if (this._healthCheckInterval) return;
+    this._healthCheckInterval = setInterval(
+      () => this._healthCheckTick(),
+      this._healthCheckIntervalMs,
+    );
+  }
+
+  _stopHealthCheck() {
+    if (this._healthCheckInterval) {
+      clearInterval(this._healthCheckInterval);
+      this._healthCheckInterval = null;
+    }
+  }
+
+  /**
+   * Ask the handyfeeling cloud whether the physical device is currently
+   * reachable. Only flips state on an unambiguous `connected: false`.
+   * Network errors are treated as transient — state is preserved so a
+   * single flaky poll doesn't cause a spurious disconnect UI blip.
+   */
+  async _healthCheckTick() {
+    if (!this._handy || !this._connected || !this._connectionKey) return;
+    try {
+      const resp = await this._handy.API?.get?.connected?.(this._connectionKey);
+      if (resp && resp.connected === false) {
+        console.log('[Handy] Cloud reports device unreachable — marking disconnected');
+        this._handleDeviceLost();
+      }
+    } catch (err) {
+      // Transient — log once per tick, don't touch state.
+      console.debug('[Handy] Health check error:', err?.message || err);
+    }
+  }
+
+  /**
+   * Device is no longer reachable via WiFi (BT-mode switch, power off,
+   * WiFi drop). Mirror the SDK's disconnect cleanup so every consumer
+   * reading `handyManager.connected` updates immediately.
+   */
+  _handleDeviceLost() {
+    this._stopHealthCheck();
+    this._connected = false;
+    this._deviceInfo = null;
+    if (this.onDisconnect) this.onDisconnect();
   }
 
   // --- Getters ---

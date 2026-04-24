@@ -383,6 +383,7 @@
   border-radius: 6px;
   cursor: pointer;
   transition: background 150ms;
+  container-type: inline-size;
 }
 
 .playlists__list-item:hover {
@@ -390,14 +391,39 @@
 }
 
 .playlists__list-name {
-  flex: 1;
+  flex: 1 1 120px;
+  min-width: 120px;
   font-size: 13px;
   font-weight: 500;
   color: var(--text-primary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  min-width: 0;
+}
+
+.playlists__list-item--no-heatmap .playlists__list-name {
+  flex: 1 1 auto;
+}
+
+.playlists__list-heatmap {
+  flex: 1 1 200px;
+  min-width: 80px;
+  max-width: 300px;
+  height: 24px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--accent);
+  pointer-events: none;
+  display: block;
+}
+
+@container (max-width: 600px) {
+  .playlists__list-heatmap {
+    display: none;
+  }
+  .playlists__list-name {
+    flex: 1 1 auto;
+  }
 }
 
 .playlists__list-count {

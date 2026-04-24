@@ -3,16 +3,21 @@
 import { Modal } from './modal.js';
 import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
 import { computeSpeedStats } from '../js/library-search.js';
+import { computeBins, renderBins } from '../js/heatmap-strip.js';
+import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
+import { pathToFileURL } from '../js/path-utils.js';
 
 export class Playlists {
-  constructor({ settings, onPlayVideo, onPlayAll }) {
+  constructor({ settings, onPlayVideo, onPlayAll, library }) {
     this._settings = settings;
     this._onPlayVideo = onPlayVideo;
     this._onPlayAll = onPlayAll;
+    this._library = library || null;
     this._container = null;
     this._view = 'grid'; // 'grid' or 'detail'
     this._detailPlaylistId = null;
     this._viewMode = 'grid'; // 'grid' or 'list'
+    this._binsByPath = new Map();
   }
 
   show(containerEl) {
@@ -295,13 +300,26 @@ export class Playlists {
       const fileName = videoPath.split(/[\\/]/).pop();
       const fileData = { name: fileName, path: videoPath, _isPathBased: true };
       const fsPath = this._getFunscriptPath(videoPath);
+      // Only warn when the script path was user-associated (explicit) —
+      // the fallback basename guess silently failing is fine ("user
+      // never set up a script" isn't a failure, it's a no-op).
+      const isExplicit = this._hasExplicitAssociation(videoPath);
       let funscriptData = null;
+      let readFailed = false;
       try {
         const content = await window.funsync.readFunscript(fsPath);
         if (content) {
           funscriptData = { name: fsPath.split(/[\\/]/).pop(), textContent: content };
+        } else if (isExplicit) {
+          readFailed = true;
         }
-      } catch { /* funscript not found — play without */ }
+      } catch {
+        if (isExplicit) readFailed = true;
+      }
+      if (readFailed) {
+        const { showToast } = await import('../js/toast.js');
+        showToast(`Funscript for ${fileName} couldn't be read — playing without sync`, 'warn', 4000);
+      }
       this._onPlayVideo(fileData, funscriptData);
     });
 
@@ -345,7 +363,23 @@ export class Playlists {
     cardEl.title = `File not found: ${videoPath}`;
   }
 
-  _captureFrame(videoPath) {
+  /**
+   * Get a single representative frame for a card. Routes through the
+   * backend's ffmpeg by default — much cheaper than the renderer's old
+   * hidden-<video> decode. Falls back to in-renderer decode if the
+   * backend isn't reachable. Mirrors the same change in library.js.
+   */
+  async _captureFrame(videoPath) {
+    if (window.funsync?.generateSingleThumbnail) {
+      try {
+        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct: 0.1, width: 320 });
+        if (result?.dataUrl) return { dataUrl: result.dataUrl, duration: result.duration || 0 };
+      } catch { /* fall through */ }
+    }
+    return this._captureFrameViaVideoElement(videoPath);
+  }
+
+  _captureFrameViaVideoElement(videoPath) {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
@@ -384,7 +418,7 @@ export class Playlists {
       }, { once: true });
 
       video.addEventListener('error', () => { clearTimeout(timeout); cleanup(); resolve(null); }, { once: true });
-      video.src = `file:///${videoPath.replace(/\\/g, '/')}`;
+      video.src = pathToFileURL(videoPath);
     });
   }
 
@@ -473,10 +507,47 @@ export class Playlists {
   }
 
   _getFunscriptPath(videoPath) {
+    // Library scan is the source of truth — it holds scanner-normalized
+    // auto-detects (e.g. "Foo (Part B).mp4" → "Foo (Part B).funscript") AND
+    // already-applied manual associations. Naive extension swap misses
+    // normalized matches, so try library first.
+    const libVideo = this._library?.getVideoByPath(videoPath);
+    if (libVideo?.funscriptPath) return libVideo.funscriptPath;
+
     const associations = this._settings.get('library.associations') || {};
-    if (associations[videoPath]) return associations[videoPath];
+    const resolved = resolveActiveConfig(normalizeAssociation(associations[videoPath]));
+    if (resolved) {
+      if (resolved.kind === 'single') return resolved.config;
+      if (resolved.kind === 'multi' && resolved.config.main) return resolved.config.main;
+      if (resolved.kind === 'custom') {
+        const mainRoute = (resolved.config.routes || []).find(r => r.role === 'main');
+        if (mainRoute?.scriptPath) return mainRoute.scriptPath;
+      }
+    }
     // Basename fallback — swap extension to .funscript
     return videoPath.replace(/\.[^/.]+$/, '.funscript');
+  }
+
+  /**
+   * Does this video have a user-set (or auto-detected) association that
+   * resolves to a real script path? Used to distinguish "script path was
+   * expected and failed to read" from "no script was ever configured" —
+   * only the former is a failure worth surfacing.
+   */
+  _hasExplicitAssociation(videoPath) {
+    // Auto-detected scripts live on the library's scanned video record.
+    const libVideo = this._library?.getVideoByPath(videoPath);
+    if (libVideo?.funscriptPath) return true;
+
+    const associations = this._settings.get('library.associations') || {};
+    const resolved = resolveActiveConfig(normalizeAssociation(associations[videoPath]));
+    if (!resolved) return false;
+    if (resolved.kind === 'single') return !!resolved.config;
+    if (resolved.kind === 'multi') return !!resolved.config.main;
+    if (resolved.kind === 'custom') {
+      return (resolved.config.routes || []).some(r => r.role === 'main' && r.scriptPath);
+    }
+    return false;
   }
 
   async _playAll(pl) {
@@ -585,16 +656,17 @@ export class Playlists {
     title.textContent = fileName.replace(/\.[^/.]+$/, '');
     title.title = fileName;
 
+    const heatmap = document.createElement('canvas');
+    heatmap.className = 'playlists__list-heatmap';
+
     const badges = document.createElement('div');
     badges.className = 'playlists__list-badges';
 
-    const funscriptPath = this._getFunscriptPath(videoPath);
-    if (funscriptPath) {
-      const fsBadge = document.createElement('span');
-      fsBadge.className = 'library__funscript-badge--inline library__funscript-badge--auto';
-      fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
-      badges.appendChild(fsBadge);
-    }
+    const fsBadge = document.createElement('span');
+    fsBadge.className = 'library__funscript-badge--inline library__funscript-badge--auto';
+    fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
+    fsBadge.hidden = true;
+    badges.appendChild(fsBadge);
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
@@ -606,12 +678,50 @@ export class Playlists {
       this._renderDetail(playlist.id);
     });
 
-    row.append(title, badges, removeBtn);
+    row.append(title, heatmap, badges, removeBtn);
 
     row.addEventListener('click', () => {
       this._playVideoByPath(videoPath);
     });
 
+    const funscriptPath = this._getFunscriptPath(videoPath);
+    this._loadListStats(videoPath, funscriptPath, fsBadge, badges, heatmap, row);
+
     return row;
+  }
+
+  async _loadListStats(videoPath, funscriptPath, fsBadgeEl, badgesEl, heatmapEl, rowEl) {
+    const cachedBins = this._binsByPath.get(videoPath);
+    if (cachedBins && heatmapEl) {
+      requestAnimationFrame(() => renderBins(heatmapEl, cachedBins));
+    }
+    try {
+      const content = await window.funsync.readFunscript(funscriptPath);
+      if (!content) {
+        if (rowEl) rowEl.classList.add('playlists__list-item--no-heatmap');
+        if (heatmapEl) heatmapEl.remove();
+        return;
+      }
+
+      if (fsBadgeEl) fsBadgeEl.hidden = false;
+
+      const parsed = JSON.parse(content);
+      const actions = parsed?.actions;
+      if (!actions || actions.length < 2) return;
+
+      if (badgesEl) {
+        const stats = computeSpeedStats(actions);
+        if (stats.maxSpeed > 0) this._addSpeedBadge(badgesEl, stats);
+      }
+
+      if (heatmapEl) {
+        const bins = cachedBins || computeBins(actions);
+        if (!cachedBins) this._binsByPath.set(videoPath, bins);
+        renderBins(heatmapEl, bins);
+      }
+    } catch {
+      if (rowEl) rowEl.classList.add('playlists__list-item--no-heatmap');
+      if (heatmapEl) heatmapEl.remove();
+    }
   }
 }

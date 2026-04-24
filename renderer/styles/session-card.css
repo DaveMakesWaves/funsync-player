@@ -1,0 +1,281 @@
+/* Session card — persistent status for external-controller sessions.
+   Docked bottom-right; collapses to an edge tab when minimised. */
+
+.session-card {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  z-index: 90;                 /* above grid, below modals */
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 10px;
+  box-shadow: 0 6px 28px rgba(0, 0, 0, 0.5);
+  padding: 10px 12px;
+  font-size: 12px;
+  color: var(--text-primary);
+  transition: width 180ms ease, padding 180ms ease;
+}
+
+.session-card[hidden] { display: none; }
+
+.session-card--minimised {
+  width: 36px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.session-card__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.session-card__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #888;
+}
+.session-card__dot--blue   { background: #4a90ff; }
+.session-card__dot--green  {
+  background: #3ece6b;
+  animation: session-card-pulse 1.5s ease-in-out infinite;
+}
+.session-card__dot--yellow { background: #f4c441; }
+.session-card__dot--amber  { background: #ff9c42; }
+.session-card__dot--red    { background: #e94560; }
+@keyframes session-card-pulse {
+  0%, 100% { opacity: 1;   box-shadow: 0 0 0 0 rgba(62, 206, 107, 0.35); }
+  50%      { opacity: 0.8; box-shadow: 0 0 0 5px rgba(62, 206, 107, 0); }
+}
+
+.session-card__source {
+  font-weight: 600;
+  color: var(--text-primary);
+  flex-shrink: 0;
+}
+.session-card__id {
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-card__btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-size: 14px;
+  line-height: 1;
+  transition: color 120ms, background 120ms;
+  font-family: inherit;
+}
+.session-card__btn:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.session-card__state {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+.session-card__video {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-card__progress {
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+.session-card__progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 200ms ease-out;
+}
+
+.session-card__meta {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.session-card__devices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.session-card__device {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-weight: 500;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+.session-card__device--on {
+  background: rgba(62, 206, 107, 0.15);
+  color: #5fd98c;
+}
+.session-card__device--off {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+}
+
+/* Minimised state — edge tab */
+.session-card__tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 36px;
+  height: 56px;
+  background: var(--bg-secondary);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-right: none;
+  border-radius: 8px 0 0 8px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 120ms;
+  font-family: inherit;
+  padding: 0;
+  /* Anchor to the screen edge when minimised */
+  position: absolute;
+  right: -16px;              /* cancels the parent's 16px right offset */
+  bottom: 16px;
+}
+.session-card__tab:hover {
+  background: var(--bg-card-hover, rgba(255, 255, 255, 0.06));
+}
+.session-card__tab-arrow {
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+/* Session history modal */
+.session-history__empty {
+  padding: 24px 8px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+.session-history__list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+.session-history__item {
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+}
+
+.session-history__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.session-history__source {
+  font-weight: 600;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.session-history__id {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-history__when {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.session-history__duration {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.session-history__videos {
+  margin: 0;
+  padding: 0 0 0 18px;
+  list-style: disc;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.session-history__videos li {
+  margin-bottom: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-history__footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.session-history__count {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.session-history__clear {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.session-history__clear:hover {
+  border-color: #e94560;
+  color: #e94560;
+}

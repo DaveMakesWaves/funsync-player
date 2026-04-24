@@ -165,7 +165,7 @@ describe('VRPlaybackProxy — Reset', () => {
 // === VRBridge Path Normalization ===
 
 describe('VRBridge — Path Normalization', () => {
-  // Test the normalization logic directly
+  // Mirrors renderer/js/vr-bridge.js _normalizePath — keep in sync.
   const normalizePath = (rawPath) => {
     let name = rawPath;
     if (name.includes('://')) {
@@ -173,8 +173,7 @@ describe('VRBridge — Path Normalization', () => {
     }
     name = name.split(/[\\/]/).pop() || name;
     try { name = decodeURIComponent(name); } catch { /* keep */ }
-    const dotIdx = name.lastIndexOf('.');
-    if (dotIdx > 0) name = name.slice(0, dotIdx);
+    name = name.replace(/\.(?:mp4|mkv|webm|avi|mov|wmv|flv|m4v|mp3|wav|ogg|flac|aac|m4a|3gp|ts|mts|m2ts)$/i, '');
     name = name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
     return name;
   };
@@ -218,6 +217,27 @@ describe('VRBridge — Path Normalization', () => {
   it('double encoded URL', () => {
     expect(normalizePath('http://host/My%2520Scene.mp4')).toBe('my%20scene');
     // Only single-decode — double encoding stays partially encoded. This is expected.
+  });
+
+  // --- Regression: dotted stems (HereSphere often reports without extension)
+  it('leading number prefix with dot stays intact', () => {
+    // Before fix: `lastIndexOf('.')` stripped to just "2" → nothing matched.
+    expect(normalizePath('/storage/emulated/0/Interactive/2.GroVR_30 35_ Lina Laon Amecan Bety2_TMAL'))
+      .toBe('2 grovr 30 35 lina laon amecan bety2 tmal');
+  });
+
+  it('dotted stem without extension', () => {
+    expect(normalizePath('/storage/emulated/0/Interactive/9.VRBTS_46 20_Naie Mars_the_nutcracker_tmal'))
+      .toBe('9 vrbts 46 20 naie mars the nutcracker tmal');
+  });
+
+  it('dotted stem with real extension strips only the extension', () => {
+    expect(normalizePath('/path/2.GroVR_scene.mp4')).toBe('2 grovr scene');
+  });
+
+  it('multi-dot filename with extension', () => {
+    // e.g. "Studio.Title.2024.1080p.mkv" — only .mkv should be stripped
+    expect(normalizePath('/path/Studio.Title.2024.1080p.mkv')).toBe('studio title 2024 1080p');
   });
 });
 
