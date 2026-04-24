@@ -207,6 +207,13 @@ export function sortVideos(videos, sortBy, order = 'asc') {
       sorted.sort((a, b) => -dir * ((a.lastPlayed || 0) - (b.lastPlayed || 0)));
       break;
 
+    case 'dateAdded':
+      // Standard timestamp semantics: asc = oldest first, desc = newest
+      // first. Backed by `fs.stat` mtimeMs from the scan. Missing values
+      // (stat failed) default to 0 → sort to the "oldest" end.
+      sorted.sort((a, b) => dir * ((a.dateAdded || 0) - (b.dateAdded || 0)));
+      break;
+
     case 'hasFunscript':
       // Funscript videos first
       sorted.sort((a, b) => {

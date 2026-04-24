@@ -109,6 +109,15 @@ class App {
       console.warn('Could not get backend port:', err.message);
     }
 
+    // Fire a fast pre-scan register with JUST the collections / playlists /
+    // categories / sources so the phone-remote's Groupings tabs populate
+    // within ~100 ms of desktop launch. These are already in memory from
+    // `dataService.init()` — no filesystem work to wait on. The library
+    // scan will later send the `videos` slice via `_registerWithBackend`;
+    // the backend's register endpoint treats each key independently, so
+    // this early pass leaves the video registry untouched.
+    this._registerGroupingsEarly();
+
     // Initialize core video player (must succeed for anything to work)
     this.videoPlayer = new VideoPlayer({
       videoElement: document.getElementById('video'),
@@ -1032,11 +1041,10 @@ class App {
 
     // Update editor script list for custom routing
     if (this.scriptEditor) {
-      const knownDevices = this.settings.get('knownDevices') || [];
       const scripts = [];
       for (const route of routes) {
         if (!route.scriptPath) continue;
-        const device = knownDevices.find(d => d.id === route.deviceId);
+        const device = this._findKnownDeviceForRoute(route);
         const deviceLabel = device ? device.label : (route.deviceId || '');
         const prefix = route.role === 'main' ? '★ ' : '';
         const scriptName = route.scriptName || route.scriptPath.split(/[\\/]/).pop();
@@ -1069,9 +1077,9 @@ class App {
    * @param {{deviceId: string, buttplugIndex?: number}} route
    * @returns {{dev: object, matchedBy: 'index'|'name'} | null}
    */
-  _matchButtplugRoute(route) {
+  _matchButtplugRoute(route, options = {}) {
     if (!this.buttplugManager?.connected) return null;
-    const result = matchButtplugRoute(route, this.buttplugManager.devices);
+    const result = matchButtplugRoute(route, this.buttplugManager.devices, options);
     if (result?.indexMismatch) {
       const byIdx = this.buttplugManager.devices.find(d => d.index === route.buttplugIndex);
       console.warn(
@@ -1113,25 +1121,59 @@ class App {
 
     let anyHealed = false;
 
-    for (const route of routes) {
-      if (!route.deviceId?.startsWith('buttplug:')) continue;
-      if (!route._assignedAxis) continue;
+    // Only process routes that target a Buttplug device and have an axis.
+    const bpRoutes = routes.filter(r =>
+      r.deviceId?.startsWith('buttplug:') && r._assignedAxis
+    );
 
-      const match = this._matchButtplugRoute(route);
+    // Two-pass matching protects the two-same-name-device case:
+    //   Pass 1 — authoritative index-hits claim their devices first.
+    //   Pass 2 — name-fallback for any remaining route, skipping indices
+    //            already claimed by pass 1.
+    // Without the claim set, a pass-1 name-fallback could steal a device
+    // that a later pass-2 route would legitimately have index-matched.
+    const claimedIndices = new Set();
+    const pendingNameFallback = [];
+
+    const applyMatch = (route, match) => {
+      this.buttplugSync.setAxisAssignment(match.dev.index, route._assignedAxis);
+      const prevIdx = route.buttplugIndex;
+      console.log(
+        `[CustomRouting] ${route._assignedAxis} (${route.role === 'main' ? 'main' : 'axis'}) → ` +
+        `"${match.dev.name}" (index ${match.dev.index}) — matched by ${match.matchedBy}` +
+        (match.matchedBy === 'name' && Number.isFinite(prevIdx) && prevIdx !== match.dev.index
+          ? ` (stored index ${prevIdx} was stale, refreshed to ${match.dev.index})`
+          : '')
+      );
+      if (match.matchedBy === 'name' && match.dev.index !== route.buttplugIndex) {
+        route.buttplugIndex = match.dev.index;  // in-memory heal
+        anyHealed = true;
+      }
+      claimedIndices.add(match.dev.index);
+    };
+
+    // Pass 1 — direct index hits.
+    for (const route of bpRoutes) {
+      if (!Number.isFinite(route.buttplugIndex)) {
+        pendingNameFallback.push(route);
+        continue;
+      }
+      // Attempt a pure index-match (no name-fallback yet). If the device at
+      // the stored index exists AND its name matches, claim it. Anything
+      // else defers to pass 2.
+      const dev = this.buttplugManager.devices.find(d => d.index === route.buttplugIndex);
+      if (dev && `buttplug:${dev.name}` === route.deviceId) {
+        applyMatch(route, { dev, matchedBy: 'index' });
+      } else {
+        pendingNameFallback.push(route);
+      }
+    }
+
+    // Pass 2 — name-fallback with claim-set protection.
+    for (const route of pendingNameFallback) {
+      const match = this._matchButtplugRoute(route, { excludeIndices: claimedIndices });
       if (match) {
-        this.buttplugSync.setAxisAssignment(match.dev.index, route._assignedAxis);
-        const prevIdx = route.buttplugIndex;
-        console.log(
-          `[CustomRouting] ${route._assignedAxis} (${route.role === 'main' ? 'main' : 'axis'}) → ` +
-          `"${match.dev.name}" (index ${match.dev.index}) — matched by ${match.matchedBy}` +
-          (match.matchedBy === 'name' && Number.isFinite(prevIdx) && prevIdx !== match.dev.index
-            ? ` (stored index ${prevIdx} was stale, refreshed to ${match.dev.index})`
-            : '')
-        );
-        if (match.matchedBy === 'name' && match.dev.index !== route.buttplugIndex) {
-          route.buttplugIndex = match.dev.index;  // in-memory heal
-          anyHealed = true;
-        }
+        applyMatch(route, match);
       } else {
         unmatched.push({
           axis: route._assignedAxis,
@@ -2002,20 +2044,123 @@ class App {
 
   _registerKnownDevice(id, label, type, extras = {}) {
     const devices = this.settings.get('knownDevices') || [];
+
+    // For Buttplug devices, persist each physical device as a distinct entry
+    // by appending the Intiface deviceIndex to the id. Without this, two
+    // same-name devices (e.g. two OG Handys, both reported as "The Handy"
+    // over BT) collapsed into a single knownDevices entry — the routing
+    // modal showed only one option and two-device custom routing couldn't
+    // be saved. `route.deviceId` stays name-only (`buttplug:Name`); the
+    // `buttplugIndex` field on both the route and the knownDevice carries
+    // the disambiguation.
+    if (type === 'buttplug' && typeof extras.buttplugIndex === 'number') {
+      id = `buttplug:${label}#${extras.buttplugIndex}`;
+      extras.name = label;
+      // Legacy cleanup: old builds stored a single `buttplug:${name}` entry
+      // without an index suffix. Drop it on first composite registration
+      // so the routing dropdown doesn't list a ghost option.
+      const legacyIdx = devices.findIndex(d => d.id === `buttplug:${label}`);
+      if (legacyIdx >= 0) devices.splice(legacyIdx, 1);
+    }
+
     const existing = devices.find(d => d.id === id);
     if (existing) {
-      // Refresh mutable fields (label may change; buttplugIndex in particular is
-      // updated every reconnect so routes can prefer it over the name match).
       let dirty = false;
       if (existing.label !== label) { existing.label = label; dirty = true; }
       for (const [k, v] of Object.entries(extras)) {
         if (v !== undefined && existing[k] !== v) { existing[k] = v; dirty = true; }
       }
       if (dirty) this.settings.set('knownDevices', devices);
-      return;
+    } else {
+      devices.push({ id, label, type, ...extras });
+      this.settings.set('knownDevices', devices);
     }
-    devices.push({ id, label, type, ...extras });
-    this.settings.set('knownDevices', devices);
+
+    // Disambiguate labels when 2+ buttplug entries share a name. Each one
+    // gets `Name (device #N)` so the routing dropdown is unambiguous. If
+    // only one exists, keep the clean bare name.
+    if (type === 'buttplug') {
+      this._relabelButtplugNameCollisions(devices, label);
+    }
+  }
+
+  /**
+   * Update labels for every `buttplug`-type knownDevice that shares the
+   * given name. If 2+ share it, suffix each with `(device #N)`; if only
+   * one, clear the suffix and use the plain name. Writes settings only
+   * when something changes.
+   */
+  _relabelButtplugNameCollisions(devices, name) {
+    const sameName = devices.filter(d => d.type === 'buttplug' && d.name === name);
+    let changed = false;
+    if (sameName.length > 1) {
+      for (const d of sameName) {
+        const want = `${name} (device #${d.buttplugIndex})`;
+        if (d.label !== want) { d.label = want; changed = true; }
+      }
+    } else if (sameName.length === 1) {
+      if (sameName[0].label !== name) { sameName[0].label = name; changed = true; }
+    }
+    if (changed) this.settings.set('knownDevices', devices);
+  }
+
+  /**
+   * Find the knownDevice entry that corresponds to a given route.
+   * Handles both new composite-id format and legacy name-only ids:
+   *   - Buttplug + buttplugIndex present → match by name + index.
+   *   - Exact id match (handy, tcode, autoblow, legacy buttplug).
+   *   - Buttplug fallback by name-only when nothing else matches.
+   */
+  _findKnownDeviceForRoute(route) {
+    const devices = this.settings.get('knownDevices') || [];
+    if (!route?.deviceId) return null;
+
+    if (route.deviceId.startsWith('buttplug:') && Number.isFinite(route.buttplugIndex)) {
+      const name = route.deviceId.slice('buttplug:'.length);
+      const byComposite = devices.find(d =>
+        d.type === 'buttplug' && d.name === name && d.buttplugIndex === route.buttplugIndex
+      );
+      if (byComposite) return byComposite;
+    }
+
+    const byExact = devices.find(d => d.id === route.deviceId);
+    if (byExact) return byExact;
+
+    if (route.deviceId.startsWith('buttplug:')) {
+      const name = route.deviceId.slice('buttplug:'.length);
+      return devices.find(d => d.type === 'buttplug' && (d.name === name || d.label === name)) || null;
+    }
+    return null;
+  }
+
+  /**
+   * Fire-and-forget early register pass carrying only the in-memory
+   * groupings (collections, playlists, categories, videoCategories,
+   * sources). Runs right after `dataService.init()` + backend port is
+   * known, BEFORE the library scan finishes — so the phone remote's
+   * Collections / Playlists / Categories tabs populate quickly instead
+   * of waiting for the filesystem walk + funscript matching to settle.
+   * The `videos` slice is deliberately omitted; the backend's register
+   * endpoint treats each key independently, so this leaves `_video_registry`
+   * alone until `library.js::_registerWithBackend` pushes the full
+   * payload at scan completion.
+   */
+  _registerGroupingsEarly() {
+    if (!this.backendPort) return;
+    const payload = {
+      sources: this.settings.get('library.sources') || [],
+      collections: this.settings.get('library.collections') || [],
+      playlists: this.settings.getPlaylists ? this.settings.getPlaylists() : [],
+      categories: this.settings.getCategories ? this.settings.getCategories() : [],
+      videoCategories: (this.settings._cache && this.settings._cache.videoCategories) || {},
+    };
+    try {
+      fetch(`http://127.0.0.1:${this.backendPort}/api/media/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      }).catch(() => {}); // backend may still be starting — full register post-scan will retry
+    } catch { /* ignore */ }
   }
 
   async _pollSourceAvailability() {
@@ -2590,11 +2735,10 @@ class App {
     let title = `${info.filename} — ${info.actionCount} actions, ${info.durationFormatted}`;
 
     if (this._currentCustomRoutes && this._currentCustomRoutes.length > 0) {
-      const knownDevices = this.settings.get('knownDevices') || [];
       const lines = [title, '— Custom Routing —'];
       for (const route of this._currentCustomRoutes) {
         const scriptName = route.scriptName || route.scriptPath?.split(/[\\/]/).pop() || '(none)';
-        const device = knownDevices.find(d => d.id === route.deviceId);
+        const device = this._findKnownDeviceForRoute(route);
         const deviceLabel = device ? device.label : (route.deviceId || 'Unassigned');
         const roleLabel = route.role === 'main' ? '★ ' : '';
         lines.push(`${roleLabel}${deviceLabel}: ${scriptName}`);

@@ -212,6 +212,38 @@ describe('library-search', () => {
       expect(sorted[0].lastPlayed).toBe(3000); // most recent
     });
 
+    it('sorts by dateAdded descending (recently added first)', () => {
+      const vids = [
+        { name: 'old.mp4',    path: '/a', hasFunscript: false, dateAdded: 1000 },
+        { name: 'newest.mp4', path: '/b', hasFunscript: false, dateAdded: 5000 },
+        { name: 'middle.mp4', path: '/c', hasFunscript: false, dateAdded: 3000 },
+      ];
+      const sorted = sortVideos(vids, 'dateAdded', 'desc');
+      expect(sorted[0].name).toBe('newest.mp4');
+      expect(sorted[1].name).toBe('middle.mp4');
+      expect(sorted[2].name).toBe('old.mp4');
+    });
+
+    it('sorts by dateAdded ascending (oldest first)', () => {
+      const vids = [
+        { name: 'old.mp4',    path: '/a', hasFunscript: false, dateAdded: 1000 },
+        { name: 'newest.mp4', path: '/b', hasFunscript: false, dateAdded: 5000 },
+      ];
+      const sorted = sortVideos(vids, 'dateAdded', 'asc');
+      expect(sorted[0].name).toBe('old.mp4');
+      expect(sorted[1].name).toBe('newest.mp4');
+    });
+
+    it('dateAdded treats missing values as 0 (sort to oldest end)', () => {
+      const vids = [
+        { name: 'has-date.mp4', path: '/a', hasFunscript: false, dateAdded: 5000 },
+        { name: 'no-date.mp4',  path: '/b', hasFunscript: false },  // missing
+      ];
+      const sorted = sortVideos(vids, 'dateAdded', 'desc');
+      expect(sorted[0].name).toBe('has-date.mp4');
+      expect(sorted[1].name).toBe('no-date.mp4');
+    });
+
     it('sorts by hasFunscript (funscript first)', () => {
       const sorted = sortVideos(videos, 'hasFunscript', 'asc');
       expect(sorted[0].hasFunscript).toBe(true);

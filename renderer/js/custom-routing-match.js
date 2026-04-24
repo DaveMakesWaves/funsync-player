@@ -15,11 +15,17 @@
 /**
  * @param {{deviceId: string, buttplugIndex?: number}} route
  * @param {Array<{index: number, name: string}>} bpDevices
+ * @param {{ excludeIndices?: Set<number> }} [options]  Indices to skip during
+ *   NAME-fallback only (not the index-hit path). Used by the two-Handy case
+ *   where two routes with the same stored name need to claim two distinct
+ *   devices — the second route's fallback must not steal the first's device.
+ *   Index-hit ignores the set because a direct index match is authoritative.
  * @returns {{dev: object, matchedBy: 'index'|'name', indexMismatch?: boolean} | null}
  */
-export function matchButtplugRoute(route, bpDevices) {
+export function matchButtplugRoute(route, bpDevices, options = {}) {
   if (!route || !route.deviceId || !Array.isArray(bpDevices)) return null;
   const wantedId = route.deviceId;
+  const excludeIndices = options.excludeIndices;
 
   if (Number.isFinite(route.buttplugIndex)) {
     const byIdx = bpDevices.find(d => d.index === route.buttplugIndex);
@@ -29,14 +35,20 @@ export function matchButtplugRoute(route, bpDevices) {
       }
       // Index hit, name miss — the slot now holds a different device. Fall
       // through to name lookup so we try to find the *correct* device by
-      // its stored name.
-      const byName = bpDevices.find(d => `buttplug:${d.name}` === wantedId);
+      // its stored name. Skip any devices a prior route already claimed.
+      const byName = bpDevices.find(d =>
+        `buttplug:${d.name}` === wantedId
+        && !(excludeIndices && excludeIndices.has(d.index))
+      );
       if (byName) return { dev: byName, matchedBy: 'name', indexMismatch: true };
       return null;
     }
   }
 
-  const byName = bpDevices.find(d => `buttplug:${d.name}` === wantedId);
+  const byName = bpDevices.find(d =>
+    `buttplug:${d.name}` === wantedId
+    && !(excludeIndices && excludeIndices.has(d.index))
+  );
   if (byName) return { dev: byName, matchedBy: 'name' };
 
   return null;

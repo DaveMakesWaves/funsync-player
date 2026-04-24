@@ -286,6 +286,35 @@ async def get_vr_activity():
     return _vr_activity
 
 
+@router.get("/durations")
+async def get_durations():
+    """Return all known video durations, keyed by absolute video path.
+
+    The renderer's scan doesn't capture durations (no ffprobe pass) —
+    thumbnail capture populates them lazily, but only for cards the user
+    has actually scrolled past, and only via the capture path (not the
+    thumbnail cache hit path). That left Sort-by-Duration effectively
+    broken: most videos had `duration = 0` and sorted to one end.
+
+    The backend's `_queue_duration_probes` worker (fired by
+    `register_videos`) computes these in the background via ffprobe.
+    This endpoint surfaces the results so the renderer can hydrate its
+    `_durationCache` + in-memory video objects and on-disk settings cache.
+
+    Returns:
+        { "<videoPath>": <durationSeconds>, ... }  —  only entries where
+        a duration has been computed (duration > 0). Renderer uses the
+        absence of an entry to know it still needs to wait.
+    """
+    out: dict[str, float] = {}
+    for v in _video_registry.values():
+        path = v.get("path")
+        dur = v.get("duration") or 0
+        if path and dur > 0:
+            out[path] = dur
+    return out
+
+
 @router.get("/speed-stats")
 async def get_speed_stats():
     """Return all computed avgSpeed/maxSpeed for the registered videos.
@@ -324,12 +353,16 @@ async def register_library(request: Request):
     """Register videos from a library scan (called by Electron main process).
 
     Also accepts collections/playlists/categories so the web remote can show
-    the same groupings the desktop app does. Everything is optional — a
-    minimal `{"videos": [...]}` payload still works like before.
+    the same groupings the desktop app does. Every field is independent:
+    omit a key to leave that slice untouched on the backend. That lets the
+    renderer push groupings FAST (in-memory, no filesystem work) ahead of
+    the slower video scan — the phone can render Collections / Playlists /
+    Categories tabs within ~100 ms of desktop startup instead of waiting
+    for the scan to finish.
     """
     data = await request.json()
-    videos = data.get("videos", [])
-    register_videos(videos)
+    if "videos" in data:
+        register_videos(data.get("videos") or [])
 
     # Groupings — view-only on the phone, but they follow the desktop's
     # settings shape so no translation is needed.

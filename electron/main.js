@@ -601,8 +601,26 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
       subtitlePath,
       variants: variants.length > 1 ? variants : [],
       sourceName: sourceName || path.basename(path.dirname(fullPath)) || 'Library',
+      // `dateAdded` is populated in a batched stat pass below. Using `mtimeMs`
+      // as a pragmatic "date added" proxy — cross-platform reliable (unlike
+      // birthtimeMs on Linux ext4). Users typically want "recently appeared
+      // in my folder", which matches mtime for fresh-dropped files.
+      dateAdded: 0,
     });
   }
+
+  // Batched stat pass to fill `dateAdded`. Runs all stats in parallel
+  // (libuv's thread pool naturally caps concurrency). Typical cost for
+  // 1000 videos: ~10-50ms on SSD, ~100-500ms on HDD. Failures fall back
+  // to 0 which sorts to the "oldest" end of the list.
+  await Promise.all(videos.map(async (v) => {
+    try {
+      const st = await fs.promises.stat(v.path);
+      v.dateAdded = st.mtimeMs || 0;
+    } catch {
+      v.dateAdded = 0;
+    }
+  }));
 
   // Fuzzy match pass: pair unmatched videos with high-confidence funscript matches
   // Uses token overlap (Jaccard index) — same logic as renderer fuzzy-match.js
@@ -776,6 +794,28 @@ ipcMain.handle('get-speed-stats', async () => {
     return await resp.json();
   } catch (err) {
     log.warn(`get-speed-stats failed: ${err.message}`);
+    return {};
+  }
+});
+
+/**
+ * Fetch the backend's computed video durations, keyed by absolute path.
+ * Mirror of `get-speed-stats` — needed because the scan itself doesn't
+ * ffprobe (too slow for big libraries) and thumbnail-cache hits skip the
+ * capture path that would have populated duration inline. Renderer polls
+ * after register to hydrate durations so Sort-by-Duration works without
+ * the user having to scroll past every card first.
+ */
+ipcMain.handle('get-durations', async () => {
+  const { getBackendPort } = require('./python-bridge');
+  const port = getBackendPort();
+  const url = `http://localhost:${port}/api/media/durations`;
+  try {
+    const resp = await fetchWithTimeout(url, {}, 5000);
+    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+    return await resp.json();
+  } catch (err) {
+    log.warn(`get-durations failed: ${err.message}`);
     return {};
   }
 });

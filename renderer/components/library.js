@@ -79,10 +79,32 @@ export class Library {
     this._previewGeneration = 0;
     this._previewHoverTimer = null;
     this._isVideoPlaying = false; // set by app.js to gate preview
+
+    // Virtual-scroll resize handling. `_vsColumns` is computed once per
+    // `_renderGrid` call; without a resize listener, going from a small
+    // window to fullscreen leaves the cached column count stale and the
+    // visible-range math misaligns (cards overlap / empty rows appear on
+    // scroll). Debounced so maximise animation doesn't spawn one update
+    // per animation frame.
+    this._resizeDebounceTimer = null;
+    this._resizeListenerAttached = false;
+    this._onResize = () => {
+      clearTimeout(this._resizeDebounceTimer);
+      this._resizeDebounceTimer = setTimeout(() => this._handleResize(), 100);
+    };
   }
 
   show(containerEl) {
     this._container = containerEl;
+
+    // Wire the resize listener once per show. The cached `_vsColumns`
+    // only updates inside `_renderGrid`; without this, a window resize
+    // (tile → fullscreen, maximise, etc.) leaves virtual scroll using
+    // the old column count → scroll goes haywire.
+    if (!this._resizeListenerAttached) {
+      window.addEventListener('resize', this._onResize);
+      this._resizeListenerAttached = true;
+    }
 
     // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives).
     // `library.directory` is a legacy singleton setting that app.js migrates into `library.sources` on
@@ -157,6 +179,11 @@ export class Library {
     }
     this._pendingThumbnails = [];
     this._activeThumbnails = 0;
+    if (this._resizeListenerAttached) {
+      window.removeEventListener('resize', this._onResize);
+      this._resizeListenerAttached = false;
+    }
+    clearTimeout(this._resizeDebounceTimer);
     if (this._container) {
       this._container.innerHTML = '';
     }
@@ -189,6 +216,8 @@ export class Library {
         <select class="library__sort-select" aria-label="Sort videos">
           <option value="name:asc">Name A-Z</option>
           <option value="name:desc">Name Z-A</option>
+          <option value="dateAdded:desc">Recently Added</option>
+          <option value="dateAdded:asc">Oldest First</option>
           <option value="duration:asc">Duration Short-Long</option>
           <option value="duration:desc">Duration Long-Short</option>
           <option value="avgSpeed:asc">Avg Speed Slow-Fast</option>
@@ -400,6 +429,12 @@ export class Library {
     // back instantly so sort-by-speed works without waiting.
     this._hydrateSpeedStatsCache();
 
+    // Same trick for durations — the backend probes via ffprobe after
+    // every register, but without a persistent cache the renderer had
+    // to wait for that probe on every launch for Sort-by-Duration to
+    // work. Keyed by video path.
+    this._hydrateDurationCache();
+
     // Re-register with backend for VR server (with manual associations applied)
     this._registerWithBackend();
 
@@ -572,6 +607,9 @@ export class Library {
     if (this._pendingThumbnails.length === 0 && this._activeThumbnails === 0) {
       this._initialThumbsLoading = false;
       mark('initial thumbnails complete (cache hit / no thumbs needed)');
+      // Kick off speed-stats and duration hydration in parallel — both
+      // poll the backend independently, no ordering dependency.
+      this._precomputeDurationsInBackground();
       this._precomputeSpeedStatsInBackground().then(() => {
         mark('speed-stats precompute complete');
         import('../js/startup-timer.js').then(m => m.logSummary());
@@ -599,6 +637,7 @@ export class Library {
     // until here avoids competing with thumbnail/scan IPC at startup
     // (which was felt as the whole app freezing for a few seconds).
     // Cached entries hydrated earlier are skipped automatically.
+    this._precomputeDurationsInBackground();
     this._precomputeSpeedStatsInBackground().then(() => {
       mark('speed-stats precompute complete');
       // After the deferred work is done, dump the timing summary so
@@ -805,6 +844,36 @@ export class Library {
 
     // Load thumbnails for visible cards
     this._lazyLoadVisibleThumbnails(grid);
+  }
+
+  /**
+   * Window resize handler — recomputes the cached column count and nudges
+   * the virtual-scroll renderer so the visible range tracks the new
+   * viewport. Wired via the debounced `_onResize` listener from `show()`
+   * / `hide()`. Without this, going from a tiled window to fullscreen
+   * left `_vsColumns` at its small-window value and scrolling misaligned
+   * the card grid.
+   */
+  _handleResize() {
+    if (!this._container || !this._virtualActive) return;
+    const wrapper = this._container.querySelector('.library__grid-wrapper');
+    const grid = this._container.querySelector('.library__grid');
+    if (!wrapper || !grid) return;
+
+    const isListMode = this._viewMode === 'list';
+    // Same formula as `_renderGrid` — card width 236px + 32px wrapper padding.
+    const newColumns = isListMode
+      ? 1
+      : Math.max(1, Math.floor((wrapper.clientWidth - 32) / 236));
+
+    if (newColumns !== this._vsColumns) {
+      this._vsColumns = newColumns;
+      this._vsLastState = null;   // force a full range recompute
+    }
+    // Always refresh — `_virtualScrollUpdate` reads `wrapper.clientHeight`
+    // fresh each call, so height-only resizes still update the visible
+    // range even when the column count didn't change.
+    this._virtualScrollUpdate(wrapper, grid);
   }
 
   _lazyLoadVisibleThumbnails(grid) {
@@ -1831,6 +1900,28 @@ export class Library {
   }
 
   /**
+   * Read persistent duration cache (keyed by video path) and apply to
+   * `_videos` + the in-memory `_durationCache`. Counterpart to
+   * `_hydrateSpeedStatsCache` — without this, Sort-by-Duration was a
+   * no-op on fresh library loads because the scan doesn't ffprobe and
+   * most cards haven't been scrolled past yet.
+   */
+  _hydrateDurationCache() {
+    const cache = this._settings.get('library.durationCache') || {};
+    if (Object.keys(cache).length === 0) return;
+    let hits = 0;
+    for (const video of (this._videos || [])) {
+      const cached = cache[video.path];
+      if (typeof cached === 'number' && cached > 0 && !video.duration) {
+        video.duration = cached;
+        this._durationCache.set(video.path, cached);
+        hits++;
+      }
+    }
+    if (hits > 0) console.log(`[Library] Hydrated ${hits} durations from cache`);
+  }
+
+  /**
    * Hydrate speed stats from the BACKEND's computed values, then
    * persist to the local settings cache.
    *
@@ -1916,6 +2007,84 @@ export class Library {
     }
     if (pending.size > 0) {
       console.log(`[Library] ${pending.size} videos still without speed stats after ${MAX_WAIT_MS}ms — lazy load will catch up`);
+    }
+  }
+
+  /**
+   * Poll the backend's `/api/media/durations` endpoint to hydrate
+   * missing `video.duration` fields. Mirror of `_precomputeSpeedStatsInBackground`.
+   *
+   * Why this exists: the scan doesn't capture duration (ffprobe-per-file
+   * would blow scan time on big libraries), thumbnail capture only
+   * populates it for cards that get scrolled past AND whose thumbnail
+   * isn't cache-hit, and without it Sort-by-Duration was broken.
+   * Backend already probes durations on register; this just surfaces
+   * the results to the desktop.
+   *
+   * Polls every 2s for up to 90s, re-renders on progress, persists to
+   * `library.durationCache` for next launch.
+   */
+  async _precomputeDurationsInBackground() {
+    const pending = new Set(
+      (this._videos || [])
+        .filter(v => v.path && (!v.duration || v.duration <= 0))
+        .map(v => v.path)
+    );
+    if (pending.size === 0) return;
+
+    const cache = this._settings.get('library.durationCache') || {};
+    const videosByPath = new Map();
+    for (const video of this._videos) {
+      if (video.path) videosByPath.set(video.path, video);
+    }
+
+    let renderQueued = false;
+    const queueRender = () => {
+      if (renderQueued) return;
+      renderQueued = true;
+      Promise.resolve().then(() => {
+        renderQueued = false;
+        if (!this._scanning) this._applyFilters();
+      });
+    };
+
+    const POLL_INTERVAL_MS = 2000;
+    const MAX_WAIT_MS = 90000;
+    const startTime = performance.now();
+    let cacheDirty = false;
+
+    while (pending.size > 0 && (performance.now() - startTime) < MAX_WAIT_MS) {
+      if (this._scrolling) {
+        await new Promise(r => setTimeout(r, 250));
+        continue;
+      }
+      let durations = {};
+      try {
+        durations = await window.funsync.getDurations();
+      } catch {
+        break;
+      }
+      for (const [videoPath, dur] of Object.entries(durations || {})) {
+        if (!pending.has(videoPath)) continue;
+        const video = videosByPath.get(videoPath);
+        if (video && typeof dur === 'number' && dur > 0) {
+          video.duration = dur;
+          this._durationCache.set(videoPath, dur);
+        }
+        cache[videoPath] = dur;
+        pending.delete(videoPath);
+        cacheDirty = true;
+      }
+      if (cacheDirty) queueRender();
+      if (pending.size === 0) break;
+      await new Promise(r => setTimeout(r, POLL_INTERVAL_MS));
+    }
+
+    if (cacheDirty) {
+      this._settings.set('library.durationCache', cache);
+    }
+    if (pending.size > 0) {
+      console.log(`[Library] ${pending.size} videos still without duration after ${MAX_WAIT_MS}ms — thumbnail capture will catch up`);
     }
   }
 
@@ -2914,16 +3083,41 @@ export class Library {
               opt.textContent = kd.label;
               devSelect.appendChild(opt);
             }
-            devSelect.value = route.deviceId || '';
+            // Preselect — buttplug knownDevices now use a composite id
+            // (`buttplug:Name#Index`) so two same-name devices show as
+            // distinct options. Match the route to its knownDevice by
+            // deviceId + buttplugIndex; fall back to exact id for legacy
+            // routes and non-buttplug device types.
+            const matchedKd = (knownDevices || []).find((kd) => {
+              if (kd.type === 'buttplug') {
+                const name = kd.name || kd.label;
+                if (`buttplug:${name}` !== route.deviceId) return false;
+                if (Number.isFinite(route.buttplugIndex)) {
+                  return kd.buttplugIndex === route.buttplugIndex;
+                }
+                return true;
+              }
+              return kd.id === route.deviceId;
+            });
+            devSelect.value = matchedKd?.id || '';
             devSelect.addEventListener('change', () => {
-              route.deviceId = devSelect.value;
+              const known = (knownDevices || []).find(kd => kd.id === devSelect.value);
+              if (known && known.type === 'buttplug') {
+                // Strip the `#Index` suffix from the composite id so
+                // `route.deviceId` stays name-only — the matcher compares
+                // against `buttplug:${dev.name}` and the extra disambiguation
+                // is carried by `buttplugIndex` below.
+                const name = known.name || known.label;
+                route.deviceId = `buttplug:${name}`;
+              } else {
+                route.deviceId = devSelect.value;
+              }
               // Snapshot the current Intiface index at save-time. It's stable
               // across Intiface restarts unless the user resets/reinstalls,
               // so _loadCustomRouting prefers it over the rename-sensitive
               // name match. Lookup happens from knownDevices (populated on
               // every Buttplug connect) so this works without a live manager
               // reference in the library view.
-              const known = (knownDevices || []).find(kd => kd.id === devSelect.value);
               if (known && typeof known.buttplugIndex === 'number') {
                 route.buttplugIndex = known.buttplugIndex;
               } else {

@@ -123,4 +123,49 @@ describe('matchButtplugRoute', () => {
       expect(result.dev.index).toBe(0);
     });
   });
+
+  describe('two same-name devices (two-Handy regression)', () => {
+    // Scenario from user report: two OG Handys both reported as "The Handy"
+    // over Intiface BT. Each route carries a distinct buttplugIndex; both
+    // must index-match independently without clobbering each other.
+    const twoHandys = [dev(0, 'The Handy'), dev(1, 'The Handy')];
+
+    it('two routes with distinct indices each match their own device', () => {
+      const route0 = { deviceId: 'buttplug:The Handy', buttplugIndex: 0 };
+      const route1 = { deviceId: 'buttplug:The Handy', buttplugIndex: 1 };
+      const r0 = matchButtplugRoute(route0, twoHandys);
+      const r1 = matchButtplugRoute(route1, twoHandys);
+      expect(r0?.matchedBy).toBe('index');
+      expect(r0.dev.index).toBe(0);
+      expect(r1?.matchedBy).toBe('index');
+      expect(r1.dev.index).toBe(1);
+    });
+
+    it('excludeIndices skips a device during name-fallback', () => {
+      // Route had buttplugIndex 5 (no longer present). Name-fallback would
+      // normally pick device 0 — but if caller claims index 0, fallback
+      // must step to index 1.
+      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 5 };
+      const claimed = new Set([0]);
+      const result = matchButtplugRoute(route, twoHandys, { excludeIndices: claimed });
+      expect(result?.matchedBy).toBe('name');
+      expect(result.dev.index).toBe(1);
+    });
+
+    it('excludeIndices does not affect a direct index-hit (authoritative)', () => {
+      // Even if caller claims index 0, a route whose own stored index IS 0
+      // still wins at the index-hit path — index-match is authoritative.
+      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 0 };
+      const claimed = new Set([0]);
+      const result = matchButtplugRoute(route, twoHandys, { excludeIndices: claimed });
+      expect(result?.matchedBy).toBe('index');
+      expect(result.dev.index).toBe(0);
+    });
+
+    it('returns null if every same-name device is already claimed and index is stale', () => {
+      const route = { deviceId: 'buttplug:The Handy', buttplugIndex: 9 };
+      const claimed = new Set([0, 1]);
+      expect(matchButtplugRoute(route, twoHandys, { excludeIndices: claimed })).toBeNull();
+    });
+  });
 });

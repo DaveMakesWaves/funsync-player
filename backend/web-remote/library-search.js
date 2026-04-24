@@ -133,6 +133,13 @@ export function sortVideos(videos, sortBy, order = 'asc') {
     case 'maxSpeed':
       sorted.sort((a, b) => dir * ((a.maxSpeed || 0) - (b.maxSpeed || 0)));
       break;
+    case 'dateAdded':
+      // asc = oldest first, desc = newest first. `dateAdded` comes from
+      // the desktop scan's `fs.stat().mtimeMs` and is forwarded by the
+      // backend's /api/remote/videos endpoint. Missing values default to
+      // 0 (sort to the oldest end).
+      sorted.sort((a, b) => dir * ((a.dateAdded || 0) - (b.dateAdded || 0)));
+      break;
     default:
       break;
   }

@@ -56,6 +56,10 @@ async def list_videos():
             # ran and the script was empty/unreadable.
             "avgSpeed": v.get("avgSpeed"),
             "maxSpeed": v.get("maxSpeed"),
+            # File mtime in ms (populated by the Electron scan). Lets the
+            # phone sort by "recently added" without needing its own stat
+            # access. Missing → 0, sorts to the "oldest" end.
+            "dateAdded": v.get("dateAdded") or 0,
             "sourceName": v.get("sourceName") or "Library",
             "streamUrl": f"/api/media/stream/{vid_id}",
             "scriptUrl": f"/api/media/script/{vid_id}" if v.get("funscriptPath") else None,

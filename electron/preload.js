@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('funsync', {
   generateThumbnails: (videoPath, interval) => ipcRenderer.invoke('generate-thumbnails', videoPath, interval),
   generateSingleThumbnail: (videoPath, opts) => ipcRenderer.invoke('generate-single-thumbnail', videoPath, opts),
   getSpeedStats: () => ipcRenderer.invoke('get-speed-stats'),
+  getDurations: () => ipcRenderer.invoke('get-durations'),
   convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
 
   // Shell
