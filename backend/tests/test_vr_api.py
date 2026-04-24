@@ -310,11 +310,11 @@ async def client():
 @pytest.fixture(autouse=True)
 def setup_registry():
     register_videos([
-        {"path": "C:\\Videos\\Scene1_180_sbs.mp4", "name": "Scene1_180_sbs.mp4",
-         "funscriptPath": "C:\\Videos\\Scene1.funscript", "hasFunscript": True, "duration": 600},
-        {"path": "C:\\Videos\\Scene2.mp4", "name": "Scene2.mp4",
+        {"path": "/Videos/Scene1_180_sbs.mp4", "name": "Scene1_180_sbs.mp4",
+         "funscriptPath": "/Videos/Scene1.funscript", "hasFunscript": True, "duration": 600},
+        {"path": "/Videos/Scene2.mp4", "name": "Scene2.mp4",
          "hasFunscript": False, "duration": 300},
-        {"path": "D:\\Other\\Scene3_MKX200.mp4", "name": "Scene3_MKX200.mp4",
+        {"path": "/Other/Scene3_MKX200.mp4", "name": "Scene3_MKX200.mp4",
          "hasFunscript": False, "duration": 900},
     ])
 
@@ -340,7 +340,7 @@ async def test_deovr_library(client):
 
 @pytest.mark.anyio
 async def test_deovr_scene(client):
-    vid_id = _path_to_id("C:\\Videos\\Scene1_180_sbs.mp4")
+    vid_id = _path_to_id("/Videos/Scene1_180_sbs.mp4")
     response = await client.get(f"/deovr/{vid_id}")
     assert response.status_code == 200
     data = response.json()
@@ -370,7 +370,7 @@ async def test_deovr_scene_not_found(client):
 
 @pytest.mark.anyio
 async def test_deovr_flat_video(client):
-    vid_id = _path_to_id("C:\\Videos\\Scene2.mp4")
+    vid_id = _path_to_id("/Videos/Scene2.mp4")
     response = await client.get(f"/deovr/{vid_id}")
     data = response.json()
 
@@ -411,7 +411,7 @@ async def test_heresphere_library(client):
 
 @pytest.mark.anyio
 async def test_heresphere_scene(client):
-    vid_id = _path_to_id("C:\\Videos\\Scene1_180_sbs.mp4")
+    vid_id = _path_to_id("/Videos/Scene1_180_sbs.mp4")
     response = await client.get(f"/heresphere/{vid_id}")
     assert response.status_code == 200
     assert response.headers.get("heresphere-json-version") == "1"
@@ -440,7 +440,7 @@ async def test_heresphere_scene_not_found(client):
 
 @pytest.mark.anyio
 async def test_heresphere_fisheye(client):
-    vid_id = _path_to_id("D:\\Other\\Scene3_MKX200.mp4")
+    vid_id = _path_to_id("/Other/Scene3_MKX200.mp4")
     response = await client.get(f"/heresphere/{vid_id}")
     data = response.json()
 
@@ -451,7 +451,7 @@ async def test_heresphere_fisheye(client):
 
 @pytest.mark.anyio
 async def test_heresphere_tags(client):
-    vid_id = _path_to_id("C:\\Videos\\Scene1_180_sbs.mp4")
+    vid_id = _path_to_id("/Videos/Scene1_180_sbs.mp4")
     response = await client.get(f"/heresphere/{vid_id}")
     data = response.json()
 
