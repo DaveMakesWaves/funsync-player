@@ -96,7 +96,12 @@ function downloadUpdate() {
  * Quit and install the downloaded update.
  */
 function quitAndInstall() {
-  autoUpdater.quitAndInstall(false, true);
+  // isSilent=true → passes `/S` to NSIS so the assisted installer doesn't
+  // re-show its wizard during auto-update. The wizard only appears on the
+  // initial manual install (where the user picks the destination folder
+  // and toggles the desktop-shortcut checkbox); subsequent updates stay
+  // silent. isForceRunAfter=true relaunches the app once install finishes.
+  autoUpdater.quitAndInstall(true, true);
 }
 
 /**

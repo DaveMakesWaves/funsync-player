@@ -579,20 +579,35 @@ export class ScriptEditor {
         this.editableScript.insertAction(timeMs, pos);
         this._sendLivePreview(pos);
       } else {
+        // Disambiguate "tweak the selected action" from "insert new at
+        // playhead" by checking whether the playhead is actually ON the
+        // selected action's frame. The previous logic used `sel.size === 1`
+        // alone — but every successful insertion auto-selects the new
+        // action, so the second numpad press always hit the modify branch
+        // and the user could only ever place ONE point (every subsequent
+        // press just nudged the first point's position). Now: same frame
+        // → tweak; different frame → insert new.
         const sel = this.editableScript.selectedIndices;
+        const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+        let modifyIdx = -1;
         if (sel.size === 1) {
           const idx = [...sel][0];
-          const newIdx = this.editableScript.updateAction(idx, { pos });
+          const action = this.editableScript.actions[idx];
+          // Sub-millisecond tolerance covers float rounding from snapTime
+          // when snap-to-frame is off; with snap on, both values land on
+          // exact integer frame boundaries.
+          if (action && Math.abs(action.at - timeMs) < 1) modifyIdx = idx;
+        }
+        if (modifyIdx >= 0) {
+          const newIdx = this.editableScript.updateAction(modifyIdx, { pos });
           this.editableScript.select(newIdx);
           this._lastSelectedIndex = newIdx;
-          this._sendLivePreview(pos);
         } else {
-          const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
           const newIdx = this.editableScript.insertAction(timeMs, pos);
           this.editableScript.select(newIdx);
           this._lastSelectedIndex = newIdx;
-          this._sendLivePreview(pos);
         }
+        this._sendLivePreview(pos);
       }
       return;
     }

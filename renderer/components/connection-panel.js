@@ -1136,7 +1136,20 @@ export class ConnectionPanel {
         // been written before the save-side filter existed. Re-applying
         // a synthetic axis here would filter the device out of the main
         // loop on the current (possibly unrouted) video.
-        if (saved.axisAssignment && !String(saved.axisAssignment).startsWith('CR')) {
+        //
+        // ALSO skip when custom routing is active for the current video.
+        // `_loadCustomRouting` has already called `setAxisAssignment` for
+        // every routed device; applying a stale per-device axis here
+        // (typically an `L0`/`L1` left over from an earlier multi-axis
+        // session) would clobber the route's `CR1`/`CR2`/... assignment
+        // and leave the second device in a 2+-device routing setup
+        // silently unassigned. This is the "two-Handy custom routing
+        // doesn't work for the second device" bug.
+        if (
+          saved.axisAssignment
+          && !String(saved.axisAssignment).startsWith('CR')
+          && !this.buttplugSync._customRoutingActive
+        ) {
           this.buttplugSync.setAxisAssignment(dev.index, saved.axisAssignment);
         }
         if (saved.inverted) this.buttplugSync.setInverted(dev.index, true);

@@ -130,6 +130,29 @@ Updates are checked on startup. When a new version is available, a toast appears
 | V / Shift+V | Cycle script variants |
 | G / Shift+G | Skip to next/previous action |
 
+### Script Editor (when canvas focused)
+
+| Key / Mouse | Action |
+|-------------|--------|
+| 0-9 / Numpad 0-9 | Place action at current playhead (positions 0, 11, 22, ..., 100) |
+| Alt+Click on empty canvas | Insert action at click position |
+| Left / Right | Select adjacent action |
+| Ctrl+Left / Right | Frame-step (one video frame) |
+| Up / Down | Nudge selected position ±5 |
+| Ctrl+Up / Down | Nudge ±1 |
+| Delete / Backspace | Delete selected actions |
+| Ctrl+Z / Ctrl+Y | Undo / Redo |
+| Ctrl+C / V / X | Copy / Paste / Cut |
+| Ctrl+A | Select all |
+| Ctrl+I | Invert positions |
+| Ctrl+S | Save |
+| W | Toggle audio waveform overlay |
+| B | Add bookmark at current time |
+| +/- | Zoom in / out |
+| Escape | Clear selection / close editor |
+
+When placing actions: press numpad without moving the playhead to refine the just-placed action's height; seek the playhead before pressing numpad to place a new action at the new time.
+
 ---
 
 ## Requirements

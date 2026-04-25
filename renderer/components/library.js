@@ -256,6 +256,14 @@ export class Library {
       </div>
     `;
 
+    // Re-render the breadcrumb whenever the header DOM is rebuilt — the
+    // template above sets `library__breadcrumb` to `hidden` by default, and
+    // `_applyFilters` only re-shows it inside the collection-state-changed
+    // branch. Without this call, returning from the player resets the
+    // breadcrumb to invisible even though `_currentFolderPath` is still set
+    // and the grid renders the right folder. Workaround was to toggle
+    // folder-browse off and on; this removes the need for that.
+    this._renderBreadcrumb();
 
     // Search — restore previous query
     const searchInput = this._container.querySelector('.library__search-input');

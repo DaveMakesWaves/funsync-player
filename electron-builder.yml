@@ -46,11 +46,18 @@ linux:
         - ffprobe
 
 nsis:
-  oneClick: true
+  # Assisted installer (NOT oneClick) — shows a wizard with a destination
+  # folder picker and a "create desktop shortcut" checkbox. Default install
+  # path stays per-user (`%LOCALAPPDATA%\Programs\funsync-player`); the user
+  # can pick another path and NSIS will prompt for elevation if needed.
+  # Auto-updates remain silent because `auto-updater.js` calls
+  # `quitAndInstall(true, true)` which passes the `/S` NSIS flag.
+  oneClick: false
   perMachine: false
+  allowToChangeInstallationDirectory: true
   allowElevation: true
   runAfterFinish: true
-  createDesktopShortcut: true
+  createDesktopShortcut: true        # default state of the wizard checkbox
   createStartMenuShortcut: true
   uninstallDisplayName: FunSync Player
 

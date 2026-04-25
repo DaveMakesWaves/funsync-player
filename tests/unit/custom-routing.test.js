@@ -667,3 +667,110 @@ describe('Custom axis (C prefix) sends by capability', () => {
     expect(bp.sendScalar).toHaveBeenCalled();
   });
 });
+
+// --- Persisted-settings vs custom-routing collision (regression for the
+//     "second Handy in a 2-device custom-routing setup is silent" bug) ---
+//
+// On cold start of a custom-routed video, `_loadCustomRouting` correctly
+// assigns each device to its route's axis (e.g. device 0 → L0, device 1 →
+// CR1). Then `_tryStartButtplugSync` calls `_loadButtplugDeviceSettings`
+// which, prior to the fix, would re-apply the per-device axisAssignment
+// persisted from any earlier multi-axis session — clobbering the just-set
+// CR-axis on device 1 and leaving it silent. The fix gates the re-apply
+// on `!_customRoutingActive`. These tests replicate the load-side logic
+// to pin the behaviour down.
+describe('persisted axis vs custom routing collision (two-Handy regression)', () => {
+  /**
+   * Replicates the GUARDED load logic from
+   * `connection-panel.js::_loadButtplugDeviceSettings` so any change there
+   * has to keep this invariant true.
+   */
+  function applyPersistedSettings(sync, devices, persisted) {
+    for (const dev of devices) {
+      const saved = persisted[`${dev.index}:${dev.name}`] || persisted[dev.name];
+      if (
+        saved?.axisAssignment
+        && !String(saved.axisAssignment).startsWith('CR')
+        && !sync._customRoutingActive  // ← the fix: skip when custom routing owns the axes
+      ) {
+        sync.setAxisAssignment(dev.index, saved.axisAssignment);
+      }
+    }
+  }
+
+  it('does not let saved axisAssignment clobber a custom-routing CR-axis', () => {
+    const bp = mockButtplug([
+      { index: 0, name: 'The Handy', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+      { index: 1, name: 'The Handy', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+    ]);
+    const sync = new ButtplugSync({
+      videoPlayer: mockPlayer(),
+      buttplugManager: bp,
+      funscriptEngine: mockFunscript(),
+    });
+
+    // Step 1: simulate _loadCustomRouting → _applyCustomRoutingAssignments
+    sync._customRoutingActive = true;
+    sync.setAxisAssignment(0, 'L0');
+    sync.setAxisAssignment(1, 'CR1');
+
+    // Step 2: stale persisted settings — user set device 1 to L1 in an
+    // earlier multi-axis session before switching to custom routing.
+    const persisted = {
+      '0:The Handy': { axisAssignment: 'L0' },
+      '1:The Handy': { axisAssignment: 'L1' },
+    };
+
+    // Step 3: _tryStartButtplugSync invokes _loadButtplugDeviceSettings.
+    applyPersistedSettings(sync, bp.devices, persisted);
+
+    // Custom routing must still own device 1.
+    expect(sync.getAxisAssignment(0)).toBe('L0');
+    expect(sync.getAxisAssignment(1)).toBe('CR1');
+  });
+
+  it('still applies persisted axisAssignment when custom routing is OFF', () => {
+    const bp = mockButtplug([
+      { index: 0, name: 'A', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+      { index: 1, name: 'B', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+    ]);
+    const sync = new ButtplugSync({
+      videoPlayer: mockPlayer(),
+      buttplugManager: bp,
+      funscriptEngine: mockFunscript(),
+    });
+
+    sync._customRoutingActive = false;
+
+    const persisted = {
+      '0:A': { axisAssignment: 'L0' },
+      '1:B': { axisAssignment: 'L1' },
+    };
+
+    applyPersistedSettings(sync, bp.devices, persisted);
+
+    // Multi-axis path: persisted assignments must apply.
+    expect(sync.getAxisAssignment(0)).toBe('L0');
+    expect(sync.getAxisAssignment(1)).toBe('L1');
+  });
+
+  it('still ignores stale CR-prefixed persisted assignments (existing safeguard)', () => {
+    const bp = mockButtplug([
+      { index: 0, name: 'A', canLinear: true, canVibrate: false, canRotate: false, canScalar: false },
+    ]);
+    const sync = new ButtplugSync({
+      videoPlayer: mockPlayer(),
+      buttplugManager: bp,
+      funscriptEngine: mockFunscript(),
+    });
+
+    sync._customRoutingActive = false;
+    sync.setAxisAssignment(0, 'L0');
+
+    // CR-prefixed value somehow persisted in the past — must NOT be applied.
+    const persisted = { '0:A': { axisAssignment: 'CR2' } };
+    applyPersistedSettings(sync, bp.devices, persisted);
+
+    expect(sync.getAxisAssignment(0)).toBe('L0');
+  });
+});

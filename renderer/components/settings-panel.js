@@ -224,6 +224,18 @@ export class SettingsPanel {
 
               const srcs = this._settings.get('library.sources') || [];
               this._settings.set('library.sources', srcs.filter(s => s.id !== src.id));
+
+              // Clear the legacy `library.directory` singleton if it still
+              // points at this source. Otherwise the migrate-on-load path
+              // in `app.js::_refreshCollectionsUI` would re-add this source
+              // on the next library refresh — only ever the FIRST source
+              // ever added is affected (subsequent adds don't touch the
+              // legacy key), so this fix is narrow but real.
+              const legacyDir = this._settings.get('library.directory');
+              if (legacyDir && legacyDir === src.path) {
+                this._settings.set('library.directory', '');
+              }
+
               renderSources();
               if (this._onSourcesChanged) this._onSourcesChanged();
               showToast(`Source "${src.name}" removed`, 'info');

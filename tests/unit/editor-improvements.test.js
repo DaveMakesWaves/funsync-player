@@ -249,3 +249,91 @@ describe('Live device preview', () => {
     expect(hdspMove).not.toHaveBeenCalled();
   });
 });
+
+// --- Numpad placement disambiguation (regression guard for the
+//     "can only place one point" bug) -----------------------------------
+//
+// The script editor's numpad handler has to distinguish two intents:
+//   (a) "modify the selected action's position"  — playhead is ON the
+//       selected action, user wants to refine the height they just placed.
+//   (b) "insert a new action at the playhead"   — playhead has moved,
+//       user wants the next note in the score.
+//
+// Pre-fix logic checked ONLY `selectedIndices.size === 1`. Because every
+// successful insertAction auto-selects the new action, condition (a) was
+// always true after the first placement — the user could only ever
+// place ONE point, every subsequent numpad press just nudged it. The
+// fix uses playhead-distance: same frame → modify, different frame →
+// insert. These tests pin down the data-layer expectations the handler
+// relies on so the bug can't sneak back via a refactor.
+describe('numpad placement disambiguator (regression for one-point bug)', () => {
+  /** Replicates the (post-fix) handler's branching against EditableScript. */
+  function pressNumpad(script, currentTimeMs, pos, snap = (t) => t) {
+    const sel = script.selectedIndices;
+    const timeMs = snap(currentTimeMs);
+    let modifyIdx = -1;
+    if (sel.size === 1) {
+      const idx = [...sel][0];
+      const action = script.actions[idx];
+      if (action && Math.abs(action.at - timeMs) < 1) modifyIdx = idx;
+    }
+    if (modifyIdx >= 0) {
+      const newIdx = script.updateAction(modifyIdx, { pos });
+      script.select(newIdx);
+    } else {
+      const newIdx = script.insertAction(timeMs, pos);
+      script.select(newIdx);
+    }
+  }
+
+  it('two presses at different playhead times produce two separate actions', () => {
+    const script = new EditableScript();
+    pressNumpad(script, 0, 55);     // first press at t=0
+    pressNumpad(script, 1000, 77);  // user seeked to 1s, second press
+    expect(script.actions).toHaveLength(2);
+    expect(script.actions[0]).toEqual({ at: 0, pos: 55 });
+    expect(script.actions[1]).toEqual({ at: 1000, pos: 77 });
+  });
+
+  it('two presses at the same playhead time tweak the existing action', () => {
+    const script = new EditableScript();
+    pressNumpad(script, 500, 33);   // place
+    pressNumpad(script, 500, 88);   // playhead unchanged → tweak height
+    expect(script.actions).toHaveLength(1);
+    expect(script.actions[0]).toEqual({ at: 500, pos: 88 });
+  });
+
+  it('a flurry of presses across different times accumulates correctly', () => {
+    const script = new EditableScript();
+    pressNumpad(script, 0,    11);
+    pressNumpad(script, 250,  44);
+    pressNumpad(script, 500,  77);
+    pressNumpad(script, 750, 100);
+    expect(script.actions).toHaveLength(4);
+    expect(script.actions.map(a => a.at)).toEqual([0, 250, 500, 750]);
+    expect(script.actions.map(a => a.pos)).toEqual([11, 44, 77, 100]);
+  });
+
+  it('multi-selection (size > 1) always inserts new', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 50);
+    script.insertAction(500, 50);
+    script.selectAll();
+    expect(script.selectedIndices.size).toBe(2);
+    pressNumpad(script, 1000, 99);
+    expect(script.actions).toHaveLength(3);
+    expect(script.actions[2]).toEqual({ at: 1000, pos: 99 });
+  });
+
+  it('snap-to-frame keeps modify branch when playhead is within the same frame', () => {
+    // Snap to 30fps boundaries (33.33ms / frame).
+    const snap30 = (t) => Math.round(t / (1000 / 30)) * (1000 / 30);
+    const script = new EditableScript();
+    pressNumpad(script, 33, 50, snap30);   // snaps to ~33ms (frame 1)
+    // Playhead nudged 5ms within same frame — should still snap to 33ms,
+    // and modify-branch should fire.
+    pressNumpad(script, 38, 70, snap30);
+    expect(script.actions).toHaveLength(1);
+    expect(script.actions[0].pos).toBe(70);
+  });
+});
