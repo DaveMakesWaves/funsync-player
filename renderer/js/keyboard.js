@@ -1,13 +1,16 @@
 // KeyboardHandler — Keyboard shortcuts for video playback
 
+import { openKeyboardHelp, PLAYER_SHORTCUT_GROUPS } from './keyboard-help.js';
+
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
     this.scriptEditor = scriptEditor || null;
     this.deviceSimulator = deviceSimulator || null;
     this.gapSkipEngine = gapSkipEngine || null;
+    this.onNavigate = onNavigate || null;
     this._bindEvents();
   }
 
@@ -18,6 +21,22 @@ export class KeyboardHandler {
   _onKeyDown(e) {
     // Don't capture keys when typing in an input
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    // Alt+1/2/3 — top-level nav between Library / Playlists / Categories.
+    // Slack/Discord/Notion convention; Nielsen #7 (flexibility for experts).
+    // Skipped when the editor canvas owns input or a modal is on screen
+    // (modals trap focus on themselves so the typical guard is a no-op,
+    // but the editor handles its own keys without focusing — gate
+    // explicitly).
+    if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && this.onNavigate && !this.scriptEditor?.isOpen) {
+      const navMap = { '1': 'library', '2': 'playlists', '3': 'categories' };
+      const target = navMap[e.key];
+      if (target) {
+        e.preventDefault();
+        this.onNavigate(target);
+        return;
+      }
+    }
 
     switch (e.key) {
       case ' ':
@@ -160,6 +179,18 @@ export class KeyboardHandler {
         this.player.clearAbLoop();
         if (this.connectionPanel) {
           this.connectionPanel.hide();
+        }
+        break;
+
+      // ? opens the keyboard-shortcut help overlay (Nielsen #7 +
+      // #10 — make every shortcut discoverable from one binding).
+      // Skipped when the editor is open — its own canvas-level
+      // handler picks `?` up there and renders the editor-specific
+      // group set.
+      case '?':
+        if (!this.scriptEditor?.isOpen) {
+          e.preventDefault();
+          openKeyboardHelp('Player keyboard shortcuts', PLAYER_SHORTCUT_GROUPS);
         }
         break;
 

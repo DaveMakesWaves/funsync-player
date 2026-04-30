@@ -348,3 +348,252 @@ describe('VRPlaybackProxy — Edge Cases', () => {
     expect(proxy.playbackRate).toBe(1); // 0 || 1 = 1 (falsy guard)
   });
 });
+
+// === Connection-reliability pass (2026-04-28) ===
+
+describe('VRBridge — linkState (three-state UI)', () => {
+  it('returns disconnected when not connected', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    expect(bridge.linkState).toBe('disconnected');
+  });
+
+  it('returns receiving immediately after connect (seeded _lastArrivalMs)', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+    await bridge.connect('deovr');
+    // _lastArrivalMs is seeded to Date.now() on connect, so linkState
+    // is 'receiving' (within the 5 s threshold).
+    expect(bridge.linkState).toBe('receiving');
+    bridge._stopLivenessWatchdog();
+  });
+
+  it('flips to waiting when no packet arrives for >5s', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+    await bridge.connect('deovr');
+    // Backdate the last arrival to 6 s ago
+    bridge._lastArrivalMs = Date.now() - 6000;
+    expect(bridge.linkState).toBe('waiting');
+    bridge._stopLivenessWatchdog();
+  });
+
+  it('returns to receiving when a fresh packet arrives', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+    await bridge.connect('deovr');
+    bridge._lastArrivalMs = Date.now() - 6000;
+    expect(bridge.linkState).toBe('waiting');
+    // A fresh packet arrives — handler bumps _lastArrivalMs
+    bridge._handleStateUpdate({
+      currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1,
+      _arrivalMs: Date.now(),
+    });
+    expect(bridge.linkState).toBe('receiving');
+    bridge._stopLivenessWatchdog();
+  });
+});
+
+describe('VRBridge — connect() coalescing', () => {
+  it('short-circuits a second connect() while one is in flight', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    let resolveFirst;
+    window.funsync.vrConnect.mockImplementation(() =>
+      new Promise(r => { resolveFirst = r; })
+    );
+    // Don't await — kick off a "slow" connect
+    const p1 = bridge.connect('deovr', '1.2.3.4', 23554);
+    // Immediately try again — should short-circuit and return false
+    const p2 = bridge.connect('deovr', '1.2.3.4', 23554);
+    expect(await p2).toBe(false);
+    // First one still resolves normally
+    resolveFirst({ success: true });
+    expect(await p1).toBe(true);
+    bridge._stopLivenessWatchdog();
+  });
+});
+
+describe('VRBridge — no self-retry on disconnect', () => {
+  it('socket close does NOT trigger _attemptReconnect', async () => {
+    // After the connection-reliability pass, the bridge no longer
+    // self-retries — activity poll is sole driver. Pre-pass this would
+    // call _attemptReconnect which would schedule a setTimeout.
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+    await bridge.connect('deovr');
+    // The _attemptReconnect method should not exist anymore.
+    expect(bridge._attemptReconnect).toBeUndefined();
+    expect(bridge._reconnectTimer).toBeUndefined();
+    bridge._stopLivenessWatchdog();
+  });
+});
+
+// === Smoothing pass (2026-04-28) ===
+
+describe('VRPlaybackProxy — smoothing (Stage A: drift-clamped EMA)', () => {
+  let proxy;
+  beforeEach(() => { proxy = new VRPlaybackProxy(); });
+
+  it('first packet is hard-snapped (no prior anchor to blend with)', () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    // Internal anchor === reported value on first packet
+    expect(proxy._lastReportedTime).toBe(10);
+  });
+
+  it('sub-threshold packet is EMA-blended, not hard-snapped', async () => {
+    // Arm a steady-state anchor at t=10 playing at 1×.
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    await new Promise(r => setTimeout(r, 100));
+    // VR reports t=10.05 — we expected ~10.1 (100ms elapsed at 1×),
+    // so the packet is 50ms BEHIND expected. With α=0.20, the
+    // anchor blends to expected + 0.20 × (-0.05) = ~10.09.
+    proxy.updateFromVR({ currentTime: 10.05, duration: 100, playerState: 0, playbackSpeed: 1 });
+    // Anchor should be near 10.09, NOT 10.05 (which would be a hard snap).
+    expect(proxy._lastReportedTime).toBeGreaterThan(10.07);
+    expect(proxy._lastReportedTime).toBeLessThan(10.11);
+  });
+
+  it('seek > 1 s threshold hard-snaps and dispatches seeked', async () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    await new Promise(r => setTimeout(r, 50));
+    const handler = vi.fn();
+    proxy.addEventListener('seeked', handler);
+    // Jump to t=50 — way beyond the 1 s threshold.
+    proxy.updateFromVR({ currentTime: 50, duration: 100, playerState: 0, playbackSpeed: 1 });
+    expect(handler).toHaveBeenCalled();
+    expect(proxy._lastReportedTime).toBe(50);
+  });
+
+  it('drift just below 1 s does NOT dispatch seeked (EMA absorbs)', async () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    await new Promise(r => setTimeout(r, 50));
+    const handler = vi.fn();
+    proxy.addEventListener('seeked', handler);
+    // 0.8 s drift — under the threshold.
+    proxy.updateFromVR({ currentTime: 10.85, duration: 100, playerState: 0, playbackSpeed: 1 });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('pause→play transition hard-snaps even at sub-threshold drift', () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 1, playbackSpeed: 1 });
+    proxy.updateFromVR({ currentTime: 10.05, duration: 100, playerState: 0, playbackSpeed: 1 });
+    // State transition forced a hard snap — anchor === packet value.
+    expect(proxy._lastReportedTime).toBe(10.05);
+  });
+});
+
+describe('VRPlaybackProxy — smoothing (Stage B: slew-rate clamp)', () => {
+  let proxy;
+  beforeEach(() => { proxy = new VRPlaybackProxy(); });
+
+  it('consumer-visible time never decreases between reads (monotonicity)', async () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    let prev = -Infinity;
+    // 1000 reads with random small jitter on the underlying anchor.
+    for (let i = 0; i < 1000; i++) {
+      // Inject some jitter into the anchor as a hostile EMA convergence.
+      if (i % 100 === 0) {
+        proxy._lastReportedTime += (Math.random() - 0.5) * 0.05;
+      }
+      const t = proxy.currentTime;
+      expect(t).toBeGreaterThanOrEqual(prev);
+      prev = t;
+      // Tick microtask so performance.now advances slightly.
+      await Promise.resolve();
+    }
+  });
+
+  it('consumer advance is bounded by ±10 % of expected per read', async () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    proxy.currentTime; // prime the slew state
+    const before = performance.now();
+    await new Promise(r => setTimeout(r, 100));
+    const after = performance.now();
+    // Force the underlying anchor far ahead so the slew clamp engages.
+    proxy._lastReportedTime += 5; // way more than the 10% would allow
+    const t = proxy.currentTime;
+    const wallElapsed = (after - before) / 1000;
+    // Consumer advance ≈ 1.1 × wallElapsed × 1 (speed) — bounded.
+    // Allow generous tolerance: < 1.5 × expected (would be ~6 s without clamp).
+    expect(t).toBeLessThan(10 + wallElapsed * 1.5);
+  });
+});
+
+describe('VRPlaybackProxy — smoothing (anchor reset paths)', () => {
+  let proxy;
+  beforeEach(() => { proxy = new VRPlaybackProxy(); });
+
+  it('programmatic seek resets slew state and adopts new value instantly', async () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    proxy.currentTime; // prime
+    await new Promise(r => setTimeout(r, 50));
+    proxy.currentTime = 75;
+    // Next read returns the new value (paused getter would, but it's playing).
+    // Slew is reset, so first read after the seek primes from raw.
+    const t = proxy.currentTime;
+    expect(t).toBeGreaterThanOrEqual(75);
+    expect(t).toBeLessThan(75.1); // hasn't had time to advance
+  });
+
+  it('reset() clears slew state', () => {
+    proxy.updateFromVR({ currentTime: 10, duration: 100, playerState: 0, playbackSpeed: 1 });
+    proxy.currentTime; // prime
+    expect(proxy._consumerLastReadAt).toBeGreaterThan(0);
+    proxy.reset();
+    expect(proxy._consumerLastReadAt).toBe(0);
+    expect(proxy._consumerLastValue).toBe(0);
+  });
+});
+
+describe('VRBridge — liveness watchdog', () => {
+  it('synthesises a disconnect when no packet arrives within timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+      const bridge = new VRBridge();
+      const onDisconnect = vi.fn();
+      bridge.onDisconnect = onDisconnect;
+      window.funsync.vrConnect.mockResolvedValue({ success: true });
+      await bridge.connect('deovr');
+      // Backdate the last arrival so the watchdog sees an over-timeout gap.
+      // (The watchdog reads Date.now(), which fake timers DON'T advance —
+      // we have to fake the gap by writing the field directly.)
+      bridge._lastArrivalMs = Date.now() - 9000;
+      // Advance the watchdog interval (1 s) — its tick should detect the
+      // 9 s gap and tear down.
+      vi.advanceTimersByTime(1100);
+      expect(bridge.connected).toBe(false);
+      expect(onDisconnect).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT tear down while packets are arriving', async () => {
+    vi.useFakeTimers();
+    try {
+      const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+      const bridge = new VRBridge();
+      const onDisconnect = vi.fn();
+      bridge.onDisconnect = onDisconnect;
+      window.funsync.vrConnect.mockResolvedValue({ success: true });
+      await bridge.connect('deovr');
+      // Simulate a packet arriving every 100 ms for several seconds —
+      // _lastArrivalMs stays fresh.
+      for (let i = 0; i < 30; i++) {
+        bridge._lastArrivalMs = Date.now();
+        vi.advanceTimersByTime(100);
+      }
+      expect(bridge.connected).toBe(true);
+      expect(onDisconnect).not.toHaveBeenCalled();
+      bridge._stopLivenessWatchdog();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -2,6 +2,7 @@
 
 import { icon, X } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
+import { Modal } from './modal.js';
 
 export class EroScriptsPanel {
   constructor({ settings }) {
@@ -26,12 +27,15 @@ export class EroScriptsPanel {
     this._panel = document.createElement('div');
     this._panel.className = 'eroscripts-panel';
     this._panel.hidden = true;
+    this._panel.setAttribute('role', 'dialog');
+    this._panel.setAttribute('aria-modal', 'true');
+    this._panel.setAttribute('aria-labelledby', 'eroscripts-panel__title');
 
     this._panel.innerHTML = `
       <div class="eroscripts-panel__header">
-        <span class="eroscripts-panel__title">EroScripts</span>
+        <h2 id="eroscripts-panel__title" class="eroscripts-panel__title">EroScripts</h2>
         <span class="eroscripts-panel__status" id="es-status"></span>
-        <button class="eroscripts-panel__close"></button>
+        <button class="eroscripts-panel__close" aria-label="Close EroScripts"></button>
       </div>
 
       <div class="eroscripts-panel__auth-bar" id="es-auth-bar">
@@ -135,171 +139,160 @@ export class EroScriptsPanel {
   }
 
   async _showLoginModal() {
-    // Create a login modal overlay
-    const overlay = document.createElement('div');
-    overlay.className = 'eroscripts-login-overlay';
-
-    const modal = document.createElement('div');
-    modal.className = 'eroscripts-login-modal';
-    modal.innerHTML = `
-      <div class="eroscripts-login-modal__header">
-        <span>Log in to EroScripts</span>
-        <button class="eroscripts-login-modal__close"></button>
-      </div>
-      <div class="eroscripts-login-modal__body">
-        <div class="eroscripts-login-modal__field">
-          <label>Username</label>
-          <input type="text" id="es-modal-username" class="eroscripts-panel__input" autocomplete="off">
-        </div>
-        <div class="eroscripts-login-modal__field">
-          <label>Password</label>
-          <input type="password" id="es-modal-password" class="eroscripts-panel__input" autocomplete="off">
-        </div>
-        <div class="eroscripts-login-modal__2fa" id="es-modal-2fa" hidden>
-          <label>Authenticator Code</label>
-          <div class="eroscripts-login-modal__otp-row">
-            <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off">
-            <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off">
-            <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off">
-            <span class="eroscripts-login-modal__otp-sep"></span>
-            <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off">
-            <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off">
-            <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off">
+    // Use the shared Modal.open() so the login sub-modal inherits the
+    // full DESIGN.md §2.5 contract for free (aria-labelledby, focus
+    // trap, Escape close, focus restored on close, inert background).
+    // The inner form keeps its existing CSS classes — only the outer
+    // overlay / header / close-button is replaced by Modal.open's chrome.
+    await Modal.open({
+      title: 'Log in to EroScripts',
+      onRender: (body, close) => {
+        body.innerHTML = `
+          <div class="eroscripts-login-modal__field">
+            <label for="es-modal-username">Username</label>
+            <input type="text" id="es-modal-username" class="eroscripts-panel__input" autocomplete="off">
           </div>
-          <div class="eroscripts-login-modal__hint">Enter the code from your authenticator app</div>
-        </div>
-        <div class="eroscripts-login-modal__error" id="es-modal-error" hidden></div>
-        <button id="es-modal-submit" class="eroscripts-panel__btn eroscripts-login-modal__submit">Log In</button>
-      </div>
-    `;
+          <div class="eroscripts-login-modal__field">
+            <label for="es-modal-password">Password</label>
+            <input type="password" id="es-modal-password" class="eroscripts-panel__input" autocomplete="off">
+          </div>
+          <div class="eroscripts-login-modal__2fa" id="es-modal-2fa" hidden>
+            <label>Authenticator Code</label>
+            <div class="eroscripts-login-modal__otp-row">
+              <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="2FA digit 1">
+              <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="2FA digit 2">
+              <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="2FA digit 3">
+              <span class="eroscripts-login-modal__otp-sep"></span>
+              <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="2FA digit 4">
+              <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="2FA digit 5">
+              <input type="text" class="eroscripts-login-modal__otp-digit" maxlength="1" inputmode="numeric" autocomplete="off" aria-label="2FA digit 6">
+            </div>
+            <div class="eroscripts-login-modal__hint">Enter the code from your authenticator app</div>
+          </div>
+          <div class="eroscripts-login-modal__error" id="es-modal-error" hidden role="alert"></div>
+          <button id="es-modal-submit" class="eroscripts-panel__btn eroscripts-login-modal__submit">Log In</button>
+        `;
 
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
+        const usernameInput = body.querySelector('#es-modal-username');
+        const passwordInput = body.querySelector('#es-modal-password');
+        const otpDigits = body.querySelectorAll('.eroscripts-login-modal__otp-digit');
+        const tfaSection = body.querySelector('#es-modal-2fa');
 
-    const closeBtn = modal.querySelector('.eroscripts-login-modal__close');
-    closeBtn.appendChild(icon(X, { width: 16, height: 16 }));
+        const errorEl = body.querySelector('#es-modal-error');
+        const submitBtn = body.querySelector('#es-modal-submit');
 
-    const close = () => overlay.remove();
-    closeBtn.addEventListener('click', close);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+        let pendingNonce = null;
+        let awaiting2FA = false;
 
-    const usernameInput = modal.querySelector('#es-modal-username');
-    const passwordInput = modal.querySelector('#es-modal-password');
-    const otpDigits = modal.querySelectorAll('.eroscripts-login-modal__otp-digit');
-    const tfaSection = modal.querySelector('#es-modal-2fa');
+        const getOtpCode = () => [...otpDigits].map(d => d.value).join('');
 
-    // Wire OTP digit boxes — auto-advance, backspace, paste
-    otpDigits.forEach((digit, i) => {
-      digit.addEventListener('input', () => {
-        digit.value = digit.value.replace(/\D/g, '').slice(0, 1);
-        if (digit.value && i < otpDigits.length - 1) {
-          otpDigits[i + 1].focus();
-        }
-        // Auto-submit when all 6 digits entered
-        const code = [...otpDigits].map(d => d.value).join('');
-        if (code.length === 6) submit();
-      });
-      digit.addEventListener('keydown', (e) => {
-        if (e.key === 'Backspace' && !digit.value && i > 0) {
-          otpDigits[i - 1].focus();
-          otpDigits[i - 1].value = '';
-        }
-        if (e.key === 'Enter') submit();
-      });
-      digit.addEventListener('paste', (e) => {
-        e.preventDefault();
-        const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
-        for (let j = 0; j < pasted.length && i + j < otpDigits.length; j++) {
-          otpDigits[i + j].value = pasted[j];
-        }
-        const focusIdx = Math.min(i + pasted.length, otpDigits.length - 1);
-        otpDigits[focusIdx].focus();
-        if (pasted.length === 6) submit();
-      });
+        const submit = async () => {
+          errorEl.hidden = true;
+          submitBtn.disabled = true;
+
+          if (awaiting2FA) {
+            // 2FA step
+            const code = getOtpCode();
+            if (code.length < 6) {
+              errorEl.textContent = 'Enter all 6 digits';
+              errorEl.hidden = false;
+              submitBtn.disabled = false;
+              return;
+            }
+
+            submitBtn.textContent = 'Verifying...';
+            const result = await window.funsync.eroscriptsVerify2FA(
+              pendingNonce,
+              code,
+              usernameInput.value.trim(),
+              passwordInput.value,
+            );
+            submitBtn.disabled = false;
+            submitBtn.textContent = 'Verify';
+
+            if (result.success) {
+              this._settings.set('eroscripts.session', { cookie: result.cookie, username: result.username });
+              this._setLoggedIn(result.username);
+              close();
+            } else {
+              errorEl.textContent = result.error || 'Verification failed';
+              errorEl.hidden = false;
+              otpDigits.forEach(d => { d.value = ''; });
+              otpDigits[0].focus();
+            }
+          } else {
+            // Initial login step
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value;
+
+            if (!username || !password) {
+              errorEl.textContent = 'Enter username and password';
+              errorEl.hidden = false;
+              submitBtn.disabled = false;
+              return;
+            }
+
+            submitBtn.textContent = 'Logging in...';
+            const result = await window.funsync.eroscriptsLogin(username, password);
+            submitBtn.disabled = false;
+
+            if (result.success) {
+              this._settings.set('eroscripts.session', { cookie: result.cookie, username: result.username });
+              this._setLoggedIn(result.username);
+              close();
+            } else if (result.requires2FA) {
+              // Show 2FA input
+              pendingNonce = result.nonce; // may be null — verify2FA handles both cases
+              awaiting2FA = true;
+              tfaSection.hidden = false;
+              usernameInput.disabled = true;
+              passwordInput.disabled = true;
+              submitBtn.textContent = 'Verify';
+              otpDigits[0].focus();
+            } else {
+              submitBtn.textContent = 'Log In';
+              errorEl.textContent = result.error || 'Login failed';
+              errorEl.hidden = false;
+            }
+          }
+        };
+
+        // Wire OTP digit boxes — auto-advance, backspace, paste.
+        otpDigits.forEach((digit, i) => {
+          digit.addEventListener('input', () => {
+            digit.value = digit.value.replace(/\D/g, '').slice(0, 1);
+            if (digit.value && i < otpDigits.length - 1) {
+              otpDigits[i + 1].focus();
+            }
+            // Auto-submit when all 6 digits entered
+            const code = [...otpDigits].map(d => d.value).join('');
+            if (code.length === 6) submit();
+          });
+          digit.addEventListener('keydown', (e) => {
+            if (e.key === 'Backspace' && !digit.value && i > 0) {
+              otpDigits[i - 1].focus();
+              otpDigits[i - 1].value = '';
+            }
+            if (e.key === 'Enter') submit();
+          });
+          digit.addEventListener('paste', (e) => {
+            e.preventDefault();
+            const pasted = (e.clipboardData.getData('text') || '').replace(/\D/g, '').slice(0, 6);
+            for (let j = 0; j < pasted.length && i + j < otpDigits.length; j++) {
+              otpDigits[i + j].value = pasted[j];
+            }
+            const focusIdx = Math.min(i + pasted.length, otpDigits.length - 1);
+            otpDigits[focusIdx].focus();
+            if (pasted.length === 6) submit();
+          });
+        });
+
+        submitBtn.addEventListener('click', submit);
+        passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
+
+        usernameInput.focus();
+      },
     });
-
-    const getOtpCode = () => [...otpDigits].map(d => d.value).join('');
-    const errorEl = modal.querySelector('#es-modal-error');
-    const submitBtn = modal.querySelector('#es-modal-submit');
-
-    let pendingNonce = null;
-    let awaiting2FA = false;
-
-    const submit = async () => {
-      errorEl.hidden = true;
-      submitBtn.disabled = true;
-
-      if (awaiting2FA) {
-        // 2FA step
-        const code = getOtpCode();
-        if (code.length < 6) {
-          errorEl.textContent = 'Enter all 6 digits';
-          errorEl.hidden = false;
-          submitBtn.disabled = false;
-          return;
-        }
-
-        submitBtn.textContent = 'Verifying...';
-        const result = await window.funsync.eroscriptsVerify2FA(
-          pendingNonce,
-          code,
-          usernameInput.value.trim(),
-          passwordInput.value,
-        );
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Verify';
-
-        if (result.success) {
-          this._settings.set('eroscripts.session', { cookie: result.cookie, username: result.username });
-          this._setLoggedIn(result.username);
-          close();
-        } else {
-          errorEl.textContent = result.error || 'Verification failed';
-          errorEl.hidden = false;
-          otpDigits.forEach(d => { d.value = ''; });
-          otpDigits[0].focus();
-        }
-      } else {
-        // Initial login step
-        const username = usernameInput.value.trim();
-        const password = passwordInput.value;
-
-        if (!username || !password) {
-          errorEl.textContent = 'Enter username and password';
-          errorEl.hidden = false;
-          submitBtn.disabled = false;
-          return;
-        }
-
-        submitBtn.textContent = 'Logging in...';
-        const result = await window.funsync.eroscriptsLogin(username, password);
-        submitBtn.disabled = false;
-
-        if (result.success) {
-          this._settings.set('eroscripts.session', { cookie: result.cookie, username: result.username });
-          this._setLoggedIn(result.username);
-          close();
-        } else if (result.requires2FA) {
-          // Show 2FA input
-          pendingNonce = result.nonce; // may be null — verify2FA handles both cases
-          awaiting2FA = true;
-          tfaSection.hidden = false;
-          usernameInput.disabled = true;
-          passwordInput.disabled = true;
-          submitBtn.textContent = 'Verify';
-          otpDigits[0].focus();
-        } else {
-          submitBtn.textContent = 'Log In';
-          errorEl.textContent = result.error || 'Login failed';
-          errorEl.hidden = false;
-        }
-      }
-    };
-
-    submitBtn.addEventListener('click', submit);
-    passwordInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-
-    usernameInput.focus();
   }
 
   async _search() {
@@ -321,7 +314,15 @@ export class EroScriptsPanel {
     }
 
     if (results.length === 0) {
-      resultsEl.innerHTML = '<div class="eroscripts-panel__placeholder">No scripts found</div>';
+      // No-results state with a "what to do next" hint (Nielsen #9 +
+      // #10) — was a single line of text with no suggestion. The
+      // placeholder--hint modifier styles the secondary line a touch
+      // smaller / dimmer, mirroring the library / playlists pattern.
+      resultsEl.innerHTML = `
+        <div class="eroscripts-panel__placeholder">
+          <div>No scripts found for "${this._esc(query)}"</div>
+          <div class="eroscripts-panel__placeholder--hint">Try a shorter or more general search term — partial titles often match better than full filenames.</div>
+        </div>`;
       return;
     }
 
@@ -519,15 +520,51 @@ export class EroScriptsPanel {
   show() {
     this._panel.hidden = false;
     this._visible = true;
+
+    // Modal contract per DESIGN.md §2.5 — stash previous focus, focus
+    // trap on Tab, Escape closes, focus restored on close.
+    this._previouslyFocused = document.activeElement;
     this._panel.querySelector('#es-search-input').focus();
 
-    // Clean up any existing outside click listener before adding a new one
+    this._boundFocusTrap = (e) => {
+      if (e.key !== 'Tab') return;
+      const focusables = this._panel.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      const visible = Array.from(focusables).filter(el => el.offsetParent !== null);
+      if (visible.length === 0) return;
+      const first = visible[0];
+      const last = visible[visible.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    this._panel.addEventListener('keydown', this._boundFocusTrap);
+
+    this._boundEscapeKey = (e) => {
+      if (e.key === 'Escape') {
+        // Don't close if the login sub-modal is open — let it handle
+        // its own Escape and stay inside the panel. The login modal now
+        // uses Modal.open() which renders with `.modal-overlay`.
+        if (document.querySelector('.modal-overlay')) return;
+        e.preventDefault();
+        this.hide();
+      }
+    };
+    this._panel.addEventListener('keydown', this._boundEscapeKey);
+
+    // Outside-click close (preserved from prior implementation).
     if (this._boundOutsideClick) {
       document.removeEventListener('click', this._boundOutsideClick, true);
     }
     this._boundOutsideClick = (e) => {
-      // Don't close if clicking inside the login modal overlay
-      if (e.target.closest('.eroscripts-login-overlay')) return;
+      // Don't close if clicking inside any open modal (login sub-modal
+      // now uses Modal.open() which renders into `.modal-overlay`).
+      if (e.target.closest('.modal-overlay')) return;
       if (!this._panel.contains(e.target)) {
         e.preventDefault();
         e.stopPropagation();
@@ -544,6 +581,19 @@ export class EroScriptsPanel {
       document.removeEventListener('click', this._boundOutsideClick, true);
       this._boundOutsideClick = null;
     }
+    if (this._boundFocusTrap) {
+      this._panel.removeEventListener('keydown', this._boundFocusTrap);
+      this._boundFocusTrap = null;
+    }
+    if (this._boundEscapeKey) {
+      this._panel.removeEventListener('keydown', this._boundEscapeKey);
+      this._boundEscapeKey = null;
+    }
+    if (this._previouslyFocused && typeof this._previouslyFocused.focus === 'function') {
+      try { this._previouslyFocused.focus({ preventScroll: true }); }
+      catch { /* element may be unfocusable now */ }
+    }
+    this._previouslyFocused = null;
   }
 
   _esc(str) {

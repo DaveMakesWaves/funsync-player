@@ -70,6 +70,21 @@ async function initStore() {
   return conf;
 }
 
+/**
+ * Subscribe to every config write. Used by data-backup to schedule a
+ * debounced snapshot after significant mutations. Returns the
+ * unsubscribe function from electron-conf.
+ *
+ * Called by main.js right after initStore() so the very first write
+ * (which is often the migration) is observed too.
+ */
+function subscribe(callback) {
+  if (!conf || typeof conf.onDidAnyChange !== 'function') {
+    return () => {};
+  }
+  return conf.onDidAnyChange(callback);
+}
+
 function getAll() {
   return JSON.parse(JSON.stringify({
     settings: conf.get('settings'),
@@ -285,6 +300,7 @@ function migrateFromLegacy(legacyData) {
 module.exports = {
   DEFAULTS,
   initStore,
+  subscribe,
   getAll,
   getSetting,
   setSetting,

@@ -16,7 +16,7 @@
   gap: 12px;
   padding: 12px 16px;
   background: var(--bg-secondary);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
 
@@ -54,8 +54,8 @@
 }
 
 .library__change-dir-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   padding: 6px 14px;
   border-radius: 6px;
@@ -66,7 +66,7 @@
 }
 
 .library__change-dir-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay-strong);
 }
 
 /* Empty State */
@@ -78,6 +78,16 @@
   justify-content: center;
   gap: 16px;
   color: var(--text-secondary);
+  /* When the empty-state is appended to the CSS-grid container
+     (`.library__grid`) — e.g. the no-results-with-filters case — span
+     all columns so it occupies the full row, and give it real vertical
+     room so the centering computes against more than the contained
+     text height. Without this, the message lands flush with the top of
+     the grid wrapper (flex:1 above doesn't apply inside a grid parent).
+     min-height is a viewport-relative floor so it stays centered on
+     short windows; max-width keeps the wrapped hint text readable. */
+  grid-column: 1 / -1;
+  min-height: 50vh;
 }
 
 .library__empty-icon {
@@ -89,6 +99,18 @@
 
 .library__empty-text {
   font-size: 15px;
+}
+
+/* Secondary explanatory line below the empty-state heading — same
+   pattern as `.playlists__empty-hint` / `.categories__empty-hint`.
+   Gives the user a "what to do next" cue (Nielsen #9 / #10). */
+.library__empty-hint {
+  font-size: 13px;
+  color: var(--text-secondary);
+  opacity: 0.85;
+  max-width: 360px;
+  text-align: center;
+  line-height: 1.45;
 }
 
 .library__loading {
@@ -104,7 +126,7 @@
 .library__loading-spinner {
   width: 24px;
   height: 24px;
-  border: 3px solid rgba(255, 255, 255, 0.1);
+  border: 3px solid var(--border-subtle);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -207,7 +229,7 @@
 }
 
 .library__list-item:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
 }
 
 .library__list-heatmap {
@@ -216,7 +238,7 @@
   max-width: 300px;
   height: 24px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-overlay);
   color: var(--accent);
   pointer-events: none;
   display: block;
@@ -289,28 +311,43 @@
   text-align: right;
 }
 
+/* List-view kebab — same visible-at-rest pattern as the grid kebab.
+   ≥36 × 36 hit area; baseline 0.4 opacity, full on hover / focus / when
+   the parent row owns keyboard focus. */
 .library__list-kebab {
   background: none;
   border: none;
   color: var(--text-secondary);
   cursor: pointer;
-  padding: 4px;
+  width: 36px;
+  height: 36px;
+  padding: 6px;
   border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  opacity: 0;
-  transition: opacity 150ms, color 150ms;
+  opacity: 0.4;
+  transition: opacity 150ms, color 150ms, background 150ms;
 }
 
+.library__list-kebab:hover,
+.library__list-kebab:focus-visible,
 .library__list-item:hover .library__list-kebab,
-.library__folder-row:hover .library__list-kebab {
+.library__list-item:focus-within .library__list-kebab,
+.library__folder-row:hover .library__list-kebab,
+.library__folder-row:focus-within .library__list-kebab {
   opacity: 1;
 }
 
 .library__list-kebab:hover {
   color: var(--text-primary);
+  background: var(--surface-overlay);
+}
+
+.library__list-kebab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .library__list-item .library__card-checkbox {
@@ -334,7 +371,10 @@
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
 
-/* Hover Video Preview */
+/* Hover Video Preview — opacity fade-in respects `prefers-reduced-motion`.
+   The canvas still loads / decodes; only the transition is suppressed
+   so users opted out of motion get an instant show / hide without
+   losing the feature. */
 .library__preview-canvas {
   position: absolute;
   inset: 0;
@@ -342,19 +382,24 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  transition: opacity 200ms ease;
   pointer-events: none;
   z-index: 1;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .library__preview-canvas {
+    transition: opacity 200ms ease;
+  }
 }
 
 .library__preview-canvas--visible {
   opacity: 1;
 }
 
-.library__funscript-badge--inline.library__funscript-badge--auto { color: #4caf50; }
-.library__funscript-badge--inline.library__funscript-badge--manual { color: #2196f3; }
-.library__subtitle-badge--inline.library__subtitle-badge--auto { color: #ff9800; }
-.library__subtitle-badge--inline.library__subtitle-badge--manual { color: #ab47bc; }
+.library__funscript-badge--inline.library__funscript-badge--auto { color: var(--state-connected); }
+.library__funscript-badge--inline.library__funscript-badge--manual { color: var(--badge-info); }
+.library__subtitle-badge--inline.library__subtitle-badge--auto { color: var(--state-warning); }
+.library__subtitle-badge--inline.library__subtitle-badge--manual { color: var(--badge-purple); }
 
 /* Card */
 .library__card {
@@ -391,7 +436,7 @@
   font-family: inherit;
 }
 .library__breadcrumb-crumb:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
   color: var(--text-primary);
 }
 .library__breadcrumb-crumb--active {
@@ -423,7 +468,7 @@
 
 .library__search-scope-toggle {
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-subtle);
   color: var(--accent);
   cursor: pointer;
   padding: 2px 10px;
@@ -490,7 +535,7 @@
 }
 
 .library__folder-mosaic-cell--empty {
-  background-color: rgba(255, 255, 255, 0.05);
+  background-color: var(--surface-overlay);
 }
 .library__folder-info {
   text-align: center;
@@ -529,7 +574,7 @@
   position: relative;
 }
 .library__folder-row:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
 }
 .library__folder-row .library__folder-row-thumb {
   width: 32px;
@@ -600,7 +645,11 @@
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.5));
 }
 
-/* Kebab Button */
+/* Kebab button — visible at rest at reduced opacity (Norman signifier:
+   the affordance is discoverable without hovering — Nielsen #6). Full
+   opacity on hover, focus, or when the parent card is keyboard-focused.
+   36×36 hit area (Fitts floor); the 28×28 visual chip + padding give a
+   compliant target without making the chip itself visually loud. */
 .library__kebab-btn {
   position: absolute;
   top: 6px;
@@ -608,14 +657,15 @@
   background: rgba(0, 0, 0, 0.6);
   border: none;
   color: #fff;
-  width: 28px;
-  height: 28px;
+  width: 36px;
+  height: 36px;
+  padding: 4px;
   border-radius: 50%;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  opacity: 0;
+  opacity: 0.4;
   transition: opacity var(--transition-fast), background var(--transition-fast);
   z-index: 2;
 }
@@ -624,8 +674,12 @@
   pointer-events: none;
 }
 
+.library__kebab-btn:hover,
+.library__kebab-btn:focus-visible,
 .library__card:hover .library__kebab-btn,
-.library__folder-card:hover .library__kebab-btn {
+.library__card:focus-within .library__kebab-btn,
+.library__folder-card:hover .library__kebab-btn,
+.library__folder-card:focus-within .library__kebab-btn {
   opacity: 1;
 }
 
@@ -633,44 +687,49 @@
   background: rgba(0, 0, 0, 0.85);
 }
 
-/* Funscript Badge */
-.library__funscript-badge {
+.library__kebab-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Bottom-left badges container — holds funscript + subtitle (and any
+   future left-side badges) in a flex row with gap. Replaces the prior
+   `left: 6px` / `left: 26px` hardcoded offsets that broke when the
+   subtitle was present without a funscript, or when a third badge
+   would be added. */
+.library__card-badges {
   position: absolute;
   bottom: 6px;
   left: 6px;
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
   z-index: 1;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+  pointer-events: none;
+}
+
+.library__funscript-badge,
+.library__subtitle-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .library__funscript-badge--auto {
-  color: #4caf50;
+  color: var(--state-connected);
 }
 
 .library__funscript-badge--manual {
-  color: #2196f3;
-}
-
-/* Subtitle Badge */
-.library__subtitle-badge {
-  position: absolute;
-  bottom: 6px;
-  left: 26px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1;
-  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
+  color: var(--badge-info);
 }
 
 .library__subtitle-badge--auto {
-  color: #ff9800;
+  color: var(--state-warning);
 }
 
 .library__subtitle-badge--manual {
-  color: #ab47bc;
+  color: var(--badge-purple);
 }
 
 .library__speed-badge {
@@ -682,23 +741,23 @@
 }
 
 .library__speed-badge--slow {
-  color: #4a9eff;
+  color: var(--badge-info);
 }
 
 .library__speed-badge--medium {
-  color: #4caf50;
+  color: var(--state-connected);
 }
 
 .library__speed-badge--fast {
-  color: #ff9800;
+  color: var(--state-warning);
 }
 
 .library__speed-badge--extreme {
-  color: #e94560;
+  color: var(--accent);
 }
 
 .library__speed-badge--insane {
-  color: #b44cff;
+  color: var(--badge-purple);
 }
 
 .library__duration-badge {
@@ -709,8 +768,8 @@
   font-weight: 600;
   padding: 1px 5px;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.7);
-  color: rgba(255, 255, 255, 0.8);
+  background: var(--badge-duration-bg);
+  color: #fff;
   letter-spacing: 0.3px;
   z-index: 1;
 }
@@ -738,7 +797,7 @@
   top: 36px;
   right: 6px;
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   z-index: 100;
@@ -763,6 +822,18 @@
   background: var(--control-hover);
 }
 
+/* Destructive kebab actions (Remove Funscript / Remove Subtitle) — same
+   `--danger` modifier pattern as `.connection-panel__action--danger`.
+   Default state stays neutral so the menu doesn't read as alarming;
+   hover surfaces the destructive nature with red text + soft red bg. */
+.library__kebab-menu-item--danger {
+  color: var(--text-primary);
+}
+.library__kebab-menu-item--danger:hover {
+  color: var(--state-error);
+  background: var(--state-error-soft);
+}
+
 /* Video Count */
 .library__video-count {
   font-size: 12px;
@@ -777,12 +848,26 @@
   align-items: center;
 }
 
+/* Magnifier icon at the left edge — visible search affordance. The
+   icon is decorative (aria-hidden=true) since the input itself has
+   aria-label="Search videos". */
+.library__search-icon {
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+
 .library__search-input {
-  width: 160px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  width: 180px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  padding: 6px 28px 6px 10px;
+  /* Left padding leaves room for the magnifier icon. */
+  padding: 6px 28px 6px 28px;
   color: var(--text-primary);
   font-family: var(--font-family);
   font-size: 13px;
@@ -792,7 +877,7 @@
 
 .library__search-input:focus {
   border-color: var(--accent);
-  width: 220px;
+  width: 240px;
 }
 
 .library__search-input::placeholder {
@@ -829,18 +914,18 @@
 }
 
 .library__grid-wrapper::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay-strong);
   border-radius: 4px;
 }
 
 .library__grid-wrapper::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: var(--surface-overlay-strong);
 }
 
 /* Select Mode Button */
 .library__select-mode-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   padding: 6px 14px;
   border-radius: 6px;
@@ -851,7 +936,7 @@
 }
 
 .library__select-mode-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay-strong);
 }
 
 /* Selection Bar */
@@ -890,7 +975,7 @@
 }
 
 .library__selection-cancel {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-overlay);
   color: var(--text-primary);
   border: none;
   padding: 6px 14px;
@@ -902,43 +987,88 @@
 }
 
 .library__selection-cancel:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--surface-overlay-strong);
 }
 
-/* Card Checkbox (multi-select) */
+/* Card checkbox (multi-select) — 36 × 36 hit area (Fitts floor + corner
+   placement = "infinite-radius" target per Fitts's law) with a visible
+   22 × 22 chip centred inside via a `::before` pseudo-element. The
+   element itself is the transparent click target; the chip is
+   decorative. Was a bare 22 × 22 chip with no hit-area extension —
+   below the 36-px floor used everywhere else. */
 .library__card-checkbox {
   position: absolute;
-  top: 6px;
-  left: 6px;
-  width: 22px;
-  height: 22px;
-  border: 2px solid rgba(255, 255, 255, 0.6);
-  border-radius: 4px;
-  background: rgba(0, 0, 0, 0.4);
+  top: 0;
+  left: 0;
+  width: 36px;
+  height: 36px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
   z-index: 3;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.library__card-checkbox--checked {
+.library__card-checkbox::before {
+  content: '';
+  width: 22px;
+  height: 22px;
+  border: 2px solid var(--text-secondary);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.4);
+  box-sizing: border-box;
+  transition: background var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.library__card-checkbox--checked::before {
   background: var(--accent);
   border-color: var(--accent);
 }
 
+/* Checkmark — absolute-positioned overlay so it sits dead centre
+   over the chip (not the 36×36 hit area). */
 .library__card-checkbox--checked::after {
   content: '\2713';
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
+  position: absolute;
   color: #fff;
   font-size: 14px;
   font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+/* Focus ring on the visible chip when keyboard-focused — bright accent
+   outline (DESIGN.md §2.5 visibility-of-focus contract). */
+.library__card-checkbox:focus-visible::before {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+/* When the parent card has keyboard focus, the chip border tints with
+   accent so the user can see "this card is focused, Space toggles
+   selection" (Norman feedback redundancy on top of the card's own
+   outline). Subtle — full focus visibility is on the chip itself. */
+.library__card:focus-within .library__card-checkbox::before {
+  border-color: var(--accent);
 }
 
 .library__card--selected {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
+}
+
+/* Selected-state background tint on the title bar — outline alone reads
+   as "focused" not "selected" (Norman feedback ambiguity). The accent-
+   soft tint on the info / title row makes "selected" unambiguous at a
+   glance without overlaying the thumbnail. List view's selected row
+   gets a left-edge accent strip via box-shadow for the same purpose. */
+.library__card--selected .library__card-info {
+  background: var(--accent-soft);
+}
+
+.library__list-item.library__card--selected {
+  background: var(--accent-soft);
 }
 
 /* Category Dot Badges */
@@ -959,105 +1089,204 @@
   flex-shrink: 0;
 }
 
-/* Sort Dropdown */
-.library__sort-select {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
-  padding: 6px 10px;
-  border-radius: 6px;
-  font-size: 13px;
-  font-family: var(--font-family);
-  cursor: pointer;
-  outline: none;
-}
+/* === Library Sort + Filters pickers (post-redesign 2026-04-27) ===
+ * The old `<select>` for sort + `<select>` for VR filter + Matched/
+ * Unmatched tab pair were replaced by two trigger buttons that each
+ * open their own popover dropdown. State commits go through the same
+ * downstream callbacks as before so behaviour is preserved. The chip
+ * strip below the header reflects active filters; chip × removes the
+ * one filter without dismissing the rest. See SCOPE-desktop-redesign §4.4.
+ */
 
-.library__sort-select option {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.library__sort-select option:disabled {
-  color: var(--text-secondary);
-  opacity: 0.5;
-}
-
-.library__sort-select:focus {
-  border-color: var(--accent);
-}
-
-.library__sort-hint {
-  display: inline-flex;
-  align-items: center;
-  padding: 4px 8px;
-  border-radius: 6px;
-  font-size: 11px;
-  color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  white-space: nowrap;
-}
-
-.library__sort-hint[hidden] {
-  display: none;
-}
-
-.library__vr-filter {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  color: var(--text-primary);
-  padding: 6px 8px;
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: var(--font-family);
-  cursor: pointer;
-  outline: none;
-}
-
-.library__vr-filter option {
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-}
-
-.library__vr-filter:focus {
-  border-color: var(--accent);
-}
-
-/* Matched / Unmatched Tabs */
-.library__tabs {
-  display: flex;
-  gap: 2px;
-  background: rgba(255, 255, 255, 0.06);
-  border-radius: 6px;
-  padding: 2px;
+.library__picker {
+  position: relative;
   flex-shrink: 0;
 }
 
-.library__tab {
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  padding: 5px 14px;
-  border-radius: 5px;
+.library__picker-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  padding: 0 10px;
+  height: 36px;
+  border-radius: 6px;
   font-size: 13px;
+  font-family: var(--font-family);
   cursor: pointer;
+  outline: none;
+  transition: background 120ms, border-color 120ms;
+}
+.library__picker-btn:hover {
+  background: var(--surface-overlay-strong);
+}
+.library__picker-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.library__picker-btn[aria-expanded="true"] {
+  border-color: var(--accent);
+  background: var(--surface-overlay-strong);
+}
+
+.library__picker-icon {
+  display: inline-flex;
+  color: var(--text-secondary);
+}
+.library__picker-label { white-space: nowrap; }
+
+/* Inline relevance hint inside the Sort button — appears as a small
+   suffix when search is active ("Sort: Name A-Z (relevance)"). */
+.library__sort-hint {
+  font-size: 11px;
+  color: var(--text-secondary);
   white-space: nowrap;
-  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.library__sort-hint[hidden] { display: none; }
+
+.library__picker-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
 }
 
-.library__tab:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+/* Picker popover — anchored to the button. Single-open-at-a-time
+   policy enforced by the JS (Norman conceptual model: one open
+   surface at a time keeps the mental model simple). */
+.library__picker-pop {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 220px;
+  max-width: 320px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: var(--shadow-modal);
+  padding: 6px;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.library__picker-pop[hidden] { display: none; }
+
+.library__picker-pop--filters {
+  padding: 12px;
+  gap: 16px;
+  min-width: 240px;
 }
 
-.library__tab--active {
-  background: rgba(255, 255, 255, 0.12);
+.library__picker-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.library__picker-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0;
+}
+.library__picker-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.library__picker-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
   color: var(--text-primary);
+  transition: background 100ms;
+  min-height: 32px;
+}
+.library__picker-item:hover {
+  background: var(--surface-overlay);
+}
+.library__picker-item:has(input:checked) {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.library__picker-item input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+}
+.library__picker-item--disabled,
+.library__picker-item:has(input:disabled) {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* === Active-filter chip strip ===
+ * Sits below the library header (and below the breadcrumb when
+ * folder-browse mode is active). Hidden when no filters are applied
+ * — the shared filter-chips module sets [hidden] on the container.
+ *
+ * Padding is symmetric (10px top AND bottom) so the chip row is
+ * visually equidistant from whatever's above (breadcrumb / header)
+ * and the card grid below. Asymmetric padding (the prior `8px 16px 0`)
+ * looked top-heavy when wedged between breadcrumb and grid. */
+.library__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 10px 16px;
+}
+.library__chips[hidden] { display: none; }
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 12px;
   font-weight: 500;
+  font-family: var(--font-family);
+  cursor: pointer;
+  height: 28px;
+  transition: background 120ms;
 }
-
-.library__tab--active:hover {
-  background: rgba(255, 255, 255, 0.15);
+.filter-chip:hover {
+  background: rgba(233, 69, 96, 0.22);
+}
+.filter-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.filter-chip__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.18);
 }
 
 /* Fuzzy Match Score Badges */
@@ -1081,14 +1310,14 @@
 }
 
 .library__match-score--low {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
   color: var(--text-secondary);
 }
 
 /* Suggestion Divider */
 .library__suggestion-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
   margin: 6px 0;
 }
 
@@ -1112,7 +1341,7 @@
 
 .library__collection-select-all {
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   padding: 4px 10px;
   border-radius: 5px;
@@ -1124,7 +1353,7 @@
 
 .library__collection-select-all:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
 }
 
 .library__collection-count {
@@ -1148,15 +1377,15 @@
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   cursor: pointer;
   transition: background 100ms, border-color 100ms;
 }
 
 .library__collection-card:hover {
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
 }
 
 .library__collection-card--selected {
@@ -1167,7 +1396,7 @@
 .library__collection-card-check {
   width: 16px;
   height: 16px;
-  border: 2px solid rgba(255, 255, 255, 0.3);
+  border: 2px solid var(--border-strong);
   border-radius: 3px;
   flex-shrink: 0;
   transition: background 100ms, border-color 100ms;
@@ -1204,14 +1433,14 @@
 }
 
 .library__collection-grid::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay-strong);
   border-radius: 3px;
 }
 
 /* EroScripts Button */
 .library__eroscripts-btn {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   padding: 5px 12px;
   border-radius: 6px;
@@ -1226,7 +1455,7 @@
 }
 
 .library__eroscripts-btn:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay-strong);
   color: var(--text-primary);
 }
 
@@ -1245,7 +1474,7 @@
   align-items: center;
   gap: 8px;
   padding: 8px 0 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
   margin-bottom: 10px;
 }
 
@@ -1279,8 +1508,8 @@
 
 .library__assoc-axis-select {
   flex: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   padding: 5px 8px;
   border-radius: 5px;
@@ -1309,8 +1538,8 @@
 
 .library__searchable-select-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: var(--text-primary);
   padding: 5px 8px;
   border-radius: 5px;
@@ -1335,7 +1564,7 @@
   right: 0;
   margin-top: 2px;
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
   max-height: 180px;
@@ -1362,7 +1591,7 @@
 }
 
 .library__searchable-select-option:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
 }
 
 .library__searchable-select-option--active {
@@ -1372,7 +1601,7 @@
 .library__searchable-select-clear {
   color: var(--text-secondary);
   font-style: italic;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid var(--border-subtle);
   margin-top: 2px;
   padding-top: 6px;
 }
@@ -1389,13 +1618,13 @@
 }
 
 .library__searchable-select-dropdown::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay-strong);
   border-radius: 3px;
 }
 
 .library__assoc-bp-row {
   padding: 10px 0 6px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-subtle);
   margin-top: 6px;
 }
 
@@ -1434,7 +1663,7 @@
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-overlay);
   border-radius: 6px;
   margin-bottom: 10px;
 }
@@ -1459,7 +1688,7 @@
 .library__assoc-current-type {
   font-size: 10px;
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
   padding: 1px 6px;
   border-radius: 3px;
   flex-shrink: 0;
@@ -1532,7 +1761,7 @@
   color: var(--text-dim, var(--text-secondary));
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--surface-overlay);
   flex-shrink: 0;
 }
 
@@ -1555,11 +1784,11 @@
 
 /* Custom Routing */
 .library__custom-route {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 10px;
   margin-bottom: 8px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-overlay);
 }
 
 .library__custom-route-header {
@@ -1590,7 +1819,7 @@
   flex-shrink: 0;
   background: var(--bg-card, #1c2a4a);
   color: var(--text-secondary, #a0a0a0);
-  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border: 1px solid var(--border, var(--border-subtle));
   border-radius: 6px;
   padding: 4px 10px;
   font-size: 11px;

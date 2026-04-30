@@ -29,6 +29,13 @@ const SETTINGS_DEFAULTS = {
   editor: {
     defaultCreator: '',
     patternPresets: [],
+    fastStepFrames: 6,
+  },
+  notifications: {
+    // One-time HEVC codec install guidance — set true when the user
+    // dismisses the toast permanently. See renderer/js/hevc-detect.js
+    // for what the toast does and why it exists.
+    hevcDismissed: false,
   },
 };
 

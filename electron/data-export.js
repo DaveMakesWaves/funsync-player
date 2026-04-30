@@ -3,6 +3,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { stripBlacklist } = require('./data-backup');
 
 let JSZip = null;
 
@@ -30,8 +31,15 @@ async function exportData(configData, outputPath, options = {}) {
     const Zip = await getJSZip();
     const zip = new Zip();
 
-    // Always include config.json
-    zip.file('config.json', JSON.stringify(configData, null, 2));
+    // Strip the same derived-cache fields that data-backup.js skips on
+    // every snapshot (speedStatsCache, durationCache, thumbnailCache).
+    // Without this, exports balloon by tens of MB of base64-encoded
+    // thumbnails and ship the user's library cache to wherever they
+    // share the .funsync-backup file. Single source of truth =
+    // data-backup.js::BACKUP_BLACKLIST so both surfaces stay in sync.
+    // SCOPE-data-backup.md §4.8 + §7.6a.
+    const exportable = stripBlacklist(configData);
+    zip.file('config.json', JSON.stringify(exportable, null, 2));
 
     // Optionally include funscript files
     if (options.funscriptPaths && options.funscriptPaths.length > 0) {

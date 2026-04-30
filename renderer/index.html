@@ -84,8 +84,15 @@
             <span id="queue-indicator" class="queue-indicator" hidden></span>
 
             <div class="controls__volume" role="group" aria-label="Volume controls">
+              <!-- Three-state mute icon (Nielsen #1 visibility of state).
+                   .icon-volume:    audible (volume > ~50%, not muted)
+                   .icon-volume-low: low or zero (volume ≤ 50%, not muted)
+                   .icon-muted:     explicitly muted via M key
+                   The user can distinguish "I dragged the slider down" from
+                   "I pressed M" — different recovery actions for each. -->
               <button id="btn-mute" class="control-btn" aria-label="Mute" title="Mute (M)">
                 <span class="icon-volume"><i data-lucide="volume-2"></i></span>
+                <span class="icon-volume-low" hidden><i data-lucide="volume-1"></i></span>
                 <span class="icon-muted" hidden><i data-lucide="volume-x"></i></span>
               </button>
               <input type="range" id="volume-slider" class="volume-slider"
@@ -100,6 +107,15 @@
             </div>
           </div>
 
+          <!-- Right side organised into 3 conceptual clusters separated
+               by subtle wider gaps (Norman conceptual model + Shneiderman
+               #1 consistency). The .controls-cluster-gap spacer is
+               purely visual; aria-hidden so screen readers skip it.
+
+                 [SCRIPT cluster]    funscript / variant / subtitle / editor
+                 [DEVICE cluster]    handy
+                 [WINDOW cluster]    pip / fullscreen
+          -->
           <div class="controls__right">
             <span id="funscript-badge" class="funscript-badge" hidden title="Funscript loaded"></span>
             <div id="variant-selector" class="variant-selector" hidden>
@@ -108,31 +124,78 @@
             </div>
             <span id="subtitle-badge" class="subtitle-badge" hidden title="Subtitles loaded"></span>
 
-            <button id="btn-editor" class="control-btn" aria-label="Script Editor" title="Script Editor (E)" hidden>
+            <!-- Editor / Devices / Fullscreen carry persistent text
+                 labels at ≥1024px so first-time users don't have to
+                 hover-learn their icons (Norman signifier; Nielsen #6
+                 recognition over recall). The .control-btn--labelled
+                 class drives the responsive show/hide via CSS. -->
+            <button id="btn-editor" class="control-btn control-btn--labelled" aria-label="Script Editor" title="Script Editor (E)" hidden>
               <i data-lucide="pencil"></i>
+              <span class="control-btn__label">Editor</span>
             </button>
 
-            <button id="btn-handy" class="control-btn control-btn--handy" aria-label="Device Connection" title="Devices Connection (H)">
-              <span class="icon-handy"><i data-lucide="bluetooth"></i></span>
+            <span class="controls-cluster-gap" aria-hidden="true"></span>
+
+            <!-- Devices button — was a `bluetooth` icon, but Handy uses
+                 WiFi (HSSP), TCode uses USB serial, and Buttplug can be
+                 anything Intiface speaks. The bluetooth icon misled
+                 users into thinking the app was BT-only. `cable` reads
+                 as "the connection thing" without committing to a
+                 specific transport (Nielsen #2 match real world). -->
+            <button id="btn-handy" class="control-btn control-btn--handy control-btn--labelled" aria-label="Device Connection" title="Devices Connection (H)">
+              <span class="icon-handy"><i data-lucide="cable"></i></span>
               <span class="handy-led" id="handy-led"></span>
+              <span class="control-btn__label">Devices</span>
             </button>
 
-            <button id="btn-pip" class="control-btn" aria-label="Picture in Picture" title="Picture in Picture">
-              <i data-lucide="picture-in-picture-2"></i>
-            </button>
+            <span class="controls-cluster-gap" aria-hidden="true"></span>
 
-            <button id="btn-fullscreen" class="control-btn" aria-label="Fullscreen" title="Fullscreen (F)">
+            <!-- Overflow menu — niche actions (PiP, future help link)
+                 collapse behind a `⋮` trigger so the bar stays scannable.
+                 Fullscreen and Devices stay first-class (most-used
+                 aux features). PiP is invoked rarely in a single-window
+                 desktop app — Nielsen #8 minimalist + Shneiderman #8
+                 memory load. -->
+            <div class="controls-overflow" id="controls-overflow">
+              <button id="btn-overflow" class="control-btn"
+                      aria-label="More options" title="More"
+                      aria-haspopup="menu" aria-expanded="false">
+                <i data-lucide="ellipsis-vertical"></i>
+              </button>
+              <div id="controls-overflow-menu" class="controls-overflow__menu" role="menu" hidden>
+                <button id="btn-pip" class="controls-overflow__item" role="menuitem" aria-label="Picture in Picture">
+                  <i data-lucide="picture-in-picture-2"></i>
+                  <span>Picture-in-Picture</span>
+                </button>
+                <button id="btn-help" class="controls-overflow__item" role="menuitem" aria-label="Keyboard shortcuts">
+                  <i data-lucide="keyboard"></i>
+                  <span>Keyboard shortcuts</span>
+                </button>
+              </div>
+            </div>
+
+            <button id="btn-fullscreen" class="control-btn control-btn--labelled" aria-label="Fullscreen" title="Fullscreen (F)">
               <span class="icon-expand"><i data-lucide="maximize"></i></span>
               <span class="icon-compress" hidden><i data-lucide="minimize"></i></span>
+              <span class="control-btn__label">Fullscreen</span>
             </button>
           </div>
         </div>
       </div>
 
-      <!-- Top Bar Overlay (back button + title) -->
+      <!-- Top Bar Overlay (back button + title + sync chip + category dots + quick-add)
+           The sync chip is a single-source-of-truth indicator for device sync
+           state — aggregates Handy + Buttplug + TCode + Autoblow into one
+           label visible at the top of the player view (Nielsen #1 visibility
+           of system status). Live region so screen readers announce
+           transitions ("Syncing • 2 devices" → "Disconnected"). -->
       <div class="player__top-bar">
         <button id="btn-player-back" class="player__back-btn" aria-label="Back" title="Back"><i data-lucide="arrow-left"></i></button>
         <div id="video-title" class="player__title" aria-live="polite"></div>
+        <div id="player-sync-chip" class="player__sync-chip" role="status" aria-live="polite" hidden>
+          <span class="player__sync-chip-dot" aria-hidden="true"></span>
+          <span id="player-sync-chip-text" class="player__sync-chip-text"></span>
+        </div>
         <div id="video-category-dots" class="player__category-dots"></div>
         <button id="btn-add-to-playlist" class="player__quick-add" aria-label="Add to playlist" title="Add to Playlist"><i data-lucide="plus"></i></button>
       </div>
@@ -142,6 +205,56 @@
         <button id="gap-skip-btn" class="gap-skip__btn">Skip to next action</button>
         <button id="gap-skip-cancel" class="gap-skip__cancel" hidden>Cancel</button>
       </div>
+    </div>
+  </div>
+
+  <!-- Backend-disconnected banner — shown when the Python FastAPI
+       backend dies / fails to start / hangs. Most app features keep
+       working (playback uses file:// URLs, no backend dependency) but
+       library scans / thumbnails / metadata / VR / web-remote all
+       require the backend, so the user needs a clear signal + an
+       actionable fix when it's down. Hidden by default; main process
+       sends `backend-status` via IPC on state transitions and the
+       renderer toggles `hidden` accordingly. -->
+  <div id="backend-banner" class="backend-banner" hidden role="alert" aria-live="polite">
+    <div class="backend-banner__inner">
+      <svg class="backend-banner__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+      <div class="backend-banner__body">
+        <div class="backend-banner__title" id="backend-banner-title">Backend is not responding</div>
+        <div class="backend-banner__detail" id="backend-banner-detail">Library scans, thumbnails, and VR features need it. Playback still works for already-open files.</div>
+      </div>
+      <div class="backend-banner__actions">
+        <button id="backend-banner-restart" class="backend-banner__btn backend-banner__btn--primary" type="button">Restart Backend</button>
+        <button id="backend-banner-logs" class="backend-banner__btn" type="button">View Logs</button>
+        <button id="backend-banner-dismiss" class="backend-banner__close" type="button" aria-label="Dismiss banner">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Drop-zone overlay — full-screen visual feedback during file drag.
+       Was a no-op before 2026-04-28 (DragDrop class accepted a dropZone
+       element but app.js passed `null`, so dragenter classes never landed
+       anywhere). Now a real overlay that surfaces "you can drop here"
+       (Nielsen #1 visibility) and a rejected variant for unsupported
+       file types (Nielsen #5 error prevention). -->
+  <div id="drop-zone-overlay" class="drop-zone-overlay" hidden aria-hidden="true">
+    <div class="drop-zone-overlay__inner">
+      <svg class="drop-zone-overlay__icon" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
+        <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
+        <path d="M12 18v-6"/>
+        <path d="m9 15 3 3 3-3"/>
+      </svg>
+      <div class="drop-zone-overlay__title">Drop to load</div>
+      <div class="drop-zone-overlay__subtitle">Video, funscript, or subtitle file</div>
     </div>
   </div>
 

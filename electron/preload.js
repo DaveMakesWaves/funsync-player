@@ -1,8 +1,24 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('funsync', {
+  // Static platform identifier from the main process — used by anything
+  // that needs to branch on OS (HEVC codec install guidance, native
+  // dialog quirks, etc.) without an IPC roundtrip. Values match
+  // Node's `process.platform`: 'win32' | 'linux' | 'darwin' | 'freebsd' | …
+  platform: process.platform,
   getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+
+  // Backend health monitoring — used by the disconnected-banner.
+  getBackendHealth: () => ipcRenderer.invoke('get-backend-health'),
+  restartBackend: () => ipcRenderer.invoke('restart-backend'),
+  openLogFile: () => ipcRenderer.invoke('open-log-file'),
+  // Subscribe to state-change events from the main-process health monitor.
+  onBackendStatus: (callback) => {
+    const handler = (_e, payload) => callback(payload);
+    ipcRenderer.on('backend-status', handler);
+    return () => ipcRenderer.removeListener('backend-status', handler);
+  },
   // Direct write to main.log via electron-log — used by startup-timer
   // so timing data survives even if the console transport breaks
   // (e.g. parent process closed stdout). Fire-and-forget.
@@ -58,6 +74,14 @@ contextBridge.exposeInMainWorld('funsync', {
   // Data export/import
   exportData: () => ipcRenderer.invoke('export-data'),
   importData: () => ipcRenderer.invoke('import-data'),
+
+  // Backup & Recovery (rolling snapshots, auto-recovery)
+  backupGetBootResult: () => ipcRenderer.invoke('backup:get-boot-result'),
+  backupList: () => ipcRenderer.invoke('backup:list'),
+  backupSnapshotNow: () => ipcRenderer.invoke('backup:snapshot-now'),
+  backupRestore: (subdir, filename) => ipcRenderer.invoke('backup:restore', { subdir, filename }),
+  backupOpenFolder: () => ipcRenderer.invoke('backup:open-folder'),
+  backupPreAction: (label) => ipcRenderer.invoke('backup:pre-action', label),
 
   // Backend API proxies
   fetchMetadata: (videoPath) => ipcRenderer.invoke('fetch-metadata', videoPath),

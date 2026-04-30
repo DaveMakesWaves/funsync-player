@@ -1,5 +1,7 @@
 // VideoPlayer — HTML5 video wrapper with custom controls
 
+import { showToast } from './toast.js';
+
 /**
  * Format seconds into human-readable time string.
  * @param {number} seconds
@@ -48,6 +50,7 @@ export class VideoPlayer {
 
     this.btnMute = document.getElementById('btn-mute');
     this.iconVolume = this.btnMute.querySelector('.icon-volume');
+    this.iconVolumeLow = this.btnMute.querySelector('.icon-volume-low');
     this.iconMuted = this.btnMute.querySelector('.icon-muted');
     this.volumeSlider = document.getElementById('volume-slider');
 
@@ -56,6 +59,13 @@ export class VideoPlayer {
     this.iconCompress = this.btnFullscreen.querySelector('.icon-compress');
 
     this.btnPip = document.getElementById('btn-pip');
+    // Hide the PiP button when the browser doesn't support it (Chromium
+    // on some Linux builds, embedded contexts, etc.). Cheaper than
+    // rendering it and silently failing on click — Norman constraints
+    // (limit possible actions to prevent invalid ones).
+    if (this.btnPip && document.pictureInPictureEnabled === false) {
+      this.btnPip.hidden = true;
+    }
 
     this.timeCurrent = document.getElementById('time-current');
     this.timeDuration = document.getElementById('time-duration');
@@ -119,11 +129,36 @@ export class VideoPlayer {
     // PiP
     this.btnPip.addEventListener('click', () => this.togglePip());
 
-    // Progress bar seeking
+    // Progress bar seeking — mouse drag.
     this.progressContainer.addEventListener('mousedown', (e) => this._startSeek(e));
     this.progressContainer.addEventListener('mousemove', (e) => this._onProgressHover(e));
     document.addEventListener('mousemove', (e) => this._onSeekDrag(e));
     document.addEventListener('mouseup', () => this._endSeek());
+
+    // Keyboard seeking — when the progress bar (role="slider") has
+    // focus. Arrow keys = ±5s; Shift = ±1 frame; Home / End jump to
+    // start / end. Brings the WCAG 2.1.1 keyboard contract to a control
+    // that previously only responded to mouse events.
+    this.progressContainer.addEventListener('keydown', (e) => {
+      const dur = this.video.duration;
+      if (!isFinite(dur) || dur <= 0) return;
+      let delta = 0;
+      switch (e.key) {
+        case 'ArrowLeft':  delta = e.shiftKey ? -1 / this._estimateFps() : -5; break;
+        case 'ArrowRight': delta = e.shiftKey ?  1 / this._estimateFps() :  5; break;
+        case 'Home':
+          e.preventDefault();
+          this.video.currentTime = 0;
+          return;
+        case 'End':
+          e.preventDefault();
+          this.video.currentTime = Math.max(0, dur - 0.5);
+          return;
+        default: return;
+      }
+      e.preventDefault();
+      this.video.currentTime = Math.max(0, Math.min(dur, this.video.currentTime + delta));
+    });
 
     // Controls visibility
     this.container.addEventListener('mousemove', () => this._showControls());
@@ -216,6 +251,22 @@ export class VideoPlayer {
   }
 
   /**
+   * Step forward or backward by N video frames in one go. Used by the
+   * editor's fast-step binding (OFS convention: Ctrl+Left/Right at a
+   * configurable frame count). Pauses first like `stepFrame`.
+   * @param {number} count — frames; positive = forward, negative = backward
+   */
+  stepFrames(count) {
+    if (!count) return;
+    this.video.pause();
+    const fps = this._estimateFps();
+    const newTime = Math.max(0, this.video.currentTime + count / fps);
+    if (isFinite(newTime)) {
+      this.video.currentTime = Math.min(newTime, this.video.duration || Infinity);
+    }
+  }
+
+  /**
    * Set the FPS from external metadata (e.g. backend ffprobe).
    * @param {number} fps
    */
@@ -242,18 +293,39 @@ export class VideoPlayer {
   }
 
   async toggleFullscreen() {
-    if (document.fullscreenElement) {
-      await document.exitFullscreen();
-    } else {
-      await this.container.requestFullscreen();
+    // Fullscreen can be denied by browser policy (no user gesture, or
+    // the page is in an embedded iframe without `allow="fullscreen"`).
+    // Wrap in try/catch and surface the failure so the user knows the
+    // click did something (Nielsen #1 visibility, #9 error recovery —
+    // plain language, not just a silent no-op).
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else {
+        await this.container.requestFullscreen();
+      }
+    } catch (err) {
+      const msg = (err && err.message) || 'Fullscreen unavailable in this context.';
+      showToast(`Fullscreen blocked: ${msg}`, 'warn');
     }
   }
 
   async togglePip() {
-    if (document.pictureInPictureElement) {
-      await document.exitPictureInPicture();
-    } else if (document.pictureInPictureEnabled) {
-      await this.video.requestPictureInPicture();
+    // PiP throws when: video has no metadata yet, browser blocks PiP
+    // for autoplay-restricted media, or the document doesn't have
+    // recent user interaction. Same surface-the-failure rationale as
+    // toggleFullscreen above.
+    try {
+      if (document.pictureInPictureElement) {
+        await document.exitPictureInPicture();
+      } else if (document.pictureInPictureEnabled) {
+        await this.video.requestPictureInPicture();
+      } else {
+        showToast('Picture-in-Picture is not supported by this browser.', 'warn');
+      }
+    } catch (err) {
+      const msg = (err && err.message) || 'Picture-in-Picture failed.';
+      showToast(`Picture-in-Picture: ${msg}`, 'warn');
     }
   }
 
@@ -287,11 +359,24 @@ export class VideoPlayer {
     this._updateCenterPlay(isPlaying);
   }
 
+  /** Three-state mute icon (Nielsen #1 visibility of state).
+   *
+   *  - "muted":       explicit `video.muted = true` (set by M key /
+   *                   the toggleMute path). Recovery = press M again.
+   *  - "low":         volume ≤ 50% AND not explicitly muted. The user
+   *                   dragged the slider down; recovery = drag back up.
+   *  - "audible":     volume > 50%, not muted. Default.
+   *
+   *  Without the middle state, "audible at 30%" looked identical to
+   *  "muted via M" — same `volume-x` icon, no signal which path the
+   *  user took. */
   _updateMuteButton() {
-    const muted = this.video.muted || this.video.volume === 0;
-    this.iconVolume.hidden = muted;
-    this.iconMuted.hidden = !muted;
-    this.btnMute.setAttribute('aria-label', muted ? 'Unmute' : 'Mute');
+    const isMuted = this.video.muted;
+    const isLow = !isMuted && this.video.volume <= 0.5;
+    this.iconVolume.hidden = isMuted || isLow;
+    if (this.iconVolumeLow) this.iconVolumeLow.hidden = !isLow;
+    this.iconMuted.hidden = !isMuted;
+    this.btnMute.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
   }
 
   _updateFullscreenButton() {

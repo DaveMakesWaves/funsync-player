@@ -1,12 +1,21 @@
-/* FunSync Web Remote — mobile-first UI that mirrors the desktop app's
-   palette, typography, and component styling. Colour tokens match
-   renderer/styles/player.css so the two surfaces feel like one product. */
+/* FunSync Web Remote — UI mirrors the desktop app's palette and
+   typography. Colour tokens match renderer/styles/player.css so the
+   two surfaces feel like one product.
+
+   Layout (post-redesign 2026-04-27):
+     mobile (default)   — bottom nav, content-action bar above grid
+     tablet ≥ 600px     — same shell, 3-col grid, side-drawer sheets
+     desktop ≥ 1024px   — bottom nav becomes a left rail, 4-col grid
+
+   See notes/features/SCOPE-web-remote-redesign.md for the principles
+   that drove each layout choice. Visual atoms (palette, font, card
+   radii, pill shapes) are unchanged from the previous design. */
 
 :root {
   /* Palette — identical to desktop player.css */
   --bg-primary: #1a1a2e;
   --bg-secondary: #16213e;
-  --bg-card: #1c2a4a;            /* matches --bg-modal on desktop */
+  --bg-card: #1c2a4a;
   --bg-card-hover: #233766;
   --text-primary: #e0e0e0;
   --text-secondary: #a0a0a0;
@@ -16,37 +25,51 @@
   --control-hover: rgba(255, 255, 255, 0.08);
   --border: rgba(255, 255, 255, 0.08);
 
-  /* Back-compat aliases for existing rules that still reference these */
+  /* Back-compat aliases */
   --bg: var(--bg-primary);
   --text: var(--text-primary);
   --text-dim: var(--text-secondary);
 
+  /* Layout tokens */
   --safe-top: env(safe-area-inset-top, 0);
   --safe-bottom: env(safe-area-inset-bottom, 0);
+  --nav-height: 64px;          /* bottom nav height (mobile/tablet) */
+  --rail-width: 200px;         /* left rail width (desktop ≥1024px) */
+  --tap-min: 44px;             /* WCAG 2.5.5 / Apple HIG minimum */
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-
-/* HTML `hidden` attr must beat any `display:` we set elsewhere. Without this,
-   e.g. `.header__view { display: flex }` would resurrect a hidden button. */
 [hidden] { display: none !important; }
 
-/* Icon-button baseline — all header / inline buttons pick these up. Individual
-   classes (.header__view, .controls__search-clear) still override size/padding. */
+/* ============================================================
+   Icon-button baseline
+   ============================================================ */
 .icon-btn {
-  display: inline-flex;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-secondary);
-  transition: color 120ms, background 120ms, border-color 120ms;
+  transition: background 150ms, color 150ms, border-color 150ms;
+  /* Tap target floor — ALL icon buttons inherit. WCAG 2.5.5 / Apple HIG
+     converge on 44px; we honour that everywhere. */
+  min-width: var(--tap-min);
+  min-height: var(--tap-min);
+  border-radius: 8px;
 }
-.icon-btn:hover { color: var(--text-primary); }
+.icon-btn:hover { color: var(--text-primary); background: var(--control-hover); }
 .icon-btn:active { color: var(--accent); }
+.icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-/* Wrapper around each inline SVG — lets the glyph inherit colour from the btn. */
 .icon { display: inline-flex; line-height: 0; }
 .icon svg { display: block; }
 
+/* ============================================================
+   Document shell
+   ============================================================ */
 html, body {
   margin: 0;
   padding: 0;
@@ -59,19 +82,37 @@ html, body {
   overscroll-behavior: none;
 }
 
+/* App grid: header on row 1, toolbar on row 2, scrolling main on
+   row 3, bottom nav on row 4. Becomes a 2-col grid (rail | rest)
+   at desktop.
+   Height layering (top wins):
+     1. `calc(var(--app-vh) * 100)` — JS-driven, updated on every
+        viewport-changing event in app.js. Authoritative on mobile
+        because iOS Safari doesn't recompute `100dvh` promptly after
+        orientation change (landscape -> portrait left the root
+        stuck at the pre-rotate height value, breaking the layout).
+     2. `100dvh` — modern dynamic viewport unit; fallback if the JS
+        hasn't run yet (e.g. between HTML parse and module execution).
+     3. `100vh` — older static fallback for browsers that lack `dvh`. */
 #app {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  grid-template-columns: 1fr;
   height: 100vh;
   height: 100dvh;
+  height: calc(var(--app-vh, 1vh) * 100);
 }
 
-/* Header */
+/* ============================================================
+   Header — back + title + count + refresh.
+   Per Hoober the top corners are red-zone; only "where am I" + the
+   single emergency-exit (refresh) lives here.
+   ============================================================ */
 .header {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: calc(12px + var(--safe-top)) 16px 12px;
+  gap: 10px;
+  padding: calc(10px + var(--safe-top)) 16px 10px;
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
@@ -81,12 +122,25 @@ html, body {
 
 .brand-accent { color: var(--accent); }
 
+.header__back {
+  width: var(--tap-min);
+  height: var(--tap-min);
+  flex-shrink: 0;
+  color: var(--text-primary);
+}
+
+.header__titleblock {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .header__title {
   font-size: 17px;
   font-weight: 600;
   margin: 0;
-  flex: 1;
-  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -96,213 +150,431 @@ html, body {
   font-size: 12px;
   color: var(--text-dim);
   flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
 }
 
-.header__view {
-  background: none;
+.header__action {
+  width: var(--tap-min);
+  height: var(--tap-min);
+  flex-shrink: 0;
   border: 1px solid var(--border);
-  color: var(--text-secondary);
-  width: 32px;
-  height: 28px;
-  border-radius: 6px;
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 150ms, color 150ms, border-color 150ms;
-}
-.header__view:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.18); }
-.header__view:active,
-.header__view[aria-pressed="true"] {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: var(--accent);
 }
 
-.header__back {
-  background: none;
-  border: 1px solid transparent;
-  color: var(--text-primary);
-  width: 36px;
-  height: 32px;
-  border-radius: 8px;
-  cursor: pointer;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 150ms;
-}
-.header__back:hover { background: var(--control-hover); }
-.header__view--spinning {
-  animation: spin 0.4s linear;
-}
+.header__action--spinning { animation: spin 0.6s linear; }
 @keyframes spin {
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
 
-/* Controls — search + tabs + sort + filter */
-.controls {
-  padding: 10px 16px 8px;
+/* ============================================================
+   Breadcrumb — persistent "where am I" feedback (Nielsen #1).
+   Inline below the title; horizontal-scroll on overflow.
+   ============================================================ */
+.breadcrumb {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+  margin: 0;
+}
+.breadcrumb::-webkit-scrollbar { display: none; }
+
+.breadcrumb__item {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 120ms;
+}
+.breadcrumb__item:hover { color: var(--text-primary); }
+.breadcrumb__item--current {
+  color: var(--text-primary);
+  cursor: default;
+}
+.breadcrumb__sep {
+  color: rgba(255, 255, 255, 0.2);
+  user-select: none;
+}
+
+/* ============================================================
+   Toolbar — search + filter chips + content-action bar.
+   Wrapped so the player view can hide it all in one toggle.
+   ============================================================ */
+.toolbar {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
   position: sticky;
-  top: 0;
+  top: 0; /* offset overridden by header sticky-stack */
   z-index: 9;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 16px 8px;
 }
+.toolbar--hidden { display: none; }
 
-.controls--hidden { display: none; }
-
-.controls__search {
+/* Persistent search bar — same component on every mode (Shneiderman #1). */
+.search-bar {
   position: relative;
 }
-.controls__search-icon {
+.search-bar__icon {
   position: absolute;
-  left: 10px;
+  left: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: var(--text-secondary);
   display: inline-flex;
   pointer-events: none;
 }
-.controls__search-input {
+.search-bar__input {
   width: 100%;
-  height: 36px;
-  padding: 0 36px 0 34px;
+  height: var(--tap-min);
+  padding: 0 var(--tap-min) 0 38px;
   background: var(--bg-card);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   color: var(--text);
-  font-size: 14px;
+  font-size: 15px;
   font-family: inherit;
   outline: none;
   -webkit-appearance: none;
   appearance: none;
   transition: border-color 120ms;
 }
-.controls__search-input:focus {
-  border-color: var(--accent);
-}
-.controls__search-clear {
+.search-bar__input:focus { border-color: var(--accent); }
+.search-bar__clear {
   position: absolute;
   top: 50%;
-  right: 6px;
+  right: 4px;
   transform: translateY(-50%);
-  background: none;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
   border: none;
-  cursor: pointer;
-  padding: 6px;
-  border-radius: 6px;
 }
-.controls__search-clear:hover { background: var(--control-hover); }
 
-.controls__row {
+/* Active-filter chips. Hidden via [hidden] when empty so the row
+   collapses (Nielsen #8 minimalist). Each chip carries an X to
+   remove that filter individually (Shneiderman #6). */
+.filter-chips {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.controls__row::-webkit-scrollbar { display: none; }
-.controls__row--hidden { display: none; }
-/* At the folder root, Sort doesn't apply (folders are alphabetical); the
-   tabs + VR filter are still useful for hiding empty sources. */
-.controls__row--folder-root #sortSelect { display: none; }
-
-/* Top-level mode tabs — Library / Collections / Playlists / Categories. */
-.controls__modes {
-  display: flex;
+  flex-wrap: wrap;
   gap: 6px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
-  scrollbar-width: none;
-}
-.controls__modes::-webkit-scrollbar { display: none; }
-
-.controls__mode {
-  background: transparent;
-  border: none;
-  color: var(--text-secondary);
-  padding: 6px 4px;
-  font-size: 13px;
-  font-weight: 600;
-  font-family: inherit;
-  cursor: pointer;
-  white-space: nowrap;
-  border-bottom: 2px solid transparent;
-  transition: color 120ms, border-color 120ms;
-  -webkit-tap-highlight-color: transparent;
-}
-.controls__mode:hover { color: var(--text-primary); }
-.controls__mode--active {
-  color: var(--accent);
-  border-bottom-color: var(--accent);
 }
 
-.controls__tabs {
-  display: flex;
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
   gap: 4px;
-  flex-shrink: 0;
-}
-.controls__tab {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text-secondary);
-  padding: 6px 12px;
+  padding: 4px 4px 4px 10px;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
   border-radius: 999px;
+  color: var(--accent);
   font-size: 12px;
   font-weight: 500;
   font-family: inherit;
   cursor: pointer;
-  white-space: nowrap;
-  transition: background 120ms, border-color 120ms, color 120ms;
+  height: 30px;
+  transition: background 120ms;
 }
-.controls__tab:hover { color: var(--text-primary); }
-.controls__tab--active,
-.controls__tab--active:hover {
+.filter-chip:hover { background: rgba(233, 69, 96, 0.22); }
+.filter-chip__close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.18);
+}
+
+/* Content-action bar: sort / view / folder / filters.
+   Each button has icon + (sometimes) label. The filters button
+   carries a count-badge. */
+.content-actions {
+  display: flex;
+  gap: 6px;
+  align-items: stretch;
+}
+.content-actions__btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 0 12px;
+  height: 38px;
+  min-width: var(--tap-min);
+  border-radius: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.content-actions__btn:hover { color: var(--text-primary); border-color: rgba(255,255,255,0.16); }
+.content-actions__btn:active { background: var(--bg-card-hover); }
+.content-actions__btn[aria-pressed="true"] {
   background: var(--accent-soft);
   border-color: var(--accent);
   color: var(--accent);
 }
+.content-actions__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.controls__select {
-  background: var(--bg-card);
-  border: 1px solid var(--border);
-  color: var(--text);
-  font-size: 12px;
-  padding: 6px 26px 6px 10px;
-  border-radius: 6px;
-  font-family: inherit;
-  -webkit-appearance: none;
-  appearance: none;
-  flex-shrink: 0;
-  cursor: pointer;
-  /* Inline chevron — matches Lucide 'chevron-down', stroked in --text-secondary */
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23a0a0a0' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  transition: border-color 120ms, color 120ms;
+.content-actions__icon { display: inline-flex; line-height: 0; }
+.content-actions__label { font-size: 13px; }
+
+.content-actions__btn--filters {
+  margin-left: auto; /* push filters to the right edge */
 }
-.controls__select:focus { outline: none; border-color: var(--accent); }
 
-/* Main content area */
+/* Hide the content-actions row in views where sort/filter don't apply
+   (currently the grouping-list view — collections/playlists/categories
+   index pages). Search stays visible above. */
+.content-actions--hidden { display: none; }
+
+.content-actions__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  background: var(--accent);
+  color: #fff;
+  border-radius: 9px;
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
+   Main content scroll area
+   ============================================================ */
 .main {
-  flex: 1;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding-bottom: calc(16px + var(--safe-bottom));
+  /* Bottom padding includes the nav height + safe-area so the last
+     row isn't covered by the fixed nav. */
+  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 16px);
+  min-height: 0; /* lets the grid row collapse properly */
 }
 
-/* List view */
-.list {
-  padding: 8px 0;
+/* ============================================================
+   Bottom navigation (mobile/tablet) → left rail (desktop ≥1024px).
+   Mode switching = most frequent action = lives in the easy-reach
+   green zone (Hoober).
+   ============================================================ */
+.nav-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  display: flex;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border);
+  padding-bottom: var(--safe-bottom);
+  z-index: 8;
 }
+
+.nav-tabs__tab {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 8px 4px;
+  height: var(--nav-height);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  transition: color 150ms;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-tabs__tab:hover { color: var(--text-primary); }
+.nav-tabs__tab[aria-selected="true"] { color: var(--accent); }
+.nav-tabs__tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.nav-tabs__icon {
+  display: inline-flex;
+  line-height: 0;
+}
+.nav-tabs__icon svg {
+  width: 22px;
+  height: 22px;
+}
+
+.nav-tabs__label {
+  font-size: 11px;
+  letter-spacing: 0.1px;
+}
+
+/* ============================================================
+   Bottom-sheet modal (Filters / Sort).
+   Mobile: bottom sheet sliding up.
+   Tablet (≥600px): right-side drawer.
+   Desktop (≥1024px): centred dialog.
+   ============================================================ */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.sheet__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  animation: backdrop-fade-in 200ms ease-out;
+}
+@keyframes backdrop-fade-in { from { opacity: 0; } to { opacity: 1; } }
+
+.sheet__panel {
+  position: relative;
+  background: var(--bg-secondary);
+  border-top-left-radius: 16px;
+  border-top-right-radius: 16px;
+  border-top: 1px solid var(--border);
+  max-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--safe-bottom);
+  animation: sheet-slide-up 220ms ease-out;
+}
+@keyframes sheet-slide-up {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+
+.sheet__handle {
+  width: 36px;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 2px;
+  margin: 8px auto 0;
+  flex-shrink: 0;
+}
+
+.sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px 8px;
+  flex-shrink: 0;
+}
+
+.sheet__title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sheet__close {
+  width: var(--tap-min);
+  height: var(--tap-min);
+}
+
+.sheet__body {
+  overflow-y: auto;
+  padding: 8px 16px 16px;
+}
+
+.sheet__group {
+  margin-bottom: 18px;
+}
+.sheet__group:last-child { margin-bottom: 0; }
+
+.sheet__group-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin: 0 0 8px;
+}
+
+.sheet__options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* "Single" variant for sort — vertical radio list, more readable for
+   long option text. */
+.sheet__options--single {
+  flex-direction: column;
+  flex-wrap: nowrap;
+  gap: 0;
+}
+
+.sheet__option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-secondary);
+  min-height: var(--tap-min);
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.sheet__options--single .sheet__option {
+  border-radius: 0;
+  border-bottom: none;
+}
+.sheet__options--single .sheet__option:first-child { border-top-left-radius: 10px; border-top-right-radius: 10px; }
+.sheet__options--single .sheet__option:last-child  { border-bottom: 1px solid var(--border); border-bottom-left-radius: 10px; border-bottom-right-radius: 10px; }
+
+.sheet__option:hover { color: var(--text-primary); }
+.sheet__option:has(input:checked) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.sheet__option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin: 0;
+}
+
+/* Pill-style flex-wrap variant for tab/vr — small option counts. */
+.sheet__options:not(.sheet__options--single) .sheet__option {
+  flex: 0 1 auto;
+  border-radius: 999px;
+  padding: 8px 14px;
+}
+
+/* ============================================================
+   List view — preserved from prior design (only padding tweak)
+   ============================================================ */
+.list { padding: 8px 0; }
 
 .list__row {
   display: flex;
@@ -311,15 +583,11 @@ html, body {
   padding: 10px 16px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
+  min-height: 60px;
   transition: background 120ms;
 }
-
-.list__row:active {
-  background: var(--bg-card-hover);
-}
-.list__row:hover {
-  background: var(--control-hover);
-}
+.list__row:active { background: var(--bg-card-hover); }
+.list__row:hover  { background: var(--control-hover); }
 
 .list__thumb {
   width: 112px;
@@ -330,7 +598,6 @@ html, body {
   object-fit: cover;
   overflow: hidden;
 }
-
 .list__thumb--placeholder {
   display: flex;
   align-items: center;
@@ -339,11 +606,7 @@ html, body {
   font-size: 24px;
 }
 
-.list__info {
-  flex: 1;
-  min-width: 0;
-}
-
+.list__info { flex: 1; min-width: 0; }
 .list__title {
   font-size: 14px;
   font-weight: 500;
@@ -352,7 +615,6 @@ html, body {
   text-overflow: ellipsis;
   margin-bottom: 4px;
 }
-
 .list__sub {
   font-size: 12px;
   color: var(--text-dim);
@@ -360,7 +622,6 @@ html, body {
   align-items: center;
   gap: 8px;
 }
-
 .list__badge {
   display: inline-flex;
   align-items: center;
@@ -374,18 +635,87 @@ html, body {
   color: var(--accent);
 }
 
+/* ============================================================
+   Empty / loading
+   ============================================================ */
 .empty {
   padding: 48px 24px;
   text-align: center;
   color: var(--text-dim);
 }
-
 .empty__title { font-size: 16px; margin-bottom: 6px; color: var(--text); }
 
-/* Grouping list — collections / playlists / categories index view. */
-.grouping-list {
-  padding: 8px 0;
+.loading {
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 14px;
 }
+
+/* ============================================================
+   Skeletons (§3.4.1a) — shape-matched placeholders that prevent
+   layout reflow when real data arrives. Diagonal shimmer driven by
+   `transform`, GPU-friendly, disabled under prefers-reduced-motion.
+   ============================================================ */
+.skeleton {
+  pointer-events: none;
+  user-select: none;
+}
+
+.skeleton__plate,
+.skeleton__line {
+  position: relative;
+  overflow: hidden;
+  background: var(--bg-card);
+}
+
+.skeleton__plate::after,
+.skeleton__line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.04) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  animation: skeleton-shimmer 1.5s infinite linear;
+  will-change: transform;
+}
+
+@keyframes skeleton-shimmer {
+  to { transform: translateX(100%); }
+}
+
+.skeleton__line {
+  height: 12px;
+  border-radius: 4px;
+  margin-bottom: 6px;
+}
+.skeleton__line:last-child { margin-bottom: 0; }
+.skeleton__line--small  { height: 10px; }
+.skeleton__line--40 { width: 40%; }
+.skeleton__line--60 { width: 60%; }
+.skeleton__line--70 { width: 70%; }
+.skeleton__line--80 { width: 80%; }
+.skeleton__line--85 { width: 85%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .skeleton__plate::after,
+  .skeleton__line::after,
+  .header__action--spinning,
+  .sheet__panel,
+  .sheet__backdrop {
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   Grouping list — preserved
+   ============================================================ */
+.grouping-list { padding: 8px 0; }
 
 .grouping-row {
   display: flex;
@@ -394,9 +724,10 @@ html, body {
   padding: 12px 16px;
   cursor: pointer;
   border-bottom: 1px solid var(--border);
+  min-height: 60px;
   transition: background 120ms;
 }
-.grouping-row:hover { background: var(--control-hover); }
+.grouping-row:hover  { background: var(--control-hover); }
 .grouping-row:active { background: var(--bg-card-hover); }
 
 .grouping-row__badge {
@@ -419,11 +750,7 @@ html, body {
   margin: 0 9px;
 }
 
-.grouping-row__info {
-  flex: 1;
-  min-width: 0;
-}
-
+.grouping-row__info { flex: 1; min-width: 0; }
 .grouping-row__name {
   font-size: 14px;
   font-weight: 500;
@@ -433,12 +760,10 @@ html, body {
   text-overflow: ellipsis;
   margin-bottom: 2px;
 }
-
 .grouping-row__sub {
   font-size: 12px;
   color: var(--text-dim);
 }
-
 .grouping-row__chev {
   color: var(--text-dim);
   font-size: 22px;
@@ -446,9 +771,9 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Folder-browse breadcrumb — sits above the grid when drilled into a
-   subfolder. Horizontal-scrolling on overflow so long paths don't break
-   the layout on narrow phones. */
+/* ============================================================
+   Folder breadcrumb / jump — preserved from prior design
+   ============================================================ */
 .folder-breadcrumb {
   display: flex;
   align-items: center;
@@ -488,15 +813,12 @@ html, body {
   user-select: none;
 }
 
-/* "In folder: X" jump bar shown inside grouping detail views. Matches
-   the desktop's auto-navigate-to-common-ancestor behaviour — tap to
-   drop into folder browse at that location. */
 .folder-jump {
   display: flex;
   align-items: center;
   gap: 10px;
   width: 100%;
-  padding: 10px 16px;
+  padding: 12px 16px;
   background: var(--bg-card);
   border: none;
   border-bottom: 1px solid var(--border);
@@ -505,6 +827,7 @@ html, body {
   font-family: inherit;
   cursor: pointer;
   text-align: left;
+  min-height: var(--tap-min);
   transition: background 120ms, color 120ms;
 }
 .folder-jump:hover { background: var(--bg-card-hover); color: var(--text-primary); }
@@ -514,7 +837,6 @@ html, body {
   color: var(--accent);
   flex-shrink: 0;
 }
-
 .folder-jump__label {
   flex: 1;
   min-width: 0;
@@ -526,7 +848,6 @@ html, body {
   color: var(--text-primary);
   font-weight: 600;
 }
-
 .folder-jump__chev {
   color: var(--text-dim);
   font-size: 20px;
@@ -534,12 +855,14 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Grid view */
+/* ============================================================
+   Card grid — preserved (palette, radii, badges all unchanged)
+   ============================================================ */
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
-  padding: 10px 12px calc(14px + var(--safe-bottom));
+  padding: 10px 12px calc(14px + var(--safe-bottom) + var(--nav-height));
 }
 
 .card {
@@ -619,30 +942,28 @@ html, body {
   background: var(--accent-soft);
   color: var(--accent);
 }
-.card__badge--vr { background: rgba(120, 180, 255, 0.12); color: #82b4ff; }
+.card__badge--vr           { background: rgba(120, 180, 255, 0.12); color: #82b4ff; }
 .card__badge--speed-slow   { background: rgba(120,180,255,0.12); color: #82b4ff; }
 .card__badge--speed-medium { background: rgba(0,200,180,0.12);   color: #4ecdc4; }
 .card__badge--speed-fast   { background: rgba(255,190,80,0.14);  color: #ffc15a; }
 .card__badge--speed-extreme{ background: rgba(255,130,60,0.14);  color: #ff925c; }
 .card__badge--speed-insane { background: rgba(255,70,90,0.14);   color: #ff5c74; }
 
-/* Speed-badge icon + optional number pair. Tight gap keeps it compact in
-   the 2-col phone grid. Tabular-nums so 3-digit values line up when
-   scrolling a grid of cards. */
 .card__badge--speed-slow,
 .card__badge--speed-medium,
 .card__badge--speed-fast,
 .card__badge--speed-extreme,
-.card__badge--speed-insane {
-  gap: 3px;
-}
+.card__badge--speed-insane { gap: 3px; }
+
 .card__badge-text {
   font-variant-numeric: tabular-nums;
   font-size: 9px;
   letter-spacing: 0;
 }
 
-/* Player view */
+/* ============================================================
+   Player view — preserved
+   ============================================================ */
 .player {
   display: flex;
   flex-direction: column;
@@ -680,17 +1001,8 @@ html, body {
   border-color: rgba(244, 67, 54, 0.4);
   color: #f66;
 }
-
-/* Expandable variant — summary + per-device dropdown. When expanded the
-   border-radius eases off the pill shape so the list reads as attached. */
-.player__sync-pill--expandable {
-  cursor: pointer;
-  user-select: none;
-  text-align: left;
-}
-.player__sync-pill--open {
-  border-radius: 14px;
-}
+.player__sync-pill--expandable { cursor: pointer; user-select: none; text-align: left; }
+.player__sync-pill--open { border-radius: 14px; }
 .player__sync-pill-summary {
   display: flex;
   align-items: center;
@@ -730,10 +1042,7 @@ html, body {
   font-weight: 600;
 }
 
-.player__heatmap-wrapper {
-  padding: 12px 16px 0;
-}
-
+.player__heatmap-wrapper { padding: 12px 16px 0; }
 .player__heatmap-label {
   font-size: 11px;
   color: var(--text-dim);
@@ -741,7 +1050,6 @@ html, body {
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
-
 .player__heatmap {
   width: 100%;
   height: 32px;
@@ -750,13 +1058,7 @@ html, body {
   background: rgba(255, 255, 255, 0.04);
   color: var(--accent);
 }
-
-.player__title {
-  padding: 14px 16px 4px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
+.player__title { padding: 14px 16px 4px; font-size: 16px; font-weight: 600; }
 .player__meta {
   padding: 0 16px 16px;
   font-size: 12px;
@@ -764,9 +1066,6 @@ html, body {
   display: flex;
   gap: 10px;
 }
-
-/* Speed stats on the player page — sits below meta, echoes the card
-   badge colour so the same "insane" script looks the same in both views. */
 .player__speed {
   padding: 0 16px 16px;
   display: flex;
@@ -776,31 +1075,116 @@ html, body {
   color: var(--text-secondary);
   flex-wrap: wrap;
 }
-.player__speed-badge {
-  padding: 3px 8px;
-  font-size: 11px;
-}
+.player__speed-badge { padding: 3px 8px; font-size: 11px; }
 .player__speed-stat strong {
   color: var(--text-primary);
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   margin: 0 2px;
 }
-.player__speed-unit {
-  color: var(--text-dim);
-  font-size: 10px;
+.player__speed-unit { color: var(--text-dim); font-size: 10px; }
+
+/* ============================================================
+   Responsive breakpoints
+   ============================================================ */
+
+/* Tablet: more horizontal room — wider gutters, 3-col grid. */
+@media (min-width: 600px) {
+  .header { padding-left: 24px; padding-right: 24px; }
+  .toolbar { padding-left: 24px; padding-right: 24px; }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    padding: 14px 24px calc(18px + var(--safe-bottom) + var(--nav-height));
+    gap: 14px;
+  }
+
+  /* Sheet becomes a right-side drawer instead of a bottom sheet —
+     same component, different motion. */
+  .sheet { justify-content: flex-end; align-items: stretch; flex-direction: row; }
+  .sheet__panel {
+    max-height: none;
+    height: 100%;
+    width: 380px;
+    border-radius: 0;
+    border-top: none;
+    border-left: 1px solid var(--border);
+    animation: sheet-slide-left 220ms ease-out;
+  }
+  .sheet__handle { display: none; }
+  @keyframes sheet-slide-left {
+    from { transform: translateX(100%); }
+    to   { transform: translateX(0); }
+  }
 }
 
-/* Loading state */
-.loading {
-  padding: 48px 24px;
-  text-align: center;
-  color: var(--text-dim);
-  font-size: 14px;
+/* Desktop: bottom-nav becomes a left rail. Centred max-width content
+   so 4K screens don't stretch a single row of cards across 3000px. */
+@media (min-width: 1024px) {
+  /* App grid becomes 2 columns: rail | content stack */
+  #app {
+    grid-template-columns: var(--rail-width) 1fr;
+    grid-template-rows: auto auto 1fr;
+  }
+
+  /* Header + toolbar + main span the right column */
+  .header   { grid-column: 2; }
+  .toolbar  { grid-column: 2; }
+  .main     { grid-column: 2; }
+
+  /* Nav-tabs: left rail spanning all rows on the left */
+  .nav-tabs {
+    grid-column: 1;
+    grid-row: 1 / span 3;
+    position: relative;
+    bottom: auto;
+    left: auto;
+    right: auto;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    padding: calc(20px + var(--safe-top)) 12px 20px;
+    border-top: none;
+    border-right: 1px solid var(--border);
+    background: var(--bg-secondary);
+    gap: 4px;
+    height: auto;
+  }
+
+  .nav-tabs__tab {
+    flex: 0 0 auto;
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    height: auto;
+    padding: 12px 14px;
+    border-radius: 8px;
+    text-align: left;
+    font-size: 14px;
+  }
+  .nav-tabs__tab[aria-selected="true"] {
+    background: var(--accent-soft);
+  }
+  .nav-tabs__icon svg { width: 20px; height: 20px; }
+  .nav-tabs__label { font-size: 14px; font-weight: 500; }
+
+  /* Main no longer needs bottom-nav clearance. */
+  .main { padding-bottom: calc(24px + var(--safe-bottom)); }
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    padding: 18px 32px calc(24px + var(--safe-bottom));
+    gap: 16px;
+    max-width: 1400px;
+  }
+
+  .header { padding-left: 32px; padding-right: 32px; }
+  .toolbar { padding-left: 32px; padding-right: 32px; }
+
+  /* Sheet stays a right-side drawer at desktop too — keeps the user's
+     mouse on the right edge for filter actions. */
 }
 
-/* Landscape tweaks — hide chrome when video is near fullscreen */
+/* Landscape phone — keep the chrome compact when video plays. */
 @media (orientation: landscape) and (max-height: 500px) {
-  .header { padding-top: 8px; padding-bottom: 8px; }
-  .player__video { aspect-ratio: auto; height: 55vh; }
+  .header { padding-top: 6px; padding-bottom: 6px; }
+  .player__video { aspect-ratio: auto; height: 60vh; }
 }

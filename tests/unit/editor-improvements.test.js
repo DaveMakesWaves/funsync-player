@@ -337,3 +337,201 @@ describe('numpad placement disambiguator (regression for one-point bug)', () => 
     expect(script.actions[0].pos).toBe(70);
   });
 });
+
+// --- OFS-style arrow-key remap (v0.4.4) -------------------------------
+//
+// Pre-v0.4.4 the editor's Up/Down nudged selected position and Left/Right
+// stepped one frame. There was no fast-frame-step binding and the Shift
+// modifier was unused. The remap (script-editor.js _onCanvasKeyDown):
+//
+//   Plain Left/Right       → videoPlayer.stepFrame(±1)
+//   Ctrl+Left/Right        → videoPlayer.stepFrames(±fastStepFrames)
+//   Shift+Left/Right       → moveActions(sel, ±frameMs, 0)
+//   Ctrl+Shift+Left/Right  → moveActions(sel, ±fastStepFrames*frameMs, 0)
+//   Plain Up/Down          → _selectAdjacentAction (already seeks)
+//   Ctrl+Up/Down           → _selectAdjacentActionAcrossScripts
+//   Shift+Up/Down          → moveActions(sel, 0, ±5)  (coarse pos nudge)
+//   Ctrl+Shift+Up/Down     → moveActions(sel, 0, ±1)  (fine pos nudge)
+//
+// We can't mount the full editor here (canvas + DOM + dataService), so we
+// replicate the handler's branching against EditableScript and mock spies
+// for the videoPlayer + adjacent-action helpers. This pins the dispatch
+// logic so a refactor of _onCanvasKeyDown can't silently drop a binding.
+describe('OFS-style arrow-key remap', () => {
+  const FRAME_MS = 1000 / 30;
+  const FAST_FRAMES = 6;
+
+  /** Replicates _onCanvasKeyDown's arrow-key dispatch (post-remap). */
+  function dispatchArrow(key, mods, deps) {
+    const { script, videoPlayer, selectAdjacent, selectAdjacentAcross } = deps;
+    const ctrl = mods.ctrl || false;
+    const shift = mods.shift || false;
+    const sel = script.selectedIndices;
+
+    switch (key) {
+      case 'ArrowLeft':
+        if (shift && sel.size > 0) {
+          const frames = ctrl ? FAST_FRAMES : 1;
+          script.moveActions(sel, -frames * FRAME_MS, 0);
+        } else if (ctrl) {
+          videoPlayer.stepFrames(-FAST_FRAMES);
+        } else {
+          videoPlayer.stepFrame(-1);
+        }
+        return;
+      case 'ArrowRight':
+        if (shift && sel.size > 0) {
+          const frames = ctrl ? FAST_FRAMES : 1;
+          script.moveActions(sel, frames * FRAME_MS, 0);
+        } else if (ctrl) {
+          videoPlayer.stepFrames(FAST_FRAMES);
+        } else {
+          videoPlayer.stepFrame(1);
+        }
+        return;
+      case 'ArrowUp':
+        if (shift && sel.size > 0) {
+          const delta = ctrl ? 1 : 5;
+          script.moveActions(sel, 0, delta);
+        } else if (ctrl) {
+          selectAdjacentAcross(-1);
+        } else {
+          selectAdjacent(-1);
+        }
+        return;
+      case 'ArrowDown':
+        if (shift && sel.size > 0) {
+          const delta = ctrl ? -1 : -5;
+          script.moveActions(sel, 0, delta);
+        } else if (ctrl) {
+          selectAdjacentAcross(1);
+        } else {
+          selectAdjacent(1);
+        }
+        return;
+    }
+  }
+
+  function makeDeps() {
+    return {
+      script: new EditableScript(),
+      videoPlayer: { stepFrame: vi.fn(), stepFrames: vi.fn() },
+      selectAdjacent: vi.fn(),
+      selectAdjacentAcross: vi.fn(),
+    };
+  }
+
+  // --- frame stepping (no selection) ---
+
+  it('plain Left/Right step one frame', () => {
+    const deps = makeDeps();
+    dispatchArrow('ArrowLeft', {}, deps);
+    dispatchArrow('ArrowRight', {}, deps);
+    expect(deps.videoPlayer.stepFrame).toHaveBeenCalledWith(-1);
+    expect(deps.videoPlayer.stepFrame).toHaveBeenCalledWith(1);
+  });
+
+  it('Ctrl+Left/Right step fastStepFrames', () => {
+    const deps = makeDeps();
+    dispatchArrow('ArrowLeft', { ctrl: true }, deps);
+    dispatchArrow('ArrowRight', { ctrl: true }, deps);
+    expect(deps.videoPlayer.stepFrames).toHaveBeenCalledWith(-FAST_FRAMES);
+    expect(deps.videoPlayer.stepFrames).toHaveBeenCalledWith(FAST_FRAMES);
+  });
+
+  it('Shift+Left/Right with no selection still steps the playhead', () => {
+    // Shift only takes the move-actions branch when something is selected,
+    // otherwise it falls through to frame-step (so Shift doesn't become a
+    // dead key for users without selections).
+    const deps = makeDeps();
+    dispatchArrow('ArrowRight', { shift: true }, deps);
+    expect(deps.videoPlayer.stepFrame).toHaveBeenCalledWith(1);
+  });
+
+  // --- action navigation ---
+
+  it('plain Up/Down call _selectAdjacentAction with prev/next direction', () => {
+    const deps = makeDeps();
+    dispatchArrow('ArrowUp', {}, deps);
+    dispatchArrow('ArrowDown', {}, deps);
+    expect(deps.selectAdjacent).toHaveBeenCalledWith(-1);
+    expect(deps.selectAdjacent).toHaveBeenCalledWith(1);
+  });
+
+  it('Ctrl+Up/Down call the across-scripts variant', () => {
+    const deps = makeDeps();
+    dispatchArrow('ArrowUp', { ctrl: true }, deps);
+    dispatchArrow('ArrowDown', { ctrl: true }, deps);
+    expect(deps.selectAdjacentAcross).toHaveBeenCalledWith(-1);
+    expect(deps.selectAdjacentAcross).toHaveBeenCalledWith(1);
+    // And the single-script helper must NOT fire when Ctrl is held.
+    expect(deps.selectAdjacent).not.toHaveBeenCalled();
+  });
+
+  // --- shift-modifier action moves ---
+
+  it('Shift+Left/Right moves selected actions by ±1 frame in time', () => {
+    const deps = makeDeps();
+    deps.script.insertAction(1000, 50);
+    deps.script.select(0);
+    dispatchArrow('ArrowRight', { shift: true }, deps);
+    // 1000 + 1 frame at 30fps (33.33ms) = 1033.33 → moveActions rounds to 1033
+    expect(deps.script.actions[0].at).toBe(Math.round(1000 + FRAME_MS));
+    dispatchArrow('ArrowLeft', { shift: true }, deps);
+    expect(deps.script.actions[0].at).toBe(Math.round(1000 + FRAME_MS - FRAME_MS));
+  });
+
+  it('Ctrl+Shift+Left/Right moves selected actions by ±N frames (fast)', () => {
+    const deps = makeDeps();
+    deps.script.insertAction(2000, 50);
+    deps.script.select(0);
+    dispatchArrow('ArrowRight', { ctrl: true, shift: true }, deps);
+    expect(deps.script.actions[0].at).toBe(Math.round(2000 + FAST_FRAMES * FRAME_MS));
+    // The playhead step should NOT also fire.
+    expect(deps.videoPlayer.stepFrames).not.toHaveBeenCalled();
+  });
+
+  it('Shift+Up/Down nudges selected position by ±5 (coarse)', () => {
+    const deps = makeDeps();
+    deps.script.insertAction(0, 50);
+    deps.script.select(0);
+    dispatchArrow('ArrowUp', { shift: true }, deps);
+    expect(deps.script.actions[0].pos).toBe(55);
+    dispatchArrow('ArrowDown', { shift: true }, deps);
+    expect(deps.script.actions[0].pos).toBe(50);
+  });
+
+  it('Ctrl+Shift+Up/Down nudges selected position by ±1 (fine)', () => {
+    const deps = makeDeps();
+    deps.script.insertAction(0, 50);
+    deps.script.select(0);
+    dispatchArrow('ArrowUp', { ctrl: true, shift: true }, deps);
+    expect(deps.script.actions[0].pos).toBe(51);
+    dispatchArrow('ArrowDown', { ctrl: true, shift: true }, deps);
+    expect(deps.script.actions[0].pos).toBe(50);
+    // selectAdjacentAcross should NOT fire when Shift+Ctrl is held.
+    expect(deps.selectAdjacentAcross).not.toHaveBeenCalled();
+  });
+
+  it('position nudge clamps at 0 and 100', () => {
+    const deps = makeDeps();
+    deps.script.insertAction(0, 98);
+    deps.script.select(0);
+    dispatchArrow('ArrowUp', { shift: true }, deps);   // 98 + 5 → clamp 100
+    expect(deps.script.actions[0].pos).toBe(100);
+    deps.script.insertAction(500, 2);
+    deps.script.select(1);
+    dispatchArrow('ArrowDown', { shift: true }, deps); // 2 - 5 → clamp 0
+    expect(deps.script.actions[1].pos).toBe(0);
+  });
+
+  it('multi-selection moves all selected actions together in time', () => {
+    const deps = makeDeps();
+    deps.script.insertAction(0, 25);
+    deps.script.insertAction(1000, 75);
+    deps.script.selectAll();
+    dispatchArrow('ArrowRight', { shift: true }, deps);
+    expect(deps.script.actions[0].at).toBe(Math.round(0 + FRAME_MS));
+    expect(deps.script.actions[1].at).toBe(Math.round(1000 + FRAME_MS));
+  });
+});

@@ -7,7 +7,7 @@
   height: 48px;
   padding: 0 16px;
   background: var(--bg-secondary);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
 }
 
@@ -70,17 +70,30 @@
   align-items: center;
 }
 
+/* Library dropdown arrow — Fitts: 36x36 hit area for the chevron icon.
+   Was a raw `▾` unicode glyph that needed font-size:20px to look right;
+   now an inline-SVG chevron icon. The `aria-expanded` attribute drives
+   a visual rotation so the chevron points up when the menu is open. */
 .nav-bar__library-arrow {
   background: none;
   border: none;
   color: var(--text-secondary);
-  font-size: 20px;
   cursor: pointer;
-  padding: 4px 6px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   margin-left: -2px;
   border-radius: 6px;
   line-height: 1;
-  transition: color var(--transition-fast), background var(--transition-fast);
+  transition: color var(--transition-fast), background var(--transition-fast), transform 150ms ease;
+}
+.nav-bar__library-arrow svg {
+  transition: transform 150ms ease;
+}
+.nav-bar__library-arrow[aria-expanded="true"] svg {
+  transform: rotate(180deg);
 }
 
 .nav-bar__library-arrow:hover {
@@ -94,7 +107,7 @@
   left: 0;
   margin-top: 4px;
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
   min-width: 180px;
@@ -117,7 +130,7 @@
 }
 
 .nav-bar__library-option:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
 }
 
 .nav-bar__library-option--active {
@@ -172,7 +185,7 @@
 
 .nav-bar__library-action:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-overlay);
 }
 
 .nav-bar__library-action--danger:hover {
@@ -224,62 +237,106 @@
 
 .nav-bar__library-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
   margin: 4px 8px;
 }
 
-/* === EroScripts Button === */
-
-.nav-bar__eroscripts {
-  margin-left: auto;
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text-secondary);
-  padding: 6px 12px;
-  border-radius: 6px;
-  font-size: 12px;
-  cursor: pointer;
-  transition: color var(--transition-fast), background var(--transition-fast), border-color var(--transition-fast);
-}
-
-.nav-bar__eroscripts:hover {
-  color: var(--text-primary);
-  background: var(--control-hover);
-}
-
-.nav-bar__eroscripts--connected {
-  border-color: rgba(76, 175, 80, 0.4);
-  color: #4caf50;
-}
-
-.nav-bar__eroscripts--connected:hover {
-  color: #66bb6a;
-}
-
-/* === Handy Status Widget === */
-
-.nav-bar__handy {
-  margin-left: 8px;
-  display: flex;
+/* === Right-side action buttons (unified) ============================
+ *
+ * One class for ALL right-side buttons (EroScripts, Devices, Web
+ * Remote, VR, Settings). Was four different shapes pre-redesign:
+ *   - .nav-bar__eroscripts   bordered pill
+ *   - .nav-bar__handy        multi-element widget
+ *   - .nav-bar__settings     icon-only square (also used by VR + Remote)
+ * Visual fragmentation made the bar read as four separate categories.
+ * Unified into .nav-bar__action — Shneiderman #1 consistency, Nielsen
+ * #4 standards.
+ *
+ * Modifier classes layered on top:
+ *   .nav-bar__handy           multi-element widget shape (LED + 2 spans)
+ *   .nav-bar__eroscripts      reuses base — no special border anymore
+ *   .nav-bar__remote-btn      icon button with optional --connected tint
+ *   .nav-bar__vr-btn          icon button with --connected tint
+ *   .nav-bar__settings        rightmost icon button
+ */
+.nav-bar__action {
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   background: none;
   border: none;
   color: var(--text-secondary);
-  padding: 8px 14px;
+  padding: 0 10px;
+  min-width: 36px;
+  min-height: 36px;
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
+  line-height: 1;
   cursor: pointer;
+  white-space: nowrap;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
-
-.nav-bar__handy:hover {
+.nav-bar__action:hover {
   color: var(--text-primary);
   background: var(--control-hover);
+}
+.nav-bar__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Action labels — visible at desktop widths only. Below 1024px the
+   right-side buttons collapse to icon-only (matches the player
+   bottom bar's .control-btn--labelled pattern). EroScripts and Devices
+   are wider with permanent text; the others are icon-only at narrow
+   widths and gain text labels at ≥1024px. */
+.nav-bar__action-label { display: none; }
+@media (min-width: 1024px) {
+  .nav-bar__action-label {
+    display: inline;
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.1px;
+  }
+}
+/* EroScripts label is always visible (was always visible pre-redesign;
+   it's the most user-action-y of the right-side buttons and the label
+   adds material recognition). Same for the Devices widget — its label
+   is part of its multi-element shape. */
+.nav-bar__eroscripts .nav-bar__action-label,
+.nav-bar__handy .nav-bar__action-label {
+  display: inline;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* Push the entire right side to the right (was on .nav-bar__eroscripts;
+   moved here so the position is independent of which is the leftmost
+   right-side button). */
+.nav-bar__eroscripts { margin-left: auto; }
+
+/* EroScripts connected-state tint — green border + accent text was the
+   prior design; kept as a colour change without the bordered-pill
+   variant so it visually fits the rest of the actions. */
+.nav-bar__eroscripts--connected { color: #4caf50; }
+.nav-bar__eroscripts--connected:hover { color: #66bb6a; }
+
+/* Cluster gap — purely visual spacing between conceptual groups in the
+   nav bar. Same approach as the player bottom-bar's .controls-cluster-gap
+   (Norman conceptual model: same gap inside a cluster, bigger gap
+   between clusters reads as group boundary without needing a line). */
+.nav-bar__cluster-gap {
+  width: 12px;
+  flex-shrink: 0;
+}
+
+/* Devices widget — LED dot + label + status text. Inherits the
+   .nav-bar__action base; the only differences are the multi-element
+   gap and the LED-specific styling. */
+.nav-bar__handy {
+  gap: 8px;
 }
 
 .nav-bar__handy-led {
@@ -290,17 +347,14 @@
   flex-shrink: 0;
   transition: box-shadow 150ms ease;
 }
-
 .nav-bar__handy-led--connected {
   background: #4caf50;
   box-shadow: 0 0 6px #4caf50;
 }
-
 .nav-bar__handy-led--connecting {
   background: #ff9800;
   animation: pulse 1s ease-in-out infinite;
 }
-
 .nav-bar__handy-led--active {
   box-shadow: 0 0 8px 2px #4caf50;
 }
@@ -315,24 +369,12 @@
   line-height: 1;
 }
 
-/* Settings Button */
-.nav-bar__settings {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: none;
-  border: none;
-  color: var(--text-secondary);
-  padding: 8px;
-  border-radius: 6px;
-  cursor: pointer;
-  margin-left: 4px;
-  transition: color var(--transition-fast), background var(--transition-fast);
-}
-
-.nav-bar__settings:hover {
-  color: var(--text-primary);
-  background: var(--control-hover);
+/* Web Remote connected tint — mirrors the VR pattern below.
+   Active when ≥1 phone is connected to the remote server. */
+.nav-bar__remote-btn--connected,
+.nav-bar__remote-btn--connected:hover {
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 /* VR toolbar button — tints accent when the PCVR companion bridge is
@@ -342,4 +384,15 @@
 .nav-bar__vr-btn--connected:hover {
   color: var(--accent, #e94560);
   background: var(--accent-soft, rgba(233, 69, 96, 0.14));
+}
+
+/* `--waiting` is the silent-failure tint: TCP socket is open but
+   HereSphere isn't pushing packets (timestamp-server toggle off,
+   wrong port, etc.). Yellow warns the user that the bridge is
+   "connected but not actually working" — was a Nielsen #1 visibility
+   gap that let the toys sit silent while the UI showed green. */
+.nav-bar__vr-btn--waiting,
+.nav-bar__vr-btn--waiting:hover {
+  color: var(--state-warning);
+  background: var(--state-warning-soft);
 }

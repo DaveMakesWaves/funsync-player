@@ -61,6 +61,27 @@ export { default as LayoutGrid } from '../../node_modules/lucide/dist/esm/icons/
 export { default as LayoutList } from '../../node_modules/lucide/dist/esm/icons/layout-list.js';
 export { default as Unplug } from '../../node_modules/lucide/dist/esm/icons/unplug.js';
 export { default as Settings } from '../../node_modules/lucide/dist/esm/icons/settings.js';
+// Added 2026-04-27 for the desktop redesign — sort + filters trigger
+// buttons in the library header.
+export { default as ArrowDownAZ } from '../../node_modules/lucide/dist/esm/icons/arrow-down-a-z.js';
+export { default as SlidersHorizontal } from '../../node_modules/lucide/dist/esm/icons/sliders-horizontal.js';
+// ChevronDown — replaces the raw `▾` text used in the nav-bar library
+// arrow. Real semantic icon, not a unicode glyph.
+export { default as ChevronDown } from '../../node_modules/lucide/dist/esm/icons/chevron-down.js';
+// Search — visible affordance in the library search input (left-side
+// icon, complements the placeholder which disappears on focus).
+export { default as Search } from '../../node_modules/lucide/dist/esm/icons/search.js';
+// Cable — replaces Bluetooth on the player Devices button (2026-04-27
+// player-bottom-bar polish). Bluetooth was misleading: Handy is WiFi,
+// TCode is serial, Buttplug uses Intiface (which can be any transport).
+export { default as Cable } from '../../node_modules/lucide/dist/esm/icons/cable.js';
+// Volume1 — middle state for the 3-state mute icon set.
+//   Volume2 = audible (volume > 0, not muted)
+//   Volume1 = low-or-zero (volume ≤ ~50% and not muted)
+//   VolumeX = explicitly muted (regardless of volume)
+export { default as Volume1 } from '../../node_modules/lucide/dist/esm/icons/volume-1.js';
+// Keyboard — overflow menu's "Keyboard shortcuts" item icon.
+export { default as Keyboard } from '../../node_modules/lucide/dist/esm/icons/keyboard.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

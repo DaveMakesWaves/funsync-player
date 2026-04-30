@@ -7,6 +7,7 @@ import {
   DEVICE_OFFSET_PRESETS,
 } from '../js/auto-offset.js';
 import { eventBus } from '../js/event-bus.js';
+import { showToast } from '../js/toast.js';
 // TCode v0.3 axes exposed in the Axis Ranges UI. Naming + type match the
 // multi-axis spec module (renderer/js/multi-axis.js) and the official TCode
 // specification. L0 is the main stroke; R0-R2 are rotation, V* are vibration,
@@ -43,6 +44,14 @@ export class ConnectionPanel {
     this._createPanel();
     this._bindEvents();
     this._loadSavedSettings();
+
+    // Initial tab LED state — all four start "not connected" so the
+    // strip reads the correct neutral state on first show. Real status
+    // updates flow in via SDK callbacks once auto-connect kicks off.
+    this._setTabLedState('handy', 'disconnected');
+    this._setTabLedState('buttplug', 'disconnected');
+    this._setTabLedState('tcode', 'disconnected');
+    this._setTabLedState('autoblow', 'disconnected');
   }
 
   _createPanel() {
@@ -50,25 +59,41 @@ export class ConnectionPanel {
     this._panel.className = 'connection-panel';
     this._panel.hidden = true;
     this._panel.setAttribute('role', 'dialog');
-    this._panel.setAttribute('aria-label', 'Handy Connection');
+    this._panel.setAttribute('aria-modal', 'true');
+    this._panel.setAttribute('aria-labelledby', 'connection-panel__title');
 
     this._panel.innerHTML = `
       <div class="connection-panel__header">
-        <div class="connection-panel__tabs">
-          <button class="connection-panel__tab connection-panel__tab--active" data-tab="handy">Handy</button>
-          <button class="connection-panel__tab" data-tab="buttplug">Buttplug.io</button>
-          <button class="connection-panel__tab" data-tab="tcode">TCode</button>
-          <button class="connection-panel__tab" data-tab="autoblow">Autoblow</button>
-          <button class="connection-panel__tab" data-tab="sync">Sync</button>
-        </div>
-        <button class="connection-panel__close control-btn" aria-label="Close"><i data-lucide="x"></i></button>
+        <h2 id="connection-panel__title" class="connection-panel__title">Device Connection</h2>
+        <button class="connection-panel__close control-btn" aria-label="Close Device Connection"><i data-lucide="x"></i></button>
+      </div>
+      <div class="connection-panel__tabs" role="tablist" aria-label="Device tabs">
+        <button class="connection-panel__tab connection-panel__tab--active" role="tab" id="connection-panel__tab-btn-handy" aria-selected="true" aria-controls="tab-handy" data-tab="handy">
+          <span class="connection-panel__tab-led" data-tab-led="handy" aria-hidden="true"></span>
+          <span class="connection-panel__tab-label">Handy</span>
+        </button>
+        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-buttplug" aria-selected="false" aria-controls="tab-buttplug" data-tab="buttplug" tabindex="-1">
+          <span class="connection-panel__tab-led" data-tab-led="buttplug" aria-hidden="true"></span>
+          <span class="connection-panel__tab-label">Buttplug.io</span>
+        </button>
+        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-tcode" aria-selected="false" aria-controls="tab-tcode" data-tab="tcode" tabindex="-1">
+          <span class="connection-panel__tab-led" data-tab-led="tcode" aria-hidden="true"></span>
+          <span class="connection-panel__tab-label">TCode</span>
+        </button>
+        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-autoblow" aria-selected="false" aria-controls="tab-autoblow" data-tab="autoblow" tabindex="-1">
+          <span class="connection-panel__tab-led" data-tab-led="autoblow" aria-hidden="true"></span>
+          <span class="connection-panel__tab-label">Autoblow</span>
+        </button>
+        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-sync" aria-selected="false" aria-controls="tab-sync" data-tab="sync" tabindex="-1">
+          <span class="connection-panel__tab-label">Sync</span>
+        </button>
       </div>
 
-      <div class="connection-panel__tab-content" id="tab-handy">
+      <div class="connection-panel__tab-content" id="tab-handy" role="tabpanel" aria-labelledby="connection-panel__tab-btn-handy">
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="connection-led"></span>
-        <span class="connection-panel__status-text" id="connection-status-text">Disconnected</span>
+        <span class="connection-panel__status-text" id="connection-status-text">Not connected</span>
       </div>
 
       <div class="connection-panel__form">
@@ -144,11 +169,11 @@ export class ConnectionPanel {
 
       </div><!-- end tab-handy -->
 
-      <div class="connection-panel__tab-content" id="tab-buttplug" hidden>
+      <div class="connection-panel__tab-content" id="tab-buttplug" role="tabpanel" aria-labelledby="connection-panel__tab-btn-buttplug" hidden>
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="bp-connection-led"></span>
-        <span class="connection-panel__status-text" id="bp-connection-status-text">Disconnected</span>
+        <span class="connection-panel__status-text" id="bp-connection-status-text">Not connected</span>
       </div>
 
       <div class="connection-panel__form">
@@ -165,7 +190,7 @@ export class ConnectionPanel {
       <div class="connection-panel__info" id="bp-device-section" hidden>
         <div class="connection-panel__section-label">Devices</div>
         <div id="bp-device-list" class="connection-panel__device-list">
-          <div class="connection-panel__no-devices">No devices found</div>
+          <div class="connection-panel__no-devices">No devices found — click Scan to search</div>
         </div>
         <button id="btn-bp-scan" class="connection-panel__btn connection-panel__btn--secondary">
           Scan for Devices
@@ -174,18 +199,18 @@ export class ConnectionPanel {
 
       </div><!-- end tab-buttplug -->
 
-      <div class="connection-panel__tab-content" id="tab-tcode" hidden>
+      <div class="connection-panel__tab-content" id="tab-tcode" role="tabpanel" aria-labelledby="connection-panel__tab-btn-tcode" hidden>
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="tcode-led"></span>
-        <span class="connection-panel__status-text" id="tcode-status-text">Disconnected</span>
+        <span class="connection-panel__status-text" id="tcode-status-text">Not connected</span>
       </div>
 
       <div class="connection-panel__form">
         <label class="connection-panel__label">Serial Port</label>
         <div class="connection-panel__input-row">
           <select id="tcode-port-select" class="connection-panel__input" style="flex:1" aria-label="Serial port"></select>
-          <button id="tcode-refresh-btn" class="connection-panel__btn" style="min-width:auto;padding:6px 10px" title="Refresh ports">↻</button>
+          <button id="tcode-refresh-btn" class="connection-panel__action connection-panel__action--utility" title="Refresh ports" aria-label="Refresh serial port list">↻</button>
         </div>
 
         <label class="connection-panel__label" style="margin-top:8px">Baud Rate</label>
@@ -210,11 +235,11 @@ export class ConnectionPanel {
 
       </div><!-- end tab-tcode -->
 
-      <div class="connection-panel__tab-content" id="tab-autoblow" hidden>
+      <div class="connection-panel__tab-content" id="tab-autoblow" role="tabpanel" aria-labelledby="connection-panel__tab-btn-autoblow" hidden>
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="ab-led"></span>
-        <span class="connection-panel__status-text" id="ab-status-text">Disconnected</span>
+        <span class="connection-panel__status-text" id="ab-status-text">Not connected</span>
       </div>
 
       <div class="connection-panel__form">
@@ -237,7 +262,7 @@ export class ConnectionPanel {
         <div class="connection-panel__setting-row">
           <span class="connection-panel__setting-label">Latency</span>
           <span id="ab-latency" class="connection-panel__setting-value">—</span>
-          <button id="ab-latency-btn" class="connection-panel__btn" style="min-width:auto;padding:4px 10px;font-size:11px">Measure</button>
+          <button id="ab-latency-btn" class="connection-panel__action connection-panel__action--utility">Measure</button>
         </div>
         <div class="connection-panel__setting-row">
           <span class="connection-panel__setting-label">Offset</span>
@@ -248,7 +273,7 @@ export class ConnectionPanel {
 
       </div><!-- end tab-autoblow -->
 
-      <div class="connection-panel__tab-content" id="tab-sync" hidden>
+      <div class="connection-panel__tab-content" id="tab-sync" role="tabpanel" aria-labelledby="connection-panel__tab-btn-sync" hidden>
 
       <div class="connection-panel__section" style="padding:8px 12px;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:6px;margin-bottom:10px">
         <span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px">EXPERIMENTAL</span>
@@ -273,14 +298,14 @@ export class ConnectionPanel {
           <span id="sync-vr-transport" class="connection-panel__setting-value">—</span>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px">
-          <button id="sync-refresh-btn" class="connection-panel__btn" style="min-width:auto;padding:4px 10px;font-size:11px">Refresh</button>
+          <button id="sync-refresh-btn" class="connection-panel__action connection-panel__action--utility">Refresh</button>
         </div>
       </div>
 
       <div class="connection-panel__section">
         <label class="connection-panel__section-label">Per-Device Offsets</label>
         <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7">
-          Each device has its own offset to compensate for its specific command latency. Negative values fire commands earlier.
+          Each device has its own offset to compensate for command latency. Negative values fire commands earlier. The slider here mirrors the offset on the device's own tab — change either, and both update.
         </div>
         <div id="sync-device-rows"></div>
       </div>
@@ -419,9 +444,26 @@ export class ConnectionPanel {
     // Reset stroke button
     this._panel.querySelector('#btn-reset-stroke').addEventListener('click', () => this._onResetStroke());
 
-    // Tab switching
-    for (const tab of this._panel.querySelectorAll('.connection-panel__tab')) {
+    // Tab switching — click activates a tab; arrow keys move focus
+    // within the tablist per WAI-ARIA APG (Left/Right + Home/End,
+    // wrapping at edges).
+    const tabButtons = Array.from(this._panel.querySelectorAll('.connection-panel__tab'));
+    for (const tab of tabButtons) {
       tab.addEventListener('click', () => this._switchTab(tab.dataset.tab));
+      tab.addEventListener('keydown', (e) => {
+        const idx = tabButtons.indexOf(tab);
+        let nextIdx = null;
+        if (e.key === 'ArrowRight') nextIdx = (idx + 1) % tabButtons.length;
+        else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + tabButtons.length) % tabButtons.length;
+        else if (e.key === 'Home') nextIdx = 0;
+        else if (e.key === 'End') nextIdx = tabButtons.length - 1;
+        if (nextIdx != null) {
+          e.preventDefault();
+          const next = tabButtons[nextIdx];
+          this._switchTab(next.dataset.tab);
+          next.focus();
+        }
+      });
     }
 
     // SDK callbacks
@@ -486,12 +528,19 @@ export class ConnectionPanel {
       this._panel.querySelector('#ab-latency-btn')?.addEventListener('click', async () => {
         const btn = this._panel.querySelector('#ab-latency-btn');
         const display = this._panel.querySelector('#ab-latency');
+        const originalText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = '...';
-        const latency = await this.autoblowManager.estimateLatency();
-        display.textContent = `${latency}ms`;
-        btn.textContent = 'Measure';
-        btn.disabled = false;
+        btn.textContent = 'Measuring…';
+        try {
+          const latency = await this.autoblowManager.estimateLatency();
+          display.textContent = `${latency}ms`;
+          showToast(`Autoblow latency: ${latency} ms`, 'info', 2500);
+        } catch (err) {
+          showToast(`Latency measurement failed: ${err?.message || 'unknown error'}`, 'error', 4000);
+        } finally {
+          btn.textContent = originalText;
+          btn.disabled = false;
+        }
       });
 
       this.autoblowManager.onConnect = () => this._updateAutoblowStatus('connected');
@@ -590,6 +639,7 @@ export class ConnectionPanel {
     const offsetSection = this._panel.querySelector('#offset-section');
     const strokeSection = this._panel.querySelector('#stroke-section');
 
+    this._setTabLedState('handy', status);
     led.className = 'connection-panel__led';
 
     switch (status) {
@@ -601,6 +651,7 @@ export class ConnectionPanel {
         syncSection.hidden = false;
         offsetSection.hidden = false;
         strokeSection.hidden = false;
+        this._handyEverConnected = true;
         // Apply saved offset and stroke zone to device
         this._applySavedDeviceSettings();
         break;
@@ -621,7 +672,10 @@ export class ConnectionPanel {
 
       case 'disconnected':
       default:
-        text.textContent = 'Disconnected';
+        // "Disconnected" only when the device was previously connected
+        // in this session (real drop-out). On first launch / after error
+        // we say "Not connected" — neutral, not failure framing.
+        text.textContent = this._handyEverConnected ? 'Disconnected' : 'Not connected';
         btn.textContent = 'Connect';
         btn.disabled = false;
         infoSection.hidden = true;
@@ -701,13 +755,51 @@ export class ConnectionPanel {
     }
   }
 
+  /**
+   * Mirror per-tab connection state onto the tab button's LED dot and
+   * aria-label. Lets the user see "Handy is connected, Buttplug is not"
+   * across the whole tab strip without clicking through. The LED is
+   * visual; the aria-label is the canonical semantic value for screen
+   * readers (Norman signifier — text canonical, colour secondary).
+   * @param {string} tabId — 'handy' | 'buttplug' | 'tcode' | 'autoblow'
+   * @param {string} status — 'connected' | 'connecting' | 'error' | 'disconnected'
+   */
+  _setTabLedState(tabId, status) {
+    if (!this._panel) return;
+    const led = this._panel.querySelector(`[data-tab-led="${tabId}"]`);
+    if (led) {
+      led.className = 'connection-panel__tab-led';
+      if (status === 'connected') led.classList.add('connection-panel__tab-led--connected');
+      else if (status === 'connecting') led.classList.add('connection-panel__tab-led--connecting');
+      else if (status === 'error') led.classList.add('connection-panel__tab-led--error');
+    }
+    const labels = {
+      handy: 'Handy', buttplug: 'Buttplug.io',
+      tcode: 'TCode', autoblow: 'Autoblow',
+    };
+    const stateMap = {
+      connected: 'connected', connecting: 'connecting...',
+      error: 'connection failed', disconnected: 'not connected',
+    };
+    const tabBtn = this._panel.querySelector(`#connection-panel__tab-btn-${tabId}`);
+    if (tabBtn) {
+      tabBtn.setAttribute('aria-label', `${labels[tabId] || tabId}: ${stateMap[status] || status}`);
+    }
+  }
+
   // --- Tab Switching ---
 
   _switchTab(tabId) {
     this._activeTab = tabId;
 
+    // Update tab buttons: visual --active class + ARIA aria-selected +
+    // roving tabindex (only the active tab is reachable via Tab; arrow
+    // keys move within the tablist per WAI-ARIA APG).
     for (const tab of this._panel.querySelectorAll('.connection-panel__tab')) {
-      tab.classList.toggle('connection-panel__tab--active', tab.dataset.tab === tabId);
+      const isActive = tab.dataset.tab === tabId;
+      tab.classList.toggle('connection-panel__tab--active', isActive);
+      tab.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      tab.tabIndex = isActive ? 0 : -1;
     }
 
     this._panel.querySelector('#tab-handy').hidden = tabId !== 'handy';
@@ -755,6 +847,7 @@ export class ConnectionPanel {
     const btn = this._panel.querySelector('#btn-bp-connect');
     const deviceSection = this._panel.querySelector('#bp-device-section');
 
+    this._setTabLedState('buttplug', status);
     led.className = 'connection-panel__led';
 
     switch (status) {
@@ -764,6 +857,7 @@ export class ConnectionPanel {
         btn.textContent = 'Disconnect';
         btn.disabled = false;
         deviceSection.hidden = false;
+        this._buttplugEverConnected = true;
         this._updateButtplugDeviceList();
         break;
 
@@ -783,7 +877,7 @@ export class ConnectionPanel {
 
       case 'disconnected':
       default:
-        text.textContent = 'Disconnected';
+        text.textContent = this._buttplugEverConnected ? 'Disconnected' : 'Not connected';
         btn.textContent = 'Connect';
         btn.disabled = false;
         deviceSection.hidden = true;
@@ -798,7 +892,7 @@ export class ConnectionPanel {
     const devices = this.buttplug.devices;
 
     if (devices.length === 0) {
-      list.innerHTML = '<div class="connection-panel__no-devices">No devices found — click Scan</div>';
+      list.innerHTML = '<div class="connection-panel__no-devices">No devices found — click Scan to search</div>';
       return;
     }
 
@@ -825,7 +919,7 @@ export class ConnectionPanel {
       header.appendChild(badges);
 
       const testBtn = document.createElement('button');
-      testBtn.className = 'connection-panel__device-test';
+      testBtn.className = 'connection-panel__action connection-panel__action--utility connection-panel__device-test';
       testBtn.textContent = 'Test';
       testBtn.title = 'Send a brief test movement';
       testBtn.addEventListener('click', () => this._testDevice(dev));
@@ -843,8 +937,13 @@ export class ConnectionPanel {
       axisSelect.className = 'connection-panel__device-select';
       axisSelect.title = 'What drives this device';
 
+      // Per-device axis assignment dropdown. Labels follow "Name (Code)"
+      // so the user can recognise both the friendly name AND the TCode
+      // identifier they see elsewhere (TCode panel, library cards).
+      // Previously L0 was labelled "Main Script" without the code,
+      // breaking that recognition pattern.
       const axisOptions = [
-        { value: 'L0', label: 'Main Script' },
+        { value: 'L0', label: 'Main / Stroke (L0)' },
         { value: '__custom__', label: 'Follow Custom Routing' },
         { value: 'L1', label: 'Surge (L1)' },
         { value: 'L2', label: 'Sway (L2)' },
@@ -953,16 +1052,20 @@ export class ConnectionPanel {
         maxVal.className = 'connection-panel__safety-value';
         const currentMax = this.buttplugSync?.getMaxIntensity(dev.index) ?? 70;
         maxVal.textContent = `${currentMax}%`;
+        if (currentMax >= 70) maxVal.classList.add('connection-panel__safety-value--warn');
         const maxSlider = document.createElement('input');
         maxSlider.type = 'range';
         maxSlider.min = '0';
         maxSlider.max = '100';
         maxSlider.value = String(currentMax);
         maxSlider.className = 'connection-panel__safety-slider';
+        // Soft visual warn at ≥ 70 % — was 80 %, but for a safety-critical
+        // control the user should see the heightened-risk threshold well
+        // before the hard confirm at 90 % (Shneiderman #5 prevent errors).
         maxSlider.addEventListener('input', () => {
           const v = parseInt(maxSlider.value, 10);
           maxVal.textContent = `${v}%`;
-          if (v > 80) maxVal.classList.add('connection-panel__safety-value--warn');
+          if (v >= 70) maxVal.classList.add('connection-panel__safety-value--warn');
           else maxVal.classList.remove('connection-panel__safety-value--warn');
         });
         maxSlider.addEventListener('change', async () => {
@@ -1281,7 +1384,7 @@ export class ConnectionPanel {
     if (ports.length === 0) {
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = 'No ports found';
+      opt.textContent = 'No serial ports found — click ↻ to refresh';
       select.appendChild(opt);
     } else {
       for (const p of ports) {
@@ -1300,14 +1403,17 @@ export class ConnectionPanel {
     const btn = this._panel.querySelector('#tcode-connect-btn');
     const axisSection = this._panel.querySelector('#tcode-axis-settings');
 
+    this._setTabLedState('tcode', status);
     if (led) {
       led.className = 'connection-panel__led';
       if (status === 'connected') led.classList.add('connection-panel__led--connected');
       else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
     }
+    if (status === 'connected') this._tcodeEverConnected = true;
     if (text) {
       text.textContent = status === 'connected' ? 'Connected'
-        : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+        : status === 'connecting' ? 'Connecting...'
+        : (this._tcodeEverConnected ? 'Disconnected' : 'Not connected');
     }
     if (btn) {
       btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
@@ -1501,14 +1607,17 @@ export class ConnectionPanel {
     const infoSection = this._panel.querySelector('#ab-device-info');
     const typeEl = this._panel.querySelector('#ab-device-type');
 
+    this._setTabLedState('autoblow', status);
     if (led) {
       led.className = 'connection-panel__led';
       if (status === 'connected') led.classList.add('connection-panel__led--connected');
       else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
     }
+    if (status === 'connected') this._autoblowEverConnected = true;
     if (text) {
       text.textContent = status === 'connected' ? 'Connected'
-        : status === 'connecting' ? 'Connecting...' : 'Disconnected';
+        : status === 'connecting' ? 'Connecting...'
+        : (this._autoblowEverConnected ? 'Disconnected' : 'Not connected');
     }
     if (btn) {
       btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
@@ -1537,9 +1646,50 @@ export class ConnectionPanel {
   show() {
     this._panel.hidden = false;
     this._visible = true;
-    this._panel.querySelector('#connection-key-input')?.focus();
 
-    // Clean up previous listener before adding new one
+    // Stash the previously-focused element so we can restore on hide.
+    // Modal contract per DESIGN.md §2.5 — focus trap on Tab/Shift+Tab,
+    // Escape close, focus restored on close. Outside-click close is
+    // preserved (was the only dismissal path before this contract).
+    this._previouslyFocused = document.activeElement;
+
+    // Initial focus — prefer the connection-key input on the active
+    // tab; fall back to the active tab button if it's hidden.
+    const initialFocus = this._panel.querySelector('#connection-key-input')
+      || this._panel.querySelector('.connection-panel__tab--active');
+    initialFocus?.focus();
+
+    // Focus trap — Tab cycles within the panel.
+    this._boundFocusTrap = (e) => {
+      if (e.key !== 'Tab') return;
+      const focusables = this._panel.querySelectorAll(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      const visible = Array.from(focusables).filter(el => el.offsetParent !== null);
+      if (visible.length === 0) return;
+      const first = visible[0];
+      const last = visible[visible.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    this._panel.addEventListener('keydown', this._boundFocusTrap);
+
+    // Escape closes — third dismissal path alongside backdrop click and
+    // the X button. DESIGN.md §2.5 contract: three exit paths.
+    this._boundEscapeKey = (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.hide();
+      }
+    };
+    this._panel.addEventListener('keydown', this._boundEscapeKey);
+
+    // Outside-click close (preserved from prior implementation).
     if (this._boundOutsideClick) {
       document.removeEventListener('click', this._boundOutsideClick, true);
     }
@@ -1562,12 +1712,25 @@ export class ConnectionPanel {
       document.removeEventListener('click', this._boundOutsideClick, true);
       this._boundOutsideClick = null;
     }
+    if (this._boundFocusTrap) {
+      this._panel.removeEventListener('keydown', this._boundFocusTrap);
+      this._boundFocusTrap = null;
+    }
+    if (this._boundEscapeKey) {
+      this._panel.removeEventListener('keydown', this._boundEscapeKey);
+      this._boundEscapeKey = null;
+    }
     if (this._vibeHelpCloseHandler) {
       document.removeEventListener('click', this._vibeHelpCloseHandler);
       this._vibeHelpCloseHandler = null;
     }
     // Remove any open tooltips
     this._panel.querySelector('.connection-panel__vibe-help')?.remove();
+    // Restore focus to whatever owned it before show() (Modal contract).
+    if (this._previouslyFocused && typeof this._previouslyFocused.focus === 'function') {
+      this._previouslyFocused.focus();
+    }
+    this._previouslyFocused = null;
   }
 
   /**
@@ -1742,12 +1905,23 @@ export class ConnectionPanel {
     if (refreshBtn && !refreshBtn._wired) {
       refreshBtn._wired = true;
       refreshBtn.addEventListener('click', async () => {
-        // Re-measure Handy RTD; the SDK's measurement cycle returns a
-        // refreshed avgRtd. Rest is read fresh on every paint.
-        if (this.handy?.connected && this.handy.syncTime) {
-          await this.handy.syncTime(10);
+        const originalText = refreshBtn.textContent;
+        refreshBtn.disabled = true;
+        refreshBtn.textContent = 'Refreshing…';
+        try {
+          // Re-measure Handy RTD; the SDK's measurement cycle returns a
+          // refreshed avgRtd. Rest is read fresh on every paint.
+          if (this.handy?.connected && this.handy.syncTime) {
+            await this.handy.syncTime(10);
+          }
+          this._refreshSyncTab();
+          showToast('Latency refreshed', 'info', 2000);
+        } catch (err) {
+          showToast(`Refresh failed: ${err?.message || 'unknown error'}`, 'error', 4000);
+        } finally {
+          refreshBtn.textContent = originalText;
+          refreshBtn.disabled = false;
         }
-        this._refreshSyncTab();
       });
     }
   }
@@ -1796,8 +1970,7 @@ export class ConnectionPanel {
     sugTxt.style.opacity = '0.7';
     sugTxt.textContent = `Suggested: ${suggestedMs} ms`;
     const applyBtn = document.createElement('button');
-    applyBtn.className = 'connection-panel__btn';
-    applyBtn.style.cssText = 'min-width:auto;padding:3px 10px;font-size:11px';
+    applyBtn.className = 'connection-panel__action connection-panel__action--utility';
     applyBtn.textContent = 'Apply';
     applyBtn.disabled = currentMs === suggestedMs;
     applyBtn.addEventListener('click', () => onApply(suggestedMs));

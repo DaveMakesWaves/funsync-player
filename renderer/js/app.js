@@ -23,6 +23,8 @@ import { DragDrop } from './drag-drop.js';
 import { KeyboardHandler } from './keyboard.js';
 import { dataService } from './data-service.js';
 import { showToast } from './toast.js';
+import { maybeShowHevcGuidance } from './hevc-detect.js';
+import { initTheme } from './theme-manager.js';
 import { matchButtplugRoute } from './custom-routing-match.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
@@ -37,7 +39,8 @@ import { DeviceSimulator } from '../components/device-simulator.js';
 import { GapSkipEngine } from './gap-skip.js';
 import { EroScriptsPanel } from '../components/eroscripts-panel.js';
 import {
-  createIcons, icon, Play, Pause, Volume2, VolumeX, FolderOpen, Bluetooth,
+  createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
+  EllipsisVertical, Keyboard,
   Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
   Pencil, FileCheck, Captions, RotateCcw,
 } from './icons.js';
@@ -87,16 +90,35 @@ class App {
     // Initialize data service (loads data from main process, handles migration)
     await span('dataService.init', () => dataService.init());
 
+    // Surface the boot-time auto-recovery result if the main process
+    // restored config.json from a snapshot during this launch
+    // (SCOPE-data-backup.md §4.4 + §8.2). One-shot read — main clears
+    // the stored result after we consume it so a renderer reload
+    // doesn't replay the toast.
+    this._maybeShowRecoveryToast();
+
+    // Apply the user's theme preference (or follow the OS) before any
+    // visual paint hits the user. Cheap (sets one attribute on <html>)
+    // and must happen post-dataService-init since we read the setting.
+    initTheme(dataService);
+
     // Renderer error handlers (electron-log forwards console to main log file)
     window.onerror = (msg, src, line, col, err) => console.error('[Window]', msg, err);
     window.addEventListener('unhandledrejection', (e) => console.error('[Rejection]', e.reason));
 
-    // Replace <i data-lucide="..."> placeholders with SVG icons
+    // Replace <i data-lucide="..."> placeholders with SVG icons.
+    // Volume1 added 2026-04-27 for the 3-state mute icon (audible /
+    // low-or-zero / explicitly muted). Cable added to replace the
+    // misleading bluetooth icon on the device button.
     createIcons({
       icons: {
-        Play, Pause, Volume2, VolumeX, FolderOpen, Bluetooth,
+        Play, Pause, Volume2, Volume1, VolumeX, FolderOpen, Bluetooth, Cable,
         Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-        Pencil, RotateCcw,
+        Pencil, RotateCcw, EllipsisVertical,
+        // 'keyboard' icon for the overflow menu's help item; lucide
+        // ships it as `keyboard.js`. Resolved by createIcons via
+        // data-lucide attribute lookup at the placeholder site.
+        Keyboard,
       },
       attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
     });
@@ -108,6 +130,12 @@ class App {
     } catch (err) {
       console.warn('Could not get backend port:', err.message);
     }
+
+    // Wire the backend-disconnected banner. State events stream from
+    // the main-process health monitor; first paint queries the
+    // current state via getBackendHealth. See SCOPE-design-polish-queue
+    // / `electron/python-bridge.js` for the failure-mode rationale.
+    this._initBackendBanner();
 
     // Fire a fast pre-scan register with JUST the collections / playlists /
     // categories / sources so the phone-remote's Groupings tabs populate
@@ -137,12 +165,15 @@ class App {
       backendPort: this.backendPort,
     });
 
-    // Initialize drag-and-drop EARLY — this must always work
+    // Initialize drag-and-drop EARLY — this must always work. Omit
+    // `dropZoneElement` so the default `#drop-zone-overlay` element
+    // resolves automatically (was passed as `null` pre-2026-04-28
+    // which silenced all visual feedback).
     this.dragDrop = new DragDrop({
-      dropZoneElement: null,
       onVideoFile: (file) => this.loadVideo(file),
       onFunscriptFile: (file) => this.loadFunscript(file),
       onSubtitleFile: (file) => this.videoPlayer.loadSubtitles(file),
+      onUnsupported: (msg) => showToast(msg, 'warn', 5000),
     });
 
     // Nav Bar
@@ -251,6 +282,49 @@ class App {
     document.getElementById('btn-prev')?.addEventListener('click', () => this._playPrev());
     document.getElementById('btn-next')?.addEventListener('click', () => this._playNext());
 
+    // Overflow menu — bottom-bar `⋮` opens a small popover with niche
+    // actions (PiP, keyboard shortcuts). Closes on item click, outside
+    // click, or Escape. Single open-at-a-time policy. The PiP and help
+    // items inside use real button IDs so existing click handlers
+    // (video-player.js#btn-pip) still work without rewiring.
+    const overflowBtn = document.getElementById('btn-overflow');
+    const overflowMenu = document.getElementById('controls-overflow-menu');
+    if (overflowBtn && overflowMenu) {
+      const closeOverflow = () => {
+        overflowMenu.hidden = true;
+        overflowBtn.setAttribute('aria-expanded', 'false');
+      };
+      overflowBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isOpen = !overflowMenu.hidden;
+        if (isOpen) { closeOverflow(); return; }
+        overflowMenu.hidden = false;
+        overflowBtn.setAttribute('aria-expanded', 'true');
+      });
+      // Close after any item click — PiP / help both fire their own
+      // handler first, then the menu closes.
+      overflowMenu.addEventListener('click', (e) => {
+        if (e.target.closest('.controls-overflow__item')) closeOverflow();
+      });
+      // Outside-click + Escape dismissal.
+      document.addEventListener('click', (e) => {
+        if (overflowMenu.hidden) return;
+        if (overflowMenu.contains(e.target) || overflowBtn.contains(e.target)) return;
+        closeOverflow();
+      });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && !overflowMenu.hidden) closeOverflow();
+      });
+    }
+    // Keyboard-shortcuts item inside the overflow menu — open the
+    // shared help overlay. Same content the `?` shortcut shows.
+    document.getElementById('btn-help')?.addEventListener('click', () => {
+      // Lazy-import to keep startup tree small.
+      import('./keyboard-help.js').then(({ openKeyboardHelp, PLAYER_SHORTCUT_GROUPS }) => {
+        openKeyboardHelp('Player keyboard shortcuts', PLAYER_SHORTCUT_GROUPS);
+      });
+    });
+
     // Wire thumbnail preview on progress hover
     this.videoPlayer.onProgressHover = (time) => {
       this.progressBar.updateThumbnailPreview(time);
@@ -259,15 +333,21 @@ class App {
     // Redraw heatmap on resize
     window.addEventListener('resize', () => this.progressBar.redraw());
 
-    // Gate library hover preview when main video is playing
+    // Gate library hover preview when main video is playing — and
+    // refresh the player top-bar sync chip on every play/pause/ended
+    // transition so the chip's "Ready" / "Syncing" state stays
+    // honest. Cheap (one DOM dataset write).
     this.videoPlayer.video.addEventListener('play', () => {
       if (this.library) this.library._isVideoPlaying = true;
+      this._updatePlayerSyncChip();
     });
     this.videoPlayer.video.addEventListener('pause', () => {
       if (this.library) this.library._isVideoPlaying = false;
+      this._updatePlayerSyncChip();
     });
     this.videoPlayer.video.addEventListener('ended', () => {
       if (this.library) this.library._isVideoPlaying = false;
+      this._updatePlayerSyncChip();
     });
 
     // Render heatmap once video duration is known
@@ -645,6 +725,7 @@ class App {
         connectionPanel: this.connectionPanel,
         onOpenFile: () => this.dragDrop._openNativeDialog(),
         scriptEditor: null, // Set after ScriptEditor creation below
+        onNavigate: (viewId) => this._navigateTo(viewId),
       });
 
       // Auto-connect if a key is saved
@@ -740,10 +821,64 @@ class App {
       btnEditor.addEventListener('click', () => this.scriptEditor.toggle());
     }
 
-    // Initialize subtitle badge icon
+    // Initialize subtitle badge icon — and wire its click to toggle
+    // subtitle visibility. Was a hover-styled but non-interactive badge
+    // (Norman affordance violation: looked clickable, did nothing).
+    // Now clicking it toggles the active text-track between 'showing'
+    // and 'disabled'. If multiple tracks exist, the prior caller's
+    // logic still picks the default; future improvement would be a
+    // picker for multi-track files.
     const subBadgeInit = document.getElementById('subtitle-badge');
     if (subBadgeInit) {
       subBadgeInit.appendChild(icon(Captions, { width: 20, height: 20, 'stroke-width': 1.75 }));
+      // Convert to a real button-equivalent via role + tabindex.
+      subBadgeInit.setAttribute('role', 'button');
+      subBadgeInit.setAttribute('tabindex', '0');
+      subBadgeInit.setAttribute('aria-label', 'Toggle subtitles');
+      subBadgeInit.style.cursor = 'pointer';
+      const toggleSubs = () => {
+        const tracks = this.videoPlayer?.video?.textTracks;
+        if (!tracks || tracks.length === 0) return;
+        // Find the first track that's currently 'showing' or fall back
+        // to track 0. Toggle between 'showing' and 'disabled'.
+        let active = null;
+        for (let i = 0; i < tracks.length; i++) {
+          if (tracks[i].mode === 'showing') { active = tracks[i]; break; }
+        }
+        if (active) {
+          active.mode = 'disabled';
+          subBadgeInit.classList.remove('subtitle-badge--active');
+        } else {
+          tracks[0].mode = 'showing';
+          subBadgeInit.classList.add('subtitle-badge--active');
+        }
+      };
+      subBadgeInit.addEventListener('click', toggleSubs);
+      subBadgeInit.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          toggleSubs();
+        }
+      });
+    }
+
+    // Funscript badge — clicking opens the script editor (same as E
+    // key). Previously a hover-styled span that did nothing; now a
+    // real interactive control matching its affordance (Norman).
+    const fsBadgeInit = document.getElementById('funscript-badge');
+    if (fsBadgeInit) {
+      fsBadgeInit.setAttribute('role', 'button');
+      fsBadgeInit.setAttribute('tabindex', '0');
+      fsBadgeInit.setAttribute('aria-label', 'Open script editor');
+      fsBadgeInit.style.cursor = 'pointer';
+      const openEditor = () => this.scriptEditor?.toggle?.();
+      fsBadgeInit.addEventListener('click', openEditor);
+      fsBadgeInit.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openEditor();
+        }
+      });
     }
 
     // Variant selector button
@@ -1303,8 +1438,10 @@ class App {
     const gen = this._vrMatchGeneration;
 
     // Stash the display name on the bridge so the VR modal can render it
-    // even when it wasn't open at the moment the video changed.
-    const displayName = rawPath.split(/[\\/]/).pop() || normalizedName;
+    // even when it wasn't open at the moment the video changed. Defensive
+    // `|| ''` fallback mirrors line 1423 — without it, an upstream caller
+    // that drops `rawPath` crashes the whole handler before script load.
+    const displayName = (rawPath || '').split(/[\\/]/).pop() || normalizedName;
     if (this.vrBridge) this.vrBridge.__vrModalLastVideo = displayName;
 
     // Stop existing sync engines (they'll be rebound to VR proxy)
@@ -1757,19 +1894,24 @@ class App {
 
   /**
    * Keep the nav-bar VR button's tooltip in sync with bridge state.
-   * Called from a 2s polling tick — the bridge doesn't emit events
-   * during backoff retries, so polling is the cheapest way to surface
-   * live "Reconnecting... (attempt N)" feedback without opening the VR
-   * modal.
+   * Polled every 2s (the bridge doesn't emit events for the silent-
+   * failure "connected but no packets" transition, so polling is the
+   * cheapest way to surface live state). Three states from the bridge:
+   * receiving (green), waiting (yellow — silent-failure mode),
+   * disconnected (red).
    */
   _updateVRTooltip() {
     if (!this.navBar || !this.vrBridge) return;
-    if (this.vrBridge.connected) {
-      this.navBar.setVRTooltip('connected', { host: this.vrBridge._host });
-    } else if (this.vrBridge._reconnecting || this.vrBridge._reconnectTimer) {
-      this.navBar.setVRTooltip('reconnecting', { attempt: this.vrBridge._reconnectAttempts });
+    const state = this.vrBridge.linkState; // 'receiving' | 'waiting' | 'disconnected'
+    if (state === 'receiving') {
+      this.navBar.setVRTooltip('connected', { host: this.vrBridge.host });
+      this.navBar.setVRLinkState('connected');
+    } else if (state === 'waiting') {
+      this.navBar.setVRTooltip('waiting', { host: this.vrBridge.host });
+      this.navBar.setVRLinkState('waiting');
     } else {
       this.navBar.setVRTooltip('disconnected');
+      this.navBar.setVRLinkState('disconnected');
     }
   }
 
@@ -1872,11 +2014,35 @@ class App {
 
       if (!data.clientIp || !data.videoId || !data.timestamp) return;
 
+      // Auto-update saved `vr.lastHost` whenever the activity poll
+      // discovers a different IP than what's currently saved. Closes
+      // the "Quest got a new DHCP lease and FunSync still tries the
+      // old IP next launch" gap. Doesn't substitute for the parked
+      // mDNS work (still needed for the "Quest IP changed while
+      // FunSync was closed" case), but covers every session where the
+      // user has actively used HereSphere at least once.
+      const savedHost = this.settings.get('vr.lastHost');
+      if (savedHost !== data.clientIp) {
+        this.settings.set('vr.lastHost', data.clientIp);
+      }
+
       const isNewActivity = data.timestamp > this._lastVrActivityTs;
-      // If bridge is connected and no new activity, skip
-      if (!isNewActivity && this.vrBridge.connected) return;
-      // If bridge is disconnected, keep retrying every 10s even for same activity
-      if (!isNewActivity && (performance.now() - (this._lastVrRetryTime || 0)) < 10000) return;
+
+      // Backoff strategy after a failed connect: count consecutive
+      // failed attempts in `_vrPollFailedAttempts`. First three attempts
+      // retry every 2 s (matches the poll cadence — no extra delay);
+      // after that, back off to 8 s. **Crucially**, fresh activity
+      // (a new timestamp from the backend) bypasses the backoff
+      // entirely — that's the strongest signal that the user just did
+      // something in HereSphere (toggled a setting, picked a video)
+      // and we should retry immediately. Was a 10 s lockout that left
+      // the user staring at silent toys after fixing their config.
+      if (!isNewActivity) {
+        const attempts = this._vrPollFailedAttempts || 0;
+        const backoffMs = attempts < 3 ? 2000 : 8000;
+        const lastTry = this._lastVrRetryTime || 0;
+        if (performance.now() - lastTry < backoffMs) return;
+      }
 
       this._lastVrActivityTs = data.timestamp;
       this._lastVrRetryTime = performance.now();
@@ -1888,6 +2054,7 @@ class App {
       if (!this.vrBridge.connected) {
         const success = await this.vrBridge.connect('heresphere', data.clientIp, 23554);
         if (success) {
+          this._vrPollFailedAttempts = 0; // reset backoff on success
           showToast('VR companion connected — devices syncing', 'info', 3000);
           // Tear down any stale hint toast that's still on screen, and
           // reset the "already hinted" flag so if the Quest later drops
@@ -1898,11 +2065,50 @@ class App {
           // Bridge's onConnect callback already drives the nav-bar tint
           // and the VR modal live-updates when open; nothing extra to do.
         } else {
-          this._maybeShowTimestampServerHint(this.vrBridge._lastError);
+          this._vrPollFailedAttempts = (this._vrPollFailedAttempts || 0) + 1;
+          // Pass Quest IP through so the toast can suggest the literal
+          // value to type into HereSphere's timestamp-server IP field.
+          this._maybeShowTimestampServerHint(this.vrBridge._lastError, data.clientIp);
         }
       }
     } catch {
       // Backend not running or fetch failed — ignore
+    }
+  }
+
+  /**
+   * If the main process recovered config.json from a snapshot during
+   * boot (corrupt or missing config — power-loss, disk full at write
+   * time, ransomware, etc.), surface that fact to the user. Per
+   * SCOPE-data-backup.md §8.2 the user should never see an empty UI
+   * with no explanation; one toast at most, never on a healthy boot.
+   *
+   * Fire-and-forget — backup IPC failures are tolerable; if the result
+   * channel isn't reachable we just skip the toast.
+   */
+  async _maybeShowRecoveryToast() {
+    try {
+      const result = await window.funsync.backupGetBootResult?.();
+      if (!result) return;
+      if (result.recovered) {
+        // Recovered cleanly from a snapshot — actionable, not alarming.
+        showToast(
+          `Settings were recovered from a recent backup. Open Settings → Data to view backup history.`,
+          'warn',
+          10_000
+        );
+      } else if (result.fellBack) {
+        // No valid snapshot to fall back to. Rare (only on a fresh install
+        // where config.json was somehow corrupt before any snapshot was
+        // taken). More urgent — direct the user toward the Import flow.
+        showToast(
+          `Settings could not be recovered. Starting fresh — use Settings → Data → Import to restore from a backup file.`,
+          'error',
+          15_000
+        );
+      }
+    } catch {
+      // IPC channel unavailable (e.g. older preload). Silently skip.
     }
   }
 
@@ -1918,7 +2124,7 @@ class App {
    * the bridge reconnects — otherwise the hint lingers after it's no
    * longer relevant.
    */
-  _maybeShowTimestampServerHint(lastError) {
+  _maybeShowTimestampServerHint(lastError, questIp) {
     if (!lastError) return;
     if (this._vrTimestampHintShown) return;
     // Only fire for the specific "server not listening" case — other VR
@@ -1928,14 +2134,63 @@ class App {
     if (!looksLikeRefused) return;
     this._vrTimestampHintShown = true;
 
-    this._vrTimestampHintToast = showToast(
+    // Interactive toast: hint text + "Try again" button. Clicking the
+    // button clears the activity-poll backoff and triggers an immediate
+    // reconnect, so the user doesn't have to wait out the 8 s backoff
+    // window after fixing the HereSphere config. Shneiderman #6
+    // reversibility, Nielsen #9 actionable error recovery.
+    //
+    // Wording rewritten 2026-04-29 after a real user incident: ECONNREFUSED
+    // on HereSphere's port 23554 is almost always caused by HereSphere's
+    // timestamp-server IP and port FIELDS being blank or stale, not the
+    // toggle being off. Users see the toggle as "enabled" and assume the
+    // server is running; in reality HereSphere doesn't bind a socket
+    // unless both fields contain valid values. The toast now spells out
+    // both the toggle AND the field-fill step, with the literal Quest IP
+    // suggested as the value to type into the IP field.
+    const wrapper = document.createElement('div');
+    wrapper.className = 'toast__multiline';
+
+    const ipSuggestion = questIp || 'your Quest\'s IP';
+    const text = document.createElement('div');
+    text.textContent =
       "VR companion can't reach HereSphere's timestamp server. " +
-      'On the Quest: HereSphere → Settings → Timestamp Server → enable it. ' +
-      'If it was already enabled, fully quit HereSphere and reopen — the ' +
-      'timestamp server sometimes needs a restart to start listening. ' +
-      '(Click to dismiss.)',
+      'On the Quest: HereSphere → Settings → Timestamp Server. ' +
+      `Enable the toggle AND fill in both fields — IP: ${ipSuggestion}, port: 23554. ` +
+      "The toggle alone isn't enough; without the fields populated " +
+      'HereSphere shows "enabled" but never actually opens the listening socket.';
+    wrapper.appendChild(text);
+
+    const tryAgainBtn = document.createElement('button');
+    tryAgainBtn.type = 'button';
+    tryAgainBtn.className = 'toast__action';
+    tryAgainBtn.textContent = 'Try again';
+    tryAgainBtn.addEventListener('click', async (e) => {
+      e.stopPropagation(); // don't trigger click-to-dismiss on the toast body
+      tryAgainBtn.disabled = true;
+      tryAgainBtn.textContent = 'Connecting…';
+      // Reset the backoff state so the next activity-poll tick (or the
+      // direct attempt below) fires immediately.
+      this._vrPollFailedAttempts = 0;
+      this._lastVrRetryTime = 0;
+      // Direct connect attempt with the last-known host. If it succeeds,
+      // the bridge.onConnect callback dismisses the hint via
+      // _dismissTimestampServerHint(); if it fails, leave the toast up
+      // (the user can hit Try again again or the next activity-poll
+      // tick will retry on its own).
+      const host = this.settings.get('vr.lastHost') || this.vrBridge.host || '127.0.0.1';
+      const success = await this.vrBridge.connect('heresphere', host, 23554);
+      if (!success) {
+        tryAgainBtn.disabled = false;
+        tryAgainBtn.textContent = 'Try again';
+      }
+    });
+    wrapper.appendChild(tryAgainBtn);
+
+    this._vrTimestampHintToast = showToast(
+      wrapper,
       'warn',
-      15000,  // 15s — long enough to read + act, short enough to not nag
+      0,  // persistent — caller dismisses via _dismissTimestampServerHint()
     );
   }
 
@@ -1949,6 +2204,90 @@ class App {
       this._vrTimestampHintToast.dismiss();
     }
     this._vrTimestampHintToast = null;
+  }
+
+  /**
+   * Wire the backend-disconnected banner. Subscribes to `backend-status`
+   * IPC events and renders / hides the banner based on the current
+   * state. Three states from the main-process health monitor:
+   *   'running'    → hide banner
+   *   'down'       → show error banner with Restart + View Logs actions
+   *   'restarting' → show neutral "restarting" banner (no actions)
+   * User can dismiss the banner manually; if the backend stays down,
+   * the next state-change event will re-show it.
+   */
+  _initBackendBanner() {
+    const banner = document.getElementById('backend-banner');
+    if (!banner) return;
+    const titleEl = banner.querySelector('#backend-banner-title');
+    const detailEl = banner.querySelector('#backend-banner-detail');
+    const restartBtn = banner.querySelector('#backend-banner-restart');
+    const logsBtn = banner.querySelector('#backend-banner-logs');
+    const dismissBtn = banner.querySelector('#backend-banner-dismiss');
+    let userDismissed = false;
+
+    const render = (state, detail) => {
+      if (state === 'running') {
+        banner.hidden = true;
+        banner.classList.remove('backend-banner--restarting');
+        userDismissed = false; // reset for next failure
+        return;
+      }
+      if (state === 'restarting') {
+        banner.hidden = false;
+        banner.classList.add('backend-banner--restarting');
+        titleEl.textContent = 'Restarting backend…';
+        detailEl.textContent = 'This usually takes a couple of seconds.';
+        restartBtn.disabled = true;
+        return;
+      }
+      // 'down' (default)
+      if (userDismissed) return;
+      banner.hidden = false;
+      banner.classList.remove('backend-banner--restarting');
+      titleEl.textContent = 'Backend is not responding';
+      detailEl.textContent = detail
+        ? `Library scans, thumbnails, and VR features need it. Playback still works for files already open. (${detail})`
+        : 'Library scans, thumbnails, and VR features need it. Playback still works for files already open.';
+      restartBtn.disabled = false;
+    };
+
+    restartBtn.addEventListener('click', async () => {
+      restartBtn.disabled = true;
+      restartBtn.textContent = 'Restarting…';
+      try {
+        const result = await window.funsync.restartBackend();
+        if (!result.success) {
+          showToast(`Restart failed: ${result.error || 'unknown error'}`, 'error', 5000);
+        }
+      } finally {
+        restartBtn.textContent = 'Restart Backend';
+        // The health monitor will emit a state event; render() handles
+        // the banner visibility from there.
+      }
+    });
+
+    logsBtn.addEventListener('click', async () => {
+      const result = await window.funsync.openLogFile();
+      if (!result.success) {
+        showToast(`Couldn't open log file: ${result.error || 'unknown error'}`, 'warn', 4000);
+      }
+    });
+
+    dismissBtn.addEventListener('click', () => {
+      banner.hidden = true;
+      userDismissed = true;
+    });
+
+    // Subscribe to live state transitions.
+    window.funsync.onBackendStatus(({ state, detail }) => render(state, detail));
+
+    // First paint — query current state in case the backend died before
+    // the renderer had subscribed (subscription is event-only; misses
+    // any transition that already happened).
+    window.funsync.getBackendHealth?.().then((state) => {
+      if (state && state !== 'unknown') render(state);
+    }).catch(() => { /* ignore — IPC may not be ready yet */ });
   }
 
 
@@ -2286,6 +2625,66 @@ class App {
     if (btn) {
       btn.title = deviceCount === 1 ? 'Device Connection (H)' : 'Devices Connection (H)';
     }
+
+    // Top-bar canonical sync chip — aggregates device + script + play
+    // state into a single human-readable label.
+    this._updatePlayerSyncChip();
+  }
+
+  /**
+   * Compute the canonical sync state for the player top-bar chip.
+   * Single source of truth for "what's syncing" across Handy +
+   * Buttplug + TCode + Autoblow + the various sync engines. Called
+   * from `_updateDeviceIndicators` and from play/pause / sync-state
+   * transitions so the chip always tells the user what's happening.
+   *
+   * Returns null when the chip should be hidden (e.g. before a video
+   * is loaded — there's nothing to sync TO).
+   *
+   * @returns {{state: string, label: string} | null}
+   */
+  _computeSyncChipState() {
+    // Hidden when no video loaded (the player view itself is hidden too).
+    if (!this._currentVideoPath && !this._currentVideoName) return null;
+
+    const deviceCount = this._getConnectedDeviceCount();
+    const hasScript = !!this.funscriptEngine?.isLoaded;
+
+    // Aggregate "any sync engine actively driving" — covers Handy
+    // (HSSP, played server-side, no client-side _active flag), Buttplug,
+    // TCode, Autoblow.
+    const isPlaying = this.videoPlayer?.video && !this.videoPlayer.video.paused
+                      && !this.videoPlayer.video.ended;
+    const syncActive = !!(this.buttplugSync?._active
+                          || this.tcodeSync?._active
+                          || this.autoblowSync?._active
+                          || (this.handyManager?.connected && hasScript && isPlaying));
+
+    if (deviceCount === 0) {
+      return { state: 'idle', label: 'No devices' };
+    }
+    if (!hasScript) {
+      return { state: 'idle', label: 'No script' };
+    }
+    if (syncActive) {
+      const label = deviceCount === 1 ? 'Syncing' : `Syncing • ${deviceCount} devices`;
+      return { state: 'syncing', label };
+    }
+    return { state: 'ready', label: 'Ready' };
+  }
+
+  _updatePlayerSyncChip() {
+    const chip = document.getElementById('player-sync-chip');
+    const text = document.getElementById('player-sync-chip-text');
+    if (!chip || !text) return;
+    const compact = this._computeSyncChipState();
+    if (!compact) {
+      chip.hidden = true;
+      return;
+    }
+    chip.hidden = false;
+    chip.dataset.state = compact.state;
+    if (text.textContent !== compact.label) text.textContent = compact.label;
   }
 
   /**
@@ -2545,6 +2944,13 @@ class App {
     this.videoPlayer.loadSource(videoUrl, file.name);
     this.progressBar.setVideoSource(videoUrl);
     this._updateCategoryDots();
+
+    // One-time HEVC codec install guidance — fires once per session if
+    // the OS lacks a hardware HEVC decoder (and the user hasn't
+    // permanently dismissed it). Cheap to call on every load; the
+    // helper has its own per-session guard. See hevc-detect.js for
+    // the full rationale.
+    maybeShowHevcGuidance(this.settings);
 
     // Store video path on player container for editor access
     const pc = document.getElementById('player-container');
@@ -3714,6 +4120,11 @@ class App {
 
     const confirmed = await Modal.confirm('Delete Library', `Delete "${col.name}"? Your videos won't be affected.`);
     if (!confirmed) return;
+
+    // Pre-action snapshot — deleting a collection drops the entire
+    // videoPaths array AND any syncSource config. Recoverable from
+    // the snapshot if the user immediately regrets it.
+    await window.funsync.backupPreAction?.('delete-collection');
 
     const updated = collections.filter(c => c.id !== id);
     this.settings.set('library.collections', updated);

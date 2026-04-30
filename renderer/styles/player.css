@@ -16,12 +16,14 @@
   flex-shrink: 0;
 }
 
+/* Library header view-toggle (grid/list) — Fitts: 30x30 → 36x36. Same
+   visible icon, larger click target. */
 .view-toggle {
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: var(--text-secondary, #a0a0a0);
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -31,14 +33,14 @@
 }
 
 .view-toggle:hover {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
   color: var(--text-primary, #e0e0e0);
 }
 
 .view-toggle--active {
-  background: rgba(255, 255, 255, 0.14);
+  background: var(--surface-overlay-strong);
   color: var(--text-primary, #e0e0e0);
-  border-color: rgba(255, 255, 255, 0.2);
+  border-color: var(--border-strong);
 }
 
 .view-toggle--grid {
@@ -57,8 +59,8 @@
   background: transparent;
   border: none;
   color: var(--text-secondary, #a0a0a0);
-  width: 30px;
-  height: 30px;
+  width: 36px;
+  height: 36px;
   margin-left: 10px;
   border-radius: 6px;
   cursor: pointer;
@@ -69,7 +71,7 @@
   transition: background 150ms, color 150ms;
 }
 .folder-browse-btn:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
   color: var(--text-primary, #e0e0e0);
 }
 .folder-browse-btn.view-toggle--active {
@@ -78,24 +80,209 @@
   border: none;
 }
 
-:root {
-  --bg-primary: #1a1a2e;
-  --bg-secondary: #16213e;
-  --bg-controls: rgba(0, 0, 0, 0.85);
+/* Library refresh button — header icon-only, mirrors `.folder-browse-btn`
+   shape so the right-side cluster of icon controls reads as a unit.
+   The `--spinning` modifier rotates the icon while a refresh is in
+   flight (Nielsen #1 visibility — the click was registered, scan is
+   running). Respects `prefers-reduced-motion`: motion-suppressed users
+   see the disabled appearance without rotation. */
+.library__refresh-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #a0a0a0);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 150ms, color 150ms;
+}
+.library__refresh-btn:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary, #e0e0e0);
+}
+.library__refresh-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.library__refresh-btn--spinning {
+  pointer-events: none;
+  opacity: 0.6;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .library__refresh-btn--spinning svg {
+    animation: library-refresh-spin 800ms linear infinite;
+  }
+}
+@keyframes library-refresh-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(-360deg); }
+}
+
+/* === Theme tokens (dark default + light variant) ===
+ *
+ * Refactored 2026-04-27 from named ("--bg-primary") to semantic ("--surface-base")
+ * tokens. The semantic name describes the *role* of the colour, not its specific
+ * value, so the same token has different paint values across themes.
+ *
+ * Theme is selected by the `data-theme` attribute on <html>:
+ *   - <html data-theme="dark">   → :root[data-theme="dark"]
+ *   - <html data-theme="light">  → :root[data-theme="light"]
+ *   - no attribute               → falls through to the default :root block
+ *                                  (currently dark — matches pre-redesign)
+ *
+ * On first launch, app.js reads `settings.player.theme` and sets the attribute.
+ * If the setting is `'system'`, the attribute follows `prefers-color-scheme` and
+ * a MediaQueryList listener keeps it reactive when the OS theme flips.
+ *
+ * Old token names ("--bg-primary" etc.) are preserved as aliases below so any
+ * inline CSS or JS reading them still works during the migration. Removed in a
+ * future cleanup once we've confirmed nothing references them outside the CSS.
+ *
+ * See notes/features/SCOPE-desktop-redesign.md §4.1 for the full rationale.
+ */
+
+:root,
+:root[data-theme="dark"] {
+  /* Surfaces — describe role: base = page bg, elevated = chrome, card = panels */
+  --surface-base: #1a1a2e;
+  --surface-elevated: #16213e;
+  --surface-card: #1c2a4a;
+  --surface-card-hover: #233766;
+  --surface-overlay: rgba(255, 255, 255, 0.08);
+  --surface-overlay-strong: rgba(255, 255, 255, 0.14);
+  --surface-controls: rgba(0, 0, 0, 0.85);
+
+  /* Text */
   --text-primary: #e0e0e0;
   --text-secondary: #a0a0a0;
+  --text-muted: #666666;
+  --text-dropdown: #c8c8d0;
+
+  /* Accent (FunSync red — same on both themes; verified WCAG AA contrast on each surface) */
   --accent: #e94560;
   --accent-hover: #ff6b81;
+  --accent-soft: rgba(233, 69, 96, 0.14);
+
+  /* Borders */
+  --border-subtle: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.18);
+
+  /* Status tokens — semantic colours for connection / safety / error
+     states across the app (LEDs, warning bands, error chips). One source
+     of truth; light-theme variants override below. */
+  --state-connected: #4caf50;
+  --state-connected-glow: rgba(76, 175, 80, 0.45);
+  --state-warning: #ff9800;
+  --state-warning-soft: rgba(255, 152, 0, 0.15);
+  --state-error: #f44336;
+  --state-error-soft: rgba(244, 67, 54, 0.15);
+  --state-idle: #666666;
+
+  /* Badge accent tokens — used by library card badges (funscript /
+     subtitle / speed). Three colours not already covered by state /
+     accent tokens. Light-theme variants tuned for AA on white. */
+  --badge-info: #2196f3;       /* blue: manual funscript, speed-slow */
+  --badge-purple: #ab47bc;     /* purple: manual subtitle, speed-insane */
+  --badge-duration-bg: rgba(0, 0, 0, 0.7);  /* duration sits over thumbnails — dark works on both themes */
+
+  /* Progress / scrub bar */
   --progress-bg: rgba(255, 255, 255, 0.2);
   --progress-buffered: rgba(255, 255, 255, 0.35);
   --progress-filled: #e94560;
-  --control-hover: rgba(255, 255, 255, 0.1);
-  --bg-modal: #1c2a4a;
-  --text-dropdown: #c8c8d0;
+
+  /* Dropdown — slightly darker than card so it reads as "popped" */
   --bg-dropdown-option: #1e2d50;
+
+  /* Shadows */
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.5);
+
+  /* Typography + motion (theme-independent) */
   --font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
   --transition-fast: 150ms ease;
   --transition-normal: 250ms ease;
+
+  /* === Video-overlay tokens (theme-INDEPENDENT) ============================
+     Anything that paints on top of the video (top bar, bottom controls,
+     center play button, drop zones, in-video toasts) stays white-on-dark
+     on BOTH themes. The video is always dark content; coupling these to
+     the app theme would make light-mode controls invisible against
+     dark scenes. Declared here so dark + light + system all inherit the
+     same values — never overridden in any [data-theme="light"] block. */
+  --video-overlay-text: #ffffff;
+  --video-overlay-text-dim: rgba(255, 255, 255, 0.72);
+  --video-overlay-bg: rgba(0, 0, 0, 0.85);
+  --video-overlay-bg-soft: rgba(0, 0, 0, 0.55);
+  --video-overlay-control-hover: rgba(255, 255, 255, 0.16);
+  --video-overlay-control-active: rgba(255, 255, 255, 0.22);
+  --video-overlay-border: var(--border-strong);
+  --video-overlay-progress-bg: rgba(255, 255, 255, 0.2);
+  --video-overlay-progress-buffered: rgba(255, 255, 255, 0.35);
+
+  /* --- Back-compat aliases (drop in next release once we confirm nothing
+        outside this stylesheet references them) --- */
+  --bg-primary: var(--surface-base);
+  --bg-secondary: var(--surface-elevated);
+  --bg-controls: var(--surface-controls);
+  --bg-modal: var(--surface-card);
+  --control-hover: var(--surface-overlay);
+}
+
+/* Light theme — paired role-by-role with dark. Off-white surfaces, dark text,
+   slightly darker accent-hover for AA contrast on white, softer shadows. */
+:root[data-theme="light"] {
+  --surface-base: #f5f5f7;
+  --surface-elevated: #ffffff;
+  --surface-card: #ffffff;
+  --surface-card-hover: #ececef;
+  --surface-overlay: rgba(0, 0, 0, 0.05);
+  --surface-overlay-strong: rgba(0, 0, 0, 0.10);
+  --surface-controls: rgba(0, 0, 0, 0.65);
+
+  --text-primary: #1a1a1f;
+  --text-secondary: #565660;
+  --text-muted: #8a8a92;
+  --text-dropdown: #2a2a32;
+
+  --accent: #e94560;
+  --accent-hover: #d83a52;          /* darker than dark-mode hover for AA */
+  --accent-soft: rgba(233, 69, 96, 0.10);
+
+  --border-subtle: rgba(0, 0, 0, 0.08);
+  --border-strong: rgba(0, 0, 0, 0.18);
+
+  /* State tokens — light theme uses slightly darker greens / oranges /
+     reds so AA contrast holds against the off-white surfaces. */
+  --state-connected: #2e7d32;
+  --state-connected-glow: rgba(46, 125, 50, 0.32);
+  --state-warning: #ef6c00;
+  --state-warning-soft: rgba(239, 108, 0, 0.12);
+  --state-error: #c62828;
+  --state-error-soft: rgba(198, 40, 40, 0.12);
+  --state-idle: #9e9e9e;
+
+  /* Badge accent tokens — darker variants for AA contrast on white. */
+  --badge-info: #1565c0;
+  --badge-purple: #6a1b9a;
+  --badge-duration-bg: rgba(0, 0, 0, 0.7);  /* still dark — duration sits over thumbnail */
+
+  --progress-bg: rgba(0, 0, 0, 0.16);
+  --progress-buffered: rgba(0, 0, 0, 0.28);
+  --progress-filled: #e94560;
+
+  --bg-dropdown-option: #f0f0f4;
+
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.18);
+
+  /* Aliases mirror semantic tokens. */
+  --bg-primary: var(--surface-base);
+  --bg-secondary: var(--surface-elevated);
+  --bg-controls: var(--surface-controls);
+  --bg-modal: var(--surface-card);
+  --control-hover: var(--surface-overlay);
 }
 
 /* Global dropdown styling */
@@ -161,9 +348,9 @@ html, body {
   width: 72px;
   height: 72px;
   border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
+  background: var(--video-overlay-bg-soft);
   border: none;
-  color: #fff;
+  color: var(--video-overlay-text);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -175,7 +362,7 @@ html, body {
 }
 
 .center-play:hover {
-  background: rgba(0, 0, 0, 0.7);
+  background: var(--video-overlay-bg);
 }
 
 .center-play--visible {
@@ -235,7 +422,7 @@ html, body {
 .player__back-btn {
   background: none;
   border: none;
-  color: var(--text-primary);
+  color: var(--video-overlay-text);
   cursor: pointer;
   padding: 4px 8px;
   border-radius: 6px;
@@ -247,12 +434,13 @@ html, body {
 }
 
 .player__back-btn:hover {
-  background: var(--control-hover);
+  background: var(--video-overlay-control-hover);
 }
 
 .player__title {
   font-size: 14px;
   font-weight: 500;
+  color: var(--video-overlay-text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -273,10 +461,62 @@ html, body {
   flex-shrink: 0;
 }
 
+/* Player top-bar sync chip — single canonical state for device sync.
+   Lives in the player overlay, so colors are theme-independent. State
+   is expressed in plain language ("Syncing", "No devices", "Ready") —
+   colour is a redundant cue, not the primary signal. */
+.player__sync-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--video-overlay-control-hover);
+  color: var(--video-overlay-text);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background 150ms;
+}
+.player__sync-chip[hidden] { display: none; }
+
+.player__sync-chip-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--video-overlay-text-dim);
+  flex-shrink: 0;
+}
+
+.player__sync-chip[data-state="ready"] .player__sync-chip-dot,
+.player__sync-chip[data-state="syncing"] .player__sync-chip-dot {
+  background: #4caf50;
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.6);
+}
+.player__sync-chip[data-state="syncing"] .player__sync-chip-dot {
+  animation: sync-chip-pulse 1.4s ease-in-out infinite;
+}
+@keyframes sync-chip-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+.player__sync-chip[data-state="disconnected"] .player__sync-chip-dot {
+  background: #f44336;
+}
+.player__sync-chip[data-state="connecting"] .player__sync-chip-dot {
+  background: #ffb74d;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player__sync-chip[data-state="syncing"] .player__sync-chip-dot { animation: none; }
+}
+
 .player__quick-add {
-  background: rgba(255, 255, 255, 0.12);
+  background: var(--video-overlay-control-hover);
   border: none;
-  color: var(--text-primary);
+  color: var(--video-overlay-text);
   width: 28px;
   height: 28px;
   border-radius: 6px;
@@ -294,16 +534,20 @@ html, body {
 }
 
 .player__quick-add:hover {
-  background: rgba(255, 255, 255, 0.22);
+  background: var(--video-overlay-control-active);
 }
 
-/* === Controls Overlay === */
+/* === Controls Overlay ====================================================
+   Bottom-of-screen controls bar that overlays the video. Theme-INDEPENDENT
+   styling — uses --video-overlay-* tokens because the surface beneath is
+   always video (dark) regardless of app theme. White-on-dark contrast
+   stays optimal in both Light and Dark app themes. */
 .player__controls {
   position: absolute;
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(to top, var(--bg-controls), transparent);
+  background: linear-gradient(to top, var(--video-overlay-bg), transparent);
   padding: 40px 12px 12px;
   opacity: 0;
   transition: opacity var(--transition-normal);
@@ -353,12 +597,17 @@ html, body {
   height: 100%;
 }
 
+/* Progress bar idle / hover heights bumped from 4px → 6px / 12px → 14px,
+   and the scrub thumb from 14px → 18px. Fitts: a 6px track is still
+   visually slim but offers a noticeably larger hit zone (vertical) for
+   click-and-drag scrubbing; an 18px thumb feels more confident under
+   the cursor. */
 .progress__buffered {
   position: absolute;
   left: 0;
-  height: 4px;
-  background: var(--progress-buffered);
-  border-radius: 2px;
+  height: 6px;
+  background: var(--video-overlay-progress-buffered);
+  border-radius: 3px;
   width: 0%;
   transition: width 200ms linear, height var(--transition-fast);
 }
@@ -366,17 +615,17 @@ html, body {
 .progress__filled {
   position: absolute;
   left: 0;
-  height: 4px;
+  height: 6px;
   background: var(--progress-filled);
-  border-radius: 2px;
+  border-radius: 3px;
   width: 0%;
   transition: height var(--transition-fast);
 }
 
 .progress__thumb {
   position: absolute;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   background: var(--accent);
   border-radius: 50%;
   left: 0%;
@@ -391,7 +640,7 @@ html, body {
 
 .controls__progress:hover .progress__filled,
 .controls__progress:hover .progress__buffered {
-  height: 12px;
+  height: 14px;
 }
 
 .controls__progress:hover .progress__heatmap,
@@ -438,29 +687,66 @@ html, body {
   gap: 8px;
 }
 
+/* Bottom-control flex gap — bumped from 4px to 8px (Fitts: clusters of
+   small adjacent buttons are misclick-prone; 8px between each gives
+   each button its own distinct target zone). */
 .controls__left,
 .controls__right {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 8px;
 }
 
-/* Control Buttons */
+/* Cluster gap — wider spacing between conceptual groups in the right
+   side of the bar (script-related / device / window-mode). Acts as a
+   subtle divider without drawing a line, supporting Norman's
+   conceptual-model principle: same group = same gap; different group
+   = bigger gap. Applied via the cluster-gap class on a thin spacer
+   element OR via CSS sibling combinator on group separator markers. */
+.controls__right .controls-cluster-gap {
+  width: 12px;
+  flex-shrink: 0;
+}
+
+/* Control Buttons — theme-INDEPENDENT (live in player-controls overlay
+   on top of video). White-on-dark on both themes for legibility against
+   dark video content. */
 .control-btn {
   background: none;
   border: none;
-  color: var(--text-primary);
+  color: var(--video-overlay-text);
   cursor: pointer;
   padding: 8px;
   border-radius: 4px;
   font-size: 16px;
   line-height: 1;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
   min-width: 36px;
   min-height: 36px;
+}
+
+/* Play button is the primary action — visually emphasized to
+   telegraph "this is the most important control". 44px (vs 36
+   elsewhere; Fitts: bigger target for the most-used). When playing,
+   the icon takes the accent colour — Norman signifier reinforcing
+   "this is the active state". */
+#btn-play.control-btn {
+  min-width: 44px;
+  min-height: 44px;
+}
+#btn-play.control-btn svg {
+  width: 24px;
+  height: 24px;
+}
+/* When playing, .icon-play is hidden (and .icon-pause is visible).
+   The :has() selector picks that up so the play button glows in the
+   accent colour during playback — visual confirmation of the playing
+   state without needing to look at the video itself. */
+#btn-play.control-btn:has(.icon-play[hidden]):not(:has(.icon-replay:not([hidden]))) {
+  color: var(--accent);
 }
 
 .control-btn svg {
@@ -470,12 +756,102 @@ html, body {
 }
 
 .control-btn:hover {
-  background: var(--control-hover);
+  background: var(--video-overlay-control-hover);
 }
 
 .control-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* Toggled-on state for buttons that represent an open panel / active
+   mode (Editor, etc.). Shares the visual contract with other toggles
+   (mute uses icon swap; fullscreen swaps maximize/minimize; this one
+   needs a colour cue because the icon doesn't change). */
+.control-btn--toggled,
+.control-btn[aria-pressed="true"] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* === Overflow ⋮ menu (player bottom bar) ============================
+ * Niche actions (PiP, keyboard shortcuts) live behind a single ⋮
+ * trigger so the bar stays scannable. Anchored popover above the
+ * trigger button. Theme-independent (lives in player overlay) — uses
+ * --video-overlay-* tokens.
+ */
+.controls-overflow {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.controls-overflow__menu {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 200px;
+  background: var(--video-overlay-bg);
+  border: 1px solid var(--video-overlay-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.controls-overflow__menu[hidden] { display: none; }
+
+.controls-overflow__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--video-overlay-text);
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--font-family);
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+  min-height: 36px;
+}
+.controls-overflow__item:hover {
+  background: var(--video-overlay-control-hover);
+}
+.controls-overflow__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.controls-overflow__item svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
+/* Persistent text labels on key buttons (Editor / Devices / Fullscreen).
+   Hidden by default — only revealed at desktop widths (≥1024px) where
+   horizontal room allows. Below that breakpoint the buttons collapse
+   to icon-only (current pre-redesign behaviour). Norman signifier +
+   Nielsen #6 recognition over recall. */
+.control-btn__label { display: none; }
+.control-btn--labelled { gap: 6px; }
+@media (min-width: 1024px) {
+  .control-btn--labelled .control-btn__label {
+    display: inline;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.2px;
+    line-height: 1;
+  }
+  .control-btn--labelled {
+    padding-left: 10px;
+    padding-right: 10px;
+  }
 }
 
 /* Queue navigation buttons — hidden when no queue */
@@ -486,7 +862,7 @@ html, body {
 
 .queue-indicator {
   font-size: 12px;
-  color: var(--text-secondary);
+  color: var(--video-overlay-text-dim);
   padding: 0 6px;
   white-space: nowrap;
 }
@@ -525,22 +901,30 @@ html, body {
   gap: 4px;
 }
 
+/* Volume slider — track 4→6px (Fitts), grows to 10px on hover (matches
+   progress-bar's hover-grow pattern; was the only slider that didn't
+   give that visual confirmation). Thumb 18px stays. */
 .volume-slider {
   width: 80px;
-  height: 4px;
+  height: 6px;
   -webkit-appearance: none;
   appearance: none;
-  background: var(--progress-bg);
-  border-radius: 2px;
+  background: var(--video-overlay-progress-bg);
+  border-radius: 3px;
   outline: none;
   cursor: pointer;
+  transition: height var(--transition-fast);
+}
+.volume-slider:hover {
+  height: 10px;
 }
 
 .volume-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
-  background: var(--text-primary);
+  width: 18px;
+  height: 18px;
+  /* Volume slider lives in the player overlay (white-on-dark always). */
+  background: var(--video-overlay-text);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -551,11 +935,11 @@ html, body {
   border-radius: 2px;
 }
 
-/* Time Display */
+/* Time Display — theme-independent (player overlay on dark video) */
 .controls__time {
   font-size: 13px;
   font-variant-numeric: tabular-nums;
-  color: var(--text-secondary);
+  color: var(--video-overlay-text-dim);
   padding: 0 8px;
   white-space: nowrap;
 }
@@ -564,16 +948,30 @@ html, body {
   margin: 0 3px;
 }
 
-/* === Funscript Badge (bottom bar) === */
+/* === Funscript Badge (bottom bar) ===
+ * Now interactive — click opens the script editor (matches the
+ * E shortcut). Was a non-interactive marker with hover style;
+ * giving it real action removes the false-affordance signifier
+ * (Norman). Hover/focus styling matches .control-btn for visual
+ * consistency. */
 .funscript-badge {
   display: flex;
   align-items: center;
   justify-content: center;
   color: #4caf50;
-  cursor: default;
+  cursor: pointer;
   min-width: 36px;
   min-height: 36px;
   padding: 8px;
+  border-radius: 4px;
+  transition: background var(--transition-fast);
+}
+.funscript-badge:hover {
+  background: var(--video-overlay-control-hover);
+}
+.funscript-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .funscript-badge svg {
@@ -588,24 +986,35 @@ html, body {
   align-items: center;
 }
 
+/* Variant selector trigger — was its own bordered pill with smaller
+   padding and font, visually inconsistent with .control-btn next to
+   it (Shneiderman #1 consistency). Brought into the .control-btn
+   shape so the bottom bar reads as one consistent strip. */
 .variant-selector__btn {
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: var(--text-primary);
-  padding: 3px 10px;
+  border: none;
+  color: var(--video-overlay-text);
+  padding: 8px;
   border-radius: 4px;
   font-size: 11px;
   cursor: pointer;
   white-space: nowrap;
-  transition: background 150ms, border-color 150ms;
-  display: flex;
+  transition: background var(--transition-fast), color var(--transition-fast);
+  display: inline-flex;
   align-items: center;
   gap: 4px;
+  min-width: 36px;
+  min-height: 36px;
+  line-height: 1;
 }
 
 .variant-selector__btn:hover {
-  background: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.25);
+  background: var(--video-overlay-control-hover);
+}
+
+.variant-selector__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .variant-selector__btn::after {
@@ -614,15 +1023,19 @@ html, body {
   opacity: 0.6;
 }
 
+/* Variant dropdown floats above the player overlay — uses theme-aware
+   surface tokens since it's a panel, not pure overlay text. Border +
+   divider use the standard subtle/border tokens which paint differently
+   per theme. */
 .variant-selector__dropdown {
   position: absolute;
   bottom: 100%;
   right: 0;
   margin-bottom: 6px;
-  background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
   min-width: 200px;
   max-width: 320px;
   max-height: 300px;
@@ -648,11 +1061,11 @@ html, body {
 }
 
 .variant-selector__item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
 }
 
 .variant-selector__item--active {
-  background: rgba(233, 69, 96, 0.12);
+  background: var(--accent-soft);
   color: var(--accent);
 }
 
@@ -670,7 +1083,7 @@ html, body {
   width: 100%;
   background: none;
   border: none;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid var(--border-subtle);
   color: var(--text-secondary);
   padding: 8px 10px;
   margin-top: 2px;
@@ -685,15 +1098,34 @@ html, body {
   color: var(--text-primary);
 }
 
+/* Subtitle badge — now interactive (toggle subtitle visibility on
+   click). When the subtitle track is currently 'showing', the badge
+   gets a slight emphasis (--subtitle-badge--active) so the user can
+   tell at a glance which mode they're in. */
 .subtitle-badge {
   display: flex;
   align-items: center;
   justify-content: center;
   color: #ff9800;
-  cursor: default;
+  cursor: pointer;
   min-width: 36px;
   min-height: 36px;
   padding: 8px;
+  border-radius: 4px;
+  opacity: 0.65;
+  transition: background var(--transition-fast), opacity var(--transition-fast);
+}
+.subtitle-badge:hover {
+  background: var(--video-overlay-control-hover);
+  opacity: 1;
+}
+.subtitle-badge:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.subtitle-badge--active {
+  opacity: 1;
+  background: rgba(255, 152, 0, 0.18);
 }
 
 .subtitle-badge svg {
@@ -708,11 +1140,16 @@ html, body {
   left: 50%;
   transform: translate(-50%, -50%);
   background: var(--bg-modal);
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
   padding: 24px;
-  min-width: 520px;
-  max-width: 650px;
+  /* Was fixed `min-width:520; max-width:650`. Cap to viewport so a
+     narrow window can't push the modal off-screen. min(90vw, 650) is
+     the standard responsive cap for our modals. */
+  min-width: min(90vw, 520px);
+  max-width: min(90vw, 650px);
+  max-height: 90vh;
+  overflow-y: auto;
   z-index: 1000;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
 }
@@ -721,13 +1158,38 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
 }
 
 .connection-panel__title {
   font-size: 16px;
   font-weight: 600;
   color: var(--text-primary);
+  margin: 0;
+}
+
+/* Tab-button LED — same dot as the per-tab status LED. Surfaces
+   connection state on every tab without requiring the user to switch
+   to that tab (Nielsen #1 visibility). aria-hidden="true" — the tab's
+   aria-label carries the semantic state for screen readers. */
+.connection-panel__tab-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-idle);
+  flex-shrink: 0;
+  transition: background var(--transition-fast), box-shadow var(--transition-fast);
+}
+.connection-panel__tab-led--connected {
+  background: var(--state-connected);
+  box-shadow: 0 0 4px var(--state-connected-glow);
+}
+.connection-panel__tab-led--connecting {
+  background: var(--state-warning);
+  animation: pulse 1s ease-in-out infinite;
+}
+.connection-panel__tab-led--error {
+  background: var(--state-error);
 }
 
 .connection-panel__close {
@@ -749,22 +1211,22 @@ html, body {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: #666;
+  background: var(--state-idle);
   flex-shrink: 0;
 }
 
 .connection-panel__led--connected {
-  background: #4caf50;
-  box-shadow: 0 0 6px #4caf50;
+  background: var(--state-connected);
+  box-shadow: 0 0 6px var(--state-connected-glow);
 }
 
 .connection-panel__led--connecting {
-  background: #ff9800;
+  background: var(--state-warning);
   animation: pulse 1s ease-in-out infinite;
 }
 
 .connection-panel__led--error {
-  background: #f44336;
+  background: var(--state-error);
 }
 
 @keyframes pulse {
@@ -790,8 +1252,8 @@ html, body {
 
 .connection-panel__input {
   flex: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 8px 12px;
   color: var(--text-primary);
@@ -804,38 +1266,99 @@ html, body {
   border-color: var(--accent);
 }
 
+/* Unified button shape — one class for every action button in the panel
+   (Shneiderman #1, Nielsen #4). `.connection-panel__btn` is kept as an
+   alias so external callsites in library.js / vr-modal.js continue to
+   work; new code should prefer `.connection-panel__action`. Modifiers:
+     --secondary  surface bg + primary text (Scan / Refresh)
+     --reset      subtle ghost (Reset Stroke)
+     --utility    compact 36×36 square for icon-only / tight buttons
+                  (TCode ↻ refresh, Sync Refresh, Latency Measure, Test,
+                  Apply in Sync rows). Replaces inline padding overrides.
+     --danger     accent-error bg, used for Disconnect when connected. */
+.connection-panel__action,
 .connection-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   background: var(--accent);
   color: #fff;
   border: none;
   padding: 8px 16px;
+  min-height: 36px;
   border-radius: 6px;
   font-size: 13px;
   font-weight: 500;
+  font-family: inherit;
+  line-height: 1;
   cursor: pointer;
   white-space: nowrap;
-  transition: background var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
+.connection-panel__action:hover,
 .connection-panel__btn:hover {
   background: var(--accent-hover);
 }
 
+.connection-panel__action:focus-visible,
+.connection-panel__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.connection-panel__action:disabled,
 .connection-panel__btn:disabled {
   opacity: 0.5;
   cursor: default;
 }
 
+.connection-panel__action--secondary,
 .connection-panel__btn--secondary {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-overlay);
+  color: var(--text-primary);
 }
 
+.connection-panel__action--secondary:hover,
 .connection-panel__btn--secondary:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: var(--surface-overlay-strong);
+}
+
+/* Compact icon-only / tight buttons. Square 36×36 hit area replaces the
+   prior inline `min-width:auto;padding:Xpx Ypx;font-size:11px` overrides
+   that put utility buttons below the Fitts floor (≥36 px). */
+.connection-panel__action--utility,
+.connection-panel__btn--utility {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  min-width: 36px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.connection-panel__action--utility:hover,
+.connection-panel__btn--utility:hover {
+  background: var(--surface-overlay-strong);
+}
+
+/* Disconnect-when-connected accent. Sits behind a stronger affordance
+   colour than the neutral grey of --secondary so users see the action
+   is "leaving an active state" rather than another step in setup. */
+.connection-panel__action--danger,
+.connection-panel__btn--danger {
+  background: var(--state-error-soft);
+  color: var(--state-error);
+}
+
+.connection-panel__action--danger:hover,
+.connection-panel__btn--danger:hover {
+  background: var(--state-error);
+  color: #fff;
 }
 
 .connection-panel__info {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
   margin-bottom: 12px;
 }
@@ -861,7 +1384,7 @@ html, body {
   display: flex;
   align-items: center;
   gap: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
 }
 
@@ -872,7 +1395,7 @@ html, body {
 
 /* Connection Panel — Offset / Stroke / Reset sections */
 .connection-panel__section {
-  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 1px solid var(--border-subtle);
   padding-top: 12px;
   margin-top: 12px;
 }
@@ -891,21 +1414,22 @@ html, body {
   gap: 8px;
 }
 
+/* Offset slider — Fitts: track 4→6px, thumb 14→18px. */
 .connection-panel__offset-slider {
   flex: 1;
-  height: 4px;
+  height: 6px;
   -webkit-appearance: none;
   appearance: none;
   background: var(--progress-bg);
-  border-radius: 2px;
+  border-radius: 3px;
   outline: none;
   cursor: pointer;
 }
 
 .connection-panel__offset-slider::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 14px;
-  height: 14px;
+  width: 18px;
+  height: 18px;
   background: var(--accent);
   border-radius: 50%;
   cursor: pointer;
@@ -918,8 +1442,8 @@ html, body {
 
 .connection-panel__offset-number {
   width: 56px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-strong);
   border-radius: 4px;
   padding: 4px 6px;
   color: var(--text-primary);
@@ -963,28 +1487,31 @@ html, body {
   cursor: pointer;
 }
 
+/* Stroke range slider (dual-overlap min/max). Track 4→6px, thumb 16→18px.
+   Fitts: dual-overlap thumbs are inherently misclick-prone; bigger thumbs
+   each give a clearer hit zone. */
 .connection-panel__stroke-track {
   position: absolute;
   left: 0;
   right: 0;
-  height: 4px;
+  height: 6px;
   background: var(--progress-bg);
-  border-radius: 2px;
+  border-radius: 3px;
   pointer-events: none;
 }
 
 .connection-panel__stroke-fill {
   position: absolute;
-  height: 4px;
+  height: 6px;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: 3px;
   pointer-events: none;
 }
 
 .connection-panel__stroke-input {
   position: absolute;
   width: 100%;
-  height: 24px;
+  height: 28px;
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
@@ -995,19 +1522,20 @@ html, body {
 }
 
 .connection-panel__stroke-input::-webkit-slider-runnable-track {
-  height: 4px;
+  height: 6px;
   background: transparent;
   border: none;
 }
 
 .connection-panel__stroke-input::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
   background: var(--accent);
   border-radius: 50%;
   cursor: pointer;
   pointer-events: auto;
+  /* Center thumb on the 6px track: thumb-radius (9) - track-half (3) = 6 above */
   margin-top: -6px;
   position: relative;
   z-index: 1;
@@ -1017,50 +1545,76 @@ html, body {
   box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.3);
 }
 
+.connection-panel__action--reset,
 .connection-panel__btn--reset {
   margin-top: 8px;
   width: 100%;
-  background: rgba(255, 152, 0, 0.15);
-  color: #ff9800;
-  border: 1px solid rgba(255, 152, 0, 0.25);
+  background: var(--state-warning-soft);
+  color: var(--state-warning);
+  border: 1px solid var(--state-warning-soft);
 }
 
+.connection-panel__action--reset:hover,
 .connection-panel__btn--reset:hover {
-  background: rgba(255, 152, 0, 0.25);
+  background: var(--state-warning-soft);
+  filter: brightness(1.2);
 }
 
+/* Tab strip — uses the canonical modal-tab pattern (underline-on-active
+   accent indicator, 36 px Fitts floor) for consistency with the
+   settings-panel tabs (Shneiderman #1). Strip-level features kept:
+   horizontal scroll on narrow widths (instead of ellipsis truncation),
+   edge-fade mask hinting at scrollable overflow, full labels always
+   rendered (Nielsen #6 recognition). */
 .connection-panel__tabs {
   display: flex;
-  gap: 1px;
+  gap: 2px;
   flex: 1;
   min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  border-bottom: 1px solid var(--border-subtle);
+  margin-bottom: 16px;
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 8px, #000 calc(100% - 8px), transparent);
 }
+.connection-panel__tabs::-webkit-scrollbar { display: none; }
 
 .connection-panel__tab {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  border-bottom: none;
-  color: rgba(255, 255, 255, 0.5);
-  padding: 6px 10px;
-  border-radius: 4px 4px 0 0;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  min-height: 36px;
   cursor: pointer;
-  font-size: 12px;
-  flex: 1;
-  text-align: center;
+  font-size: 13px;
+  font-family: inherit;
+  /* `flex: 1 0 auto` lets the 5 tabs share the modal width when there's
+     room, but they don't shrink past their content size (otherwise the
+     edge-fade mask wouldn't have anything to scroll). */
+  flex: 1 0 auto;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .connection-panel__tab--active {
-  background: rgba(255, 255, 255, 0.1);
-  color: #fff;
-  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--accent);
+  border-bottom-color: var(--accent);
 }
 
 .connection-panel__tab:hover:not(.connection-panel__tab--active) {
-  background: rgba(255, 255, 255, 0.08);
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--text-primary);
+}
+
+.connection-panel__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 .connection-panel__device-list {
@@ -1075,9 +1629,9 @@ html, body {
   flex-direction: column;
   gap: 4px;
   padding: 8px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface-overlay);
 }
 
 .connection-panel__device-header {
@@ -1098,22 +1652,13 @@ html, body {
   flex-wrap: wrap;
 }
 
+/* Device-row Test button — pinned right via margin-left: auto. Inherits
+   the unified .connection-panel__action --utility shape (≥36 px Fitts
+   floor) — was 2 × 8 px padding which fell well below the floor used
+   elsewhere in the codebase. */
 .connection-panel__device-test {
-  background: none;
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  color: var(--text-secondary);
-  padding: 2px 8px;
-  border-radius: 4px;
-  font-size: 11px;
-  cursor: pointer;
-  transition: color 100ms, background 100ms;
   margin-left: auto;
   flex-shrink: 0;
-}
-
-.connection-panel__device-test:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
 }
 
 .connection-panel__device-controls-row {
@@ -1152,7 +1697,7 @@ html, body {
   flex-direction: column;
   gap: 4px;
   padding: 6px 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border-subtle);
 }
 .connection-panel__tcode-axis-row:last-child { border-bottom: none; }
 .connection-panel__tcode-axis-row--disabled { opacity: 0.5; }
@@ -1205,7 +1750,7 @@ html, body {
   flex-direction: column;
   gap: 4px;
   padding-top: 4px;
-  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  border-top: 1px solid var(--border-subtle);
 }
 
 .connection-panel__vr-help {
@@ -1227,7 +1772,7 @@ html, body {
 
 .connection-panel__vr-divider {
   height: 1px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
   margin: 12px 0;
 }
 
@@ -1236,7 +1781,7 @@ html, body {
   color: var(--text-secondary);
   margin-top: 8px;
   padding: 8px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-overlay);
   border-radius: 4px;
   line-height: 1.5;
   border-left: 2px solid var(--accent);
@@ -1245,7 +1790,7 @@ html, body {
 /* Web Remote section moved to its own modal (renderer/components/web-remote-modal.js). */
 
 .connection-panel__device-caps {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-muted);
   font-size: 11px;
 }
 
@@ -1253,7 +1798,7 @@ html, body {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
   color: var(--text-secondary);
   line-height: 1.4;
 }
@@ -1301,7 +1846,7 @@ html, body {
 }
 
 .connection-panel__safety-value--warn {
-  color: #ff9800;
+  color: var(--state-warning);
   font-weight: 600;
 }
 
@@ -1318,7 +1863,7 @@ html, body {
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   cursor: pointer;
   user-select: none;
 }
@@ -1329,8 +1874,8 @@ html, body {
 }
 
 .connection-panel__device-select {
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   color: #eee;
   padding: 3px 6px;
   border-radius: 4px;
@@ -1359,7 +1904,7 @@ html, body {
   color: var(--text-secondary);
   padding: 6px 10px;
   margin-top: 6px;
-  background: rgba(255, 255, 255, 0.03);
+  background: var(--surface-overlay);
   border-radius: 4px;
   border-left: 2px solid var(--accent);
   line-height: 1.4;
@@ -1368,7 +1913,7 @@ html, body {
 .connection-panel__device-info-btn {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.35);
+  color: var(--text-muted);
   cursor: pointer;
   padding: 2px;
   display: flex;
@@ -1378,21 +1923,21 @@ html, body {
 }
 
 .connection-panel__device-info-btn:hover {
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-primary);
 }
 
 .connection-panel__vibe-help {
   position: absolute;
   z-index: 20;
   background: #1a1a2e;
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   padding: 12px;
   width: 260px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
   font-size: 12px;
   line-height: 1.5;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-primary);
 }
 
 .connection-panel__vibe-help-title {
@@ -1411,7 +1956,7 @@ html, body {
 }
 
 .connection-panel__no-devices {
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-muted);
   font-size: 12px;
   text-align: center;
   padding: 8px 0;
@@ -1436,7 +1981,7 @@ html, body {
 
 .connection-panel__setting-label {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
+  color: var(--text-secondary);
   min-width: 70px;
   flex-shrink: 0;
 }
@@ -1458,7 +2003,7 @@ html, body {
 
 .connection-panel__setting-value {
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.8);
+  color: var(--text-primary);
   min-width: 30px;
   text-align: right;
   flex-shrink: 0;
@@ -1466,7 +2011,7 @@ html, body {
 
 .connection-panel__setting-hint {
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.4);
+  color: var(--text-muted);
   padding: 4px 0 2px;
   line-height: 1.4;
 }
@@ -1491,7 +2036,7 @@ html, body {
   width: 24px;
   height: 200px;
   background: rgba(0, 0, 0, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
   overflow: hidden;
 }
@@ -1524,7 +2069,8 @@ html, body {
   align-items: center;
   gap: 2px;
   font-size: 10px;
-  color: rgba(255, 255, 255, 0.6);
+  /* Video-overlay context — stays white-on-dark on both themes. */
+  color: var(--video-overlay-text-dim);
   background: rgba(0, 0, 0, 0.5);
   border-radius: 4px;
   padding: 3px 6px;
@@ -1559,7 +2105,7 @@ html, body {
 .script-loading-overlay__spinner {
   width: 40px;
   height: 40px;
-  border: 3px solid rgba(255, 255, 255, 0.2);
+  border: 3px solid var(--border-strong);
   border-top-color: var(--accent);
   border-radius: 50%;
   animation: spin 0.8s linear infinite;
@@ -1571,7 +2117,8 @@ html, body {
 
 .script-loading-overlay__text {
   font-size: 14px;
-  color: var(--text-primary);
+  /* Video-overlay context — white-on-dark on both themes. */
+  color: var(--video-overlay-text);
   font-weight: 500;
 }
 
@@ -1585,7 +2132,8 @@ html, body {
   padding: 12px 16px;
   font-size: 13px;
   font-family: 'Consolas', 'Courier New', monospace;
-  color: var(--text-primary);
+  /* Video-overlay context — white text on a dark backdrop, both themes. */
+  color: var(--video-overlay-text);
   line-height: 1.6;
   z-index: 50;
   pointer-events: none;
@@ -1593,6 +2141,217 @@ html, body {
 
 .info-overlay div {
   white-space: nowrap;
+}
+
+/* === Backend-disconnected banner ===
+ * Persistent in-app surface for the case where the Python backend
+ * dies / hangs / fails to start. Pinned to the top of the viewport
+ * above all content (z-index above modals so it never gets occluded).
+ * Was completely silent pre-2026-04-28 — Library scans / thumbnails /
+ * speed-stats just stopped working with no user-facing signal.
+ * Apply Nielsen #1 visibility + #9 actionable recovery + Shneiderman
+ * #3 informative feedback.
+ */
+.backend-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 9000; /* above modals (1000) and toasts (2000); below dropzone (9999) */
+  background: var(--state-error-soft);
+  border-bottom: 1px solid var(--state-error);
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.backend-banner__inner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  max-width: 1400px;
+  margin: 0 auto;
+}
+
+.backend-banner__icon {
+  flex-shrink: 0;
+  color: var(--state-error);
+}
+
+.backend-banner__body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.backend-banner__title {
+  font-weight: 600;
+  color: var(--state-error);
+}
+
+.backend-banner__detail {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.backend-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.backend-banner__btn {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.backend-banner__btn:hover {
+  background: var(--surface-overlay-strong);
+  border-color: var(--border-strong);
+}
+.backend-banner__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.backend-banner__btn:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.backend-banner__btn--primary {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+.backend-banner__btn--primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.backend-banner__close {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+.backend-banner__close:hover {
+  color: var(--text-primary);
+  background: var(--surface-overlay);
+}
+.backend-banner__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* `--restarting` modifier — neutral colours during the in-flight
+   restart attempt so it doesn't look alarming while we're already
+   fixing the problem. */
+.backend-banner--restarting {
+  background: var(--state-warning-soft);
+  border-bottom-color: var(--state-warning);
+}
+.backend-banner--restarting .backend-banner__icon,
+.backend-banner--restarting .backend-banner__title {
+  color: var(--state-warning);
+}
+
+/* === Drop-zone overlay ===
+ * Full-screen drag-and-drop visual feedback. Hidden by default; shown
+ * on document `dragenter` of any external file. The accent border +
+ * tinted backdrop tells the user "you can drop here" (Nielsen #1
+ * visibility — was completely silent prior to 2026-04-28). The
+ * `--reject` modifier swaps to a warning tint when the dragged item
+ * is an unsupported file type (Nielsen #5 error prevention surfaces
+ * the rejection BEFORE the drop happens).
+ */
+.drop-zone-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  /* The dashed inset border draws over the page contents — bigger
+     visual anchor than a thin border alone, and respects the cluster
+     of "this whole window is the drop target". 24px from the edges so
+     the dashed line doesn't touch the window chrome. */
+  box-shadow: inset 0 0 0 3px var(--accent), inset 0 0 0 27px transparent;
+  pointer-events: none; /* let the drop event reach document handlers */
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  color: var(--video-overlay-text);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .drop-zone-overlay {
+    transition: opacity 120ms ease;
+  }
+}
+
+.drop-zone-overlay__inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 32px 48px;
+  background: var(--video-overlay-bg);
+  border: 1px solid var(--video-overlay-border);
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  max-width: 420px;
+  text-align: center;
+}
+
+.drop-zone-overlay__icon {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.drop-zone-overlay__title {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--video-overlay-text);
+}
+
+.drop-zone-overlay__subtitle {
+  font-size: 13px;
+  color: var(--video-overlay-text-dim);
+}
+
+/* `--reject` modifier — fired on dragover when the dragged items don't
+   include a supported extension. Swaps the accent border + icon tint
+   to the error palette so the user knows the drop will be ignored
+   before they release. */
+.drop-zone-overlay--reject {
+  box-shadow: inset 0 0 0 3px var(--state-error), inset 0 0 0 27px transparent;
+}
+.drop-zone-overlay--reject .drop-zone-overlay__icon {
+  color: var(--state-error);
+}
+.drop-zone-overlay--reject .drop-zone-overlay__title::before {
+  /* No-entry glyph prefixed visually so the heading itself signals
+     rejection (not just the colour — Norman signifier, redundancy
+     against colour-blindness). */
+  content: '⊘ ';
 }
 
 /* === Toast Notifications === */
@@ -1609,19 +2368,58 @@ html, body {
   pointer-events: none;
 }
 
+/* Toasts overlay the player (and other surfaces) — kept white-on-dark
+   on both themes for legibility against dark video.
+   Post-redesign: explicit close button + body slot, so the layout is
+   `body | close-button`. Body keeps the click-anywhere-to-dismiss
+   affordance the prior toast had. */
 .toast {
-  background: rgba(0, 0, 0, 0.85);
-  color: var(--text-primary);
-  padding: 10px 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--video-overlay-bg);
+  color: var(--video-overlay-text);
+  padding: 8px 8px 8px 16px;
   border-radius: 8px;
   font-size: 13px;
-  max-width: 400px;
-  text-align: center;
+  max-width: 480px;
   pointer-events: auto;
-  cursor: pointer;
   user-select: none;
   animation: toast-in 250ms ease forwards;
   transition: background 120ms ease;
+}
+
+.toast__body {
+  flex: 1;
+  cursor: pointer;
+  text-align: left;
+  line-height: 1.4;
+}
+
+.toast__close {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0;
+  transition: background 120ms, opacity 120ms;
+}
+.toast__close:hover {
+  opacity: 1;
+  background: var(--video-overlay-control-hover);
+}
+.toast__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  opacity: 1;
 }
 
 .toast:hover {
@@ -1638,7 +2436,42 @@ html, body {
 }
 
 .toast--warn {
-  border-left: 3px solid #ff9800;
+  border-left: 3px solid var(--state-warning);
+}
+
+/* Multi-line toast body — used when a toast carries an action button
+   alongside the hint text (e.g. the timestamp-server hint with its
+   "Try again" affordance). Stacks vertically; the action button is a
+   touchable target distinct from the click-to-dismiss body region. */
+.toast__multiline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.toast__action {
+  align-self: flex-start;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.toast__action:hover {
+  background: var(--accent-hover);
+}
+.toast__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.toast__action:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 .toast--info {
@@ -1674,7 +2507,7 @@ html, body {
 .gap-skip__btn {
   background: rgba(0, 0, 0, 0.75);
   color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border: 1px solid var(--border-strong);
   padding: 10px 20px;
   border-radius: 8px;
   font-size: 14px;
@@ -1686,13 +2519,14 @@ html, body {
 
 .gap-skip__btn:hover {
   background: rgba(0, 0, 0, 0.9);
-  border-color: rgba(255, 255, 255, 0.35);
+  border-color: var(--border-strong);
 }
 
 .gap-skip__cancel {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  /* Video-overlay context — gap-skip is rendered on top of the video. */
+  color: var(--video-overlay-text-dim);
   font-size: 12px;
   cursor: pointer;
   padding: 4px 8px;

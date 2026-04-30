@@ -1,9 +1,36 @@
 const { spawn, execSync } = require('child_process');
 const path = require('path');
+const http = require('http');
 const log = require('./logger');
 
 let pythonProcess = null;
 let backendPort = 5123;
+
+// --- Health monitor ---
+//
+// The backend is launched at app startup but can die mid-session
+// (Python crash, OOM, user killed it from Task Manager, FastAPI worker
+// hung, etc.). Pre-2026-04-28 this surfaced as silent IPC failures —
+// thumbnails stopped loading, library scans failed, but the user got
+// no signal that the cause was the backend dying. Now we poll the
+// `/health` endpoint and notify the renderer on state changes so it
+// can surface a banner with a Restart action.
+//
+// Polling cadence: 5 s (fast enough that the user sees the banner
+// within ~10 s of a death; slow enough that a steady-state idle app
+// doesn't spend cycles on health checks).
+//
+// Failure threshold: 2 consecutive failures = `down`. A single failure
+// might be a transient timeout under load. Two in a row at 5 s spacing
+// is a real death.
+const HEALTH_INTERVAL_MS = 5000;
+const HEALTH_TIMEOUT_MS = 3000;
+const HEALTH_FAIL_THRESHOLD = 2;
+
+let healthState = 'unknown';   // 'unknown' | 'running' | 'down' | 'restarting'
+let healthConsecutiveFailures = 0;
+let healthIntervalHandle = null;
+let healthListener = null;     // callback: (state, detail) => void
 
 /**
  * Kill anything currently holding `port` so we don't fight an orphan backend
@@ -160,6 +187,7 @@ async function startBackend() {
 }
 
 function stopBackend() {
+  stopHealthMonitor();
   if (pythonProcess) {
     const pid = pythonProcess.pid;
     try {
@@ -187,4 +215,107 @@ function getBackendPort() {
   return backendPort;
 }
 
-module.exports = { startBackend, stopBackend, getBackendPort };
+/**
+ * Subscribe to backend health state transitions. The callback fires on
+ * every state change with `(state, detail)` where state is one of
+ * `'running'`, `'down'`, `'restarting'`. main.js sets this up to
+ * forward events to all renderer windows via IPC.
+ */
+function setHealthListener(cb) {
+  healthListener = cb || null;
+}
+
+function getHealthState() {
+  return healthState;
+}
+
+/**
+ * Single non-blocking GET to /health. Resolves with `true` on 200,
+ * `false` on any other outcome (network error, timeout, non-2xx).
+ */
+function probeHealth() {
+  return new Promise((resolve) => {
+    const req = http.request({
+      host: '127.0.0.1',
+      port: backendPort,
+      path: '/health',
+      method: 'GET',
+      timeout: HEALTH_TIMEOUT_MS,
+    }, (res) => {
+      // Drain response body — leaving it open holds the socket.
+      res.on('data', () => { /* ignore */ });
+      res.on('end', () => resolve(res.statusCode === 200));
+    });
+    req.on('error', () => resolve(false));
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.end();
+  });
+}
+
+function _emitHealthState(newState, detail) {
+  if (newState === healthState) return; // no-op when state didn't change
+  healthState = newState;
+  log.info(`[Backend] health state → ${newState}${detail ? ` (${detail})` : ''}`);
+  if (healthListener) {
+    try { healthListener(newState, detail); }
+    catch (err) { log.warn('[Backend] health listener threw:', err.message); }
+  }
+}
+
+function startHealthMonitor() {
+  stopHealthMonitor(); // idempotent
+  healthConsecutiveFailures = 0;
+  healthIntervalHandle = setInterval(async () => {
+    const ok = await probeHealth();
+    if (ok) {
+      healthConsecutiveFailures = 0;
+      _emitHealthState('running');
+    } else {
+      healthConsecutiveFailures++;
+      if (healthConsecutiveFailures >= HEALTH_FAIL_THRESHOLD) {
+        _emitHealthState('down', `no /health response in ${healthConsecutiveFailures} attempts`);
+      }
+    }
+  }, HEALTH_INTERVAL_MS);
+}
+
+function stopHealthMonitor() {
+  if (healthIntervalHandle) {
+    clearInterval(healthIntervalHandle);
+    healthIntervalHandle = null;
+  }
+}
+
+/**
+ * Stop the existing backend (if any) and start a new one. Used by the
+ * "Restart Backend" affordance in the disconnected banner. Emits
+ * `'restarting'` immediately so the UI can show transitional state.
+ */
+async function restartBackend() {
+  _emitHealthState('restarting', 'user-initiated');
+  stopHealthMonitor();
+  stopBackend();
+  // Brief breather to let the OS reap the killed PID before respawn —
+  // Windows in particular can take a moment to release the port.
+  await new Promise(r => setTimeout(r, 500));
+  await startBackend();
+  startHealthMonitor();
+  // First probe after restart — if it succeeds, the next interval tick
+  // will emit 'running'. If it fails, threshold logic kicks in.
+  const ok = await probeHealth();
+  if (ok) {
+    healthConsecutiveFailures = 0;
+    _emitHealthState('running');
+  }
+}
+
+module.exports = {
+  startBackend,
+  stopBackend,
+  getBackendPort,
+  setHealthListener,
+  getHealthState,
+  startHealthMonitor,
+  stopHealthMonitor,
+  restartBackend,
+};

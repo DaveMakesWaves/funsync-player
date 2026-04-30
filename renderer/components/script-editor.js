@@ -17,6 +17,7 @@ import { detectGaps, fillGaps } from '../js/gap-filler.js';
 import { extractPeaks, getCachedPeaks, clearCacheFor } from '../js/waveform.js';
 import { detectBeats, beatsToActions, getCachedBeats, clearBeatCacheFor } from '../js/beat-detector.js';
 import { dataService } from '../js/data-service.js';
+import { openKeyboardHelp, EDITOR_SHORTCUT_GROUPS } from '../js/keyboard-help.js';
 
 export class ScriptEditor {
   constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyManager, settings }) {
@@ -87,9 +88,32 @@ export class ScriptEditor {
     this._panel = document.createElement('div');
     this._panel.className = 'script-editor';
 
-    // Toolbar
+    // Toolbar — role="toolbar" + arrow-key navigation between buttons
+    // (Nielsen #4 standards). Pressing ← / → moves focus between
+    // toolbar items; Home / End jumps to first / last. Tab still moves
+    // focus OUT of the toolbar to the next page region — canonical
+    // tablist/toolbar keyboard pattern.
     const toolbar = document.createElement('div');
     toolbar.className = 'editor__toolbar';
+    toolbar.setAttribute('role', 'toolbar');
+    toolbar.setAttribute('aria-label', 'Script editor tools');
+    toolbar.addEventListener('keydown', (e) => {
+      if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+      // Only buttons participate in arrow-key roving — selects keep
+      // their own arrow-key semantics (option scroll).
+      const items = [...toolbar.querySelectorAll('button:not([disabled])')];
+      const idx = items.indexOf(document.activeElement);
+      if (idx < 0) return;
+      let next = -1;
+      if (e.key === 'ArrowRight') next = (idx + 1) % items.length;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + items.length) % items.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = items.length - 1;
+      if (next >= 0) {
+        e.preventDefault();
+        items[next].focus();
+      }
+    });
 
     this._btnUndo = this._makeBtn(Undo2, 'Undo (Ctrl+Z)', () => this.editableScript.undo());
     this._btnRedo = this._makeBtn(Redo2, 'Redo (Ctrl+Y)', () => this.editableScript.redo());
@@ -620,43 +644,66 @@ export class ScriptEditor {
         this._deleteSelected();
         break;
 
-      // Left/Right: jump selection between action points (Ctrl = frame step)
+      // OFS-style arrow-key mapping (v0.4.4).
+      //   Plain Left/Right       = step 1 video frame
+      //   Ctrl+Left/Right        = step N frames (editor.fastStepFrames, default 6)
+      //   Shift+Left/Right       = move selected action(s) by ±1 frame (in time)
+      //   Ctrl+Shift+Left/Right  = move selected action(s) by ±N frames (in time)
+      //   Plain Up/Down          = navigate to prev/next action (with seek)
+      //   Ctrl+Up/Down           = navigate to prev/next action across all scripts
+      //   Shift+Up/Down          = nudge selected position ±5 (coarse)
+      //   Ctrl+Shift+Up/Down     = nudge selected position ±1 (fine)
       case 'ArrowLeft':
         e.preventDefault();
         e.stopPropagation();
-        if (ctrl) {
-          this.videoPlayer.stepFrame(-1);
+        if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
+          const frames = ctrl ? this._fastStepFrames() : 1;
+          const deltaMs = -frames * this._frameDurationMs();
+          this.editableScript.moveActions(this.editableScript.selectedIndices, deltaMs, 0);
+        } else if (ctrl) {
+          this.videoPlayer.stepFrames(-this._fastStepFrames());
         } else {
-          this._selectAdjacentAction(-1);
+          this.videoPlayer.stepFrame(-1);
         }
         break;
 
       case 'ArrowRight':
         e.preventDefault();
         e.stopPropagation();
-        if (ctrl) {
-          this.videoPlayer.stepFrame(1);
+        if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
+          const frames = ctrl ? this._fastStepFrames() : 1;
+          const deltaMs = frames * this._frameDurationMs();
+          this.editableScript.moveActions(this.editableScript.selectedIndices, deltaMs, 0);
+        } else if (ctrl) {
+          this.videoPlayer.stepFrames(this._fastStepFrames());
         } else {
-          this._selectAdjacentAction(1);
+          this.videoPlayer.stepFrame(1);
         }
         break;
 
-      // Up/Down: nudge selected positions (Ctrl = fine ±1, plain = ±5)
       case 'ArrowUp':
         e.preventDefault();
         e.stopPropagation();
-        if (this.editableScript.selectedIndices.size > 0) {
+        if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
           const delta = ctrl ? 1 : 5;
           this.editableScript.moveActions(this.editableScript.selectedIndices, 0, delta);
+        } else if (ctrl) {
+          this._selectAdjacentActionAcrossScripts(-1);
+        } else {
+          this._selectAdjacentAction(-1);
         }
         break;
 
       case 'ArrowDown':
         e.preventDefault();
         e.stopPropagation();
-        if (this.editableScript.selectedIndices.size > 0) {
+        if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
           const delta = ctrl ? -1 : -5;
           this.editableScript.moveActions(this.editableScript.selectedIndices, 0, delta);
+        } else if (ctrl) {
+          this._selectAdjacentActionAcrossScripts(1);
+        } else {
+          this._selectAdjacentAction(1);
         }
         break;
 
@@ -779,6 +826,17 @@ export class ScriptEditor {
           e.preventDefault();
           e.stopPropagation();
           this._addBookmarkAtCursor();
+        }
+        break;
+
+      // `?` (Shift+/) opens the keyboard-shortcut help overlay.
+      // Universal-discoverability for the editor's many bindings —
+      // Nielsen #7 (flexibility for experts) + #10 (help in context).
+      case '?':
+        if (!ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._openKeyboardHelp();
         }
         break;
 
@@ -915,6 +973,68 @@ export class ScriptEditor {
     this.graph.centerOnTime(action.at);
     this.graph.draw();
     this._updateScrubber();
+  }
+
+  /**
+   * Like `_selectAdjacentAction` but considers action timestamps across every
+   * loaded multi-axis script (current editor script + any axis scripts held
+   * in buttplugSync._axisActions). Used by Ctrl+Up/Down so a user editing
+   * the L0 script can still hop to a Roll/Pitch action point.
+   *
+   * Selection always lands on whatever index in the *current* editor script
+   * is closest to the chosen cross-script timestamp — we don't switch the
+   * open script automatically. The video and graph seek to the exact target.
+   */
+  _selectAdjacentActionAcrossScripts(direction) {
+    const fromMs = this.videoPlayer.currentTime * 1000;
+
+    // Collect candidate timestamps from every script we know about.
+    const stamps = new Set();
+    for (const a of this.editableScript.actions) stamps.add(a.at);
+    const sync = this.syncEngine?._buttplugSync || this.handyManager?._buttplugSync;
+    const axisMap = sync?._axisActions;
+    if (axisMap && typeof axisMap.forEach === 'function') {
+      axisMap.forEach((state) => {
+        const list = state?.actions || [];
+        for (const a of list) stamps.add(a.at);
+      });
+    }
+    if (stamps.size === 0) {
+      // No cross-script context — fall back to single-script navigation.
+      this._selectAdjacentAction(direction);
+      return;
+    }
+
+    // Pick the nearest stamp strictly in the requested direction.
+    let target = null;
+    for (const t of stamps) {
+      if (direction > 0 && t > fromMs && (target === null || t < target)) target = t;
+      else if (direction < 0 && t < fromMs && (target === null || t > target)) target = t;
+    }
+    if (target === null) {
+      this._selectAdjacentAction(direction);
+      return;
+    }
+
+    // Seek + recenter graph + reflect selection on the closest local action.
+    this.videoPlayer.video.currentTime = target / 1000;
+    this.graph.centerOnTime(target);
+    this.graph.draw();
+    this._updateScrubber();
+
+    const localActions = this.editableScript.actions;
+    if (localActions.length > 0) {
+      let bestIdx = -1;
+      let bestDist = Infinity;
+      for (let i = 0; i < localActions.length; i++) {
+        const d = Math.abs(localActions[i].at - target);
+        if (d < bestDist) { bestDist = d; bestIdx = i; }
+      }
+      if (bestIdx >= 0) {
+        this.editableScript.select(bestIdx);
+        this._lastSelectedIndex = bestIdx;
+      }
+    }
   }
 
   // --- Scrubber ---
@@ -1225,6 +1345,22 @@ export class ScriptEditor {
         showToast('No actions generated — check parameters', 'warn');
       }
     }
+  }
+
+  // --- Keyboard help overlay ---
+  //
+  // Surfaces every editor shortcut at once so the user doesn't have to
+  // discover them piecemeal via tooltips. `?` opens it from the canvas
+  // keydown handler. Modal for first ship (per SCOPE-desktop-redesign
+  // §4.7, locked decision §10.4) — can demote to a popover later if it
+  // feels heavy. Nielsen #7 (expert flexibility) + #10 (help in context).
+
+  _openKeyboardHelp() {
+    // Renders the same shape used by the player help overlay (extracted
+    // 2026-04-27 into renderer/js/keyboard-help.js so both surfaces
+    // share the layout). Editor's group set lives in EDITOR_SHORTCUT_GROUPS
+    // — anyone updating a binding in this file should update that list too.
+    openKeyboardHelp('Editor keyboard shortcuts', EDITOR_SHORTCUT_GROUPS);
   }
 
   // --- Metadata Modal ---
@@ -1760,9 +1896,23 @@ export class ScriptEditor {
     else this.show();
   }
 
+  /** Mirror open/closed state on the player bottom-bar editor button.
+   *  Adds aria-pressed + a class hook for the accent-soft background.
+   *  No-op if the button isn't in the DOM (e.g. early lifecycle). */
+  _reflectOpenStateOnTrigger(isOpen) {
+    const btn = document.getElementById('btn-editor');
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', isOpen ? 'true' : 'false');
+    btn.classList.toggle('control-btn--toggled', isOpen);
+  }
+
   show() {
     if (this._open) return;
     this._open = true;
+    // Reflect open state on the bottom-bar editor button so the user
+    // sees the same toggle-state pattern other controls use (mute,
+    // fullscreen) — Shneiderman #1 consistency, Nielsen #1 visibility.
+    this._reflectOpenStateOnTrigger(true);
 
     // Auto-create funscript if none loaded and we have a video path
     this._ensureFunscript();
@@ -1801,6 +1951,7 @@ export class ScriptEditor {
   hide() {
     if (!this._open) return;
     this._open = false;
+    this._reflectOpenStateOnTrigger(false);
 
     // Flush pending autosave before closing (only if autosave is enabled)
     if (this._autosaveTimer) {
@@ -2021,10 +2172,25 @@ export class ScriptEditor {
     if (!this._snapToFrame) return timeMs;
     if (!this.videoPlayer?.video || !isFinite(this.videoPlayer.video.duration)) return timeMs;
 
-    // Use 30fps as default snap grid — reliable across all videos
-    // (getVideoPlaybackQuality().totalVideoFrames is unreliable for FPS estimation)
-    const frameDurationMs = 1000 / 30;
-    return Math.round(timeMs / frameDurationMs) * frameDurationMs;
+    return Math.round(timeMs / this._frameDurationMs()) * this._frameDurationMs();
+  }
+
+  /**
+   * Frame duration in ms used for snap grid + arrow-key time moves. Matches
+   * snapTime's 30fps default — `getVideoPlaybackQuality()` totals are
+   * unreliable for FPS estimation, so we standardise on 30 across all videos.
+   */
+  _frameDurationMs() {
+    return 1000 / 30;
+  }
+
+  /**
+   * Frame count for fast frame-step bindings (Ctrl+Left/Right and the
+   * Ctrl+Shift in-time move). Honours `editor.fastStepFrames` setting.
+   */
+  _fastStepFrames() {
+    const n = Number(dataService.get('editor.fastStepFrames'));
+    return Number.isFinite(n) && n > 0 ? Math.round(n) : 6;
   }
 
   // --- Live Device Preview ---

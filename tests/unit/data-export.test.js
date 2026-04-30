@@ -1,4 +1,11 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { promises as fsp } from 'fs';
+import path from 'path';
+import os from 'os';
+import { createRequire } from 'module';
+
+const require_ = createRequire(import.meta.url);
+const dataExport = require_('../../electron/data-export.js');
 
 // Since data-export.js is CJS (main process), we test the mergeConfig logic
 // by extracting its pattern. For export/import, we test the merge function directly.
@@ -206,6 +213,107 @@ describe('data-export', () => {
       const result = mergeConfig(baseConfig, imported, 'merge');
       expect(result.settings.player.volume).toBe(60);
       expect(result.playlists.length).toBe(1); // unchanged
+    });
+  });
+
+  // Regression: pre-fix, exportData() wrote the live config straight into
+  // the zip without stripping the high-churn derived caches. For a 1000-
+  // video library `thumbnailCache` alone could be tens of MB of base64
+  // JPEGs travelling along with every shared backup. SCOPE-data-backup.md
+  // §4.8 + §7.6a require exportData to use the same BACKUP_BLACKLIST as
+  // the rolling-snapshot pipeline. These tests pin that contract.
+  describe('exportData — blacklist enforcement', () => {
+    let tmpDir;
+    beforeEach(async () => {
+      tmpDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'funsync-export-test-'));
+    });
+    afterEach(async () => {
+      try { await fsp.rm(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
+    });
+
+    async function readZipConfig(zipPath) {
+      const JSZip = require_('jszip');
+      const buf = await fsp.readFile(zipPath);
+      const zip = await JSZip.loadAsync(buf);
+      const file = zip.file('config.json');
+      expect(file).toBeTruthy();
+      const text = await file.async('string');
+      return JSON.parse(text);
+    }
+
+    function configWithCaches() {
+      return {
+        settings: {
+          handy: { connectionKey: 'eK6Qv3AH', defaultOffset: -50 },
+          library: {
+            sources: [{ id: 's1', path: '/media/lib' }],
+            collections: [{ id: 'c1', name: 'Favourites' }],
+            associations: { '/v/a.mp4': '/v/a.funscript' },
+            customRouting: { dev0: 'L0' },
+            // Blacklisted — must NOT appear in the exported zip.
+            speedStatsCache: { '/v/a.mp4': { mean: 12, max: 200 } },
+            durationCache: { '/v/a.mp4': 1234 },
+            thumbnailCache: { '/v/a.mp4': 'data:image/jpeg;base64,/9j/4AAQ...' },
+          },
+        },
+        playlists: [{ id: 'p1', name: 'Test', videoPaths: [] }],
+        categories: [{ id: 'cat1', name: 'Action' }],
+        videoCategories: { '/v/a.mp4': ['cat1'] },
+        _migrated: true,
+      };
+    }
+
+    it('exported config.json has no thumbnailCache / durationCache / speedStatsCache', async () => {
+      const out = path.join(tmpDir, 'backup.zip');
+      const result = await dataExport.exportData(configWithCaches(), out);
+      expect(result.success).toBe(true);
+
+      const exported = await readZipConfig(out);
+      expect(exported.settings.library.speedStatsCache).toBeUndefined();
+      expect(exported.settings.library.durationCache).toBeUndefined();
+      expect(exported.settings.library.thumbnailCache).toBeUndefined();
+    });
+
+    it('exported config.json preserves non-cache library fields', async () => {
+      const out = path.join(tmpDir, 'backup.zip');
+      await dataExport.exportData(configWithCaches(), out);
+      const exported = await readZipConfig(out);
+
+      expect(exported.settings.library.sources).toHaveLength(1);
+      expect(exported.settings.library.collections).toHaveLength(1);
+      expect(exported.settings.library.associations).toEqual({ '/v/a.mp4': '/v/a.funscript' });
+      expect(exported.settings.library.customRouting).toEqual({ dev0: 'L0' });
+      expect(exported.settings.handy.connectionKey).toBe('eK6Qv3AH');
+      expect(exported.playlists).toHaveLength(1);
+      expect(exported.categories).toHaveLength(1);
+      expect(exported.videoCategories).toEqual({ '/v/a.mp4': ['cat1'] });
+      expect(exported._migrated).toBe(true);
+    });
+
+    it('exportData does not mutate the input config (cache fields stay on the live object)', async () => {
+      // Stripping is a copy operation — the caller's live config keeps its
+      // caches so the running app can still hit them after the user clicks
+      // Export. Verify by snapshotting the input shape and re-checking.
+      const cfg = configWithCaches();
+      const before = JSON.stringify(cfg);
+      await dataExport.exportData(cfg, path.join(tmpDir, 'backup.zip'));
+      expect(JSON.stringify(cfg)).toBe(before);
+      // Sanity: live cache fields really are still there.
+      expect(cfg.settings.library.thumbnailCache).toBeDefined();
+    });
+
+    it('exported config sans library section still excludes caches gracefully', async () => {
+      // Edge case: minimal install / first-launch config has no library
+      // sub-tree at all. stripBlacklist must not throw on missing parents.
+      const minimal = {
+        settings: { handy: { connectionKey: 'k' } },
+        playlists: [],
+        categories: [],
+      };
+      const result = await dataExport.exportData(minimal, path.join(tmpDir, 'backup.zip'));
+      expect(result.success).toBe(true);
+      const exported = await readZipConfig(path.join(tmpDir, 'backup.zip'));
+      expect(exported.settings.handy.connectionKey).toBe('k');
     });
   });
 

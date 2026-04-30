@@ -13,20 +13,34 @@ export class Modal {
    */
   static open(opts) {
     return new Promise((resolve) => {
+      // Capture the focused element BEFORE we add the modal to the DOM —
+      // we'll restore focus to it on close (Shneiderman #7 user control —
+      // predictable; user came from there).
+      const previouslyFocused = document.activeElement;
+
       const overlay = document.createElement('div');
       overlay.className = 'modal-overlay';
 
+      // role="dialog" + aria-modal="true" so screen readers announce
+      // the modal context. aria-labelledby links to the title element
+      // (Nielsen #4 standards; a11y).
       const panel = document.createElement('div');
       panel.className = 'modal-panel';
+      panel.setAttribute('role', 'dialog');
+      panel.setAttribute('aria-modal', 'true');
+      const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
+      panel.setAttribute('aria-labelledby', titleId);
 
       // Header
       const header = document.createElement('div');
       header.className = 'modal-header';
-      const titleEl = document.createElement('div');
+      const titleEl = document.createElement('h2');
       titleEl.className = 'modal-title';
+      titleEl.id = titleId;
       titleEl.textContent = opts.title || '';
       const closeBtn = document.createElement('button');
       closeBtn.className = 'modal-close-btn';
+      closeBtn.setAttribute('aria-label', `Close ${opts.title || 'dialog'}`);
       closeBtn.appendChild(icon(X, { width: 18, height: 18 }));
       closeBtn.title = 'Close';
       header.appendChild(titleEl);
@@ -40,10 +54,31 @@ export class Modal {
       panel.appendChild(body);
 
       overlay.appendChild(panel);
+
+      // `inert` on the rest of the page so AT/keyboard can't reach it
+      // while the modal is open. Modern Electron supports `inert`
+      // natively. Stash any pre-existing inert children so we restore
+      // exactly the prior state on close (otherwise we'd un-inert
+      // siblings the host page intentionally inerted).
+      const inertedSiblings = [];
+      for (const sib of [...document.body.children]) {
+        if (!sib.hasAttribute('inert')) {
+          sib.setAttribute('inert', '');
+          inertedSiblings.push(sib);
+        }
+      }
       document.body.appendChild(overlay);
 
       const close = (value = null) => {
+        document.removeEventListener('keydown', onKeydown, true);
+        // Restore inert state of siblings before removal so focus can
+        // legitimately land on the previously-focused element.
+        for (const sib of inertedSiblings) sib.removeAttribute('inert');
         overlay.remove();
+        if (previouslyFocused && document.contains(previouslyFocused)) {
+          try { previouslyFocused.focus({ preventScroll: true }); }
+          catch { /* ignore — element may be unfocusable now */ }
+        }
         resolve(value);
       };
 
@@ -52,11 +87,38 @@ export class Modal {
         if (e.target === overlay) close(null);
       });
 
+      // Focus trap on Tab key. Cycle focus inside the panel; Shift+Tab
+      // wraps to the last focusable element. Without this a Tab from
+      // the last button would land on browser chrome / page content,
+      // confusing keyboard users (Nielsen #3 user control + a11y).
+      const FOCUSABLE_SELECTOR = (
+        'a[href], button:not([disabled]), textarea:not([disabled]), ' +
+        'input:not([disabled]):not([type="hidden"]), select:not([disabled]), ' +
+        '[tabindex]:not([tabindex="-1"])'
+      );
       const onKeydown = (e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
-          document.removeEventListener('keydown', onKeydown, true);
           close(null);
+          return;
+        }
+        if (e.key !== 'Tab') return;
+        const items = panel.querySelectorAll(FOCUSABLE_SELECTOR);
+        if (items.length === 0) return;
+        const first = items[0];
+        const last = items[items.length - 1];
+        const active = document.activeElement;
+        if (e.shiftKey && active === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && active === last) {
+          e.preventDefault();
+          first.focus();
+        } else if (!panel.contains(active)) {
+          // Defensive — focus drifted outside (e.g. devtools). Bring it
+          // back so Tab continues to cycle within the modal.
+          e.preventDefault();
+          first.focus();
         }
       };
       document.addEventListener('keydown', onKeydown, true);

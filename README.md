@@ -30,8 +30,8 @@ A local desktop video player with device synchronization for funscript playback.
 
 ### Remote access
 - **Web Remote** — control FunSync from your phone on the same WiFi. Library, playback, device sync. Installable as a PWA from the phone's home screen.
-- **VR content server** — Quest standalone support via HereSphere / DeoVR. Your library appears in the headset; PC-connected devices sync automatically.
-- **PCVR companion bridge** — DeoVR / HereSphere on PC (SteamVR, Virtual Desktop) driven via their timestamp APIs; all devices follow.
+- **VR content server** — Quest standalone support via HereSphere. Your library appears in the headset; PC-connected devices sync automatically.
+- **PCVR companion bridge** — HereSphere on PC (SteamVR, Virtual Desktop) driven via its timestamp API; all devices follow.
 - **Session status card** docks bottom-right when an external source is driving playback, with a 50-entry history viewer and a VR ↔ Web Remote last-wins mutex.
 
 ### EroScripts Integration
@@ -136,10 +136,14 @@ Updates are checked on startup. When a new version is available, a toast appears
 |-------------|--------|
 | 0-9 / Numpad 0-9 | Place action at current playhead (positions 0, 11, 22, ..., 100) |
 | Alt+Click on empty canvas | Insert action at click position |
-| Left / Right | Select adjacent action |
-| Ctrl+Left / Right | Frame-step (one video frame) |
-| Up / Down | Nudge selected position ±5 |
-| Ctrl+Up / Down | Nudge ±1 |
+| Left / Right | Step one video frame |
+| Ctrl+Left / Right | Fast frame step (default 6 — `editor.fastStepFrames`) |
+| Shift+Left / Right | Move selected action(s) ±1 frame in time |
+| Ctrl+Shift+Left / Right | Move selected action(s) ±N frames in time |
+| Up / Down | Select previous / next action (with seek) |
+| Ctrl+Up / Down | Select previous / next action across all loaded scripts |
+| Shift+Up / Down | Nudge selected position ±5 (coarse) |
+| Ctrl+Shift+Up / Down | Nudge selected position ±1 (fine) |
 | Delete / Backspace | Delete selected actions |
 | Ctrl+Z / Ctrl+Y | Undo / Redo |
 | Ctrl+C / V / X | Copy / Paste / Cut |

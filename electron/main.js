@@ -2,15 +2,64 @@ const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const log = require('./logger');
-const { startBackend, stopBackend } = require('./python-bridge');
+const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState } = require('./python-bridge');
 const store = require('./store');
+const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
 
 const eroScripts = new EroScriptsAPI();
 
+// Enable Chromium's VA-API hardware video decoder on Linux. Chromium
+// ships with this off by default on Linux because of historical
+// stability issues with broken drivers, but for users who DO have
+// working VA-API drivers (intel-media-driver / mesa-va-drivers /
+// nvidia-vaapi-driver) this is what gates HEVC and H.264 hardware
+// decode in the <video> element. With it off, Linux users fall back to
+// software decode and 4K+ HEVC stutters the same way Windows users hit
+// without the MS HEVC Video Extension. The switch is a no-op on
+// Windows/macOS (Chromium ignores it on those platforms) so leaving
+// it unconditional keeps the code simple. Must be called BEFORE
+// app.whenReady() — Chromium feature flags are parsed at init.
+if (process.platform === 'linux') {
+  app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiIgnoreDriverChecks');
+}
+
 let mainWindow = null;
+
+// Result of the boot-time auto-recovery check, held so the renderer
+// can pick it up via IPC and surface a toast on the first paint. Null
+// means "no result yet"; { recovered: false } means "config was fine"
+// (no toast). Set in app.whenReady before store.initStore().
+let _recoveryResult = null;
+
+// Take a pre-action snapshot before a destructive main-process IPC.
+// Best-effort: failure is logged but does NOT block the destructive
+// op — losing the safety net is regrettable, refusing the user's
+// action because of it would be worse. SCOPE-data-backup.md §4.7.
+async function _preActionSnapshot(label) {
+  try {
+    await dataBackup.takeSnapshot({
+      userDataDir: app.getPath('userData'),
+      config: store.getAll(),
+      trigger: dataBackup.TRIGGER.PRE_ACTION,
+      label,
+    });
+    log.info(`[Backup] Pre-action snapshot taken: ${label}`);
+  } catch (err) {
+    log.warn(`[Backup] Pre-action snapshot failed (${label}):`, err.message);
+  }
+}
+
+// Disposer for the electron-conf onDidAnyChange subscription. Held so
+// before-quit can clean up the listener before the app exits.
+let _unsubscribeFromStore = null;
+
+// Guard for the deferred-quit flow. before-quit fires twice: once when
+// we e.preventDefault() to take a final snapshot, and a second time
+// after we re-call app.quit(). The flag prevents an infinite loop.
+let _finalSnapshotDone = false;
 
 // Single instance lock — prevent multiple copies running at once.
 // Also handles the installer/updater trying to relaunch the app.
@@ -102,13 +151,78 @@ app.whenReady().then(async () => {
   const _t0 = Date.now();
   log.info(`[Timing main] app.whenReady fired at t=0`);
 
+  // Auto-recovery sweep — MUST run before store.initStore so that if
+  // config.json is missing/unparseable we restore it from a snapshot
+  // before electron-conf reads it (otherwise electron-conf silently
+  // resets to defaults and the user loses their entire library).
+  // SCOPE-data-backup.md §4.4 — "before any UI loads".
+  const userDataDir = app.getPath('userData');
+  const _tRecover = Date.now();
+  try {
+    _recoveryResult = await dataBackup.verifyAndRecover({ userDataDir });
+    if (_recoveryResult.recovered) {
+      log.warn(
+        `[Backup] Recovered config.json from snapshot ${_recoveryResult.fromSnapshot.filename} (reason: ${_recoveryResult.reason})`
+      );
+    } else if (_recoveryResult.fellBack) {
+      log.warn(`[Backup] No valid snapshot to recover from (${_recoveryResult.reason}). Falling back to defaults.`);
+    }
+  } catch (err) {
+    log.error('[Backup] verifyAndRecover threw — continuing with defaults:', err.message);
+    _recoveryResult = { recovered: false };
+  }
+  log.info(`[Timing main] verifyAndRecover: ${Date.now() - _tRecover}ms`);
+
   const _tStore = Date.now();
   await store.initStore();
   log.info(`[Timing main] store.initStore: ${Date.now() - _tStore}ms`);
 
+  // Wire snapshot scheduling: every settings write debounces a 60 s
+  // snapshot. The blacklist filter inside data-backup keeps high-churn
+  // caches (thumbnail/duration/speed) out of the snapshot bytes — but
+  // the timer still arms on those writes, which is fine; the snapshot
+  // strips them and dedupe-by-hash handles "no real change".
+  _unsubscribeFromStore = store.subscribe(() => {
+    dataBackup.scheduleSnapshot({
+      userDataDir,
+      getConfig: () => store.getAll(),
+    });
+  });
+
+  // Take an immediate snapshot at startup. If recovery just happened,
+  // tag it 'post-recovery' so the manifest shows what was restored.
+  // Otherwise this is the routine "startup" snapshot from §4.2.
+  try {
+    const trigger = _recoveryResult.recovered
+      ? dataBackup.TRIGGER.RECOVERY
+      : dataBackup.TRIGGER.STARTUP;
+    await dataBackup.takeSnapshot({
+      userDataDir,
+      config: store.getAll(),
+      trigger,
+    });
+    // Prune asynchronously — don't block boot on disk I/O.
+    dataBackup.pruneOld({ userDataDir }).catch(err => {
+      log.warn('[Backup] Prune failed:', err.message);
+    });
+  } catch (err) {
+    log.warn('[Backup] Startup snapshot failed:', err.message);
+  }
+
   const _tBackend = Date.now();
   await startBackend();
   log.info(`[Timing main] startBackend (Python spawn + uvicorn boot): ${Date.now() - _tBackend}ms`);
+
+  // Backend health-monitor wiring. Forward state transitions to every
+  // renderer window via IPC so the disconnected-banner can react.
+  // Started here (not inside startBackend) so manual restarts can
+  // re-call startHealthMonitor without coupling through the spawn.
+  setHealthListener((state, detail) => {
+    BrowserWindow.getAllWindows().forEach(w =>
+      w.webContents.send('backend-status', { state, detail })
+    );
+  });
+  startHealthMonitor();
 
   const _tWindow = Date.now();
   createWindow();
@@ -130,8 +244,38 @@ app.on('window-all-closed', () => {
   }
 });
 
-app.on('before-quit', () => {
+app.on('before-quit', async (event) => {
+  // Two-pass pattern: first call defers the quit so we can snapshot
+  // the final session state to disk; second call (re-fired by our own
+  // app.quit() below) falls through normally.
+  if (_finalSnapshotDone) {
+    stopBackend();
+    return;
+  }
+  event.preventDefault();
+  _finalSnapshotDone = true;
+
+  // Drop the listener and any pending debounced snapshot — the QUIT
+  // snapshot we're about to take supersedes both.
+  if (_unsubscribeFromStore) {
+    try { _unsubscribeFromStore(); } catch { /* ignore */ }
+    _unsubscribeFromStore = null;
+  }
+  dataBackup.cancelScheduled();
+
+  try {
+    await dataBackup.takeSnapshot({
+      userDataDir: app.getPath('userData'),
+      config: store.getAll(),
+      trigger: dataBackup.TRIGGER.QUIT,
+    });
+  } catch (err) {
+    log.warn('[Backup] Quit snapshot failed:', err.message);
+  }
+
   stopBackend();
+  // Re-trigger quit; the guard above lets it through this time.
+  app.quit();
 });
 
 // Last-chance cleanup — runs even if a renderer crashed, a modal blocked
@@ -149,6 +293,37 @@ process.on('unhandledRejection', (reason) => log.error('Unhandled rejection:', r
 ipcMain.handle('get-backend-port', () => {
   const { getBackendPort } = require('./python-bridge');
   return getBackendPort();
+});
+
+// Backend health snapshot — used by the renderer banner on first paint
+// (the IPC `backend-status` event only fires on transitions, so a fresh
+// renderer needs to ask for the current state to know if it should
+// already be showing the banner).
+ipcMain.handle('get-backend-health', () => {
+  return getHealthState();
+});
+
+// User-initiated restart from the disconnected banner.
+ipcMain.handle('restart-backend', async () => {
+  log.info('[Backend] user-initiated restart');
+  try {
+    await restartBackend();
+    return { success: true };
+  } catch (err) {
+    log.error('[Backend] restart failed:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// "View logs" affordance — opens the electron-log file in the OS's
+// default editor. Path resolved at runtime (depends on app userData
+// directory which differs between dev and packaged builds).
+ipcMain.handle('open-log-file', async () => {
+  const { shell } = require('electron');
+  const logPath = log.transports?.file?.getFile?.()?.path;
+  if (!logPath) return { success: false, error: 'Log file path not available' };
+  const err = await shell.openPath(logPath);
+  return err ? { success: false, error: err } : { success: true, path: logPath };
 });
 
 ipcMain.handle('get-app-version', () => {
@@ -200,7 +375,8 @@ ipcMain.handle('rename-playlist', (_event, id, name) => {
   store.renamePlaylist(id, name);
 });
 
-ipcMain.handle('delete-playlist', (_event, id) => {
+ipcMain.handle('delete-playlist', async (_event, id) => {
+  await _preActionSnapshot('delete-playlist');
   store.deletePlaylist(id);
 });
 
@@ -225,7 +401,11 @@ ipcMain.handle('rename-category', (_event, id, name) => {
   store.renameCategory(id, name);
 });
 
-ipcMain.handle('delete-category', (_event, id) => {
+ipcMain.handle('delete-category', async (_event, id) => {
+  // Category delete is doubly-destructive: it nukes the category AND
+  // every video↔category mapping that referenced it. Worth the
+  // pre-action snapshot.
+  await _preActionSnapshot('delete-category');
   store.deleteCategory(id);
 });
 
@@ -870,6 +1050,12 @@ ipcMain.handle('import-data', async () => {
   const importResult = await importData(result.filePaths[0], 'merge');
   if (!importResult.success) return importResult;
 
+  // Snapshot the pre-import state — merging an arbitrary backup file
+  // can mutate sources, collections, playlists, categories, and even
+  // the encrypted Handy key. If the user picks the wrong file, this
+  // is the snapshot they'll roll back to.
+  await _preActionSnapshot('pre-import');
+
   // Merge imported config into existing
   const existing = store.getAll();
   const merged = mergeConfig(existing, importResult.config, 'merge');
@@ -882,6 +1068,163 @@ ipcMain.handle('import-data', async () => {
   }
 
   return { success: true, funscriptCount: (importResult.funscripts || []).length };
+});
+
+// --- IPC Handlers: Backup & Recovery ---
+
+// Renderer asks once on first paint whether the just-completed boot
+// recovered from a snapshot. Result is cleared after read so a F5 in
+// devtools doesn't replay the toast.
+ipcMain.handle('backup:get-boot-result', () => {
+  const r = _recoveryResult;
+  _recoveryResult = { recovered: false }; // consume
+  return r;
+});
+
+ipcMain.handle('backup:list', async () => {
+  try {
+    const userDataDir = app.getPath('userData');
+    const paths = dataBackup.resolvePaths(userDataDir);
+    const manifest = await dataBackup.loadManifest(paths.backupDir);
+    // Sort newest first so the UI shows the freshest entry at the top.
+    const sorted = [...manifest.snapshots].sort(
+      (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
+    );
+    return { success: true, snapshots: sorted };
+  } catch (err) {
+    log.warn('[Backup] list failed:', err.message);
+    return { success: false, error: err.message, snapshots: [] };
+  }
+});
+
+ipcMain.handle('backup:snapshot-now', async () => {
+  try {
+    const userDataDir = app.getPath('userData');
+    // Cancel any pending debounced snapshot — the manual one we're
+    // about to take supersedes it (avoids two snapshots within seconds
+    // of each other from the same state).
+    dataBackup.cancelScheduled();
+    const entry = await dataBackup.takeSnapshot({
+      userDataDir,
+      config: store.getAll(),
+      trigger: dataBackup.TRIGGER.MANUAL,
+    });
+    dataBackup.pruneOld({ userDataDir }).catch(() => {});
+    return { success: true, entry };
+  } catch (err) {
+    log.error('[Backup] manual snapshot failed:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('backup:restore', async (_event, { subdir, filename }) => {
+  // Restore flow:
+  //   1. Take a pre-action snapshot ("pre-restore") of current state so
+  //      the user can undo a regrettable restore.
+  //   2. Read + verify the chosen snapshot (parses + sha256 matches).
+  //   3. Atomically replace config.json on disk.
+  //   4. Relaunch — electron-conf has the old state cached in memory,
+  //      so the only safe way to flip to the restored content is to
+  //      restart the process.
+  if (!subdir || !filename) {
+    return { success: false, error: 'subdir and filename required' };
+  }
+  if (subdir !== 'snapshots' && subdir !== 'pre-action') {
+    return { success: false, error: 'invalid subdir' };
+  }
+  try {
+    const userDataDir = app.getPath('userData');
+    const paths = dataBackup.resolvePaths(userDataDir);
+
+    // Step 1: pre-restore snapshot of the current live state.
+    await dataBackup.takeSnapshot({
+      userDataDir,
+      config: store.getAll(),
+      trigger: dataBackup.TRIGGER.PRE_ACTION,
+      label: 'pre-restore',
+    });
+
+    // Step 2: read + verify the chosen snapshot file.
+    const snapshotPath = path.join(paths.backupDir, subdir, filename);
+    const raw = await fs.promises.readFile(snapshotPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (!parsed?.config || !parsed?.metadata) {
+      return { success: false, error: 'snapshot missing config or metadata' };
+    }
+    if (parsed.metadata.sha256) {
+      // Re-hash the bytes that landed on disk and compare. Mismatched
+      // hash = restore would write bad data; refuse instead.
+      const expected = parsed.metadata.sha256;
+      const actual = require('crypto')
+        .createHash('sha256')
+        .update(JSON.stringify(parsed.config))
+        .digest('hex');
+      if (expected !== actual) {
+        return { success: false, error: 'snapshot SHA-256 mismatch — refusing restore' };
+      }
+    }
+
+    // Step 3: atomically replace config.json.
+    await dataBackup.atomicWriteFile(
+      paths.configPath,
+      JSON.stringify(parsed.config, null, 2)
+    );
+
+    // Step 4: relaunch. Skip the QUIT snapshot path on the way out by
+    // marking the guard — the file we just wrote IS the desired state.
+    log.info(`[Backup] Restored from ${subdir}/${filename}; relaunching`);
+    _finalSnapshotDone = true;
+    if (_unsubscribeFromStore) {
+      try { _unsubscribeFromStore(); } catch { /* ignore */ }
+      _unsubscribeFromStore = null;
+    }
+    dataBackup.cancelScheduled();
+    app.relaunch();
+    app.exit(0);
+    return { success: true };
+  } catch (err) {
+    log.error('[Backup] restore failed:', err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+// Renderer-callable pre-action snapshot. The renderer calls this
+// IMMEDIATELY before a destructive change (reset-defaults, delete-
+// source, delete-collection, clear-routing, bulk-remove). Failure is
+// logged but does NOT block the destructive op — losing the safety
+// net is regrettable, refusing the user's action because of it would
+// be worse. Per SCOPE-data-backup.md §4.7.
+//
+// Label is a short kebab-case operation name (e.g. "reset-defaults",
+// "delete-source-Plex"). Sanitised down to filename-safe chars on the
+// way through buildSnapshot so a user-supplied source name with
+// punctuation can't break the path.
+ipcMain.handle('backup:pre-action', async (_event, label) => {
+  try {
+    const safeLabel = String(label || 'unnamed-action')
+      .replace(/[^a-z0-9-_]+/gi, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 60) || 'unnamed-action';
+    const entry = await dataBackup.takeSnapshot({
+      userDataDir: app.getPath('userData'),
+      config: store.getAll(),
+      trigger: dataBackup.TRIGGER.PRE_ACTION,
+      label: safeLabel,
+    });
+    log.info(`[Backup] Pre-action snapshot taken: ${safeLabel}`);
+    return { success: true, entry };
+  } catch (err) {
+    log.warn(`[Backup] Pre-action snapshot failed (${label}):`, err.message);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('backup:open-folder', async () => {
+  const { shell } = require('electron');
+  const userDataDir = app.getPath('userData');
+  const paths = dataBackup.resolvePaths(userDataDir);
+  const err = await shell.openPath(paths.backupDir);
+  return err ? { success: false, error: err } : { success: true, path: paths.backupDir };
 });
 
 // --- File existence check ---
@@ -1085,7 +1428,17 @@ ipcMain.handle('vr-connect', async (_event, host, port) => {
     });
 
     socket.on('error', (err) => {
-      log.warn('[VR] Socket error:', err.message);
+      // ECONNREFUSED is the EXPECTED state when HereSphere/DeoVR isn't
+      // listening on port 23554 (no video playing, headset asleep,
+      // timestamp server toggle off, etc.). Demoting to debug so the
+      // log isn't full of noise during normal use. Other errors stay
+      // at warn because those are genuine network issues users should
+      // see (firewall, host unreachable, connection reset, etc.).
+      if (err.code === 'ECONNREFUSED') {
+        log.debug('[VR] Socket error (expected when no VR app listening):', err.message);
+      } else {
+        log.warn('[VR] Socket error:', err.message);
+      }
       if (!resolved) {
         resolved = true;
         vrSocket = null;

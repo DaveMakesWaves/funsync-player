@@ -30,6 +30,7 @@
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
+  margin: 0;
 }
 
 .eroscripts-panel__status {
@@ -305,8 +306,20 @@
 }
 
 .eroscripts-panel__placeholder--error {
-  color: #f44336;
+  color: var(--state-error);
   opacity: 1;
+}
+
+/* Secondary "what to do next" hint inside a placeholder — same
+   treatment as `.library__empty-hint` / `.playlists__empty-hint`. */
+.eroscripts-panel__placeholder--hint {
+  font-size: 12px;
+  margin-top: 8px;
+  opacity: 0.85;
+  max-width: 360px;
+  margin-left: auto;
+  margin-right: auto;
+  line-height: 1.45;
 }
 
 .eroscripts-panel__result {

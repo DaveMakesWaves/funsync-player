@@ -1,4 +1,11 @@
-/* === Modal === */
+/* === Modal ===
+ * Modals follow the app theme — light mode shows light surfaces with
+ * dark text. Backdrop intentionally stays dark on both themes (dimming
+ * effect to focus attention; a light backdrop on light mode would be
+ * indistinguishable from the page). Surface / border / hint colours
+ * route through the semantic --surface-* and --border-* tokens so
+ * dark-vs-light is just a token swap.
+ */
 
 .modal-overlay {
   position: fixed;
@@ -11,23 +18,31 @@
 }
 
 /* Settings Panel */
+/* Modal tabs — canonical style. Underline-on-active accent indicator
+   (lightweight, appropriate for modal/panel contexts) at a 36-px
+   Fitts floor (matches the touch-target rule used everywhere else).
+   Same pattern is mirrored on `.connection-panel__tabs` /
+   `.connection-panel__tab` so the two modal surfaces feel like the
+   same component (Shneiderman #1 consistency). Documented in
+   DESIGN.md §2.x — the canonical modal-tab pattern. */
 .settings-panel__tabs {
   display: flex;
   gap: 2px;
   margin-bottom: 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  padding-bottom: 0;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .settings-panel__tab {
   background: none;
   border: none;
+  border-bottom: 2px solid transparent;
   color: var(--text-secondary);
   padding: 8px 16px;
+  min-height: 36px;
   font-size: 13px;
+  font-family: inherit;
   cursor: pointer;
-  border-bottom: 2px solid transparent;
-  transition: color 100ms;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
 .settings-panel__tab:hover {
@@ -39,6 +54,11 @@
   border-bottom-color: var(--accent);
 }
 
+.settings-panel__tab:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 .settings-panel__tab-content {
   min-height: 150px;
 }
@@ -48,6 +68,85 @@
   align-items: center;
   gap: 8px;
   margin-bottom: 8px;
+}
+
+/* Conditional-hide cue — when a field is irrelevant under the current
+   parent setting (e.g. Lookahead is action-boundary-only), keep it
+   visible but dimmed + non-interactive. User sees the option exists;
+   the dim state communicates "not relevant right now" (Nielsen #1
+   visibility — silent disappearance is worse than visible-but-dim). */
+.settings-panel__field--inert {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.settings-panel__field--inert .settings-panel__field-label::after {
+  content: ' (action-boundary only)';
+  font-size: 11px;
+  font-style: italic;
+  opacity: 0.8;
+}
+
+/* Unified input baseline — one shape for selects, ranges, and number
+   fields across the settings panel (Shneiderman #1 consistency, Nielsen
+   #4 standards). Replaces the cross-panel `connection-panel__device-select`
+   borrowing pattern that was being used for settings selects.
+     --select  dropdown chevron padding (extra right padding for arrow)
+     --range   slider styling (track height, accent thumb)
+     --number  right-aligned numerals */
+.settings-panel__input {
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px 12px;
+  min-height: 36px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+  line-height: 1;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.settings-panel__input:focus {
+  border-color: var(--accent);
+}
+
+.settings-panel__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.settings-panel__input--select {
+  padding-right: 28px;
+  cursor: pointer;
+}
+
+.settings-panel__input--range {
+  flex: 1;
+  height: 6px;
+  min-height: 0;
+  padding: 0;
+  background: var(--progress-bg);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  accent-color: var(--accent);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.settings-panel__input--range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+
+.settings-panel__input--range:focus-visible::-webkit-slider-thumb {
+  box-shadow: 0 0 0 3px rgba(233, 69, 96, 0.3);
 }
 
 .settings-panel__field-label {
@@ -63,6 +162,46 @@
   min-width: 30px;
   text-align: right;
 }
+
+/* "At default" indicator — faint dot suffix on the value (Nielsen #1
+   visibility: user can see at a glance which values they've changed
+   from the default). Removed when the user customises the value. */
+.settings-panel__field-value--default::after {
+  content: ' •';
+  opacity: 0.45;
+  font-size: 11px;
+  margin-left: 1px;
+}
+
+/* Per-field reset-to-default button — small ↻ next to the field value.
+   Hidden when value already equals default; visible (and clickable) when
+   the user has customised the value. Shneiderman #6 reversibility. */
+.settings-panel__field-reset {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 100ms, background 100ms;
+}
+.settings-panel__field-reset:hover {
+  color: var(--text-primary);
+  background: var(--surface-overlay);
+}
+.settings-panel__field-reset:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.settings-panel__field-reset[hidden] { display: none; }
 
 .settings-panel__hint {
   font-size: 11px;
@@ -80,9 +219,61 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 8px;
+  margin: 0 0 8px 0;
   padding-bottom: 6px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+
+/* Theme picker — three radio cards in a vertical stack. Each card is a
+   tappable label so the entire row triggers selection (Fitts: bigger
+   target). Active state mirrors the accent-soft / accent-border pattern
+   used by other "selected option" controls across the app. */
+.settings-panel__theme-options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.settings-panel__theme-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--surface-card, var(--bg-card, #1c2a4a));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: 8px;
+  cursor: pointer;
+  min-height: 44px;
+  transition: background 120ms, border-color 120ms;
+}
+.settings-panel__theme-option:hover {
+  background: var(--surface-card-hover, var(--bg-card-hover, #233766));
+}
+.settings-panel__theme-option:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.settings-panel__theme-option input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin: 0;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.settings-panel__theme-label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-panel__theme-name {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+.settings-panel__theme-desc {
+  font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .settings-panel__sources-list {
@@ -97,8 +288,8 @@
   align-items: center;
   gap: 10px;
   padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   transition: opacity 120ms;
 }
@@ -107,32 +298,51 @@
   opacity: 0.45;
 }
 
+/* Source toggle — Fitts: 36×36 hit area (was 32×18, the thumb itself was
+   only ~14×14). The visible track stays the same compact 32×18 pill;
+   padding extends the click target to the 36-px floor used elsewhere. */
 .settings-panel__source-toggle {
   flex-shrink: 0;
-  width: 32px;
-  height: 18px;
-  padding: 0;
+  width: 36px;
+  height: 36px;
+  padding: 9px 2px;
+  background: transparent;
   border: none;
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.12);
   position: relative;
   cursor: pointer;
+}
+
+/* Visible track — pseudo-element so the hit area can be larger than
+   the visual element. */
+.settings-panel__source-toggle::before {
+  content: '';
+  position: absolute;
+  top: 9px;
+  left: 2px;
+  right: 2px;
+  bottom: 9px;
+  border-radius: 9px;
+  background: var(--surface-overlay-strong);
   transition: background 150ms;
 }
 
+/* Toggle thumb is intentionally fixed (light grey "off" / white "on")
+   on both themes — toggle thumbs aren't theme-dependent visual elements,
+   they signify on/off state via position + saturation, not surface tint. */
 .settings-panel__source-toggle::after {
   content: '';
   position: absolute;
-  top: 2px;
-  left: 2px;
+  top: 11px;
+  left: 4px;
   width: 14px;
   height: 14px;
   border-radius: 50%;
   background: #d0d0d0;
   transition: transform 150ms, background 150ms;
+  z-index: 1;
 }
 
-.settings-panel__source-toggle--on {
+.settings-panel__source-toggle--on::before {
   background: var(--accent);
 }
 
@@ -207,8 +417,8 @@
 .web-remote-modal__url {
   width: 100%;
   padding: 8px 10px;
-  background: var(--bg-primary);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface-base);
+  border: 1px solid var(--border-subtle);
   border-radius: 6px;
   color: var(--text-primary);
   font-size: 12px;
@@ -223,7 +433,7 @@
 .web-remote-modal__url:focus,
 .web-remote-modal__url:focus-visible {
   outline: none;
-  border-color: rgba(255, 255, 255, 0.18);
+  border-color: var(--border-strong);
 }
 
 .web-remote-modal__features {
@@ -293,18 +503,44 @@
 
 .settings-panel__source-btn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.08);
+  background: var(--surface-overlay);
 }
 
 .settings-panel__source-btn--danger:hover {
-  color: #f44336;
-  background: rgba(244, 67, 54, 0.1);
+  color: var(--state-error);
+  background: var(--state-error-soft);
+}
+
+/* Done button — dedicated style (was borrowing .library__assoc-save-btn
+   which is for a different flow). Centred, ~50% width, accent primary. */
+.settings-panel__done-btn {
+  display: block;
+  width: 50%;
+  margin: 16px auto 0;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 10px 16px;
+  min-height: 36px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.settings-panel__done-btn:hover {
+  background: var(--accent-hover);
+}
+.settings-panel__done-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .settings-panel__add-btn {
   width: 100%;
   background: none;
-  border: 1px dashed rgba(255, 255, 255, 0.15);
+  border: 1px dashed var(--border-strong);
   color: var(--text-secondary);
   padding: 8px;
   border-radius: 6px;
@@ -315,7 +551,7 @@
 
 .settings-panel__add-btn:hover {
   color: var(--text-primary);
-  border-color: rgba(255, 255, 255, 0.3);
+  border-color: var(--accent);
 }
 
 .settings-panel__empty {
@@ -326,8 +562,8 @@
 }
 
 .modal-panel {
-  background: #1c2a4a;
-  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: var(--surface-card);
+  border: 1px solid var(--border-strong);
   border-radius: 12px;
   min-width: 340px;
   max-width: 720px;
@@ -335,7 +571,7 @@
   max-height: 85vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: var(--shadow-modal);
 }
 
 .modal-header {
@@ -343,7 +579,7 @@
   align-items: center;
   justify-content: space-between;
   padding: 16px 20px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-subtle);
 }
 
 .modal-title {
@@ -352,14 +588,21 @@
   color: var(--text-primary);
 }
 
+/* Modal close button — Fitts: bumped from 28x28 effective area to 36x36
+   minimum. The X glyph is small visually but the click target is the
+   whole padded box. */
 .modal-close-btn {
   background: none;
   border: none;
   color: var(--text-secondary);
   font-size: 16px;
   cursor: pointer;
-  padding: 4px 8px;
-  border-radius: 4px;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 6px;
   line-height: 1;
   transition: background var(--transition-fast), color var(--transition-fast);
 }
@@ -376,8 +619,8 @@
 
 .modal-input {
   width: 100%;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-strong);
   border-radius: 6px;
   padding: 10px 12px;
   color: var(--text-primary);
@@ -429,12 +672,12 @@
 }
 
 .modal-btn--secondary {
-  background: rgba(255, 255, 255, 0.1);
+  background: var(--surface-overlay);
   color: var(--text-primary);
 }
 
 .modal-btn--secondary:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--surface-overlay-strong);
 }
 
 .modal-btn--danger {
@@ -500,6 +743,277 @@
 }
 
 .modal-list::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: var(--border-strong);
   border-radius: 3px;
+}
+
+/* === VR Modal — Library Streaming + Device Sync ===
+ *
+ * Restructured 2026-04-29 from "VR Server (Quest)" + "PCVR Companion"
+ * (which conflated platform with purpose) to "1. Library Streaming" +
+ * "2. Device Sync" (purpose-led, both apply to Quest standalone AND
+ * PCVR). Inline styles eliminated; semantic state tokens replace
+ * hardcoded amber/purple values. Headings upgraded to real h2 with
+ * border-bottom (matching settings-panel pattern). Info-toggle is now
+ * a 36 × 36 Fitts-floor disclosure widget with aria-expanded as the
+ * source of truth (CSS paints active state from the attribute — no
+ * inline-style hack).
+ */
+
+.vr-modal__experimental {
+  padding: 8px 12px;
+  background: var(--state-warning-soft);
+  border: 1px solid var(--state-warning);
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.vr-modal__experimental-label {
+  font-weight: 600;
+  color: var(--state-warning);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  margin-right: 6px;
+}
+
+.vr-modal__experimental-text {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* Section block — purpose-labelled, numbered to convey ordering. The
+ * h2 + border-bottom mirrors `.settings-panel__section-header` so the
+ * VR modal reads as a sibling to the Settings modal at the eye-level
+ * scan. */
+.vr-modal__section {
+  margin-bottom: 16px;
+}
+
+.vr-modal__section + .vr-modal__section {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.vr-modal__section-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 8px 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+/* Numbered marker — 22 px circle. Norman signifier: the visual order
+ * cue ("do step 1, then step 2") survives screen-reader skip; the
+ * `aria-hidden` on the span keeps the label clean for assistive tech
+ * since the heading text already conveys the same. */
+.vr-modal__section-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 11px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.vr-modal__section-intro {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 10px 0;
+  line-height: 1.5;
+}
+
+.vr-modal__hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 0 0;
+  line-height: 1.45;
+}
+
+/* URL row — readonly URL field with the disclosure trigger to its
+ * right. Right-aligns the info button for predictable acquisition
+ * (Fitts compromise: target is small but the label is its anchor). */
+.vr-modal__url-row {
+  align-items: center;
+  gap: 8px;
+}
+
+.vr-modal__url-input {
+  flex: 1;
+  font-size: 12px;
+  cursor: text;
+}
+
+/* Info disclosure button — 36 × 36 Fitts floor matches the modal-close
+ * button rule in DESIGN.md §2.3. The active state is painted from the
+ * aria-expanded attribute so the visual + a11y state can never drift.*/
+.vr-modal__info-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: inherit;
+  line-height: 1;
+  transition: background 150ms, color 150ms, border-color 150ms;
+}
+.vr-modal__info-btn:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+.vr-modal__info-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.vr-modal__info-btn[aria-expanded="true"] {
+  background: var(--surface-overlay-strong);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+/* Setup-info disclosure panel — uses subtle accent overlay to read as
+ * "supplementary content tied to the section above". Border-left with
+ * accent matches the existing `.connection-panel__vr-help-note`
+ * pattern so VR-modal supplementary content reads consistently
+ * regardless of which class actually holds the rule. */
+.vr-modal__setup-info {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-left: 2px solid var(--accent);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.vr-modal__setup-info-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--text-primary);
+}
+
+.vr-modal__setup-info-group-label {
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-top: 8px;
+  margin-bottom: 4px;
+}
+
+.vr-modal__setup-info-group-label:first-of-type {
+  margin-top: 0;
+}
+
+.vr-modal__setup-info-list {
+  margin: 0 0 4px 0;
+  padding-left: 22px;
+}
+
+.vr-modal__setup-info-list li {
+  margin-bottom: 2px;
+  line-height: 1.5;
+}
+
+.vr-modal__setup-info-list strong {
+  color: var(--text-primary);
+}
+
+/* Inline callout for high-value insights inside the setup guide. Used
+ * for the Handy-vs-other-devices distinction that confuses users
+ * (Handy works through HereSphere's native pipeline; other devices need
+ * the timestamp server up). Visually distinct from the surrounding list
+ * so the eye lands on it during a scan. Same accent palette as the
+ * outer setup-info container — reads as "this part is especially
+ * important." */
+.vr-modal__setup-info-note {
+  margin: 8px 0 4px 0;
+  padding: 8px 10px;
+  background: var(--state-warning-soft);
+  border-left: 2px solid var(--state-warning);
+  border-radius: 4px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+.vr-modal__setup-info-note strong {
+  color: var(--state-warning);
+}
+
+/* Form controls inside the Device Sync section. The host input flexes
+ * to fill the row, and the Connect button stays at its natural width —
+ * matching the existing connection-panel input-row convention. */
+.vr-modal__host-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Now-playing sub-cluster — visually grouped but NOT a nested section
+ * (no border, no heading). Pre-2026-04-29 it reused
+ * `.connection-panel__section` which double-bordered against the parent
+ * and made the offset slider look like its own section. */
+.vr-modal__now-playing {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+.vr-modal__now-playing-row {
+  margin-bottom: 6px;
+}
+.vr-modal__now-playing-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.vr-modal__video-name {
+  font-size: 12px;
+  word-break: break-all;
+  text-align: right;
+  flex: 1;
+  min-width: 0;
+}
+
+.vr-modal__offset-slider {
+  flex: 1;
+}
+
+.vr-modal__offset-value {
+  min-width: 48px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Screen-reader-only utility — hides labels visually while keeping
+ * them in the accessibility tree. WCAG 1.3.1 (Info and Relationships)
+ * — the `for`/`id` association needs a real label, but the visual
+ * design uses the placeholder + section header for the same
+ * information. Standard SR-only recipe. */
+.vr-modal__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
