@@ -27,29 +27,42 @@ import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAnc
 //
 // Reported 2026-04-29 against the web-remote.
 function _syncViewportHeight() {
-  // window.innerHeight reflects the actual visible-content height on
-  // mobile (excludes browser chrome). Multiply by 0.01 so the consumer
-  // CSS can write `calc(var(--app-vh) * 100)` to match the `100vh`
-  // mental model.
-  const vh = window.innerHeight * 0.01;
-  document.documentElement.style.setProperty('--app-vh', `${vh}px`);
+  // Prefer visualViewport.height when available — it reports the actual
+  // visible content area in every mobile browser, EXCLUDING any browser
+  // chrome (URL bar, toolbar). window.innerHeight is supposed to do the
+  // same thing but several mobile browsers get it wrong:
+  //   - DuckDuckGo Android (issue #1012, open since 2020) reports
+  //     window.innerHeight as the full screen height including the URL
+  //     bar's reserved space — so #app ends up oversized and the bottom
+  //     nav lands below the visible bottom edge ("grey square" bug).
+  //   - iOS Safari and others have similar quirks during chrome
+  //     animations and after rotation.
+  // visualViewport is widely supported (Chromium 61+, WebKit 13+) and
+  // gets the answer right where window.innerHeight doesn't.
+  const h = window.visualViewport?.height ?? window.innerHeight;
+  document.documentElement.style.setProperty('--app-vh', `${h * 0.01}px`);
 }
 _syncViewportHeight();
 window.addEventListener('resize', _syncViewportHeight);
 window.addEventListener('orientationchange', () => {
-  // iOS Safari reports stale innerHeight if you read it synchronously
+  // iOS Safari reports stale dimensions if you read them synchronously
   // inside the orientationchange handler — wait one frame for the
   // browser to settle on post-rotate dimensions before sampling.
   requestAnimationFrame(_syncViewportHeight);
 });
 if (window.visualViewport) {
   // visualViewport.resize fires for chrome show/hide AND keyboard
-  // events on iOS, where `window.resize` doesn't always. Strictly more
-  // accurate than window.resize on mobile when supported.
+  // events, where `window.resize` doesn't always. Tighter sync than
+  // window.resize during mobile chrome animations.
   window.visualViewport.addEventListener('resize', _syncViewportHeight);
 }
 
-const mainEl = document.getElementById('main');
+// `mainScrollEl` is the scroll container; `mainEl` is the inner content
+// wrapper that gets innerHTML-replaced on every render. The toolbar is a
+// sticky child of mainScrollEl (sibling of mainEl), so writes to mainEl
+// can't accidentally wipe it.
+const mainScrollEl = document.getElementById('main');
+const mainEl = document.getElementById('mainContent');
 const titleEl = document.getElementById('title');
 const backBtn = document.getElementById('backBtn');
 const countEl = document.getElementById('count');
@@ -1174,6 +1187,101 @@ searchClear.addEventListener('click', () => {
 sortBtn.addEventListener('click', () => openSheet(sortSheetEl));
 filtersBtn.addEventListener('click', () => openSheet(filterSheetEl));
 
+// ============================================================
+// Scroll-tracked toolbar — moves 1:1 with the user's finger. Scroll
+// down N pixels → toolbar slides up N pixels (clamped to its own
+// height, so it can fully disappear but never overshoot). Scroll up
+// is symmetric. Because the toolbar is a sticky child of the scroll
+// container, sliding it up reveals the content it was overlaying —
+// no empty strip and no layout reflow. Twitter / Reddit / Medium use
+// this same pattern.
+//
+// Why 1:1 instead of threshold-snap: a threshold + transition feels
+// like a state change happening "at" the user, whereas 1:1 tracking
+// feels like the toolbar is physically attached to the scroll —
+// closer to the OS-native pull-to-refresh / overscroll feel.
+//
+// Pause behavior (when tracking does nothing this frame):
+//   - viewport ≥ 1024 px: desktop has plenty of vertical space; the
+//     auto-hide is a phone-screen pattern. Reset on entry.
+//   - search input focused: shifting the toolbar under the user's
+//     thumb mid-typing is hostile.
+//   - any sheet is open: the page isn't the user's focus.
+//   - `.toolbar--hidden` set: player view — already invisible.
+// ============================================================
+const _toolbarMobileQuery = window.matchMedia('(max-width: 1023px)');
+let _toolbarLastScrollY = 0;
+let _toolbarOffset = 0;     // 0 = visible, negative = shifted up
+let _toolbarScrollRaf = 0;
+
+function _evaluateToolbarCollapse() {
+  const y = mainScrollEl.scrollTop;
+  const delta = y - _toolbarLastScrollY;
+  _toolbarLastScrollY = y;
+
+  if (!_toolbarMobileQuery.matches) {
+    if (_toolbarOffset !== 0) _resetToolbar();
+    return;
+  }
+  if (toolbarEl.classList.contains('toolbar--hidden')) return;
+  if (document.activeElement === searchInput) return;
+  if (document.querySelector('.sheet:not([hidden])')) return;
+
+  // Scroll DOWN (delta > 0) → offset becomes more negative (toolbar slides up).
+  // Scroll UP   (delta < 0) → offset moves back toward 0.
+  // Clamped to [-toolbarHeight, 0]: can fully disappear, can't overshoot
+  // either bound. offsetHeight is read each frame because filter chips
+  // appearing / disappearing changes the toolbar's size.
+  // Math.round keeps the transform on whole-pixel boundaries — momentum
+  // scroll on iOS reports fractional scrollTop values, and a fractional
+  // transform leaves a sub-pixel rendering seam at the bounding edge.
+  const raw = Math.max(-toolbarEl.offsetHeight, Math.min(0, _toolbarOffset - delta));
+  const next = Math.round(raw);
+  if (next !== _toolbarOffset) {
+    _toolbarOffset = next;
+    // translate3d (vs translateY) forces the toolbar onto its own
+    // compositor layer on every browser — no surprises with paint
+    // promotion and no flicker at the seams.
+    toolbarEl.style.transform = next === 0 ? '' : `translate3d(0, ${next}px, 0)`;
+  }
+}
+
+function _resetToolbar() {
+  _toolbarOffset = 0;
+  toolbarEl.style.transform = '';
+  _toolbarLastScrollY = mainScrollEl.scrollTop;
+}
+
+mainScrollEl.addEventListener('scroll', () => {
+  if (_toolbarScrollRaf) return;
+  _toolbarScrollRaf = requestAnimationFrame(() => {
+    _toolbarScrollRaf = 0;
+    _evaluateToolbarCollapse();
+  });
+}, { passive: true });
+
+// Crossing the desktop breakpoint mid-session (window resize, rotation):
+// reset so the toolbar isn't stuck at a stale offset on a layout that
+// doesn't support the auto-hide. addEventListener is widely supported
+// but optional-chained for environments that only expose `addListener`.
+_toolbarMobileQuery.addEventListener?.('change', () => {
+  if (!_toolbarMobileQuery.matches && _toolbarOffset !== 0) _resetToolbar();
+});
+
+// When the toolbar transitions out of `toolbar--hidden` (returning from
+// player view, or a mode-switch that re-enables it), reset any stale
+// offset from before the hide. The 5 call sites that toggle `--hidden`
+// stay untouched — observing class mutations centrally is more robust
+// than threading a "show toolbar" helper through each of them.
+let _wasToolbarHidden = toolbarEl.classList.contains('toolbar--hidden');
+new MutationObserver(() => {
+  const isHidden = toolbarEl.classList.contains('toolbar--hidden');
+  if (_wasToolbarHidden && !isHidden && _toolbarOffset !== 0) {
+    _resetToolbar();
+  }
+  _wasToolbarHidden = isHidden;
+}).observe(toolbarEl, { attributes: true, attributeFilter: ['class'] });
+
 // Sheet close paths: backdrop click, close button, Escape key. Each is
 // wired centrally so adding a new sheet doesn't need three new handlers.
 for (const el of document.querySelectorAll('[data-close-sheet]')) {
@@ -1577,6 +1685,10 @@ async function renderPlayer(id) {
   const wrap = document.createElement('div');
   wrap.className = 'player';
 
+  // Wrap the video so the loading overlay can absolute-position over
+   // the video frame specifically (not the whole player column).
+  const videoWrap = document.createElement('div');
+  videoWrap.className = 'player__video-wrap';
   const videoEl = document.createElement('video');
   videoEl.className = 'player__video';
   videoEl.src = video.streamUrl;
@@ -1591,7 +1703,23 @@ async function renderPlayer(id) {
     track.srclang = 'en';
     videoEl.appendChild(track);
   }
-  wrap.appendChild(videoEl);
+  videoWrap.appendChild(videoEl);
+
+  // Loading overlay shown over the video during desktop-side script
+  // re-uploads (variant switch with Handy connected). `.hidden` toggles
+  // visibility; CSS positions it absolute inside the video wrapper.
+  const loadingOverlay = document.createElement('div');
+  loadingOverlay.className = 'player__loading-overlay';
+  loadingOverlay.hidden = true;
+  const spinner = document.createElement('div');
+  spinner.className = 'player__loading-spinner';
+  const loadingText = document.createElement('div');
+  loadingText.className = 'player__loading-text';
+  loadingText.textContent = 'Switching script…';
+  loadingOverlay.appendChild(spinner);
+  loadingOverlay.appendChild(loadingText);
+  videoWrap.appendChild(loadingOverlay);
+  wrap.appendChild(videoWrap);
 
   // Device-sync status pill above the video. Populated by server messages.
   const pill = document.createElement('div');
@@ -1600,13 +1728,52 @@ async function renderPlayer(id) {
   pill.dataset.state = 'connecting';
   wrap.appendChild(pill);
 
+  // Track whether we paused the video for a desktop-side re-upload, so
+  // we know whether to auto-resume when `script-ready` arrives. Without
+  // this, a script-ready that arrives when the user manually paused
+  // would unpause behind their back.
+  let pausedForReupload = false;
+
   // Open the device-sync WebSocket when the phone has a funscript to sync to.
   // No-op for videos without scripts — the pill explains why.
   if (video.hasFunscript) {
     activeSyncClient = new RemoteSyncClient({
       video: videoEl,
       videoId: video.id,
-      onServerMessage: (msg) => renderSyncPill(pill, msg),
+      onServerMessage: (msg) => {
+        // `variant-changed` arrives whenever the desktop's active
+        // variant changes — either because the phone tapped a row
+        // (request → switch → confirm) or because the desktop user
+        // toggled a variant locally (broadcast). Dispatch to the
+        // wrap's apply function before delegating to the sync pill.
+        if (msg && msg.type === 'variant-changed' && wrap._applyActiveVariant) {
+          wrap._applyActiveVariant(msg.label);
+          return;
+        }
+        // `script-loading` / `script-ready` bracket the desktop's
+        // Handy re-upload during a variant switch. Mirror the desktop
+        // overlay: pause the video + show our own overlay so the phone
+        // doesn't keep playing audio/video while the Handy is silent.
+        if (msg && msg.type === 'script-loading') {
+          if (!videoEl.paused) {
+            pausedForReupload = true;
+            videoEl.pause();
+          }
+          loadingOverlay.hidden = false;
+          renderSyncPill(pill, msg);
+          return;
+        }
+        if (msg && msg.type === 'script-ready') {
+          loadingOverlay.hidden = true;
+          if (pausedForReupload) {
+            pausedForReupload = false;
+            videoEl.play().catch(() => {});
+          }
+          renderSyncPill(pill, msg);
+          return;
+        }
+        renderSyncPill(pill, msg);
+      },
       onKicked: (reason) => {
         pill.dataset.state = 'kicked';
         pill.textContent = reason || 'Another device took over';
@@ -1618,20 +1785,231 @@ async function renderPlayer(id) {
     pill.textContent = 'No funscript — playing video only';
   }
 
+  let heatmapCanvas = null;
+  let variantChipLabel = null;
+  let variantChip = null;
   if (video.hasFunscript && video.scriptUrl) {
     const hm = document.createElement('div');
     hm.className = 'player__heatmap-wrapper';
+
+    // Header: label on the left, optional variant chip on the right.
+    // The chip only renders when there are multiple variants — single-
+    // variant videos look exactly as they did before (Nielsen #8).
+    // Putting the chip beside the heatmap follows Norman's mapping
+    // principle: the control sits next to the visual it changes.
+    const header = document.createElement('div');
+    header.className = 'player__heatmap-header';
     const label = document.createElement('div');
     label.className = 'player__heatmap-label';
     label.textContent = 'Funscript intensity';
-    hm.appendChild(label);
-    const canvas = document.createElement('canvas');
-    canvas.className = 'player__heatmap';
-    hm.appendChild(canvas);
+    header.appendChild(label);
+
+    const variants = Array.isArray(video.variants) ? video.variants : [];
+    if (variants.length > 1) {
+      variantChip = document.createElement('button');
+      variantChip.className = 'player__variant-chip';
+      variantChip.type = 'button';
+      variantChip.setAttribute('aria-expanded', 'false');
+      variantChip.setAttribute('aria-haspopup', 'listbox');
+      variantChipLabel = document.createElement('span');
+      variantChipLabel.className = 'player__variant-chip-label';
+      variantChipLabel.textContent = variants[0].label || 'Default';
+      // Lucide chevron-down icon to match the rest of the web-remote
+      // (Shneiderman #1 — same iconography across the surface). The
+      // expanded state rotates the icon 180° via CSS rather than
+      // swapping a separate up-pointing icon.
+      const chev = svgIcon('chevronDown', 14);
+      chev.classList.add('player__variant-chip-chev');
+      variantChip.appendChild(variantChipLabel);
+      variantChip.appendChild(chev);
+      header.appendChild(variantChip);
+    }
+    hm.appendChild(header);
+
+    heatmapCanvas = document.createElement('canvas');
+    heatmapCanvas.className = 'player__heatmap';
+    hm.appendChild(heatmapCanvas);
+
+    // Expandable list of variants, rendered inside the heatmap wrapper
+    // so it visually belongs to the variant chip above it. Hidden until
+    // the chip is tapped — Nielsen #8 (no clutter when not in use).
+    if (variants.length > 1) {
+      // Mirror the filter sheet's `role="radiogroup"` pattern so "pick
+      // one of N" looks and behaves the same wherever it appears in the
+      // remote (Shneiderman #1 — same actions for same situations).
+      // Filter sheet uses <label> + <input type="radio">; doing so here
+      // gets us touch-bulletproof tap targets for free (radios are the
+      // most reliable form control on every mobile browser) plus
+      // native keyboard handling (Enter, Space, arrow keys).
+      const list = document.createElement('div');
+      list.className = 'player__variant-list';
+      list.setAttribute('role', 'radiogroup');
+      list.setAttribute('aria-label', 'Funscript variant');
+      list.hidden = true;
+      let activeLabel = variants[0].label;
+      let previewsRendered = false;
+      // Timeout that clears the `--pending` state if the desktop never
+      // confirms a switch (typical fail mode: observer disconnected
+      // mid-switch, or the desktop's variant-switch path errored). 5 s
+      // is generous — Handy upload is the slowest leg and rarely takes
+      // more than 2-3 s. Without this recovery the pending row stays
+      // ghosted forever after a single failed tap.
+      let pendingTimer = null;
+      let pendingRow = null;
+      const clearPending = () => {
+        if (pendingTimer) {
+          clearTimeout(pendingTimer);
+          pendingTimer = null;
+        }
+        if (pendingRow) {
+          pendingRow.classList.remove('player__variant-row--pending');
+          pendingRow = null;
+        }
+      };
+
+      // Build one row per variant. Each row is a <label> wrapping a
+      // hidden <input type="radio"> and the visible content. Tapping
+      // anywhere on the label toggles the input — native browser
+      // behaviour, no JS needed for the tap itself. Mini heatmaps are
+      // rendered LAZILY (on first expand) so we don't fetch + bin
+      // every variant's funscript on initial player render.
+      const radioGroupName = `variant-${video.id}`;
+      const rows = variants.map((v) => {
+        const row = document.createElement('label');
+        row.className = 'player__variant-row';
+        row.dataset.label = v.label;
+
+        const input = document.createElement('input');
+        input.type = 'radio';
+        input.name = radioGroupName;
+        input.value = v.label;
+        input.className = 'player__variant-row-input';
+        input.checked = (v.label === activeLabel);
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'player__variant-row-label';
+        labelEl.textContent = v.label;
+        const preview = document.createElement('canvas');
+        preview.className = 'player__variant-row-preview';
+
+        row.appendChild(input);
+        row.appendChild(labelEl);
+        row.appendChild(preview);
+
+        // Listen on `change` (fires when the user selects via tap, click,
+        // or keyboard), not `click` — radios fire change reliably on
+        // every browser/input type. The tap-to-switch contract:
+        //   1. User taps row → native radio toggles → change fires.
+        //   2. We mark `--pending` and send `switch-variant` to desktop.
+        //   3. Desktop applies the switch and broadcasts `variant-changed`.
+        //   4. Reply triggers `applyActiveVariant` which calls `clearPending`
+        //      and updates the active state for real.
+        // If the desktop never confirms, the 5 s pending timer resets the
+        // input back to the previously-active variant so the user isn't
+        // stranded on a fake-selected row.
+        input.addEventListener('change', () => {
+          if (!input.checked) return;
+          if (v.label === activeLabel) return; // unchanged
+          clearPending();
+          pendingRow = row;
+          row.classList.add('player__variant-row--pending');
+          pendingTimer = setTimeout(() => {
+            clearPending();
+            // Reset the radio to the truly-active variant so the UI
+            // doesn't lie about state once the timeout fires.
+            const activeRow = rows.find(r => r.label === activeLabel);
+            if (activeRow) activeRow.input.checked = true;
+          }, 5000);
+          activeSyncClient?.switchVariant?.(v.label);
+        });
+
+        return { row, input, label: v.label, preview, scriptUrl: v.scriptUrl };
+      });
+      for (const r of rows) list.appendChild(r.row);
+      hm.appendChild(list);
+
+      const collapseList = () => {
+        list.hidden = true;
+        variantChip.setAttribute('aria-expanded', 'false');
+        variantChip.classList.remove('player__variant-chip--open');
+      };
+      // Fetch + cache bins for one row, then paint. Cached so a later
+       // re-paint (when the active variant changes and `currentColor` flips
+       // from accent to muted) doesn't refetch the whole script.
+      const loadAndCacheBins = async (r) => {
+        if (r.bins) {
+          requestAnimationFrame(() => renderBins(r.preview, r.bins));
+          return;
+        }
+        try {
+          const resp = await fetch(r.scriptUrl);
+          if (!resp.ok) return;
+          const fs = await resp.json();
+          const actions = fs?.actions;
+          if (!actions || actions.length < 2) return;
+          r.bins = computeBins(actions);
+          requestAnimationFrame(() => renderBins(r.preview, r.bins));
+        } catch { /* progressive enhancement — silent fail */ }
+      };
+
+      const expandList = () => {
+        list.hidden = false;
+        variantChip.setAttribute('aria-expanded', 'true');
+        variantChip.classList.add('player__variant-chip--open');
+        if (!previewsRendered) {
+          previewsRendered = true;
+          for (const r of rows) loadAndCacheBins(r);
+        }
+      };
+
+      variantChip.addEventListener('click', () => {
+        if (list.hidden) expandList();
+        else collapseList();
+      });
+
+      // Apply a new active label arriving from the desktop. Updates the
+      // chip text, the row aria-selected states, clears any pending row,
+      // and re-renders the main heatmap with the new variant's actions.
+      const applyActiveVariant = (label) => {
+        if (!label) return;
+        const match = variants.find((v) => v.label === label);
+        if (!match) return;
+        // Confirmation arrived — cancel the pending-recovery timer
+        // before iterating rows so we don't double-clear classes.
+        clearPending();
+        activeLabel = label;
+        if (variantChipLabel) variantChipLabel.textContent = label;
+        for (const r of rows) {
+          const isActive = r.label === label;
+          r.input.checked = isActive;
+          r.row.classList.remove('player__variant-row--pending');
+        }
+        // Repaint each cached preview so the canvas picks up the row's
+        // new `currentColor` (accent for the active row, muted for the
+        // rest). renderBins re-reads getComputedStyle each call. Wait one
+        // frame so the `:has(input:checked)` style flip lands first.
+        if (previewsRendered) {
+          requestAnimationFrame(() => {
+            for (const r of rows) {
+              if (r.bins) renderBins(r.preview, r.bins);
+            }
+          });
+        }
+        if (heatmapCanvas) loadHeatmap(heatmapCanvas, match.scriptUrl || video.scriptUrl);
+        collapseList();
+      };
+      // Stash on the wrap element so `renderSyncPill` can find it via
+      // a closure-free path when `variant-changed` arrives.
+      wrap._applyActiveVariant = applyActiveVariant;
+
+      // Initial state — mark the default row as active.
+      applyActiveVariant(variants[0].label);
+    }
+
     wrap.appendChild(hm);
 
-    // Fetch + render heatmap async — don't block player render.
-    loadHeatmap(canvas, video.scriptUrl);
+    // Fetch + render the main heatmap async — don't block player render.
+    loadHeatmap(heatmapCanvas, video.scriptUrl);
   }
 
   const titleRow = document.createElement('div');

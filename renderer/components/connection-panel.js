@@ -321,6 +321,22 @@ export class ConnectionPanel {
     if (closePlaceholder) {
       closePlaceholder.replaceWith(icon(X, { width: 18, height: 18 }));
     }
+
+    // Fullscreen reparenting. The Fullscreen API only paints the
+    // fullscreen element and its descendants on the top layer, so a
+    // panel attached to `#app` is invisible (and unclickable) while a
+    // sibling video is fullscreened — even though `hidden = false`
+    // does set correctly. Move the panel into whichever element is
+    // currently fullscreened on every fullscreenchange so it lives in
+    // the right subtree whether or not it's currently open. On exit,
+    // move back to `#app`. Idempotent — re-appending to the same
+    // parent is a no-op.
+    document.addEventListener('fullscreenchange', () => {
+      const target = document.fullscreenElement || document.getElementById('app');
+      if (this._panel.parentElement !== target) {
+        target.appendChild(this._panel);
+      }
+    });
   }
 
   _bindEvents() {

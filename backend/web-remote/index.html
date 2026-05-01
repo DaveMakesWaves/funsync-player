@@ -30,56 +30,66 @@
       <button class="header__action icon-btn" id="refreshBtn" aria-label="Refresh library" title="Refresh library"></button>
     </header>
 
-    <!-- Toolbar: search + active-filter chips + content-action bar.
-         Wrapped in `.toolbar` so the player view can hide everything
-         except the header with one classList toggle. -->
-    <div class="toolbar" id="toolbar">
+    <!-- Main scroll area. The toolbar lives INSIDE this container as
+         a sticky child so the auto-hide-on-scroll behavior can use a
+         pure GPU-accelerated transform without triggering layout
+         reflow. Skeleton templates live at the end of body and are
+         cloned into `#mainContent` while content is loading. -->
+    <main id="main" class="main">
 
-      <!-- Persistent search. Placeholder updates per mode (Library /
-           Collections / Playlists / Categories) — Norman signifier. -->
-      <div class="search-bar">
-        <span class="search-bar__icon" id="searchIconSlot"></span>
-        <input type="search" id="searchInput" class="search-bar__input"
-               placeholder="Search library"
-               autocomplete="off" autocapitalize="none" autocorrect="off"
-               inputmode="search" enterkeyhint="search" spellcheck="false"
-               aria-label="Search">
-        <button class="search-bar__clear icon-btn" id="searchClear" aria-label="Clear search" hidden></button>
+      <!-- Toolbar: search + active-filter chips + content-action bar.
+           `position: sticky` (CSS) anchors it to the top of `.main`'s
+           viewport. Sliding it up via `transform: translateY(-100%)`
+           reveals the content that's scrolled-past underneath — same
+           pattern as Twitter / Reddit mobile / Medium. -->
+      <div class="toolbar" id="toolbar">
+
+        <!-- Persistent search. Placeholder updates per mode (Library /
+             Collections / Playlists / Categories) — Norman signifier. -->
+        <div class="search-bar">
+          <span class="search-bar__icon" id="searchIconSlot"></span>
+          <input type="search" id="searchInput" class="search-bar__input"
+                 placeholder="Search library"
+                 autocomplete="off" autocapitalize="none" autocorrect="off"
+                 inputmode="search" enterkeyhint="search" spellcheck="false"
+                 aria-label="Search">
+          <button class="search-bar__clear icon-btn" id="searchClear" aria-label="Clear search" hidden></button>
+        </div>
+
+        <!-- Active-filter chips (Nielsen #6 recognition; Shneiderman #6
+             reversibility). Hidden when no filters are active so the
+             toolbar collapses cleanly. -->
+        <div class="filter-chips" id="filterChips" role="region" aria-label="Active filters" hidden></div>
+
+        <!-- Content-action bar: sort / view / folder / filters.
+             Below the search to keep the search at the top of the
+             thumb-comfortable scroll zone; these less-frequent actions
+             sit a row down. The filters icon shows an active-count
+             badge so the user always knows how many filters are applied
+             (Nielsen #1 visibility of system status). -->
+        <div class="content-actions" id="contentActions">
+          <button class="content-actions__btn" id="sortBtn" aria-haspopup="dialog">
+            <span class="content-actions__icon" id="sortIconSlot"></span>
+            <span class="content-actions__label">Sort</span>
+          </button>
+          <button class="content-actions__btn" id="viewToggle" aria-label="Toggle grid or list view" title="Toggle grid / list" aria-pressed="false">
+            <span class="content-actions__icon" id="viewIconSlot"></span>
+          </button>
+          <button class="content-actions__btn" id="folderToggle" aria-label="Browse by folder" title="Browse by folder" aria-pressed="false">
+            <span class="content-actions__icon" id="folderIconSlot"></span>
+          </button>
+          <button class="content-actions__btn content-actions__btn--filters" id="filtersBtn" aria-haspopup="dialog">
+            <span class="content-actions__icon" id="filtersIconSlot"></span>
+            <span class="content-actions__label">Filters</span>
+            <span class="content-actions__badge" id="filtersBadge" aria-hidden="true" hidden></span>
+          </button>
+        </div>
       </div>
 
-      <!-- Active-filter chips (Nielsen #6 recognition; Shneiderman #6
-           reversibility). Hidden when no filters are active so the
-           toolbar collapses cleanly. -->
-      <div class="filter-chips" id="filterChips" role="region" aria-label="Active filters" hidden></div>
-
-      <!-- Content-action bar: sort / view / folder / filters.
-           Below the search to keep the search at the top of the
-           thumb-comfortable scroll zone; these less-frequent actions
-           sit a row down. The filters icon shows an active-count
-           badge so the user always knows how many filters are applied
-           (Nielsen #1 visibility of system status). -->
-      <div class="content-actions" id="contentActions">
-        <button class="content-actions__btn" id="sortBtn" aria-haspopup="dialog">
-          <span class="content-actions__icon" id="sortIconSlot"></span>
-          <span class="content-actions__label">Sort</span>
-        </button>
-        <button class="content-actions__btn" id="viewToggle" aria-label="Toggle grid or list view" title="Toggle grid / list" aria-pressed="false">
-          <span class="content-actions__icon" id="viewIconSlot"></span>
-        </button>
-        <button class="content-actions__btn" id="folderToggle" aria-label="Browse by folder" title="Browse by folder" aria-pressed="false">
-          <span class="content-actions__icon" id="folderIconSlot"></span>
-        </button>
-        <button class="content-actions__btn content-actions__btn--filters" id="filtersBtn" aria-haspopup="dialog">
-          <span class="content-actions__icon" id="filtersIconSlot"></span>
-          <span class="content-actions__label">Filters</span>
-          <span class="content-actions__badge" id="filtersBadge" aria-hidden="true" hidden></span>
-        </button>
-      </div>
-    </div>
-
-    <!-- Main scroll area. Skeleton templates live at the end of body and
-         are cloned into here while content is loading. -->
-    <main id="main" class="main"></main>
+      <!-- Content wrapper. JS replaces this element's innerHTML/
+           appendChild — the toolbar sibling above stays untouched. -->
+      <div id="mainContent" class="main__content"></div>
+    </main>
 
     <!-- Bottom nav (mobile / tablet) → left rail (≥1024px).
          Mode-switching is the most frequent navigation and lives in

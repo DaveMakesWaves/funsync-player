@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const log = require('./logger');
@@ -144,7 +144,44 @@ function createWindow() {
   });
 }
 
+// Custom application menu. Mirrors Electron's default role-based menu
+ // but overrides the zoomIn accelerator: the default is
+ // `CommandOrControl+Plus`, which Electron parses as the literal `+`
+ // character — and on US/UK keyboards that requires Shift+=, so users
+ // were forced to press Ctrl+Shift+= to zoom in. Browsers (Chrome,
+ // Firefox, Edge) bind to the physical `=` key instead, so Ctrl+= just
+ // works without Shift. Match that. Kept Plus as a secondary accelerator
+ // for muscle memory; both fire the same role.
+function buildAppMenu() {
+  const isMac = process.platform === 'darwin';
+  const template = [
+    ...(isMac ? [{ role: 'appMenu' }] : []),
+    { role: 'fileMenu' },
+    { role: 'editMenu' },
+    {
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forceReload' },
+        { role: 'toggleDevTools' },
+        { type: 'separator' },
+        { role: 'resetZoom' },
+        { role: 'zoomIn', accelerator: 'CommandOrControl+=' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+      ],
+    },
+    { role: 'windowMenu' },
+  ];
+  return Menu.buildFromTemplate(template);
+}
+
 app.whenReady().then(async () => {
+  // Install the custom menu before any window is created so the
+  // accelerator is live from the first paint.
+  Menu.setApplicationMenu(buildAppMenu());
+
   // Startup timing — main-process side. Renderer-side is in
   // renderer/js/startup-timer.js. Both end up in main.log via
   // electron-log so we can correlate.
@@ -1566,16 +1603,194 @@ ipcMain.handle('updater-install', () => {
 
 // --- IPC Handlers: EroScripts ---
 
-ipcMain.handle('eroscripts-login', async (_event, username, password) => {
-  return eroScripts.login(username, password);
+// Open a child BrowserWindow pointing at the eroscripts login page so
+// the user authenticates via the real Discourse UI — TOTP, backup
+// codes, AND hardware keys (WebAuthn) all just work because the user
+// is in a real browser context. Our previous in-app modal could only
+// handle TOTP because WebAuthn requires `navigator.credentials.get()`
+// against the secure origin with a user gesture, which Node `fetch`
+// can't produce. After login, we read the `_t` session cookie out of
+// the partition's cookie jar, verify the session via /session/current,
+// and hand the cookie + username back to the renderer.
+//
+// A dedicated session partition (`persist:eroscripts-login`) keeps
+// the cookies out of the main app session and lets `logout` clear
+// them cleanly.
+ipcMain.handle('eroscripts-login-window', async () => {
+  const { session } = require('electron');
+  const partition = 'persist:eroscripts-login';
+  const sess = session.fromPartition(partition);
+
+  // Force a real Chrome UA on the partition so Cloudflare's bot
+  // scoring doesn't serve the "Server is currently experiencing high
+  // load" page (which it routes Electron's default UA to in some
+  // configs even when actual load is fine). Same UA we already use
+  // for our REST API client. Set on the session, not just the window,
+  // so the cookie/CSRF preflights also adopt it.
+  const CHROME_UA =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
+  sess.setUserAgent(CHROME_UA);
+
+  const win = new BrowserWindow({
+    width: 520,
+    height: 720,
+    title: 'Log in to EroScripts',
+    parent: mainWindow,
+    modal: true,
+    autoHideMenuBar: true,
+    webPreferences: {
+      partition,
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  win.setMenuBarVisibility(false);
+  win.webContents.setUserAgent(CHROME_UA);
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finalize = (result) => {
+      if (settled) return;
+      settled = true;
+      if (!win.isDestroyed()) win.close();
+      resolve(result);
+    };
+
+    const tryCaptureSession = async () => {
+      if (settled) return;
+      try {
+        const tCookies = await sess.cookies.get({
+          url: 'https://discuss.eroscripts.com',
+          name: '_t',
+        });
+        if (tCookies.length === 0) return;
+
+        // Build full cookie header so /session/current sees everything
+        // Discourse expects (cf_clearance + _forum_session + _t).
+        const allCookies = await sess.cookies.get({
+          url: 'https://discuss.eroscripts.com',
+        });
+        const cookieHeader = allCookies
+          .map((c) => `${c.name}=${c.value}`)
+          .join('; ');
+
+        const resp = await fetch(
+          'https://discuss.eroscripts.com/session/current.json',
+          {
+            headers: {
+              Cookie: cookieHeader,
+              'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              Accept: 'application/json',
+            },
+          },
+        );
+        if (!resp.ok) return;
+        const text = await resp.text();
+        if (text.startsWith('<')) return; // Cloudflare / login redirect
+        const data = JSON.parse(text);
+        const username = data?.current_user?.username;
+        if (!username) return;
+
+        // Adopt the cookies into our API client so subsequent search /
+        // download calls go out authenticated. Pass the full cookie
+        // string (not just _t) so cf_clearance ride along.
+        eroScripts.restoreSession(tCookies[0].value, username);
+        eroScripts._sessionCookies = cookieHeader;
+
+        finalize({
+          success: true,
+          cookie: tCookies[0].value,
+          username,
+        });
+      } catch (err) {
+        log.warn('[EroScripts] login-window capture error:', err.message);
+      }
+    };
+
+    // Catch upstream HTTP 5xx (502/503/504/etc.) on the main-frame
+     // load. Discourse + Cloudflare can serve these as bare error
+     // pages with a blank-looking body — `did-fail-load` doesn't fire
+     // for HTTP errors (only for low-level network failures), so the
+     // window would otherwise hang on a white screen forever.
+    const onMainFrameCompleted = (details) => {
+      if (settled) return;
+      if (details.resourceType !== 'mainFrame') return;
+      if (details.statusCode >= 500 && details.statusCode < 600) {
+        finalize({
+          success: false,
+          error: `EroScripts is unreachable right now (HTTP ${details.statusCode}) — try again in a few minutes.`,
+        });
+      }
+    };
+    sess.webRequest.onCompleted(
+      { urls: ['*://discuss.eroscripts.com/*'] },
+      onMainFrameCompleted,
+    );
+
+    // Detect Discourse's "Server is currently experiencing high load"
+    // page (HTTP 200 with a static HTML body — not an error code we can
+    // catch via the webRequest hook above). Read the document text
+    // after each load and bail with a friendly toast instead of
+    // stranding the user on an unusable page.
+    const checkHighLoadPage = async () => {
+      if (settled) return;
+      try {
+        const bodyText = await win.webContents.executeJavaScript(
+          'document.body && document.body.innerText || ""',
+          true,
+        );
+        if (
+          /experiencing high load/i.test(bodyText) ||
+          /please try again later/i.test(bodyText)
+        ) {
+          finalize({
+            success: false,
+            error:
+              'EroScripts is busy right now — try logging in again in a minute or two.',
+          });
+        }
+      } catch {
+        /* page may have unloaded — ignore */
+      }
+    };
+
+    win.webContents.on('did-navigate', tryCaptureSession);
+    win.webContents.on('did-navigate-in-page', tryCaptureSession);
+    win.webContents.on('did-finish-load', checkHighLoadPage);
+    win.on('closed', () =>
+      finalize({ success: false, error: 'Login cancelled' }),
+    );
+
+    // Already-logged-in case: Discourse redirects /login → / before the
+    // user does anything, so kick off a capture attempt right after
+    // load too. The above events handle the typical flow; this catches
+    // the no-redirect edge case (page already shows logged-in state).
+    win.webContents.once('did-finish-load', tryCaptureSession);
+
+    win.loadURL('https://discuss.eroscripts.com/login').catch((err) => {
+      log.warn('[EroScripts] login-window loadURL failed:', err.message);
+      finalize({
+        success: false,
+        error: 'Could not open EroScripts login page — check your internet connection',
+      });
+    });
+  });
 });
 
-ipcMain.handle('eroscripts-verify-2fa', async (_event, nonce, token, username, password) => {
-  return eroScripts.verify2FA(nonce, token, username, password);
-});
-
-ipcMain.handle('eroscripts-logout', () => {
+ipcMain.handle('eroscripts-logout', async () => {
   eroScripts.logout();
+  // Wipe the login partition so the next login starts clean. Without
+  // this, Discourse's `_t` cookie persists in the partition and the
+  // child window would silently re-authenticate the previous user.
+  try {
+    const { session } = require('electron');
+    const sess = session.fromPartition('persist:eroscripts-login');
+    await sess.clearStorageData({ storages: ['cookies'] });
+  } catch (err) {
+    log.warn('[EroScripts] logout: failed to clear partition cookies:', err.message);
+  }
   return { success: true };
 });
 

@@ -151,6 +151,62 @@ async def test_serve_real_funscript(client):
 
 
 @pytest.mark.anyio
+async def test_serve_funscript_variant(client, tmp_path):
+    """`?variant=<label>` returns the matching variant's funscript file
+    (not the primary). Lets the web-remote fetch any variant for its
+    mini-heatmap previews and switch the active variant on the desktop
+    without having to change the primary."""
+    primary = tmp_path / "video.funscript"
+    primary.write_text(json.dumps({"actions": [{"at": 0, "pos": 0}]}))
+    soft = tmp_path / "video (Soft).funscript"
+    soft.write_text(json.dumps({"actions": [{"at": 0, "pos": 50}]}))
+
+    vid_id = _path_to_id(str(tmp_path / "video.mp4"))
+    register_videos([{
+        "path": str(tmp_path / "video.mp4"),
+        "name": "video.mp4",
+        "funscriptPath": str(primary),
+        "variants": [
+            {"label": "Default", "path": str(primary), "name": "video.funscript"},
+            {"label": "Soft", "path": str(soft), "name": "video (Soft).funscript"},
+        ],
+    }])
+
+    # Default (no variant param) — primary funscript.
+    default = await client.get(f"/api/media/script/{vid_id}")
+    assert default.status_code == 200
+    assert default.json()["actions"][0]["pos"] == 0
+
+    # ?variant=Soft — the soft variant's actions, not the primary.
+    soft_resp = await client.get(f"/api/media/script/{vid_id}?variant=Soft")
+    assert soft_resp.status_code == 200
+    assert soft_resp.json()["actions"][0]["pos"] == 50
+
+
+@pytest.mark.anyio
+async def test_serve_funscript_unknown_variant_404(client, tmp_path):
+    """Asking for a variant the video doesn't have returns 404 with a
+    helpful message (Nielsen #9). Don't silently fall back to the
+    primary — the caller's expectation was specific."""
+    primary = tmp_path / "video.funscript"
+    primary.write_text(json.dumps({"actions": []}))
+
+    vid_id = _path_to_id(str(tmp_path / "video.mp4"))
+    register_videos([{
+        "path": str(tmp_path / "video.mp4"),
+        "name": "video.mp4",
+        "funscriptPath": str(primary),
+        "variants": [
+            {"label": "Default", "path": str(primary), "name": "video.funscript"},
+        ],
+    }])
+
+    response = await client.get(f"/api/media/script/{vid_id}?variant=Ghost")
+    assert response.status_code == 404
+    assert "Ghost" in response.json()["detail"]
+
+
+@pytest.mark.anyio
 async def test_stream_range_middle(client):
     """Range request for middle of file."""
     if not os.path.exists(TEST_VIDEO):

@@ -115,25 +115,28 @@ function _template() {
           <li><em>Optional:</em> bookmark or favourite the page in HereSphere so you don't have to retype next time.</li>
         </ol>
 
-        <div class="vr-modal__setup-info-group-label">For device sync (Handy via Buttplug, Vorze, etc.)</div>
+        <div class="vr-modal__setup-info-group-label">For device sync</div>
         <ol class="vr-modal__setup-info-list">
           <li>In HereSphere, open <strong>Settings &gt; Timestamp Server</strong>.</li>
           <li><strong>Enable the timestamp server</strong> — required for FunSync to drive non-Handy devices.</li>
-          <li><strong>Fill in BOTH the IP and port fields</strong>: the IP must be your Quest's current IP (visible in the Quest's Wi-Fi settings), and the port should be <strong>23554</strong>. The toggle on its own is not enough — without these fields populated, HereSphere shows "enabled" but never actually opens the listening socket. This catches a lot of users.</li>
-          <li>FunSync auto-detects your Quest and connects when you start playback.</li>
+          <li>Check that the <strong>IP field</strong> shows your Quest's current IP. If it's blank or stale (e.g. your Quest got a new IP since you set this up), press the <strong>auto-find button next to the IP field</strong> — HereSphere fills it in for you. Port should be <strong>23554</strong>.</li>
+          <li>FunSync auto-detects your Quest and connects when you open a video in HereSphere.</li>
         </ol>
-        <div class="vr-modal__setup-info-note">
-          <strong>Note:</strong> The Handy works in HereSphere even without the timestamp server because HereSphere has its own built-in Handy connection (via the connection-key field in HereSphere's settings). If only the Handy is moving and other devices are silent, the timestamp server isn't actually listening — even if it shows as enabled. See the IP+port step above.
-        </div>
 
         <div class="vr-modal__setup-info-group-label">Troubleshooting</div>
         <ul class="vr-modal__setup-info-list">
           <li><strong>URL bar not visible?</strong> It's at the top of HereSphere's home screen — tap the address area to bring up the keyboard.</li>
           <li><strong>No videos showing?</strong> Make sure FunSync is open with at least one source added.</li>
-          <li><strong>Only the Handy moves, other devices silent?</strong> The timestamp server's IP and port fields are probably blank or wrong. Type your Quest's IP and port 23554 explicitly, even if the toggle says "enabled."</li>
-          <li><strong>Devices not syncing?</strong> Check that the timestamp server's IP and port fields are filled in (the toggle alone isn't enough — fields are reset each session on some HereSphere versions).</li>
-          <li><strong>Can't connect?</strong> Ensure your Quest and PC are on the same Wi-Fi network.</li>
-          <li><strong>VPN active?</strong> Disable VPN — it changes your network IP and blocks local connections.</li>
+          <li><strong>FunSync shows "VR companion can't reach HereSphere's timestamp server", or only the Handy moves while other devices stay silent?</strong> HereSphere isn't accepting connections on the address FunSync is reaching for. Two common fixes, in order:
+            <ol>
+              <li>Press the <strong>auto-find button next to the IP field</strong> in HereSphere's Timestamp Server settings — captures your Quest's current local IP. Useful when the IP has changed since setup (DHCP lease renewed, new router, etc.).</li>
+              <li>Toggle the timestamp server <strong>off and back on</strong> — clears any stuck state. HereSphere has had bugs in older versions where the listener didn't re-initialise after switching profiles; toggling fixes that.</li>
+            </ol>
+            As a last resort, manually type the Quest's IP and port <strong>23554</strong> into the fields — same end result, less convenient.
+          </li>
+          <li><strong>Nav-bar VR icon yellow / status reads "Waiting"?</strong> TCP is connected but HereSphere isn't sending timestamp packets. Most often this means no video is playing in HereSphere — start one and the status flips to green within a second. If it stays yellow while a video is playing, toggle the timestamp server off and on in HereSphere to force a re-init.</li>
+          <li><strong>Can't connect at all?</strong> Make sure your Quest and PC are on the same Wi-Fi network.</li>
+          <li><strong>VPN active?</strong> Disable it — VPNs change your network IP and block local connections.</li>
           <li><strong>Video looks wrong?</strong> Adjust projection mode in HereSphere (SBS, fisheye, etc.).</li>
         </ul>
       </div>

@@ -74,17 +74,49 @@ html, body {
   margin: 0;
   padding: 0;
   height: 100%;
+  width: 100%;
+  /* Hard-clip horizontal overflow at the document level — last-resort
+     guarantee that nothing in any view (library, collections, player,
+     etc.) can force a horizontal scroll past the viewport edge. The
+     targeted overflow-wrap / flex-wrap rules earlier in the stack stop
+     overflow at its source; this clips anything that slips through. */
+  max-width: 100vw;
+  /* Both elements get the bg: html catches the case where iOS Safari's
+     animated browser chrome (URL bar / bottom toolbar) momentarily
+     exposes the document background while --app-vh hasn't caught up
+     yet. Without this, the strip below body briefly shows as the
+     browser default (white in light mode, near-black in dark mode) —
+     either way it doesn't match our palette and looks like a glitch. */
   background: var(--bg);
   color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   overscroll-behavior: none;
+  /* Lock body / html scroll. All scroll happens inside `.main`. Without
+     this, iOS Safari can rubber-band the document on a fast flick even
+     when content fits exactly — the rubber-band briefly exposes the
+     page edges and shows the document scrollbar as a thin light strip
+     on the right (the "white vertical bar" the user reported). */
+  overflow: hidden;
+}
+/* Belt-and-suspenders: nuke any document-level scrollbar that iOS or
+   another browser might still try to render. */
+html { scrollbar-width: none; -ms-overflow-style: none; }
+html::-webkit-scrollbar,
+body::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  -webkit-appearance: none;
+  background: transparent;
 }
 
-/* App grid: header on row 1, toolbar on row 2, scrolling main on
-   row 3, bottom nav on row 4. Becomes a 2-col grid (rail | rest)
-   at desktop.
+/* App grid: header on row 1, scrolling main on row 2, bottom nav on
+   row 3. Becomes a 2-col grid (rail | rest) at desktop. The toolbar
+   was previously its own row (auto auto 1fr auto) but moved INSIDE
+   `.main` as a sticky child so the auto-hide-on-scroll transform can
+   slide it without triggering layout reflow on the rest of the grid.
    Height layering (top wins):
      1. `calc(var(--app-vh) * 100)` — JS-driven, updated on every
         viewport-changing event in app.js. Authoritative on mobile
@@ -96,8 +128,17 @@ html, body {
      3. `100vh` — older static fallback for browsers that lack `dvh`. */
 #app {
   display: grid;
-  grid-template-rows: auto auto 1fr auto;
-  grid-template-columns: 1fr;
+  /* `minmax(0, 1fr)` instead of plain `1fr` is the critical override:
+     CSS grid items have an implicit `min-width: auto` that resolves to
+     their MIN-CONTENT width — for `.header` containing an h1 with
+     `white-space: nowrap`, min-content is the entire (unbreakable)
+     title string, ~500 px for a long video name. Without `minmax(0, …)`
+     the grid column EXPANDS to fit that min-content, dragging the
+     whole #app wider than the viewport (and the nav-tabs in row 3
+     along with it). With `minmax(0, 1fr)` the column is exactly the
+     container width regardless of any child's min-content size. */
+  grid-template-rows: auto 1fr auto;
+  grid-template-columns: minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
   height: calc(var(--app-vh, 1vh) * 100);
@@ -118,6 +159,10 @@ html, body {
   position: sticky;
   top: 0;
   z-index: 10;
+  /* Belt to the `minmax(0, 1fr)` suspenders — explicit min-width: 0
+     so this grid item can shrink below its children's min-content
+     (the nowrap h1 title, particularly). */
+  min-width: 0;
 }
 
 .brand-accent { color: var(--accent); }
@@ -144,6 +189,14 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* min-width: 0 lets the h1 shrink below its intrinsic content width
+     in its flex column parent. Without this, a long video title forces
+     the h1 to its `nowrap` content width, which expands titleblock
+     past its flex allocation and pushes the whole header (and #app)
+     wider than the viewport — that's what was dragging the nav-tabs
+     off the right edge for videos with long names. */
+  min-width: 0;
+  max-width: 100%;
 }
 
 .header__count {
@@ -211,13 +264,26 @@ html, body {
 .toolbar {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  /* Sticky child of `.main` (the scroll container). At scrollTop=0 the
+     toolbar takes up its normal-flow space; once content scrolls past,
+     the toolbar pins to the top of the scroll viewport and overlays the
+     content underneath. That overlay is what makes the scroll-tracked
+     transform work cleanly: shifting the toolbar up reveals the content
+     it was covering — no empty strip. Twitter / Reddit / Medium use
+     this same pattern. */
   position: sticky;
-  top: 0; /* offset overridden by header sticky-stack */
+  top: 0;
   z-index: 9;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px 16px 8px;
+  /* JS drives `transform: translateY(<n>px)` directly on every scroll
+     frame, 1:1 with the user's finger motion. A CSS transition would
+     cause the toolbar to lag behind the scroll position; we want
+     instant follow. The compositor hint stays so the browser keeps
+     this layer on the GPU. */
+  will-change: transform;
 }
 .toolbar--hidden { display: none; }
 
@@ -367,11 +433,46 @@ html, body {
    ============================================================ */
 .main {
   overflow-y: auto;
+  /* Safety net so no view can ever push the page wider than the
+     viewport. If a long unbreakable string slips through, it gets
+     clipped instead of forcing a horizontal scroll on the whole
+     remote. The targeted fixes (overflow-wrap on title / meta /
+     sync-pill, flex-wrap on meta) prevent the overflow at its
+     source — this is the belt to those suspenders. */
+  overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  /* Bottom padding includes the nav height + safe-area so the last
-     row isn't covered by the fixed nav. */
-  padding-bottom: calc(var(--nav-height) + var(--safe-bottom) + 16px);
+  /* Just breathing room at the end of the scroll. Nav-tabs sits in
+     the next grid row (in flow), so we don't need to clear a fixed
+     bar's height anymore. */
+  padding-bottom: 16px;
   min-height: 0; /* lets the grid row collapse properly */
+  /* Stop scroll chaining at the boundary — without this, momentum from
+     a fast flick can bleed into a body-level rubber-band overscroll on
+     iOS, briefly exposing the document background as a flash on the
+     edges. */
+  overscroll-behavior: contain;
+}
+/* Hide the scrollbar on the scroll container. The standard properties
+   (`scrollbar-width: none`) and the WebKit pseudo-element form work in
+   Chrome / Safari / Firefox, but DuckDuckGo Android's WebView has been
+   reported (issue #170) to ignore both and render its own system
+   scrollbar regardless. The transparent `scrollbar-color` covers that
+   case — even if the bar is still drawn, it's invisible. */
+.main {
+  scrollbar-width: none;
+  scrollbar-color: transparent transparent;
+  -ms-overflow-style: none;
+}
+.main::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  -webkit-appearance: none;
+  background: transparent;
+}
+.main::-webkit-scrollbar-thumb,
+.main::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* ============================================================
@@ -380,11 +481,24 @@ html, body {
    green zone (Hoober).
    ============================================================ */
 .nav-tabs {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  display: flex;
+  /* In-flow grid row 3 of #app on mobile (becomes a left rail on
+     desktop). Position-fixed was wrong on iOS Safari: `position: fixed`
+     anchors to the LAYOUT viewport, but iOS chrome animations change
+     the VISUAL viewport. The mismatch produced a grey strip below the
+     nav whenever chrome retracted. In-flow placement ties the nav to
+     #app's height — which is dynamic via `--app-vh` — so the nav
+     always sits flush against the visible viewport bottom. */
+  /* Grid (not flex) so the four tabs are always exactly 1/4 of the
+     container width. Flex with `flex: 1` was the prior choice but
+     flex items default to `min-width: auto`, which prevents them
+     from shrinking below their intrinsic content width — at narrow
+     viewports the four labels (Library / Collections / Playlists /
+     Categories) summed to ~280 px of min-content and pushed the nav
+     wider than the viewport, dragging Playlists + Categories off the
+     right edge. `minmax(0, 1fr)` is the grid equivalent of `flex: 1
+     + min-width: 0` and just works. */
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   background: var(--bg-secondary);
   border-top: 1px solid var(--border);
   padding-bottom: var(--safe-bottom);
@@ -392,7 +506,9 @@ html, body {
 }
 
 .nav-tabs__tab {
-  flex: 1;
+  /* No `flex: 1` needed — the parent is `display: grid` with equal
+     fr columns on mobile. On desktop the parent switches back to
+     flex-column (rail) and `flex: 0 0 auto` is correct there too. */
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -409,6 +525,11 @@ html, body {
   font-weight: 500;
   transition: color 150ms;
   -webkit-tap-highlight-color: transparent;
+  /* min-width: 0 so the tab itself can shrink below its intrinsic
+     label width (belt to the grid suspenders above). The label gets
+     ellipsis so it doesn't overflow visibly. */
+  min-width: 0;
+  overflow: hidden;
 }
 .nav-tabs__tab:hover { color: var(--text-primary); }
 .nav-tabs__tab[aria-selected="true"] { color: var(--accent); }
@@ -426,6 +547,12 @@ html, body {
 .nav-tabs__label {
   font-size: 11px;
   letter-spacing: 0.1px;
+  /* Truncate long labels (Categories, Collections) on very narrow
+     viewports instead of pushing the tab wider than its grid column. */
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ============================================================
@@ -621,6 +748,10 @@ html, body {
   display: flex;
   align-items: center;
   gap: 8px;
+  /* Wrap so a long source name + duration + badge can stack on
+     narrow viewports instead of forcing the row wider. */
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 .list__badge {
   display: inline-flex;
@@ -862,7 +993,10 @@ html, body {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
   gap: 10px;
-  padding: 10px 12px calc(14px + var(--safe-bottom) + var(--nav-height));
+  /* nav-height + safe-bottom were here when nav-tabs was position-fixed
+     and overlaid this content; with in-flow nav-tabs, they're no longer
+     needed (nav-tabs has its own safe-bottom padding below). */
+  padding: 10px 12px 14px;
 }
 
 .card {
@@ -962,19 +1096,69 @@ html, body {
 }
 
 /* ============================================================
-   Player view — preserved
+   Player view
    ============================================================ */
 .player {
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* min-width: 0 lets flex children shrink below their intrinsic
+     content size — prevents a long unbreakable filename or device
+     name in a child from forcing the whole player wider than the
+     viewport. */
+  min-width: 0;
 }
 
 .player__video {
   width: 100%;
+  /* max-width prevents a programmatic `videoEl.width = …` set or any
+     other sizing pass from making the element wider than its column. */
+  max-width: 100%;
   background: #000;
+  /* 16:9 in portrait gives a sensible default frame; non-16:9 sources
+     (4:3, 21:9, vertical, VR equirectangular) letterbox/pillarbox via
+     the video element's default `object-fit: contain` — preview-grade,
+     no distortion. The landscape media query at the bottom of this
+     file switches to `aspect-ratio: auto` + `height: 60vh` so a wide
+     orientation can use the natural source aspect. */
   aspect-ratio: 16 / 9;
   display: block;
+}
+
+/* Positioned ancestor for the loading overlay. Sits flush around the
+   <video> so the overlay covers the frame and not the whole player. */
+.player__video-wrap {
+  position: relative;
+  width: 100%;
+}
+.player__loading-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 10;
+  /* Block taps to the video controls underneath while loading. */
+  pointer-events: auto;
+}
+.player__loading-spinner {
+  width: 40px;
+  height: 40px;
+  border: 3px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: player__spin 0.8s linear infinite;
+}
+.player__loading-text {
+  font-size: 14px;
+  color: #fff;
+  font-weight: 500;
+}
+@keyframes player__spin {
+  to { transform: rotate(360deg); }
 }
 
 .player__sync-pill {
@@ -988,6 +1172,9 @@ html, body {
   color: var(--text-secondary);
   text-align: center;
   transition: background 150ms, border-color 150ms, color 150ms;
+  /* Wrap long unbreakable status text (device names without spaces)
+     instead of letting them push the pill wider than the column. */
+  overflow-wrap: anywhere;
 }
 .player__sync-pill[data-state="ready"],
 .player__sync-pill[data-state="connected"] {
@@ -1043,12 +1230,160 @@ html, body {
 }
 
 .player__heatmap-wrapper { padding: 12px 16px 0; }
+.player__heatmap-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 6px;
+  /* `min-width: 0` so flex children can shrink below their intrinsic
+     content widths — keeps the variant chip from pushing the heatmap
+     wrapper wider than its viewport allocation on narrow screens. */
+  min-width: 0;
+}
 .player__heatmap-label {
   font-size: 11px;
   color: var(--text-dim);
-  margin-bottom: 6px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  /* Take whatever room the chip leaves; truncate if needed rather
+     than push the chip off the right edge. */
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  /* No bottom margin here — header gap handles spacing now. */
+  margin-bottom: 0;
+}
+
+/* Variant chip — sits at the right of the heatmap header. Tap to
+   expand a list of variants below the heatmap. Padding + font-size
+   match the sync pill above so the two read as the same component
+   family on the same player surface (Nielsen #4 — same shape, same
+   role). The sync pill doesn't enforce the full 44 px tap floor
+   either; matching it here keeps the visual rhythm consistent. */
+.player__variant-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  max-width: 60%;
+  transition: background 120ms, border-color 120ms;
+}
+.player__variant-chip:hover { background: var(--bg-card-hover); }
+.player__variant-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.player__variant-chip--open {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.player__variant-chip-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.player__variant-chip-chev {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0.7;
+  transition: transform 150ms ease;
+}
+.player__variant-chip--open .player__variant-chip-chev {
+  transform: rotate(180deg);
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .player__variant-chip-chev { transition: none; }
+}
+
+/* Expanded list of variants. Mirrors the filter-sheet `radiogroup`
+   pattern (`.sheet__option` + `<input type="radio">`) so "pick one of
+   N" looks and behaves identically wherever it appears in the remote
+   (Shneiderman #1, DESIGN.md §1.2 — same actions for same situations).
+   The mini heatmap inside each row is the variant-specific addition,
+   slotted into a third grid column. */
+.player__variant-list {
+  margin: 8px 0 0;
+  padding: 4px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.player__variant-row {
+  display: grid;
+  grid-template-columns: 18px 1fr minmax(0, 110px);
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text-secondary);
+  min-height: var(--tap-min);
+  transition: background 120ms, border-color 120ms, color 120ms;
+}
+.player__variant-row:hover { color: var(--text-primary); }
+/* `:has(input:checked)` is the same selector the filter sheet uses
+   for active state — keeps the visual cue identical across the two
+   surfaces. */
+.player__variant-row:has(input:checked) {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.player__variant-row:has(input:focus-visible) {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.player__variant-row--pending {
+  opacity: 0.65;
+}
+.player__variant-row-input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin: 0;
+}
+.player__variant-row-label {
+  font-size: 14px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.player__variant-row-preview {
+  width: 100%;
+  height: 22px;
+  display: block;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.04);
+  /* Inherits the row's `color` so the active row's preview is accent
+     and inactive rows are muted. The canvas bakes color at render time,
+     so `applyActiveVariant` re-renders previews on every active-row
+     change to pick up the new `currentColor`. */
+  color: currentColor;
+  pointer-events: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .player__variant-chip,
+  .player__variant-row { transition: none; }
 }
 .player__heatmap {
   width: 100%;
@@ -1058,13 +1393,26 @@ html, body {
   background: rgba(255, 255, 255, 0.04);
   color: var(--accent);
 }
-.player__title { padding: 14px 16px 4px; font-size: 16px; font-weight: 600; }
+.player__title {
+  padding: 14px 16px 4px;
+  font-size: 16px;
+  font-weight: 600;
+  /* Long filenames frequently have no spaces (`Some_Really_Long_File_
+     Name.mp4`). Without this they'd force the whole player wider than
+     the viewport. `anywhere` is permissive — the browser breaks at any
+     character if no better break point exists. */
+  overflow-wrap: anywhere;
+}
 .player__meta {
   padding: 0 16px 16px;
   font-size: 12px;
   color: var(--text-dim);
   display: flex;
   gap: 10px;
+  /* Source names (folder paths, e.g.) can be long. Wrap onto a second
+     line on narrow screens instead of overflowing. */
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
 }
 .player__speed {
   padding: 0 16px 16px;
@@ -1094,7 +1442,7 @@ html, body {
   .toolbar { padding-left: 24px; padding-right: 24px; }
   .grid {
     grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-    padding: 14px 24px calc(18px + var(--safe-bottom) + var(--nav-height));
+    padding: 14px 24px 18px;
     gap: 14px;
   }
 
@@ -1120,26 +1468,33 @@ html, body {
 /* Desktop: bottom-nav becomes a left rail. Centred max-width content
    so 4K screens don't stretch a single row of cards across 3000px. */
 @media (min-width: 1024px) {
-  /* App grid becomes 2 columns: rail | content stack */
+  /* App grid becomes 2 columns: rail | content stack. The content
+     column is `minmax(0, 1fr)` for the same reason as the mobile
+     grid — long titles with `nowrap` would otherwise expand the
+     column past viewport width. */
   #app {
-    grid-template-columns: var(--rail-width) 1fr;
-    grid-template-rows: auto auto 1fr;
+    grid-template-columns: var(--rail-width) minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
   }
 
-  /* Header + toolbar + main span the right column */
+  /* Header + main span the right column. Toolbar lives inside main
+     (sticky child) so it doesn't need its own grid placement. */
   .header   { grid-column: 2; }
-  .toolbar  { grid-column: 2; }
   .main     { grid-column: 2; }
 
-  /* Nav-tabs: left rail spanning all rows on the left */
+  /* Nav-tabs: left rail spanning all rows on the left. Switch back to
+     flex (vertical stack) — the mobile grid-of-4-columns rule doesn't
+     apply here. */
   .nav-tabs {
     grid-column: 1;
-    grid-row: 1 / span 3;
+    grid-row: 1 / span 2;
     position: relative;
     bottom: auto;
     left: auto;
     right: auto;
+    display: flex;
     flex-direction: column;
+    grid-template-columns: none;
     align-items: stretch;
     justify-content: flex-start;
     padding: calc(20px + var(--safe-top)) 12px 20px;

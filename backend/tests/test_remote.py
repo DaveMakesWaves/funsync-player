@@ -87,6 +87,47 @@ async def test_remote_video_script_url_only_when_funscript_present(client):
 
 
 @pytest.mark.anyio
+async def test_remote_video_variants_default_empty(client):
+    """Single-variant or no-variant videos surface an empty `variants`
+    list — the phone uses that to decide whether to render the variant
+    chip (Nielsen #8: chip not rendered when there's nothing to choose)."""
+    response = await client.get("/api/remote/videos")
+    videos = response.json()["videos"]
+    for v in videos:
+        assert v["variants"] == []
+
+
+@pytest.mark.anyio
+async def test_remote_video_variants_surface_when_present(client):
+    """Multi-variant videos surface each variant with `label` + `scriptUrl`.
+    The desktop's scan populates `variants` on each video; the remote API
+    just projects them through with a fetchable URL per variant."""
+    register_videos([
+        {
+            "path": "C:\\Videos\\Multi.mp4",
+            "name": "Multi.mp4",
+            "funscriptPath": "C:\\Videos\\Multi.funscript",
+            "hasFunscript": True,
+            "variants": [
+                {"label": "Default", "path": "C:\\Videos\\Multi.funscript", "name": "Multi.funscript"},
+                {"label": "Soft",    "path": "C:\\Videos\\Multi (Soft).funscript", "name": "Multi (Soft).funscript"},
+                {"label": "Intense", "path": "C:\\Videos\\Multi (Intense).funscript", "name": "Multi (Intense).funscript"},
+            ],
+            "duration": 600,
+        },
+    ])
+    response = await client.get("/api/remote/videos")
+    videos = response.json()["videos"]
+    assert len(videos) == 1
+    multi = videos[0]
+    labels = [v["label"] for v in multi["variants"]]
+    assert labels == ["Default", "Soft", "Intense"]
+    for entry in multi["variants"]:
+        assert entry["scriptUrl"].startswith(f"/api/media/script/{multi['id']}")
+        assert f"variant={entry['label']}" in entry["scriptUrl"]
+
+
+@pytest.mark.anyio
 async def test_remote_video_strips_extension_from_name(client):
     response = await client.get("/api/remote/videos")
     names = [v["name"] for v in response.json()["videos"]]

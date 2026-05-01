@@ -487,13 +487,38 @@ async def stream_video(video_id: str, request: Request):
 # --- Funscript Serving ---
 
 @router.get("/script/{video_id}")
-async def get_funscript(video_id: str):
-    """Serve the funscript associated with a video."""
+async def get_funscript(video_id: str, variant: str | None = None):
+    """Serve the funscript associated with a video.
+
+    `?variant=<label>` selects a specific variant from the video's
+    `variants` list (Default / Soft / Vibe1 / etc.) — populated by the
+    desktop's library scan in `electron/main.js`. Without the param the
+    response is the video's primary funscript (`funscriptPath`), which
+    matches the prior behaviour for single-variant videos and stays
+    backward-compatible with the existing remote-side calls that don't
+    know about variants yet.
+    """
     video = _video_registry.get(video_id)
     if not video:
         raise HTTPException(status_code=404, detail="Video not found")
 
-    fs_path = video.get("funscriptPath")
+    fs_path: str | None = None
+
+    if variant:
+        # Find the matching variant. Match is exact on `label` —
+        # consistent with how the desktop dropdown picks them.
+        for entry in video.get("variants") or []:
+            if (entry.get("label") or "").strip() == variant:
+                fs_path = entry.get("path")
+                break
+        if not fs_path:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Variant '{variant}' not found for this video",
+            )
+    else:
+        fs_path = video.get("funscriptPath")
+
     if not fs_path or not os.path.isfile(fs_path):
         raise HTTPException(status_code=404, detail="No funscript for this video")
 

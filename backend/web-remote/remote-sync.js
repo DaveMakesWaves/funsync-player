@@ -88,6 +88,19 @@ export class RemoteSyncClient {
     ws.addEventListener('error', () => { /* 'close' will follow */ });
   }
 
+  /**
+   * Tell the desktop to switch to a different funscript variant for the
+   * currently-playing video. Fire-and-forget — the desktop performs the
+   * switch (loads the script, re-uploads to Handy, etc.) and broadcasts
+   * a `variant-changed` reply that `onServerMessage` receives. The UI
+   * should treat this as a request and only reflect the change after
+   * the reply arrives.
+   */
+  switchVariant(label) {
+    if (typeof label !== 'string' || !label) return;
+    this._send({ type: 'switch-variant', label });
+  }
+
   /** Cleanly signal disconnect and tear down. */
   stop() {
     this._detachVideoHandlers();

@@ -131,8 +131,7 @@ contextBridge.exposeInMainWorld('funsync', {
   autoblowLatency: () => ipcRenderer.invoke('autoblow-latency'),
 
   // EroScripts
-  eroscriptsLogin: (username, password) => ipcRenderer.invoke('eroscripts-login', username, password),
-  eroscriptsVerify2FA: (nonce, token, username, password) => ipcRenderer.invoke('eroscripts-verify-2fa', nonce, token, username, password),
+  eroscriptsLoginWindow: () => ipcRenderer.invoke('eroscripts-login-window'),
   eroscriptsLogout: () => ipcRenderer.invoke('eroscripts-logout'),
   eroscriptsRestoreSession: (cookie, username) => ipcRenderer.invoke('eroscripts-restore-session', cookie, username),
   eroscriptsStatus: () => ipcRenderer.invoke('eroscripts-status'),

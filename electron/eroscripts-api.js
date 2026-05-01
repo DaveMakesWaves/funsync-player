@@ -18,7 +18,6 @@ class EroScriptsAPI {
   constructor() {
     this._cookie = null;
     this._username = null;
-    this._csrfToken = null;
     this._sessionCookies = '';
   }
 
@@ -35,204 +34,6 @@ class EroScriptsAPI {
     this._username = username;
     this._sessionCookies = cookie ? `_t=${cookie}` : '';
     _debugLog(`SESSION restored for ${username}, cookie length: ${(cookie || '').length}`);
-  }
-
-  /**
-   * Step 1: Log in with username and password.
-   * Returns { success, requires2FA, nonce, username, cookie, error }
-   */
-  async login(username, password) {
-    _debugLog(`LOGIN attempt for user: ${username}`);
-    try {
-      // Get CSRF token
-      const csrfResp = await fetch(`${BASE_URL}/session/csrf.json`, {
-        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json' },
-      });
-      if (!csrfResp.ok) {
-        const msg = csrfResp.status === 503 ? 'EroScripts is temporarily unavailable — try again later'
-          : `Failed to reach EroScripts (${csrfResp.status})`;
-        _debugLog(`LOGIN CSRF failed: ${csrfResp.status}`);
-        return { success: false, error: msg };
-      }
-
-      const csrfData = await this._safeJson(csrfResp);
-      if (!csrfData || !csrfData.csrf) {
-        return { success: false, error: 'Failed to get CSRF token' };
-      }
-
-      this._csrfToken = csrfData.csrf;
-      this._sessionCookies = this._extractCookies(csrfResp);
-
-      // Attempt login
-      const loginResp = await fetch(`${BASE_URL}/session`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'X-CSRF-Token': this._csrfToken,
-          'Cookie': this._sessionCookies,
-          'User-Agent': USER_AGENT,
-          'Accept': 'application/json',
-        },
-        body: `login=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}`,
-        redirect: 'manual',
-      });
-
-      const data = await this._safeJson(loginResp);
-      if (!data) {
-        return { success: false, error: `Unexpected response from EroScripts (${loginResp.status})` };
-      }
-
-      log.info('[EroScripts] Login response:', JSON.stringify(data));
-      _debugLog(`LOGIN response status: ${loginResp.status}`);
-      _debugLog(`LOGIN response: ${JSON.stringify(data)}`);
-      _debugLog(`LOGIN cookies len: ${this._sessionCookies.length}`);
-
-      // Merge cookies from login response
-      const loginCookies = this._extractCookies(loginResp);
-      if (loginCookies) {
-        this._sessionCookies = this._mergeCookies(this._sessionCookies, loginCookies);
-      }
-
-      // Check for 2FA requirement — Discourse returns this in multiple ways
-      const nonce = data.second_factor_challenge_nonce;
-      const is2FA = nonce ||
-        data.reason === 'invalid_second_factor' ||
-        data.reason === 'second_factor_required' ||
-        (data.error && (data.error.includes('two-factor') || data.error.includes('2fa') || data.error.includes('second factor')));
-
-      if (is2FA) {
-        log.info('[EroScripts] 2FA required, nonce:', nonce ? 'present' : 'missing');
-        return {
-          success: false,
-          requires2FA: true,
-          nonce: nonce || null,
-          totpEnabled: data.totp_enabled !== false,
-          backupEnabled: !!data.backup_enabled,
-          securityKeyEnabled: !!data.security_key_enabled,
-          error: data.error || '2FA code required',
-        };
-      }
-
-      // Check for errors
-      if (data.error) {
-        return { success: false, error: data.error };
-      }
-
-      // Success — extract session cookie
-      return this._completeLogin(data, username);
-    } catch (err) {
-      log.error('[EroScripts] Login error:', err.message);
-      return { success: false, error: err.message };
-    }
-  }
-
-  /**
-   * Step 2: Submit 2FA TOTP code.
-   * Gets a fresh CSRF token, then re-submits login with the 2FA token included.
-   */
-  async verify2FA(nonce, token, username, password) {
-    try {
-      // Always get a fresh CSRF token (the previous one was consumed by the login attempt)
-      log.info('[EroScripts] 2FA: fetching fresh CSRF token');
-      const csrfResp = await fetch(`${BASE_URL}/session/csrf.json`, {
-        headers: { 'User-Agent': USER_AGENT, 'Accept': 'application/json', 'Cookie': this._sessionCookies },
-      });
-      const csrfData = await this._safeJson(csrfResp);
-      if (csrfData?.csrf) {
-        this._csrfToken = csrfData.csrf;
-        this._sessionCookies = this._mergeCookies(this._sessionCookies, this._extractCookies(csrfResp));
-      }
-
-      let resp;
-
-      if (nonce) {
-        // Nonce-based flow: POST to /session/2fa
-        log.info('[EroScripts] 2FA: using nonce-based flow');
-        resp = await fetch(`${BASE_URL}/session/2fa`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-CSRF-Token': this._csrfToken,
-            'Cookie': this._sessionCookies,
-            'User-Agent': USER_AGENT,
-            'Accept': 'application/json',
-          },
-          body: JSON.stringify({
-            nonce,
-            second_factor_token: token,
-            second_factor_method: 1,
-          }),
-          redirect: 'manual',
-        });
-      } else {
-        // No nonce: re-submit full login with 2FA token included
-        log.info('[EroScripts] 2FA: re-submitting login with TOTP token');
-        resp = await fetch(`${BASE_URL}/session`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'X-CSRF-Token': this._csrfToken,
-            'Cookie': this._sessionCookies,
-            'User-Agent': USER_AGENT,
-            'Accept': 'application/json',
-          },
-          body: `login=${encodeURIComponent(username)}&password=${encodeURIComponent(password)}&second_factor_token=${encodeURIComponent(token)}&second_factor_method=1`,
-          redirect: 'manual',
-        });
-      }
-
-      const data = await this._safeJson(resp);
-      log.info('[EroScripts] 2FA response:', JSON.stringify(data));
-      log.info('[EroScripts] 2FA response status:', resp.status);
-
-      if (!data) {
-        return { success: false, error: `2FA verification failed (${resp.status})` };
-      }
-
-      // Merge cookies
-      const cookies = this._extractCookies(resp);
-      log.info('[EroScripts] 2FA cookies:', cookies ? cookies.substring(0, 100) : 'none');
-      if (cookies) {
-        this._sessionCookies = this._mergeCookies(this._sessionCookies, cookies);
-      }
-
-      if (data.error) {
-        return { success: false, error: data.error };
-      }
-
-      // Check if this is a successful login response
-      if (data.user || data.current_user) {
-        return this._completeLogin(data, data.user?.username || '');
-      }
-
-      // Some Discourse versions return success differently after 2FA
-      // Try extracting the _t cookie
-      const tMatch = this._sessionCookies.match(/_t=([^;,\s]+)/);
-      if (tMatch) {
-        this._cookie = tMatch[1];
-        this._username = data.username || '';
-        log.info(`[EroScripts] 2FA verified, logged in`);
-        return { success: true, username: this._username, cookie: this._cookie };
-      }
-
-      return { success: false, error: 'Verification succeeded but session not established' };
-    } catch (err) {
-      log.error('[EroScripts] 2FA error:', err.message);
-      return { success: false, error: err.message };
-    }
-  }
-
-  _completeLogin(data, fallbackUsername) {
-    // Extract _t cookie from accumulated session cookies
-    const tMatch = this._sessionCookies.match(/_t=([^;,\s]+)/);
-    if (tMatch) {
-      this._cookie = tMatch[1];
-    }
-
-    this._username = data.user?.username || data.current_user?.username || fallbackUsername;
-    log.info(`[EroScripts] Logged in as ${this._username}`);
-
-    return { success: true, username: this._username, cookie: this._cookie };
   }
 
   /**
@@ -275,7 +76,6 @@ class EroScriptsAPI {
   logout() {
     this._cookie = null;
     this._username = null;
-    this._csrfToken = null;
     this._sessionCookies = '';
   }
 
@@ -559,31 +359,6 @@ class EroScriptsAPI {
     }
   }
 
-  _extractCookies(response) {
-    // Node fetch doesn't expose set-cookie easily, try getSetCookie if available
-    if (response.headers.getSetCookie) {
-      return response.headers.getSetCookie().join('; ');
-    }
-    return response.headers.get('set-cookie') || '';
-  }
-
-  _mergeCookies(existing, newer) {
-    // Simple merge — newer values override
-    const map = new Map();
-    for (const str of [existing, newer]) {
-      for (const part of str.split(/[;,]\s*/)) {
-        const eq = part.indexOf('=');
-        if (eq > 0) {
-          const key = part.slice(0, eq).trim();
-          const val = part.slice(eq + 1).trim();
-          if (key && !['path', 'domain', 'expires', 'max-age', 'samesite', 'secure', 'httponly'].includes(key.toLowerCase())) {
-            map.set(key, val);
-          }
-        }
-      }
-    }
-    return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ');
-  }
 }
 
 module.exports = { EroScriptsAPI };

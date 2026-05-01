@@ -34,6 +34,7 @@ export class RemoteBridge {
     this.onPhonePlay = null;           // (ip) => {}
     this.onPhonePause = null;          // (ip) => {}
     this.onPhoneEnded = null;          // (ip) => {}
+    this.onPhoneSwitchVariant = null;  // (label, ip) => {} — phone tapped a variant in the player view
     this.onBridgeOpen = null;          // () => {}
     this.onBridgeClose = null;         // () => {}
   }
@@ -156,6 +157,15 @@ export class RemoteBridge {
         break;
       case 'ended':
         if (this.onPhoneEnded) this.onPhoneEnded(ip);
+        break;
+      case 'switch-variant':
+        // Phone tapped a variant row. Desktop performs the switch (load
+        // script, re-upload to Handy, reset editor, etc.) and broadcasts
+        // `variant-changed` back so the phone can update its UI when the
+        // switch actually completes.
+        if (this.onPhoneSwitchVariant && typeof msg.label === 'string') {
+          this.onPhoneSwitchVariant(msg.label, ip);
+        }
         break;
       case 'hello':
         // Phones send hello after connecting — treat it as (re)announcing

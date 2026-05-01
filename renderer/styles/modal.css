@@ -937,27 +937,6 @@
   color: var(--text-primary);
 }
 
-/* Inline callout for high-value insights inside the setup guide. Used
- * for the Handy-vs-other-devices distinction that confuses users
- * (Handy works through HereSphere's native pipeline; other devices need
- * the timestamp server up). Visually distinct from the surrounding list
- * so the eye lands on it during a scan. Same accent palette as the
- * outer setup-info container — reads as "this part is especially
- * important." */
-.vr-modal__setup-info-note {
-  margin: 8px 0 4px 0;
-  padding: 8px 10px;
-  background: var(--state-warning-soft);
-  border-left: 2px solid var(--state-warning);
-  border-radius: 4px;
-  font-size: 12px;
-  line-height: 1.5;
-  color: var(--text-secondary);
-}
-.vr-modal__setup-info-note strong {
-  color: var(--state-warning);
-}
-
 /* Form controls inside the Device Sync section. The host input flexes
  * to fill the row, and the Connect button stays at its natural width —
  * matching the existing connection-panel input-row convention. */

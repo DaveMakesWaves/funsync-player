@@ -40,6 +40,24 @@ async def list_videos():
     for vid_id, v in registry.items():
         name = v.get("name", "")
         stem = os.path.splitext(name)[0] or name
+        # Surface script variants (`<base> (Soft).funscript`, `<base>.intense
+        # .funscript`, etc.) the desktop already detected during library
+        # scan. Empty list when the video has 0 or 1 variant — the phone
+        # treats that as "no variant chip needed" so single-script videos
+        # render exactly as before. Each variant exposes a fetchable
+        # `scriptUrl` so the phone can render mini-heatmap previews per
+        # variant in the expanded list.
+        variants_raw = v.get("variants") or []
+        variants_out = []
+        for variant in variants_raw:
+            label = (variant.get("label") or "").strip()
+            if not label:
+                continue
+            variants_out.append({
+                "label": label,
+                "scriptUrl": f"/api/media/script/{vid_id}?variant={label}",
+            })
+
         out.append({
             "id": vid_id,
             "name": stem,
@@ -65,6 +83,7 @@ async def list_videos():
             "scriptUrl": f"/api/media/script/{vid_id}" if v.get("funscriptPath") else None,
             "subtitleUrl": f"/api/media/subtitle/{vid_id}" if v.get("subtitlePath") else None,
             "thumbUrl": f"/api/media/thumb/{vid_id}",
+            "variants": variants_out,
         })
     out.sort(key=lambda v: v["name"].lower())
     return {"videos": out}

@@ -1637,6 +1637,33 @@ class App {
       this._remoteProxy?.handleEnded();
       this.sessionTracker?.setPlayback({ paused: true });
     };
+    this.remoteBridge.onPhoneSwitchVariant = (label) => {
+      this._handlePhoneSwitchVariant(label).catch(err => {
+        console.warn('[Remote] switch-variant handler failed:', err);
+      });
+    };
+  }
+
+  /**
+   * Phone tapped a variant in the player view. Translate the label into
+   * the existing index-based `_switchVariant` flow — that path already
+   * loads the script, reloads sync engines, re-uploads to Handy, and
+   * (with the additions below) broadcasts `variant-changed` back to the
+   * phone so the phone's chip / heatmap update only when the switch
+   * actually completes.
+   */
+  async _handlePhoneSwitchVariant(label) {
+    const variants = this._allVariantsWithManual || [];
+    if (!variants.length) {
+      console.warn('[Remote] switch-variant ignored — no variants loaded for current video');
+      return;
+    }
+    const index = variants.findIndex(v => (v.label || '').trim() === label);
+    if (index < 0) {
+      console.warn('[Remote] switch-variant ignored — unknown label:', label);
+      return;
+    }
+    await this._switchVariant(index);
   }
 
   async _onRemotePhoneConnected(ip, videoId, videoPath) {
@@ -1704,6 +1731,26 @@ class App {
     try {
       const fsName = video.funscriptPath.split(/[\\/]/).pop();
       await this.funscriptEngine.loadContent(content, fsName);
+
+      // Populate the variant state for this phone-driven session so the
+      // existing `_switchVariant(index)` flow works when the phone taps
+      // a variant. Without this, `_currentVariants` stays empty and the
+      // switch handler short-circuits with "no variants loaded". The
+      // `_onPlayVideo` desktop path does the same; we mirror it here.
+      this._currentVariants = video.variants || [];
+      this._activeVariantIndex = 0;
+      this._activeVariantPath = video.funscriptPath || null;
+      this._updateVariantSelector();
+      // Tell the phone which variant is active so its chip starts in
+      // the right state. Sent only when the video has multiple variants
+      // — single-variant videos don't render a chip.
+      const initialVariant = this._currentVariants[0];
+      if (this._currentVariants.length > 1 && initialVariant?.label) {
+        this.remoteBridge.sendToPhone({
+          type: 'variant-changed',
+          label: initialVariant.label,
+        });
+      }
 
       if (!this._remoteProxy) this._remoteProxy = new RemotePlaybackProxy();
       this._remoteProxy.reset();
@@ -2140,25 +2187,30 @@ class App {
     // window after fixing the HereSphere config. Shneiderman #6
     // reversibility, Nielsen #9 actionable error recovery.
     //
-    // Wording rewritten 2026-04-29 after a real user incident: ECONNREFUSED
-    // on HereSphere's port 23554 is almost always caused by HereSphere's
-    // timestamp-server IP and port FIELDS being blank or stale, not the
-    // toggle being off. Users see the toggle as "enabled" and assume the
-    // server is running; in reality HereSphere doesn't bind a socket
-    // unless both fields contain valid values. The toast now spells out
-    // both the toggle AND the field-fill step, with the literal Quest IP
-    // suggested as the value to type into the IP field.
+    // Wording rewritten 2026-04-30 after deeper investigation: the
+    // earlier "fill in both fields" phrasing was driven by an n=1
+    // incident where the user happened to fix things by typing values.
+    // The actual root cause when ECONNREFUSED:23554 fires is "HereSphere
+    // isn't listening on the address FunSync is connecting to" — which
+    // can be a stale IP (DHCP lease renewed), a stuck listener (a known
+    // HereSphere bug fixed in v0.11.2), or genuinely-blank fields. ANY
+    // action that re-initialises HereSphere's listener fixes it. The
+    // cleanest is the auto-find IP button (HereSphere v0.5+ ships one
+    // next to the IP field). Toggling off-and-on works too. Manual
+    // typing also works but it's the least convenient option, and most
+    // users with a working setup never typed anything in the first
+    // place — the field was populated by the auto-find button or by
+    // HereSphere's own persistence.
     const wrapper = document.createElement('div');
     wrapper.className = 'toast__multiline';
 
-    const ipSuggestion = questIp || 'your Quest\'s IP';
+    const ipSuggestion = questIp || "your Quest's IP";
     const text = document.createElement('div');
     text.textContent =
       "VR companion can't reach HereSphere's timestamp server. " +
       'On the Quest: HereSphere → Settings → Timestamp Server. ' +
-      `Enable the toggle AND fill in both fields — IP: ${ipSuggestion}, port: 23554. ` +
-      "The toggle alone isn't enough; without the fields populated " +
-      'HereSphere shows "enabled" but never actually opens the listening socket.';
+      `Make sure it's enabled, then press the auto-find button next to the IP field — your Quest's IP is ${ipSuggestion} and the port should be 23554. ` +
+      "If that doesn't help, toggle the timestamp server off and back on to force a re-init.";
     wrapper.appendChild(text);
 
     const tryAgainBtn = document.createElement('button');
@@ -4606,6 +4658,46 @@ class App {
     this._activeVariantIndex = index;
     this._activeVariantPath = variant.path || null;
 
+    // Handy re-uploads have a network leg (1-3s typically) that the
+    // local sync engines (Buttplug, T-Code) don't pay. Without a pause
+    // the video keeps playing while the Handy goes silent — Hick's law:
+    // unexplained absence of feedback feels like a bug. Pause + overlay
+    // gives the user a clear "loading" signal.
+    //
+    // Two distinct playing surfaces exist in this app:
+    //   - Desktop video element (`videoPlayer.video`) — when nothing
+    //     else is driving playback.
+    //   - Remote proxy (`_remoteProxy`) — when a phone is the controller;
+    //     the desktop video is paused intentionally and the phone's
+    //     `<video>` is what's actually playing. The proxy mirrors its
+    //     state via WebSocket.
+    // The pause+overlay logic has to handle both. The desktop overlay
+    // covers desktop-driven playback; the phone-side overlay (already
+    // wired to `script-loading`/`script-ready` messages in the web
+    // remote) covers phone-driven playback. Earlier this branch only
+    // checked `videoPlayer.video.paused` so phone-controlled switches
+    // ran without any pause/overlay/broadcast — the user saw the phone
+    // keep playing through a 1-3s Handy-silent window with no signal.
+    const handyWillReupload = !!this.handyManager?.connected;
+    const desktopPlaying = !this.videoPlayer.video.paused;
+    const remotePlaying = !!this._remoteActive
+      && !!this._remoteProxy
+      && !this._remoteProxy.paused;
+    const shouldPauseDesktop = handyWillReupload && desktopPlaying;
+    const shouldPauseRemote = handyWillReupload && remotePlaying;
+    const willPauseAny = shouldPauseDesktop || shouldPauseRemote;
+    if (shouldPauseDesktop) {
+      this.videoPlayer.video.pause();
+      this._waitingForScript = true;
+      this._showScriptLoadingOverlay();
+    }
+    if (willPauseAny && this.remoteBridge?.connected) {
+      // Phone listens for this and pauses its own <video> + shows its
+      // overlay. Sent for both desktop-driven (so a connected remote
+      // mirrors the desktop's loading state) and phone-driven cases.
+      this.remoteBridge.sendToPhone({ type: 'script-loading' });
+    }
+
     try {
       // Resilient read — recovers from a moved file by trying the same
       // basename in the current video's folder, and prunes the entry
@@ -4644,10 +4736,25 @@ class App {
       if (this.buttplugSync?._active) this.buttplugSync.reloadActions();
       if (this.tcodeSync?._active) this.tcodeSync.reloadActions();
 
-      // Re-upload to Handy (stop first so start() doesn't early-return)
+      // Re-upload to Handy (stop first so start() doesn't early-return).
+       // _uploadAndStartSync hides the overlay + resumes playback when
+       // _waitingForScript is set, so no toast needed during the wait.
+       //
+       // hsspStop() is explicit because syncEngine.stop() only unbinds
+       // listeners — it does NOT command the device. On the desktop /
+       // pause-then-reupload path the video's `pause` event is what
+       // triggers the engine's `_handlePause` to call hsspStop; but on
+       // the phone-controlled path the desktop video is already paused
+       // (so no pause event fires) and the engine is stopped before any
+       // playing/paused state change reaches it. Without this explicit
+       // stop, `setScript` runs while the device is mid-playback, and
+       // the next hsspPlay can no-op (device thinks it's already
+       // playing) — so the device keeps streaming the old script even
+       // though we uploaded the new one. Same shape as `_handleSeeked`,
+       // which has always done stop-then-setScript-then-play for seeks.
       if (this.handyManager?.connected) {
         if (this.syncEngine) this.syncEngine.stop();
-        showToast('Switching script...', 'info', 2000);
+        try { await this.handyManager.hsspStop(); } catch { /* ignore */ }
         await this._uploadAndStartSync();
       }
 
@@ -4666,9 +4773,33 @@ class App {
       // Update variant button label
       this._updateVariantSelector();
 
+      // Broadcast to any connected web-remote so its variant chip + heatmap
+      // mirror the desktop's state. Covers both phone-initiated switches
+      // (desktop is responding to the request) and desktop-initiated ones
+      // (so the phone reflects the change without the user re-syncing).
+      if (this.remoteBridge?.connected) {
+        this.remoteBridge.sendToPhone({ type: 'variant-changed', label: variant.label });
+        if (willPauseAny) {
+          // Hides the phone-side loading overlay + resumes the phone's
+          // <video>. Sent in both surface cases so the phone always
+          // gets the bookend it expects after a `script-loading`.
+          this.remoteBridge.sendToPhone({ type: 'script-ready' });
+        }
+      }
+
       showToast(`Now playing: ${variant.label}`, 'info', 2000);
     } catch (err) {
       console.warn('[Variants] Switch failed:', err.message);
+      // Clear the loading state so the user isn't stranded on a paused
+      // video with a stuck overlay if the read/load step threw.
+      if (shouldPauseDesktop) {
+        this._waitingForScript = false;
+        this._hideScriptLoadingOverlay();
+        if (desktopPlaying) this.videoPlayer.video.play().catch(() => {});
+      }
+      if (willPauseAny && this.remoteBridge?.connected) {
+        this.remoteBridge.sendToPhone({ type: 'script-ready' });
+      }
       showToast('Failed to switch script variant', 'error');
     }
   }
