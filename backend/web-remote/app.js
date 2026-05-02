@@ -8,7 +8,7 @@ import { computeBins, renderBins } from './heatmap.js';
 import { RemoteSyncClient } from './remote-sync.js';
 import { fuzzySearch, sortVideos } from './library-search.js';
 import { buildContextMapFromGroupings } from './search-context.js';
-import { isVRVideo } from './vr-detect.js';
+import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from './vr-detect.js';
 import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
 
@@ -105,6 +105,18 @@ document.getElementById('navPlaylistsIcon').appendChild(svgIcon('listMusic', 22)
 document.getElementById('navCategoriesIcon').appendChild(svgIcon('tag', 22));
 
 let library = null;       // cached list of video objects
+
+// Wire the manual VR override store so `isVRVideo({path})` checks
+// `manualVRType` on the live library entry before falling through to the
+// filename heuristic. Defined once at module load — the closure reads
+// `library` on every call so it tracks subsequent fetches without
+// re-registration. Returns null when the library hasn't loaded yet so
+// raw-string callsites keep their existing behaviour.
+setVRTypeOverrideStore((path) => {
+  if (!library || !path) return null;
+  const hit = library.find(v => v.path === path);
+  return hit?.manualVRType || null;
+});
 let sources = null;       // cached list from /api/remote/sources
 let folderIndex = null;   // Map<canonicalPath, FolderNode> — built from library+sources
 let collections = null;   // cached list from /api/remote/collections

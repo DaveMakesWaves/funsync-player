@@ -34,6 +34,11 @@ const DEFAULTS = {
       sources: [],
       associations: {},
       manualVariants: {},
+      // Per-path manual VR-classification override. Value is `'vr'` or
+      // `'flat'`; absent means use the auto-detection heuristic.
+      // Tri-state covers both flipping a missed VR file → VR and
+      // clearing a false-positive on a flat file with a VR-like token.
+      manualVRType: {},
       collections: [],
       activeCollectionId: null,
     },

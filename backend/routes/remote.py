@@ -84,6 +84,11 @@ async def list_videos():
             "subtitleUrl": f"/api/media/subtitle/{vid_id}" if v.get("subtitlePath") else None,
             "thumbUrl": f"/api/media/thumb/{vid_id}",
             "variants": variants_out,
+            # Manual VR override (`'vr'` or `'flat'`); absent / null = use the
+            # filename heuristic. The phone-side `vr-detect.js` consults its
+            # override store before the heuristic so the VR filter agrees with
+            # the desktop.
+            "manualVRType": v.get("manualVRType") or None,
         })
     out.sort(key=lambda v: v["name"].lower())
     return {"videos": out}

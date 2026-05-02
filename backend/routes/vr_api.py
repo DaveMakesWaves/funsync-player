@@ -189,6 +189,31 @@ _SEP_SPLIT_RE = re.compile(rf'{SEP}+')
 _STUDIO_COMBO_RE = re.compile(r'^([A-Z]{2,8})(\d{2,5})$')
 
 
+def detect_vr_format_for_video(video):
+    """Return `(screenType, stereoMode, is3d)` for a registered video dict.
+
+    Wraps `detect_vr_format` to apply the per-video manual override
+    (`video['manualVRType']`) before falling through to filename heuristics —
+    matches the renderer-side precedence in `renderer/js/vr-detect.js`.
+
+      - `manualVRType == 'flat'` forces `('flat', 'off', False)`.
+      - `manualVRType == 'vr'`  uses the heuristic when it already matches a
+        VR pattern; otherwise falls back to a sensible default
+        (`mkx200` SBS) so HereSphere has a projection to play with.
+    """
+    override = (video or {}).get('manualVRType')
+    if override == 'flat':
+        return 'flat', 'off', False
+
+    name = (video or {}).get('name', '') or ''
+    screen, stereo, is_3d = detect_vr_format(name)
+
+    if override == 'vr' and not is_3d:
+        return 'mkx200', 'sbs', True
+
+    return screen, stereo, is_3d
+
+
 def detect_vr_format(filename):
     """Detect VR projection and stereo mode from filename.
 
@@ -340,7 +365,7 @@ async def deovr_library(request: Request):
 
     for vid_id, video in registry.items():
         name = video.get('name', '')
-        _, _, is_3d = detect_vr_format(name)
+        _, _, is_3d = detect_vr_format_for_video(video)
         has_script = bool(video.get('funscriptPath'))
 
         # Apply filter
@@ -423,7 +448,7 @@ async def deovr_scene(video_id: str, request: Request):
     base_url = _get_base_url(request)
     name = video.get('name', '')
     title = os.path.splitext(name)[0]
-    screen_type, stereo_mode, is_3d = detect_vr_format(name)
+    screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video)
     duration = _get_duration(video)
     path = video.get('path', '')
 
@@ -521,7 +546,7 @@ async def heresphere_library(request: Request):
 
     for vid_id, video in registry.items():
         name = video.get('name', '')
-        _, _, is_3d = detect_vr_format(name)
+        _, _, is_3d = detect_vr_format_for_video(video)
         has_script = bool(video.get('funscriptPath'))
 
         if vr_filter == 'vr' and not is_3d:
@@ -580,7 +605,7 @@ async def heresphere_scene(video_id: str, request: Request):
     base_url = _get_base_url(request)
     name = video.get('name', '')
     title = os.path.splitext(name)[0]
-    screen_type, stereo_mode, is_3d = detect_vr_format(name)
+    screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video)
     duration = _get_duration(video)
     path = video.get('path', '')
 

@@ -75,6 +75,27 @@ const STUDIO_FALLBACK_RE = new RegExp(
 const SPLIT_RE = new RegExp(`${SEP}+`);
 const STUDIO_COMBO_RE = /^([A-Z]{2,8})(\d{2,5})$/;
 
+// Per-video manual override store. Keyed by video path; value is 'vr' or
+// 'flat' (no entry = use heuristic). Wired by `setOverrideStore(getter)`
+// at app boot — tested by passing different getters in unit tests.
+// Default getter returns null (no override) so call sites that pass a
+// raw string (no path) keep their existing behaviour.
+let _overrideGetter = () => null;
+
+/**
+ * Register a getter that returns the manual VR override for a given path.
+ * The getter receives a path string and should return `'vr'`, `'flat'`,
+ * or `null` / `undefined` if no override is set.
+ *
+ * Called once at app boot (renderer/js/app.js) and again whenever the
+ * web-remote receives a fresh override map from the backend. Idempotent.
+ *
+ * @param {(path: string) => 'vr' | 'flat' | null | undefined} getter
+ */
+export function setOverrideStore(getter) {
+  _overrideGetter = (typeof getter === 'function') ? getter : () => null;
+}
+
 function _check(s) {
   if (!s) return false;
   const stem = s.replace(/\.[^./\\]+$/, ''); // strip trailing extension
@@ -103,6 +124,17 @@ function _check(s) {
  */
 export function isVRVideo(input) {
   if (!input) return false;
+  // Per-video override (set via the kebab menu) wins over the heuristic
+   // in both directions — `'vr'` flips a heuristic-flat file to VR,
+   // `'flat'` clears a heuristic-VR false positive. Only consulted when
+   // the caller passed an object with a `path`; raw-string callers
+   // (filename-only checks in tests / web-remote display code) skip the
+   // lookup and hit the heuristic directly.
+  if (input && typeof input === 'object' && input.path) {
+    const override = _overrideGetter(input.path);
+    if (override === 'vr') return true;
+    if (override === 'flat') return false;
+  }
   const s = typeof input === 'string'
     ? input
     : (input.path || input.name || '');

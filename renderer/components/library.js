@@ -3,7 +3,7 @@
 import { Modal } from './modal.js';
 import { rankFunscriptMatches, fuzzyMatchScore } from '../js/fuzzy-match.js';
 import { computeGridRange, hasRangeChanged } from '../js/virtual-scroll.js';
-import { isVRVideo } from '../js/vr-detect.js';
+import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
 import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw } from '../js/icons.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
 import { fuzzySearch, sortVideos, computeSpeedStats } from '../js/library-search.js';
@@ -42,6 +42,16 @@ export class Library {
     this._onAddSource = onAddSource || null;
     this._onTestDevice = onTestDevice || null;
     this._settings = settings;
+
+    // Wire the manual VR override store. Per-call closure over `_settings`
+    // so any setting change is reflected immediately on the next read —
+    // no re-registration needed on writes. Settings layer caches reads
+    // so this stays cheap even when called from filter passes that hit
+    // every video in the library.
+    setVRTypeOverrideStore((path) => {
+      const map = this._settings.get('library.manualVRType') || {};
+      return map[path] || null;
+    });
     this._container = null;
     this._videos = [];
     this._dirPath = null;
@@ -331,6 +341,7 @@ export class Library {
         <button class="library__selection-action" data-action="playlist">Add to Playlist</button>
         <button class="library__selection-action" data-action="category">Assign Category</button>
         <button class="library__selection-action" data-action="collection">Add to Library</button>
+        <button class="library__selection-action" data-action="vrtype">VR Type</button>
         <button class="library__selection-cancel">Cancel</button>
       </div>
       <div class="library__breadcrumb" hidden></div>
@@ -433,6 +444,8 @@ export class Library {
       .addEventListener('click', () => this._bulkAssignCategory());
     this._container.querySelector('[data-action="collection"]')
       .addEventListener('click', () => this._bulkAddToCollection());
+    this._container.querySelector('[data-action="vrtype"]')
+      .addEventListener('click', () => this._bulkPromptVRType());
   }
 
   async _scanDirectory(_dirPath, _sourceMap) {
@@ -1619,6 +1632,16 @@ export class Library {
       badges.appendChild(subBadge);
     }
 
+    const vrOverridesMap = this._settings.get('library.manualVRType') || {};
+    const vrOverride = vrOverridesMap[video.path];
+    if (vrOverride === 'vr' || vrOverride === 'flat') {
+      const vrBadge = document.createElement('span');
+      vrBadge.className = `library__vr-badge library__vr-badge--manual library__vr-badge--${vrOverride}`;
+      vrBadge.title = vrOverride === 'vr' ? 'VR (manual)' : 'Flat (manual)';
+      vrBadge.textContent = vrOverride === 'vr' ? 'VR' : 'FLAT';
+      badges.appendChild(vrBadge);
+    }
+
     if (video.avgSpeed > 0 || video.maxSpeed > 0) {
       this._addSpeedBadge(badges, { avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
     }
@@ -1947,6 +1970,18 @@ export class Library {
       subBadge.title = video._manualSubtitle ? 'Subtitles (manual)' : 'Subtitles (auto-detected)';
       subBadge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
       this._getOrCreateBadgesContainer(thumbnail).appendChild(subBadge);
+    }
+
+    // VR override marker — only appears when the user has manually classified
+    // this video. Heuristic-only entries get no badge so the grid stays clean.
+    const vrOverridesMap = this._settings.get('library.manualVRType') || {};
+    const vrOverride = vrOverridesMap[video.path];
+    if (vrOverride === 'vr' || vrOverride === 'flat') {
+      const vrBadge = document.createElement('span');
+      vrBadge.className = `library__vr-badge library__vr-badge--manual library__vr-badge--${vrOverride}`;
+      vrBadge.title = vrOverride === 'vr' ? 'VR (manual)' : 'Flat (manual)';
+      vrBadge.textContent = vrOverride === 'vr' ? 'VR' : 'FLAT';
+      this._getOrCreateBadgesContainer(thumbnail).appendChild(vrBadge);
     }
 
     // Category dot badges
@@ -2977,6 +3012,34 @@ export class Library {
 
     const menu = document.createElement('div');
     menu.className = 'library__kebab-menu';
+
+    // VR classification override — single tri-state item that flips
+    // wording based on current state. Sits at the top of the menu so
+    // it's the first per-video override the user sees, mirroring the
+    // shape of Associate Funscript / Subtitle below.
+    //
+    // Heuristic check uses the string-overload (skips override lookup)
+    // so the wording reflects "what would the auto-detector say if
+    // there were no override?" — letting "Mark as VR" appear next to a
+    // file the heuristic missed, even if a previous override is set.
+    const vrOverrides = this._settings.get('library.manualVRType') || {};
+    const currentVROverride = vrOverrides[video.path] || null;
+    const heuristicVR = isVRVideo(video.path);
+    const vrItem = document.createElement('button');
+    vrItem.className = 'library__kebab-menu-item';
+    if (currentVROverride === 'vr') {
+      vrItem.textContent = 'Reset VR (currently: VR)';
+    } else if (currentVROverride === 'flat') {
+      vrItem.textContent = 'Reset VR (currently: Flat)';
+    } else {
+      vrItem.textContent = heuristicVR ? 'Mark as Flat' : 'Mark as VR';
+    }
+    vrItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeMenu();
+      this._toggleVRType(video);
+    });
+    menu.appendChild(vrItem);
 
     const assocBtn = document.createElement('button');
     assocBtn.className = 'library__kebab-menu-item';
@@ -4349,6 +4412,69 @@ export class Library {
   }
 
   /**
+   * Cycle the manual VR classification for a single video.
+   *
+   * State machine (matches kebab item wording):
+   *   no override + heuristic flat  → set 'vr'   ("Mark as VR")
+   *   no override + heuristic VR    → set 'flat' ("Mark as Flat")
+   *   override 'vr'                 → unset      ("Reset VR")
+   *   override 'flat'               → unset      ("Reset VR")
+   *
+   * Override beats heuristic in `isVRVideo()`, so flipping or clearing
+   * here is enough to update the VR filter, the badge, and (after the
+   * web-remote pulls fresh videos) the phone-side classification.
+   */
+  async _toggleVRType(video) {
+    if (!video || !video.path) return;
+    const map = { ...(this._settings.get('library.manualVRType') || {}) };
+    const current = map[video.path] || null;
+
+    let next;
+    if (current === 'vr' || current === 'flat') {
+      delete map[video.path];
+      next = null;
+    } else {
+      next = isVRVideo(video.path) ? 'flat' : 'vr';
+      map[video.path] = next;
+    }
+    this._settings.set('library.manualVRType', map);
+
+    this._applyFilters();
+
+    const { showToast } = await import('../js/toast.js');
+    if (next === 'vr') showToast('Marked as VR', 'info', 1800);
+    else if (next === 'flat') showToast('Marked as Flat', 'info', 1800);
+    else showToast('VR classification reset', 'info', 1800);
+  }
+
+  /**
+   * Bulk variant of `_toggleVRType` for the multi-select toolbar.
+   * `mode` is `'vr'`, `'flat'`, or `'reset'`. Writes once and re-renders
+   * once at the end, regardless of how many paths are touched.
+   */
+  async _bulkSetVRType(paths, mode) {
+    if (!Array.isArray(paths) || paths.length === 0) return;
+    const map = { ...(this._settings.get('library.manualVRType') || {}) };
+    let changed = 0;
+    for (const p of paths) {
+      if (!p) continue;
+      if (mode === 'reset') {
+        if (p in map) { delete map[p]; changed++; }
+      } else if (mode === 'vr' || mode === 'flat') {
+        if (map[p] !== mode) { map[p] = mode; changed++; }
+      }
+    }
+    this._settings.set('library.manualVRType', map);
+    this._applyFilters();
+
+    const { showToast } = await import('../js/toast.js');
+    const noun = paths.length === 1 ? 'video' : 'videos';
+    if (mode === 'vr') showToast(`Marked ${paths.length} ${noun} as VR`, 'info', 2000);
+    else if (mode === 'flat') showToast(`Marked ${paths.length} ${noun} as Flat`, 'info', 2000);
+    else showToast(`Reset ${changed} VR override${changed === 1 ? '' : 's'}`, 'info', 2000);
+  }
+
+  /**
    * Sync the video's in-memory funscript state (hasFunscript, funscriptPath,
    * _multiAxis, _customRouting) to reflect a given active mode. Clears the
    * slots that the new mode doesn't own so `_playFromLibrary` routes through
@@ -4613,8 +4739,19 @@ export class Library {
     // Playlists, categories, and videoCategories live at the top of the
     // data-service cache (not under `settings.`), so use the dedicated
     // accessors. Collections live inside settings so `get()` is correct.
+    //
+    // Inline the per-video VR override so the backend (DeoVR/HereSphere
+    // metadata + phone payload) agrees with the desktop without each
+    // route having to re-read the settings map separately.
+    const vrOverrides = this._settings.get('library.manualVRType') || {};
+    const videosWithOverride = this._videos.map(v => {
+      const override = vrOverrides[v.path];
+      return override === 'vr' || override === 'flat'
+        ? { ...v, manualVRType: override }
+        : v;
+    });
     const payload = {
-      videos: this._videos,
+      videos: videosWithOverride,
       // Sources are needed by the phone's folder-browse tree view — it
       // uses {id, name, path} to seed the source-root nodes so the tree
       // walker knows where to stop climbing.
@@ -4881,6 +5018,20 @@ export class Library {
       }
       this._exitSelectMode();
     }
+  }
+
+  async _bulkPromptVRType() {
+    if (this._selectedPaths.size === 0) return;
+    const items = [
+      { id: 'vr', label: 'Mark as VR', subtitle: 'Override heuristic — treat as VR' },
+      { id: 'flat', label: 'Mark as Flat', subtitle: 'Override heuristic — treat as flat' },
+      { id: 'reset', label: 'Reset to auto', subtitle: 'Clear override; use filename heuristic' },
+    ];
+    const choice = await Modal.selectFromList('Set VR Classification', items);
+    if (!choice) return;
+    const paths = Array.from(this._selectedPaths);
+    await this._bulkSetVRType(paths, choice);
+    this._exitSelectMode();
   }
 
   async _bulkAddToCollection() {

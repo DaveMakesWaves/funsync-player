@@ -75,6 +75,20 @@ const STUDIO_FALLBACK_RE = new RegExp(
 const SPLIT_RE = new RegExp(`${SEP}+`);
 const STUDIO_COMBO_RE = /^([A-Z]{2,8})(\d{2,5})$/;
 
+// Manual VR override store — phone-side mirror of the desktop's
+// `manualVRType` map. Wired via `setOverrideStore(getter)` from
+// `app.js` after the videos payload arrives (each video carries its
+// `manualVRType` field as part of the per-video object). Default
+// getter returns null so callers without an override fall through.
+let _overrideGetter = () => null;
+
+/**
+ * @param {(path: string) => 'vr' | 'flat' | null | undefined} getter
+ */
+export function setOverrideStore(getter) {
+  _overrideGetter = (typeof getter === 'function') ? getter : () => null;
+}
+
 function _check(s) {
   if (!s) return false;
   const stem = s.replace(/\.[^./\\]+$/, ''); // strip trailing extension
@@ -103,6 +117,13 @@ function _check(s) {
  */
 export function isVRVideo(input) {
   if (!input) return false;
+  // Path-keyed manual override wins over the heuristic in both
+   // directions. Skipped for raw-string inputs (no path to look up).
+  if (input && typeof input === 'object' && input.path) {
+    const override = _overrideGetter(input.path);
+    if (override === 'vr') return true;
+    if (override === 'flat') return false;
+  }
   const s = typeof input === 'string'
     ? input
     : (input.path || input.name || '');

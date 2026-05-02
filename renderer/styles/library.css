@@ -732,6 +732,31 @@
   color: var(--badge-purple);
 }
 
+/* VR override badge — only shown when the user has manually classified the
+ * video. Heuristic-only entries get no badge. Pill shape so the short text
+ * label reads without being mistaken for a stat or category dot. */
+.library__vr-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+
+.library__vr-badge--vr {
+  background: var(--badge-purple, #8b5cf6);
+}
+
+.library__vr-badge--flat {
+  background: var(--badge-info, #3b82f6);
+}
+
 .library__speed-badge {
   display: inline-flex;
   align-items: center;

@@ -9,7 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from httpx import AsyncClient, ASGITransport
 from main import app
 from routes.media import register_videos, _path_to_id
-from routes.vr_api import detect_vr_format
+from routes.vr_api import detect_vr_format, detect_vr_format_for_video
 
 
 # --- VR Format Detection ---
@@ -291,6 +291,84 @@ class TestVRFormatDetection:
     def test_vrbtns_equirect(self):
         st, sm, is3d = detect_vr_format("5.VRBTNS_34 04_AIA RAE_watch_and_learn_TMAL.mp4")
         assert st == 'dome' and is3d is True
+
+
+class TestVRFormatOverride:
+    """`detect_vr_format_for_video` applies the per-video manualVRType
+    override before the filename heuristic — same precedence as the
+    renderer's `isVRVideo({path,...})`."""
+
+    def test_no_override_falls_through_to_heuristic(self):
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Scene_180_sbs.mp4"}
+        )
+        assert st == 'dome' and sm == 'sbs' and is3d is True
+
+    def test_override_flat_forces_non_vr(self):
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Scene_180_sbs.mp4", "manualVRType": "flat"}
+        )
+        assert st == 'flat' and sm == 'off' and is3d is False
+
+    def test_override_vr_forces_vr_on_flat_filename(self):
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Plain.mp4", "manualVRType": "vr"}
+        )
+        assert is3d is True
+        # Default projection when heuristic gives no signal — fisheye SBS
+        # so HereSphere has something playable to lean on.
+        assert st == 'mkx200' and sm == 'sbs'
+
+    def test_override_vr_keeps_specific_projection_when_heuristic_matches(self):
+        # If the filename already screams "180 SBS", we shouldn't downgrade
+        # it to the generic mkx200 default just because someone re-confirmed
+        # it as VR.
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Scene_180_sbs.mp4", "manualVRType": "vr"}
+        )
+        assert st == 'dome' and sm == 'sbs' and is3d is True
+
+    def test_unknown_override_value_falls_through(self):
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Plain.mp4", "manualVRType": "maybe"}
+        )
+        assert is3d is False
+
+    def test_none_video_treated_as_flat(self):
+        st, sm, is3d = detect_vr_format_for_video(None)
+        assert st == 'flat' and is3d is False
+
+
+@pytest.mark.anyio
+async def test_heresphere_scene_respects_manual_override_flat(client):
+    """A filename that the heuristic flags as VR but the user has marked
+    flat should serve perspective (non-VR) projection metadata."""
+    register_videos([
+        {"path": "/Videos/Scene1_180_sbs.mp4", "name": "Scene1_180_sbs.mp4",
+         "manualVRType": "flat", "duration": 600},
+    ])
+    vid_id = _path_to_id("/Videos/Scene1_180_sbs.mp4")
+    response = await client.get(f"/heresphere/{vid_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["projection"] == "perspective"
+    assert data["stereo"] == "mono"
+
+
+@pytest.mark.anyio
+async def test_heresphere_scene_respects_manual_override_vr(client):
+    """A filename the heuristic misses but the user has marked VR should
+    serve a VR projection (fisheye fallback)."""
+    register_videos([
+        {"path": "/Videos/Plain.mp4", "name": "Plain.mp4",
+         "manualVRType": "vr", "duration": 600},
+    ])
+    vid_id = _path_to_id("/Videos/Plain.mp4")
+    response = await client.get(f"/heresphere/{vid_id}")
+    assert response.status_code == 200
+    data = response.json()
+    assert data["projection"] == "fisheye"
+    assert data["stereo"] == "sbs"
 
 
 # --- DeoVR API ---
