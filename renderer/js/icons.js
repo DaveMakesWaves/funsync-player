@@ -47,6 +47,8 @@ export { default as WandSparkles } from '../../node_modules/lucide/dist/esm/icon
 export { default as BookmarkPlus } from '../../node_modules/lucide/dist/esm/icons/bookmark-plus.js';
 export { default as FileText } from '../../node_modules/lucide/dist/esm/icons/file-text.js';
 export { default as Rows3 } from '../../node_modules/lucide/dist/esm/icons/rows-3.js';
+export { default as Layers2 } from '../../node_modules/lucide/dist/esm/icons/layers-2.js';
+export { default as ExternalLink } from '../../node_modules/lucide/dist/esm/icons/external-link.js';
 export { default as AudioWaveform } from '../../node_modules/lucide/dist/esm/icons/audio-waveform.js';
 export { default as Activity } from '../../node_modules/lucide/dist/esm/icons/activity.js';
 export { default as Info } from '../../node_modules/lucide/dist/esm/icons/info.js';

@@ -31,6 +31,14 @@ export class ActionGraph {
     this._waveformData = null; // WaveformData from waveform.js
     this._showWaveform = false;
 
+    // Multi-band waveform overlay (Audio Event Detection §2.1)
+    this._multiBandData = null;
+    this._showMultiBand = false;
+
+    // Voice-activity detection track (Audio Event Detection §2.2)
+    this._vadData = null;
+    this._showVAD = false;
+
     // Beat markers
     this._beatMarkers = null; // Float64Array of beat timestamps in ms
     this._showBeatMarkers = false;
@@ -176,6 +184,37 @@ export class ActionGraph {
   }
 
   get showWaveform() { return this._showWaveform; }
+
+  // --- Multi-band waveform (Audio Event Detection §2.1) ---
+
+  /**
+   * Set multi-band peak data. When non-null and `_showMultiBand` is on,
+   * the renderer paints N stacked bands (low / mid / high) above the
+   * action graph instead of (or alongside) the single-trace waveform.
+   * @param {import('./waveform.js').MultiBandWaveformData|null} data
+   */
+  setMultiBandData(data) {
+    this._multiBandData = data;
+  }
+
+  setShowMultiBand(show) {
+    this._showMultiBand = !!show;
+  }
+
+  get showMultiBand() { return !!this._showMultiBand; }
+
+  // --- Voice-activity track (Audio Event Detection §2.2) ---
+
+  /** @param {import('./vad.js').VADData|null} data */
+  setVADData(data) {
+    this._vadData = data;
+  }
+
+  setShowVAD(show) {
+    this._showVAD = !!show;
+  }
+
+  get showVAD() { return !!this._showVAD; }
 
   // --- Beat markers ---
 
@@ -463,6 +502,26 @@ export class ActionGraph {
   draw() {
     const dpr = window.devicePixelRatio || 1;
     const ctx = this.ctx;
+
+    // Defensive auto-resize: if the canvas has zero pixel dimensions but
+    // its parent is sized (e.g., the editor was just un-hidden after the
+    // pop-out closed and resize() hasn't fired yet), pull the parent's
+    // current rect and resync. Without this, every position computed
+    // through `posToY` / `timeToX` lands at a non-positive area, so all
+    // dots / lines / cursor render outside the visible canvas — looks
+    // exactly like "all action dots are missing".
+    if (this.canvas.width === 0 || this.canvas.height === 0) {
+      const parent = this.canvas.parentElement;
+      const rect = parent ? parent.getBoundingClientRect() : null;
+      if (rect && rect.width > 0 && rect.height > 0) {
+        this.canvas.width = rect.width * dpr;
+        this.canvas.height = rect.height * dpr;
+        this.canvas.style.width = rect.width + 'px';
+        this.canvas.style.height = rect.height + 'px';
+        this._cachedArea = null;
+      }
+    }
+
     const w = this.canvas.width / dpr;
     const h = this.canvas.height / dpr;
 
@@ -478,6 +537,23 @@ export class ActionGraph {
     // 2. Waveform (behind everything else)
     if (this._showWaveform && this._waveformData) {
       this._drawWaveform(ctx, area);
+    }
+
+    // 2b. Multi-band waveform (3 stacked traces — low / mid / high).
+    // Renders behind the action graph too. Mutually independent of the
+    // single-trace waveform so a user can toggle either or both —
+    // useful for confirming a slap shows in the high band but is
+    // absent from the mid/low bands.
+    if (this._showMultiBand && this._multiBandData) {
+      this._drawMultiBandWaveform(ctx, area);
+    }
+
+    // 2c. Voice-activity detection track — thin coloured strip at the
+    // top of the area showing voice-on segments. Stays out of the way
+    // of the action graph (draws into the topmost ~12 px) so users can
+    // leave it on while editing.
+    if (this._showVAD && this._vadData) {
+      this._drawVAD(ctx, area);
     }
 
     // 3. Beat markers (behind grid and actions, on top of waveform)
@@ -552,7 +628,9 @@ export class ActionGraph {
       ctx.moveTo(x, area.y);
       ctx.lineTo(x, area.y + area.h);
       ctx.stroke();
-      ctx.fillText(this._formatTime(t), x, area.y + area.h + 6);
+      // +9 leaves the 6px heatmap bar (now drawn at area.y+area.h)
+      // visible above the labels with a 3px breathing gap.
+      ctx.fillText(this._formatTime(t), x, area.y + area.h + 9);
     }
   }
 
@@ -591,6 +669,108 @@ export class ActionGraph {
 
     ctx.closePath();
     ctx.fill();
+    ctx.restore();
+  }
+
+  /**
+   * Render N stacked horizontal bands. Each band fills a `bandH` slice
+   * of `area` (top → bottom: low → mid → high). Each band is drawn as
+   * a centered, mirrored amplitude envelope with the band's own colour
+   * tint. A thin label is painted at the band's left edge so the user
+   * can map a peak to a band without consulting a legend.
+   *
+   * Same time→x math as the single-trace waveform — uses the existing
+   * viewport binary-search-equivalent index range so the cost is
+   * proportional to visible peaks, not total peaks.
+   */
+  _drawMultiBandWaveform(ctx, area) {
+    const data = this._multiBandData;
+    if (!data || !data.bands || data.bands.length === 0) return;
+    const { bands, peaksPerSecond } = data;
+
+    const bandH = area.h / bands.length;
+    const labelFont = '9px ui-monospace, Menlo, Consolas, monospace';
+
+    ctx.save();
+    for (let b = 0; b < bands.length; b++) {
+      const band = bands[b];
+      const peaks = band.peaks;
+      if (!peaks || peaks.length === 0) continue;
+
+      const startIdx = Math.max(0, Math.floor(this._viewStartMs / 1000 * peaksPerSecond));
+      const endIdx = Math.min(peaks.length - 1, Math.ceil(this._viewEndMs / 1000 * peaksPerSecond));
+      if (startIdx >= endIdx) continue;
+
+      const bandY = area.y + bandH * b;
+      const midY = bandY + bandH / 2;
+      const maxHalf = bandH / 2 - 1;
+
+      ctx.fillStyle = band.color || 'rgba(180, 180, 255, 0.4)';
+      ctx.beginPath();
+      // Top half — forward sweep
+      for (let i = startIdx; i <= endIdx; i++) {
+        const x = this.timeToX((i / peaksPerSecond) * 1000);
+        const amp = peaks[i] * maxHalf;
+        if (i === startIdx) ctx.moveTo(x, midY - amp);
+        else ctx.lineTo(x, midY - amp);
+      }
+      // Bottom half — reverse sweep (mirror)
+      for (let i = endIdx; i >= startIdx; i--) {
+        const x = this.timeToX((i / peaksPerSecond) * 1000);
+        const amp = peaks[i] * maxHalf;
+        ctx.lineTo(x, midY + amp);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Band label — top-left of the band, low contrast so it doesn't
+      // compete with the action graph for visual attention.
+      ctx.font = labelFont;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillText(band.label, area.x + 4, bandY + 2);
+    }
+    ctx.restore();
+  }
+
+  /**
+   * Render voice-activity segments as a thin strip at the top of the
+   * draw area. Each voice-on segment is a filled rectangle in the
+   * accent-soft tint; non-voice gaps are transparent. A 9 px label
+   * ("VOICE") at the strip's left edge tells the user what the strip
+   * is, matching the multi-band band labels.
+   *
+   * The strip is just 12 px tall — barely-noticeable when no voice is
+   * detected, clearly visible when voice is active. Sits at the very
+   * top of the area so it doesn't compete with action dots / lines.
+   */
+  _drawVAD(ctx, area) {
+    const data = this._vadData;
+    if (!data || !data.segments || data.segments.length === 0) return;
+
+    const stripH = 12;
+    const stripY = area.y;
+    const viewStart = this._viewStartMs;
+    const viewEnd = this._viewEndMs;
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(11, 252, 3, 0.35)'; // OFS-green accent-soft
+    for (const seg of data.segments) {
+      // Cull segments outside the viewport — typical scripts have N
+      // segments; this is fine without binary search at common N.
+      if (seg.endMs < viewStart || seg.startMs > viewEnd) continue;
+      const x1 = this.timeToX(seg.startMs);
+      const x2 = this.timeToX(seg.endMs);
+      ctx.fillRect(x1, stripY, Math.max(1, x2 - x1), stripH);
+    }
+
+    // Strip label — same style as the multi-band band labels.
+    ctx.font = '9px ui-monospace, Menlo, Consolas, monospace';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'top';
+    ctx.fillText('VOICE', area.x + 4, stripY + 1);
     ctx.restore();
   }
 
@@ -750,6 +930,7 @@ export class ActionGraph {
     // Viewport culling — only draw visible dots
     const { first, last } = this._visibleRange(actions);
 
+
     // Draw non-selected dots first
     for (let i = first; i <= last; i++) {
       if (selected.has(i) || i === this._hoveredIndex) continue;
@@ -822,13 +1003,17 @@ export class ActionGraph {
     ctx.fill();
   }
 
-  /** Draw a thin heatmap intensity bar at the very bottom of the draw area. */
+  /** Draw a thin heatmap intensity bar in the padding-bottom strip,
+   *  just below the action area but above the time labels. The previous
+   *  position (inside the area, overlapping the bottom edge) buried any
+   *  dots at pos=0 — which is a common synthetic-rest position at the
+   *  start of long scripts, so the editor looked empty on cold-open. */
   _drawHeatmapBar(ctx, area) {
     const actions = this.script.actions;
     if (actions.length < 2) return;
 
     const barHeight = 6;
-    const barY = area.y + area.h - barHeight;
+    const barY = area.y + area.h;
     const barWidth = area.w;
 
     // Draw in pixel-width segments

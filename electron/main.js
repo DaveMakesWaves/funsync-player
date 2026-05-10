@@ -8,6 +8,7 @@ const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
+const editorPopout = require('./editor-popout-window');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -1821,4 +1822,38 @@ ipcMain.handle('eroscripts-topic-image', async (_event, topicId) => {
 
 ipcMain.handle('eroscripts-download', async (_event, url, savePath) => {
   return eroScripts.downloadFile(url, savePath);
+});
+
+// --- Editor pop-out window (SCOPE-editor-v2.md §4) ---
+//
+// Locked decisions: pop-out takes full ownership (main shows only the
+// video while pop-out is open), state-sync is IPC-through-main, no
+// auto-reopen on app restart. The window module owns the BrowserWindow
+// lifecycle; these handlers expose it to the renderer.
+ipcMain.handle('editor-popout:open', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { success: false, error: 'Main window unavailable' };
+  }
+  editorPopout.open(mainWindow, store);
+  return { success: true };
+});
+
+ipcMain.handle('editor-popout:close', () => {
+  editorPopout.close();
+  return { success: true };
+});
+
+ipcMain.handle('editor-popout:status', () => {
+  return { open: editorPopout.isOpen() };
+});
+
+// State-sync relay. The sender side passes a `direction` so we know
+// whether to forward to the parent or to the pop-out — the main process
+// is the broker. Single channel keeps the protocol observable in one
+// place rather than forking into N typed channels (we don't expect the
+// volume to need per-message-type optimisation; edits + viewport ticks
+// are far below the IPC cost floor).
+ipcMain.handle('editor-popout:relay', (_event, direction, payload) => {
+  editorPopout.relay(direction, payload);
+  return { success: true };
 });

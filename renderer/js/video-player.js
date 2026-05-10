@@ -618,13 +618,28 @@ export class VideoPlayer {
 
   // --- Subtitles ---
 
-  async loadSubtitles(file) {
-    // Remove existing tracks and revoke old blob URLs
+  /**
+   * Tear down any previously-loaded subtitles. Removes `<track>`
+   * elements AND forces every TextTrack to `disabled` — Chromium can
+   * retain stale TextTrack objects in `video.textTracks` after the
+   * `<track>` element is removed, and any track left in `showing` mode
+   * will keep painting its cues on top of the new video.
+   */
+  clearSubtitles() {
+    for (const t of this.video.textTracks) {
+      t.mode = 'disabled';
+    }
     const existing = this.video.querySelectorAll('track');
     existing.forEach((t) => {
       if (t.src && t.src.startsWith('blob:')) URL.revokeObjectURL(t.src);
       t.remove();
     });
+    const badge = document.getElementById('subtitle-badge');
+    if (badge) badge.hidden = true;
+  }
+
+  async loadSubtitles(file) {
+    this.clearSubtitles();
 
     // Read file content
     let text = typeof file.textContent === 'string' ? file.textContent : await file.text();
@@ -646,8 +661,14 @@ export class VideoPlayer {
     track.default = true;
     this.video.appendChild(track);
 
-    // Enable the track
-    this.video.textTracks[0].mode = 'showing';
+    // Enable the new track. Disable everything else first — Chromium can
+    // surface the stale TextTrack from the previous video at index 0 in
+    // a race condition, in which case naively setting textTracks[0] to
+    // 'showing' would re-enable the OLD subtitles instead of the new
+    // one. Walk the list and find OUR track by label match.
+    for (const t of this.video.textTracks) {
+      t.mode = (t.label === track.label) ? 'showing' : 'disabled';
+    }
 
     // Show subtitle indicator
     const badge = document.getElementById('subtitle-badge');

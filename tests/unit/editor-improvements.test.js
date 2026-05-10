@@ -535,3 +535,344 @@ describe('OFS-style arrow-key remap', () => {
     expect(deps.script.actions[1].at).toBe(Math.round(1000 + FRAME_MS));
   });
 });
+
+// --- §2.1: OFS parity hotkey pack ----------------------------------------
+//
+// `equalizeSelected`, `selectLeftOfCursor`, `selectRightOfCursor`,
+// `moveSelectedToTime`, and `previewSimplify` all live on EditableScript so
+// the editor's hotkey dispatch can stay thin. These tests pin the
+// data-layer contract.
+describe('equalizeSelected', () => {
+  it('redistributes middle actions evenly between first and last', () => {
+    const script = new EditableScript();
+    // Outer envelope at 0 and 1000ms; middle points clumped near the start.
+    script.insertAction(0, 0);
+    script.insertAction(50, 50);
+    script.insertAction(100, 50);
+    script.insertAction(150, 50);
+    script.insertAction(1000, 100);
+    script.selectAll();
+    script.equalizeSelected();
+    expect(script.actions.map(a => a.at)).toEqual([0, 250, 500, 750, 1000]);
+  });
+
+  it('preserves the first and last selected timestamps exactly', () => {
+    const script = new EditableScript();
+    script.insertAction(123, 0);
+    script.insertAction(200, 50);
+    script.insertAction(789, 100);
+    script.selectAll();
+    script.equalizeSelected();
+    expect(script.actions[0].at).toBe(123);
+    expect(script.actions[2].at).toBe(789);
+  });
+
+  it('no-op for selections of fewer than 3', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 0);
+    script.insertAction(1000, 100);
+    script.selectAll();
+    expect(() => script.equalizeSelected()).not.toThrow();
+    expect(script.actions[0].at).toBe(0);
+    expect(script.actions[1].at).toBe(1000);
+  });
+
+  it('leaves positions untouched (only re-spaces time)', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 30);
+    script.insertAction(50, 70);
+    script.insertAction(100, 80);
+    script.insertAction(1000, 20);
+    script.selectAll();
+    script.equalizeSelected();
+    expect(script.actions.map(a => a.pos)).toEqual([30, 70, 80, 20]);
+  });
+
+  it('is undoable', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 0);
+    script.insertAction(50, 50);
+    script.insertAction(1000, 100);
+    script.selectAll();
+    script.equalizeSelected();
+    expect(script.actions[1].at).toBe(500);
+    script.undo();
+    expect(script.actions[1].at).toBe(50);
+  });
+});
+
+describe('selectLeftOfCursor / selectRightOfCursor', () => {
+  let script;
+  beforeEach(() => {
+    script = new EditableScript();
+    script.insertAction(100, 10);
+    script.insertAction(200, 20);
+    script.insertAction(500, 50);
+    script.insertAction(800, 80);
+  });
+
+  it('selectLeftOfCursor selects strictly-less-than entries', () => {
+    script.selectLeftOfCursor(500);
+    expect([...script.selectedIndices].sort()).toEqual([0, 1]);
+  });
+
+  it('selectRightOfCursor selects strictly-greater-than entries', () => {
+    script.selectRightOfCursor(500);
+    expect([...script.selectedIndices].sort()).toEqual([3]);
+  });
+
+  it('exact-match cursor is excluded from both directions', () => {
+    script.selectLeftOfCursor(200);
+    expect([...script.selectedIndices]).toEqual([0]);
+    script.selectRightOfCursor(200);
+    expect([...script.selectedIndices].sort()).toEqual([2, 3]);
+  });
+
+  it('cursor before everything → left=empty, right=all', () => {
+    script.selectLeftOfCursor(0);
+    expect(script.selectedIndices.size).toBe(0);
+    script.selectRightOfCursor(0);
+    expect(script.selectedIndices.size).toBe(4);
+  });
+
+  it('cursor after everything → left=all, right=empty', () => {
+    script.selectLeftOfCursor(9999);
+    expect(script.selectedIndices.size).toBe(4);
+    script.selectRightOfCursor(9999);
+    expect(script.selectedIndices.size).toBe(0);
+  });
+
+  it('replaces previous selection (not additive)', () => {
+    script.selectAll();
+    script.selectLeftOfCursor(200);
+    expect([...script.selectedIndices]).toEqual([0]);
+  });
+});
+
+describe('moveSelectedToTime (move-to-playhead)', () => {
+  it('moves the single selected action and preserves selection', () => {
+    const script = new EditableScript();
+    script.insertAction(100, 50);
+    script.insertAction(500, 75);
+    script.select(0);
+    const newIdx = script.moveSelectedToTime(900);
+    expect(script.actions[newIdx]).toEqual({ at: 900, pos: 50 });
+    expect(script.actions).toHaveLength(2);
+  });
+
+  it('returns -1 when nothing is selected', () => {
+    const script = new EditableScript();
+    script.insertAction(100, 50);
+    expect(script.moveSelectedToTime(900)).toBe(-1);
+  });
+
+  it('returns -1 when 2+ are selected (ambiguous)', () => {
+    const script = new EditableScript();
+    script.insertAction(100, 50);
+    script.insertAction(500, 75);
+    script.selectAll();
+    expect(script.moveSelectedToTime(900)).toBe(-1);
+  });
+
+  it('is undoable', () => {
+    const script = new EditableScript();
+    script.insertAction(100, 50);
+    script.select(0);
+    script.moveSelectedToTime(900);
+    expect(script.actions[0].at).toBe(900);
+    script.undo();
+    expect(script.actions[0].at).toBe(100);
+  });
+});
+
+// --- §3: stacked multi-axis lane view (data-layer logic) ----------------
+//
+// The editor's actual stacked-view methods touch DOM + canvas + IPC, so
+// we don't mount the full ScriptEditor here. Instead we replicate the
+// invariant the helper relies on: from `_availableScripts` and the
+// active path, derive the inactive list. This pins the filter so a
+// refactor of `_rebuildInactiveLanes` can't silently drop or duplicate
+// lanes when the active path equals one of the script paths.
+describe('stacked-view inactive-lane derivation', () => {
+  function inactiveLanesFor(activePath, availableScripts) {
+    return availableScripts.filter(s => s.path !== activePath);
+  }
+
+  it('drops the active script from the lane list', () => {
+    const scripts = [
+      { label: 'L0', path: '/v/clip.funscript' },
+      { label: 'R0', path: '/v/clip.roll.funscript' },
+      { label: 'V0', path: '/v/clip.vibrate.funscript' },
+    ];
+    const inactive = inactiveLanesFor('/v/clip.roll.funscript', scripts);
+    expect(inactive).toHaveLength(2);
+    expect(inactive.map(s => s.label)).toEqual(['L0', 'V0']);
+  });
+
+  it('returns all scripts when the active path matches none', () => {
+    // Defensive: if the active path is stale (file deleted, rename in flight),
+    // we still render every available preview rather than blanking the row.
+    const scripts = [
+      { label: 'L0', path: '/v/clip.funscript' },
+      { label: 'R0', path: '/v/clip.roll.funscript' },
+    ];
+    const inactive = inactiveLanesFor('/v/missing.funscript', scripts);
+    expect(inactive).toHaveLength(2);
+  });
+
+  it('returns empty when only the active script is loaded', () => {
+    // Single-script case — stacked toggle is hidden in the UI, but the
+    // helper should still return a clean empty list for any caller that
+    // bypasses the visibility guard.
+    const scripts = [{ label: 'L0', path: '/v/clip.funscript' }];
+    expect(inactiveLanesFor('/v/clip.funscript', scripts)).toHaveLength(0);
+  });
+
+  it('preserves order from the available-scripts list', () => {
+    const scripts = [
+      { label: 'V0', path: '/v/c.vibrate.funscript' },
+      { label: 'L0', path: '/v/c.funscript' },
+      { label: 'R0', path: '/v/c.roll.funscript' },
+    ];
+    const inactive = inactiveLanesFor('/v/c.funscript', scripts);
+    expect(inactive.map(s => s.label)).toEqual(['V0', 'R0']);
+  });
+});
+
+// --- §2.2: nice-to-have hotkeys ----------------------------------------
+
+describe('insertAlternating', () => {
+  it('flips low-pos last → high', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 20);
+    script.insertAlternating(500);
+    expect(script.actions[1].pos).toBe(100);
+    expect(script.actions[1].at).toBe(500);
+  });
+
+  it('flips high-pos last → low', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 80);
+    script.insertAlternating(500);
+    expect(script.actions[1].pos).toBe(0);
+  });
+
+  it('boundary case pos=50 treated as high → flips to 0', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 50);
+    script.insertAlternating(500);
+    expect(script.actions[1].pos).toBe(0);
+  });
+
+  it('flips relative to the last action AT OR BEFORE the cursor', () => {
+    // Cursor between two existing actions — should reference the earlier one.
+    const script = new EditableScript();
+    script.insertAction(0, 20);
+    script.insertAction(1000, 90);
+    script.insertAlternating(500); // last-at-or-before is the pos-20 action
+    const inserted = script.actions.find(a => a.at === 500);
+    expect(inserted.pos).toBe(100);
+  });
+
+  it('falls back to last action overall when cursor is before everything', () => {
+    const script = new EditableScript();
+    script.insertAction(1000, 30);
+    script.insertAction(2000, 70);
+    script.insertAlternating(500); // cursor before all → use last (pos 70)
+    const inserted = script.actions.find(a => a.at === 500);
+    expect(inserted.pos).toBe(0);
+  });
+
+  it('defaults to 100 on an empty script', () => {
+    const script = new EditableScript();
+    script.insertAlternating(500);
+    expect(script.actions[0]).toEqual({ at: 500, pos: 100 });
+  });
+});
+
+describe('repeatLastStroke', () => {
+  it('duplicates the last 2-action pattern at the cursor', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 0);
+    script.insertAction(200, 100);
+    script.repeatLastStroke(1000);
+    expect(script.actions).toHaveLength(4);
+    // Original pair preserved, new pair starts at cursor with same span.
+    expect(script.actions[2]).toEqual({ at: 1000, pos: 0 });
+    expect(script.actions[3]).toEqual({ at: 1200, pos: 100 });
+  });
+
+  it('selects both newly-inserted actions', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 0);
+    script.insertAction(200, 100);
+    script.repeatLastStroke(1000);
+    expect(script.selectedIndices.size).toBe(2);
+  });
+
+  it('returns null when fewer than 2 actions exist', () => {
+    const script = new EditableScript();
+    expect(script.repeatLastStroke(1000)).toBeNull();
+    script.insertAction(0, 50);
+    expect(script.repeatLastStroke(1000)).toBeNull();
+  });
+
+  it('returns null when the last pair has zero span', () => {
+    // Defensive: shouldn't happen in normal use (insert dedupes by `at`),
+    // but if two consecutive actions land on the same time the helper
+    // should bail rather than insert two-at-once at the cursor.
+    const script = new EditableScript();
+    script._actions = [{ at: 500, pos: 30 }, { at: 500, pos: 70 }];
+    expect(script.repeatLastStroke(1000)).toBeNull();
+  });
+
+  it('is undoable', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 0);
+    script.insertAction(200, 100);
+    script.repeatLastStroke(1000);
+    expect(script.actions).toHaveLength(4);
+    script.undo();
+    expect(script.actions).toHaveLength(3);
+    script.undo();
+    expect(script.actions).toHaveLength(2);
+  });
+});
+
+describe('previewSimplify (live RDP preview)', () => {
+  it('reports counts without mutating actions or selection', () => {
+    const script = new EditableScript();
+    // 11 collinear points — RDP should simplify to ~2 at any non-zero epsilon.
+    for (let i = 0; i <= 10; i++) script.insertAction(i * 100, i * 10);
+    script.selectAll();
+    const before = script.actions.length;
+    const beforeSel = script.selectedIndices.size;
+    const stats = script.previewSimplify(5);
+    expect(stats.total).toBe(11);
+    expect(stats.kept).toBeLessThan(11);
+    expect(stats.removed).toBe(stats.total - stats.kept);
+    expect(script.actions.length).toBe(before);
+    expect(script.selectedIndices.size).toBe(beforeSel);
+  });
+
+  it('returns 0 removed for selections smaller than 3', () => {
+    const script = new EditableScript();
+    script.insertAction(0, 0);
+    script.insertAction(100, 50);
+    script.selectAll();
+    const stats = script.previewSimplify(2);
+    expect(stats.removed).toBe(0);
+    expect(stats.kept).toBe(2);
+  });
+
+  it('higher epsilon removes more points', () => {
+    const script = new EditableScript();
+    // Slightly noisy line — points are mostly on a slope but not exactly.
+    const seed = [0, 5, 9, 16, 24, 30, 41, 48, 55, 62, 70, 79, 88, 95, 100];
+    seed.forEach((pos, i) => script.insertAction(i * 100, pos));
+    script.selectAll();
+    const lo = script.previewSimplify(0.5).removed;
+    const hi = script.previewSimplify(10).removed;
+    expect(hi).toBeGreaterThanOrEqual(lo);
+  });
+});

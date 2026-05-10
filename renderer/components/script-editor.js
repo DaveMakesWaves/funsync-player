@@ -6,7 +6,7 @@ import { ActionGraph } from '../js/action-graph.js';
 import {
   icon, Undo2, Redo2, Save, ZoomIn, ZoomOut, Magnet, Trash2,
   FlipVertical2, Spline, Scissors, WandSparkles, BookmarkPlus, FileText, Rows3,
-  AudioWaveform, Music,
+  AudioWaveform, Music, Layers2, ExternalLink,
 } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { Modal } from './modal.js';
@@ -14,7 +14,11 @@ import {
   halfSpeed, doubleSpeed, reverseActions, remapRange, offsetTime, removePauses, generatePattern,
 } from '../js/script-modifiers.js';
 import { detectGaps, fillGaps } from '../js/gap-filler.js';
-import { extractPeaks, getCachedPeaks, clearCacheFor } from '../js/waveform.js';
+import {
+  extractPeaks, getCachedPeaks, clearCacheFor,
+  extractMultiBandPeaks, getCachedMultiBand,
+} from '../js/waveform.js';
+import { extractVAD, getCachedVAD } from '../js/vad.js';
 import { detectBeats, beatsToActions, getCachedBeats, clearBeatCacheFor } from '../js/beat-detector.js';
 import { dataService } from '../js/data-service.js';
 import { openKeyboardHelp, EDITOR_SHORTCUT_GROUPS } from '../js/keyboard-help.js';
@@ -58,6 +62,10 @@ export class ScriptEditor {
     // Waveform state
     this._waveformEnabled = false;
     this._btnWaveform = null;
+    // Multi-band waveform state (Audio Event Detection §2.1)
+    this._multiBandEnabled = false;
+    // VAD voice-activity track state (Audio Event Detection §2.2)
+    this._vadEnabled = false;
 
     /** @type {Function|null} Callback for when we create/load a funscript in editor */
     this.onFunscriptCreated = null;
@@ -65,6 +73,23 @@ export class ScriptEditor {
     // Multi-script editing
     this._availableScripts = []; // [{ label, path }] — populated by app.js
     this._scriptSelect = null;
+
+    // Stacked-lane view — shows every loaded multi-axis script as its own
+    // mini ActionGraph above the main canvas. Active lane stays the
+    // editor's normal canvas (full interaction). Inactive lanes are
+    // read-only previews; clicking one switches the active script via
+    // the same path the dropdown uses.
+    this._stackedView = false;
+    this._stackedContainer = null;       // <div> holding the inactive previews
+    this._inactiveLanes = new Map();     // path → { script, canvas, graph, container }
+
+    // Pop-out window — when open, the editor panel collapses (locked
+    // decision §4.3 α — pop-out takes full ownership; main shows only
+    // the video). Lifecycle is brokered by `electron/editor-popout-window.js`
+    // through the IPC bridge wired in preload. State updated on
+    // `editor-popout:opened` / `editor-popout:closed` events.
+    this._popoutOpen = false;
+    this._popoutUnsubscribe = null;
 
     // Undo stack cache per path (survives script switching)
     this._undoCache = new Map(); // path → { actions, undoStack, redoStack, selectedIndices, bookmarks }
@@ -140,6 +165,7 @@ export class ScriptEditor {
       { value: 'removePauses', label: 'Remove Pauses\u2026' },
       { value: 'rangeExtend', label: 'Range Extend/Compress\u2026' },
       { value: 'generatePattern', label: 'Generate Pattern\u2026' },
+      { value: 'exportHeatmap', label: 'Export Heatmap PNG\u2026' },
     ];
     for (const o of modOpts) {
       const opt = document.createElement('option');
@@ -157,10 +183,11 @@ export class ScriptEditor {
     const btnMetadata = this._makeBtn(FileText, 'Edit Metadata', () => this._openMetadataModal());
     const btnBookmark = this._makeBtn(BookmarkPlus, 'Add Bookmark (B)', () => this._addBookmarkAtCursor());
     const btnFillGaps = this._makeBtn(Rows3, 'Fill Gaps', () => this._openFillGapsModal());
-    this._btnWaveform = this._makeBtn(AudioWaveform, 'Toggle Waveform (W)', () => this._toggleWaveform());
+    this._btnWaveform = this._markToggleBtn(this._makeBtn(AudioWaveform, 'Toggle Waveform (W)', () => this._toggleWaveform()));
     const btnBeats = this._makeBtn(Music, 'Generate from Beats', () => this._openBeatModal());
 
-    const sep1d = this._makeSeparator();
+    // Editing-operations group end → cluster-gap before view controls.
+    const sep1d = this._makeSeparator('cluster');
 
     const btnZoomIn = this._makeBtn(ZoomIn, 'Zoom In (+)', () => this._zoomIn());
     const btnZoomOut = this._makeBtn(ZoomOut, 'Zoom Out (-)', () => this._zoomOut());
@@ -183,7 +210,8 @@ export class ScriptEditor {
     }
     this._speedSelect.addEventListener('change', () => this._onSpeedChange());
 
-    const sep3 = this._makeSeparator();
+    // Playback-speed group end → cluster-gap before save/autosave.
+    const sep3 = this._makeSeparator('cluster');
     const btnSave = this._makeBtn(Save, 'Save (Ctrl+S)', () => this._save());
 
     // Autosave checkbox + status
@@ -222,7 +250,20 @@ export class ScriptEditor {
     this._scriptSelect.hidden = true; // shown when multiple scripts available
     this._scriptSelect.addEventListener('change', () => this._onScriptSelectChange());
 
-    const sepScript = this._makeSeparator();
+    // Stacked-view toggle — only meaningful when multiple scripts are
+    // loaded. Sits next to the dropdown so the relationship is obvious:
+    // pick which script to edit + see all of them at once. Hidden in
+    // single-script mode to avoid a button users can't use.
+    this._btnStacked = this._markToggleBtn(this._makeBtn(Layers2, 'Stacked View — show all axes', () => this._toggleStackedView()));
+    this._btnStacked.classList.add('editor__btn--stacked');
+    this._btnStacked.hidden = true;
+
+    // Pop-out — second-monitor editing. Always visible (no preconditions).
+    // Toggle: clicking when open dock-backs (closes the pop-out window).
+    this._btnPopout = this._markToggleBtn(this._makeBtn(ExternalLink, 'Pop out editor to a separate window', () => this._togglePopoutWindow()));
+
+    // Script-management group end → cluster-gap before edit history.
+    const sepScript = this._makeSeparator('cluster');
     sepScript.classList.add('editor__script-sep');
     sepScript.hidden = true;
 
@@ -263,7 +304,7 @@ export class ScriptEditor {
     this._recordingIndicator.style.cssText = 'color:#ff4444;font-weight:700;font-size:11px;margin-left:6px;animation:blink 1s step-end infinite';
 
     toolbar.append(
-      this._scriptSelect, sepScript,
+      this._scriptSelect, this._btnStacked, this._btnPopout, sepScript,
       this._btnUndo, this._btnRedo, sep1,
       btnDelete, btnCut, btnInvert, btnSimplify, sep1b,
       this._modifySelect, sep1c,
@@ -314,14 +355,39 @@ export class ScriptEditor {
     const btn = document.createElement('button');
     btn.className = 'editor__btn';
     btn.title = title;
+    // Accessibility: title alone isn't read by every AT in every state.
+    // Pair it with aria-label so the icon button always has an
+    // accessible name. Matches the polish-pass contract in DESIGN.md.
+    btn.setAttribute('aria-label', title);
     btn.appendChild(icon(iconNode, { width: 16, height: 16, 'stroke-width': 2 }));
     btn.addEventListener('click', onClick);
     return btn;
   }
 
-  _makeSeparator() {
+  /**
+   * Mark a button as a toggle by seeding `aria-pressed="false"`.
+   * `_setToggleState(btn, on)` flips both the attribute and the
+   * legacy `--active` class so screen readers announce the state and
+   * the visual highlight stays in sync. Use only on buttons that
+   * persist a toggle state (Recording, Waveform, Multi-band, Stacked,
+   * Pop-out) — momentary actions (Save, Undo, etc.) should not have
+   * `aria-pressed`.
+   */
+  _markToggleBtn(btn) {
+    if (btn) btn.setAttribute('aria-pressed', 'false');
+    return btn;
+  }
+
+  _setToggleState(btn, on) {
+    if (!btn) return;
+    btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    btn.classList.toggle('editor__btn--active', !!on);
+  }
+
+  _makeSeparator(variant) {
     const sep = document.createElement('div');
     sep.className = 'editor__toolbar-separator';
+    if (variant === 'cluster') sep.classList.add('editor__toolbar-separator--cluster');
     return sep;
   }
 
@@ -359,6 +425,7 @@ export class ScriptEditor {
         this.graph.setCursorTime(this.videoPlayer.currentTime * 1000);
         if (!this._dragMode && !this.graph._animating) this.graph.draw();
         this._updateScrubber();
+        this._syncInactiveLanes();
       }
     });
 
@@ -372,6 +439,11 @@ export class ScriptEditor {
         this.graph.draw();
       }
     });
+
+    // Pop-out lifecycle — bind once. The unsubscribe handle is stored
+    // so we can clean up if the editor is ever torn down (currently
+    // not, but it's the correct shape).
+    this._bindPopoutLifecycle();
   }
 
   // --- Mouse Handlers (OFS style) ---
@@ -573,6 +645,7 @@ export class ScriptEditor {
       this.graph.zoomAt(centerMs, factor);
     }
     this._updateScrubber();
+    this._syncInactiveLanes();
   }
 
   // --- Canvas Keyboard (OFS style) ---
@@ -584,13 +657,16 @@ export class ScriptEditor {
 
     const ctrl = e.ctrlKey || e.metaKey;
 
-    // 0-9 keys: place action at current video time with fixed position
-    // Works with both regular number row and numpad
+    // 0-9 keys: place action at current video time with fixed position.
+    // Works with both regular number row and numpad. Steps of 10 to match
+    // OFS — round numbers play better with downstream tooling and visual
+    // heuristics. (Was previously steps of 11 — `0,11,22,...,100` — which
+    // mapped to ~9% increments and confused users who expected OFS parity.)
     const numpadMap = {
-      'Digit0': 0, 'Digit1': 11, 'Digit2': 22, 'Digit3': 33, 'Digit4': 44,
-      'Digit5': 55, 'Digit6': 66, 'Digit7': 77, 'Digit8': 88, 'Digit9': 100,
-      'Numpad0': 0, 'Numpad1': 11, 'Numpad2': 22, 'Numpad3': 33, 'Numpad4': 44,
-      'Numpad5': 55, 'Numpad6': 66, 'Numpad7': 77, 'Numpad8': 88, 'Numpad9': 100,
+      'Digit0': 0, 'Digit1': 10, 'Digit2': 20, 'Digit3': 30, 'Digit4': 40,
+      'Digit5': 50, 'Digit6': 60, 'Digit7': 70, 'Digit8': 80, 'Digit9': 100,
+      'Numpad0': 0, 'Numpad1': 10, 'Numpad2': 20, 'Numpad3': 30, 'Numpad4': 40,
+      'Numpad5': 50, 'Numpad6': 60, 'Numpad7': 70, 'Numpad8': 80, 'Numpad9': 100,
     };
     if (e.code in numpadMap) {
       e.preventDefault();
@@ -656,7 +732,10 @@ export class ScriptEditor {
       case 'ArrowLeft':
         e.preventDefault();
         e.stopPropagation();
-        if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
+        if (ctrl && e.altKey) {
+          // OFS parity: select everything before the playhead.
+          this.editableScript.selectLeftOfCursor(this.videoPlayer.currentTime * 1000);
+        } else if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
           const frames = ctrl ? this._fastStepFrames() : 1;
           const deltaMs = -frames * this._frameDurationMs();
           this.editableScript.moveActions(this.editableScript.selectedIndices, deltaMs, 0);
@@ -670,7 +749,10 @@ export class ScriptEditor {
       case 'ArrowRight':
         e.preventDefault();
         e.stopPropagation();
-        if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
+        if (ctrl && e.altKey) {
+          // OFS parity: select everything after the playhead.
+          this.editableScript.selectRightOfCursor(this.videoPlayer.currentTime * 1000);
+        } else if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
           const frames = ctrl ? this._fastStepFrames() : 1;
           const deltaMs = frames * this._frameDurationMs();
           this.editableScript.moveActions(this.editableScript.selectedIndices, deltaMs, 0);
@@ -757,6 +839,14 @@ export class ScriptEditor {
           e.stopPropagation();
           const timeMs = this.videoPlayer.currentTime * 1000;
           this.editableScript.paste(timeMs);
+        } else {
+          // Bare V → toggle VAD voice-activity track (Audio Event
+          // Detection §2.2). Bare V was unbound in the editor —
+          // paste-relevant uses all required Ctrl. Matches the SCOPE
+          // doc's recommended hotkey layout.
+          e.preventDefault();
+          e.stopPropagation();
+          this._toggleVADTrack();
         }
         break;
 
@@ -822,11 +912,83 @@ export class ScriptEditor {
 
       case 'b':
       case 'B':
-        if (!ctrl) {
+        if (ctrl) {
+          // Ctrl+B: jump to previous bookmark (OFS parity).
+          e.preventDefault();
+          e.stopPropagation();
+          this._jumpToBookmark(-1);
+        } else if (e.shiftKey) {
+          // Shift+B: jump to next bookmark.
+          e.preventDefault();
+          e.stopPropagation();
+          this._jumpToBookmark(1);
+        } else {
           e.preventDefault();
           e.stopPropagation();
           this._addBookmarkAtCursor();
         }
+        break;
+
+      // Q: Alternating insert — place an action at the playhead with
+      // its position flipped from the last action's. One-key alternative
+      // to manually toggling between numpad 1 and numpad 9 during fast
+      // manual scripting. Skipped when ctrl is held — leaves the binding
+      // free for future Ctrl+Q (close editor, etc.) without conflict.
+      case 'q':
+      case 'Q':
+        if (!ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._alternatingInsertAtCursor();
+        }
+        break;
+
+      // Home: Repeat last stroke (duplicate the final 2-action pattern
+      // at the playhead). OFS parity. End is already taken (move-to-
+      // playhead) so Home is the natural pair.
+      case 'Home':
+        e.preventDefault();
+        e.stopPropagation();
+        this._repeatLastStrokeAtCursor();
+        break;
+
+      // [ / ]: Step playback speed down / up through the dropdown's
+      // preset list. OFS parity (Numpad +/- ; we use [/] because the
+      // numpad is already saturated with placement keys). Walks through
+      // the same `[0.25, 0.5, 0.75, 1, 1.5, 2]` rates the dropdown shows.
+      case '[':
+        if (!ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._stepPlaybackSpeed(-1);
+        }
+        break;
+      case ']':
+        if (!ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._stepPlaybackSpeed(1);
+        }
+        break;
+
+      // OFS parity: distribute selected actions evenly in time.
+      // Outer envelope (first + last) is preserved; only middle
+      // timestamps are re-spaced. No-op when fewer than 3 are selected.
+      case 'e':
+      case 'E':
+        if (!ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._equalizeSelected();
+        }
+        break;
+
+      // OFS parity: snap the single-selected action's `at` to the
+      // current playhead. No-op for 0/2+ selections (ambiguous target).
+      case 'End':
+        e.preventDefault();
+        e.stopPropagation();
+        this._moveSelectedToPlayhead();
         break;
 
       // `?` (Shift+/) opens the keyboard-shortcut help overlay.
@@ -845,7 +1007,14 @@ export class ScriptEditor {
         if (!ctrl) {
           e.preventDefault();
           e.stopPropagation();
-          this._toggleWaveform();
+          if (e.shiftKey) {
+            // Shift+W → multi-band waveform (Audio Event Detection §2.1).
+            // Independent of plain W; both can be on at once for cross-
+            // referencing energy across the full spectrum vs per-band.
+            this._toggleMultiBandWaveform();
+          } else {
+            this._toggleWaveform();
+          }
         }
         break;
 
@@ -893,13 +1062,48 @@ export class ScriptEditor {
     showToast(`Inverted ${this.editableScript.selectedIndices.size} action(s)`, 'info');
   }
 
-  _simplifySelected() {
+  async _simplifySelected() {
     if (this.editableScript.selectedIndices.size < 3) {
       showToast('Select at least 3 actions to simplify', 'info');
       return;
     }
+    const editableScript = this.editableScript;
+    const result = await Modal.open({
+      title: 'Simplify',
+      onRender(body, close) {
+        body.innerHTML = `
+          <div class="modal-form">
+            <label class="modal-label">Epsilon
+              <input type="range" id="simplify-eps" min="0.1" max="20" step="0.1" value="2" class="modal-input">
+              <span id="simplify-eps-val" class="modal-hint" style="display:inline-block; min-width:3ch;">2.0</span>
+            </label>
+            <div class="modal-hint" id="simplify-preview">…</div>
+            <div class="modal-hint">Higher epsilon removes more points. Live preview shows what will change.</div>
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn modal-btn--secondary" id="simplify-cancel">Cancel</button>
+            <button class="modal-btn modal-btn--primary" id="simplify-ok">Apply</button>
+          </div>`;
+        const slider = body.querySelector('#simplify-eps');
+        const valLabel = body.querySelector('#simplify-eps-val');
+        const preview = body.querySelector('#simplify-preview');
+        const updatePreview = () => {
+          const eps = parseFloat(slider.value);
+          valLabel.textContent = eps.toFixed(1);
+          const stats = editableScript.previewSimplify(eps);
+          preview.textContent = `Will remove ${stats.removed} of ${stats.total} points (keep ${stats.kept})`;
+        };
+        slider.addEventListener('input', updatePreview);
+        updatePreview();
+        body.querySelector('#simplify-cancel').addEventListener('click', () => close(null));
+        body.querySelector('#simplify-ok').addEventListener('click', () => {
+          close({ epsilon: parseFloat(slider.value) || 2 });
+        });
+      },
+    });
+    if (!result) return;
     const before = this.editableScript.selectedIndices.size;
-    this.editableScript.simplify(2);
+    this.editableScript.simplify(result.epsilon);
     const after = this.editableScript.selectedIndices.size;
     const removed = before - after;
     if (removed > 0) {
@@ -907,6 +1111,89 @@ export class ScriptEditor {
     } else {
       showToast('No points removed (all significant)', 'info');
     }
+  }
+
+  _equalizeSelected() {
+    if (this.editableScript.selectedIndices.size < 3) {
+      showToast('Select 3+ actions to equalize', 'info');
+      return;
+    }
+    const count = this.editableScript.selectedIndices.size;
+    this.editableScript.equalizeSelected();
+    showToast(`Equalized ${count} actions`, 'info');
+  }
+
+  _moveSelectedToPlayhead() {
+    if (this.editableScript.selectedIndices.size !== 1) {
+      showToast('Select exactly one action to move to playhead', 'info');
+      return;
+    }
+    const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+    const newIdx = this.editableScript.moveSelectedToTime(timeMs);
+    if (newIdx >= 0) {
+      this.editableScript.select(newIdx);
+      this._lastSelectedIndex = newIdx;
+    }
+  }
+
+  _alternatingInsertAtCursor() {
+    const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+    const newIdx = this.editableScript.insertAlternating(timeMs);
+    this.editableScript.select(newIdx);
+    this._lastSelectedIndex = newIdx;
+    const pos = this.editableScript.actions[newIdx]?.pos;
+    if (typeof pos === 'number') this._sendLivePreview(pos);
+  }
+
+  _repeatLastStrokeAtCursor() {
+    const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+    const result = this.editableScript.repeatLastStroke(timeMs);
+    if (!result) {
+      showToast('Need at least 2 actions to repeat a stroke', 'info');
+      return;
+    }
+    showToast('Stroke repeated', 'info', 1200);
+  }
+
+  /** Walk the speed dropdown one step in `direction` (±1). Wraps the
+   *  rate through the dropdown's `<option>` list so users hit edge cases
+   *  (already at min / max) without an extra branch. */
+  _stepPlaybackSpeed(direction) {
+    const opts = Array.from(this._speedSelect.options);
+    if (opts.length === 0) return;
+    const current = this._speedSelect.selectedIndex;
+    const next = Math.max(0, Math.min(opts.length - 1, current + direction));
+    if (next === current) return;
+    this._speedSelect.selectedIndex = next;
+    const rate = parseFloat(this._speedSelect.value);
+    this._setSpeed(rate);
+    showToast(`Playback ${rate}x`, 'info', 1000);
+  }
+
+  /** Jump to the next/previous bookmark relative to the playhead.
+   *  `direction = 1` → next; `-1` → previous. No-op when there are no
+   *  bookmarks in the requested direction (shows a toast). */
+  _jumpToBookmark(direction) {
+    const bookmarks = this.editableScript.getBookmarks();
+    if (bookmarks.length === 0) {
+      showToast('No bookmarks to navigate', 'info');
+      return;
+    }
+    const cursorMs = this.videoPlayer.currentTime * 1000;
+    let target = null;
+    for (const bm of bookmarks) {
+      if (direction > 0 && bm.at > cursorMs && (target === null || bm.at < target)) target = bm;
+      else if (direction < 0 && bm.at < cursorMs && (target === null || bm.at > target)) target = bm;
+    }
+    if (!target) {
+      showToast(direction > 0 ? 'No bookmark after cursor' : 'No bookmark before cursor', 'info');
+      return;
+    }
+    this.videoPlayer.video.currentTime = target.at / 1000;
+    this.graph.centerOnTime(target.at);
+    this.graph.draw();
+    this._updateScrubber();
+    if (target.name) showToast(`▶ ${target.name}`, 'info', 1500);
   }
 
   _cutSelected() {
@@ -1147,7 +1434,57 @@ export class ScriptEditor {
       case 'generatePattern':
         await this._openPatternModal();
         break;
+      case 'exportHeatmap':
+        await this._exportHeatmapPng();
+        break;
     }
+  }
+
+  /**
+   * Render the current script's heatmap to an off-screen canvas at a
+   * print-friendly resolution (1200×80 px) and trigger a download. The
+   * canvas reuses the existing `computeBins` + `renderBins` helpers so
+   * the exported strip matches what the user sees on the player's
+   * progress bar — no separate "export styling" pass to maintain.
+   */
+  async _exportHeatmapPng() {
+    const actions = this.editableScript?.actions || [];
+    if (actions.length === 0) {
+      showToast('Nothing to export — script is empty', 'warn');
+      return;
+    }
+    const duration = (this.videoPlayer?.duration || 0) * 1000;
+    if (!duration) {
+      showToast('Video duration unavailable — load a video first', 'warn');
+      return;
+    }
+    const { computeBins, renderBins } = await import('../js/heatmap-strip.js');
+    const canvas = document.createElement('canvas');
+    canvas.width = 1200;
+    canvas.height = 80;
+    // computeBins divides the timeline into N bins; the helper handles
+    // duration scaling so the same call fits 30s and 90min videos.
+    const bins = computeBins(actions, 1200);
+    renderBins(canvas, bins);
+
+    const stem = (this.editableScript._sourcePath || 'heatmap')
+      .replace(/^.*[/\\]/, '')
+      .replace(/\.funscript$/i, '') || 'heatmap';
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        showToast('Heatmap export failed', 'error');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${stem}.heatmap.png`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showToast('Heatmap exported', 'info');
+    }, 'image/png');
   }
 
   // --- Modal dialogs for parameterized modifiers ---
@@ -1437,7 +1774,7 @@ export class ScriptEditor {
 
   async _toggleWaveform() {
     this._waveformEnabled = !this._waveformEnabled;
-    this._btnWaveform.classList.toggle('editor__btn--active', this._waveformEnabled);
+    this._setToggleState(this._btnWaveform, this._waveformEnabled);
 
     if (!this._waveformEnabled) {
       this.graph.setShowWaveform(false);
@@ -1450,7 +1787,7 @@ export class ScriptEditor {
     if (!videoSrc) {
       showToast('No video loaded', 'warn');
       this._waveformEnabled = false;
-      this._btnWaveform.classList.remove('editor__btn--active');
+      this._setToggleState(this._btnWaveform, false);
       return;
     }
 
@@ -1478,7 +1815,7 @@ export class ScriptEditor {
     } else if (!data) {
       showToast('Could not extract waveform', 'warn');
       this._waveformEnabled = false;
-      this._btnWaveform.classList.remove('editor__btn--active');
+      this._setToggleState(this._btnWaveform, false);
     }
 
     this._updateStatus();
@@ -1488,12 +1825,117 @@ export class ScriptEditor {
   _clearWaveform() {
     this._waveformEnabled = false;
     if (this._btnWaveform) {
-      this._btnWaveform.classList.remove('editor__btn--active');
+      this._setToggleState(this._btnWaveform, false);
     }
     if (this.graph) {
       this.graph.setWaveformData(null);
       this.graph.setShowWaveform(false);
+      this.graph.setMultiBandData(null);
+      this.graph.setShowMultiBand(false);
+      this.graph.setVADData(null);
+      this.graph.setShowVAD(false);
     }
+    this._multiBandEnabled = false;
+    this._vadEnabled = false;
+  }
+
+  /**
+   * Toggle the VAD voice-activity track. Independent of waveform and
+   * multi-band — all three can be on at once. Reuses the multi-band
+   * extractor (mid-band envelope) so toggling VAD on after multi-band
+   * is already loaded is instant.
+   *
+   * Phase 1c (`SCOPE-audio-event-detection.md` §2.2) replaces this
+   * energy-based path with silero-vad via ONNX-runtime in the Python
+   * backend. The action-graph render path stays the same.
+   */
+  async _toggleVADTrack() {
+    this._vadEnabled = !this._vadEnabled;
+    if (!this._vadEnabled) {
+      this.graph.setShowVAD(false);
+      if (!this.graph._animating) this.graph.draw();
+      return;
+    }
+
+    const videoSrc = this.videoPlayer.video.src;
+    if (!videoSrc) {
+      showToast('No video loaded', 'warn');
+      this._vadEnabled = false;
+      return;
+    }
+
+    const cached = getCachedVAD(videoSrc);
+    if (cached) {
+      this.graph.setVADData(cached);
+      this.graph.setShowVAD(true);
+      if (!this.graph._animating) this.graph.draw();
+      return;
+    }
+
+    const origStatus = this._statusEl.textContent;
+    this._statusEl.textContent = 'Detecting voice activity…';
+    const data = await extractVAD(videoSrc);
+
+    if (data && this._vadEnabled) {
+      this.graph.setVADData(data);
+      this.graph.setShowVAD(true);
+      if (!this.graph._animating) this.graph.draw();
+      const seconds = data.segments.reduce((acc, s) => acc + (s.endMs - s.startMs) / 1000, 0);
+      showToast(`Voice detected: ${data.segments.length} segments (${seconds.toFixed(1)}s total)`, 'info', 2500);
+    } else if (!data) {
+      showToast('Could not extract voice activity', 'warn');
+      this._vadEnabled = false;
+    }
+    this._statusEl.textContent = origStatus;
+    this._updateStatus();
+  }
+
+  /**
+   * Toggle the multi-band (low/mid/high) waveform overlay. Independent
+   * of `_toggleWaveform` — both can be on at once. Decodes the audio
+   * once via `extractMultiBandPeaks`, applies the RBJ biquad filter
+   * cascade, and pushes the result to the graph.
+   */
+  async _toggleMultiBandWaveform() {
+    this._multiBandEnabled = !this._multiBandEnabled;
+    if (!this._multiBandEnabled) {
+      this.graph.setShowMultiBand(false);
+      if (!this.graph._animating) this.graph.draw();
+      return;
+    }
+
+    const videoSrc = this.videoPlayer.video.src;
+    if (!videoSrc) {
+      showToast('No video loaded', 'warn');
+      this._multiBandEnabled = false;
+      return;
+    }
+
+    const cached = getCachedMultiBand(videoSrc);
+    if (cached) {
+      this.graph.setMultiBandData(cached);
+      this.graph.setShowMultiBand(true);
+      if (!this.graph._animating) this.graph.draw();
+      return;
+    }
+
+    const origStatus = this._statusEl.textContent;
+    this._statusEl.textContent = 'Extracting multi-band waveform…';
+    const data = await extractMultiBandPeaks(videoSrc, 100, (pct) => {
+      this._statusEl.textContent = `Extracting multi-band… ${Math.round(pct * 100)}%`;
+    });
+
+    if (data && this._multiBandEnabled) {
+      this.graph.setMultiBandData(data);
+      this.graph.setShowMultiBand(true);
+      if (!this.graph._animating) this.graph.draw();
+      showToast('Multi-band waveform loaded', 'info');
+    } else if (!data) {
+      showToast('Could not extract multi-band waveform', 'warn');
+      this._multiBandEnabled = false;
+    }
+    this._statusEl.textContent = origStatus;
+    this._updateStatus();
   }
 
   // --- Beat Detection ---
@@ -2055,10 +2497,17 @@ export class ScriptEditor {
     if (!this._scriptSelect) return;
     const show = this._availableScripts.length > 1;
     this._scriptSelect.hidden = !show;
+    if (this._btnStacked) this._btnStacked.hidden = !show;
 
     // Also show/hide the separator
     const sep = this._panel?.querySelector('.editor__script-sep');
     if (sep) sep.hidden = !show;
+
+    // Drop stacked view if the script list shrunk back to single-script —
+    // we'd otherwise leave the inactive-lane container in the DOM with
+    // nothing in it. Keeps the panel coherent across library scans /
+    // axis-detection re-runs.
+    if (!show && this._stackedView) this._setStackedView(false);
 
     if (!show) return;
 
@@ -2114,9 +2563,234 @@ export class ScriptEditor {
         this.graph?.fitAll();
         this._updateToolbarState();
         this._statusEl.textContent = newPath.split(/[\\/]/).pop();
+
+        // Rebuild the inactive-lane previews so the lane that just became
+        // active disappears from the previews list and the lane that
+        // *was* active reappears as a preview. Cheap — N small canvases.
+        if (this._stackedView) await this._rebuildInactiveLanes();
       }
     } catch (err) {
       console.warn('[Editor] Failed to load script:', err.message);
+    }
+  }
+
+  // --- Pop-out window (§4) ---
+
+  /**
+   * Toolbar handler — open the pop-out window if closed, dock back if
+   * open. The actual window lifecycle is brokered by main process; we
+   * just trigger and let the lifecycle event update local state. See
+   * `electron/editor-popout-window.js` for the broker side.
+   */
+  async _togglePopoutWindow() {
+    if (!window.funsync?.editorPopoutOpen) {
+      showToast('Pop-out unavailable — Electron bridge missing', 'error');
+      return;
+    }
+    if (this._popoutOpen) {
+      await window.funsync.editorPopoutClose();
+    } else {
+      await window.funsync.editorPopoutOpen();
+    }
+  }
+
+  /**
+   * Wire lifecycle subscription once on construction. Receives `opened`
+   * / `closed` / `message` events. Idempotent — re-binding without
+   * unsubscribing leaks listeners.
+   */
+  _bindPopoutLifecycle() {
+    if (!window.funsync?.onEditorPopoutEvent) return;
+    if (this._popoutUnsubscribe) return; // already bound
+    this._popoutUnsubscribe = window.funsync.onEditorPopoutEvent((event) => {
+      if (event.type === 'opened') {
+        this._popoutOpen = true;
+        this._setToggleState(this._btnPopout, true);
+        if (this._btnPopout) {
+          this._btnPopout.title = 'Dock editor back to main window';
+          this._btnPopout.setAttribute('aria-label', 'Dock editor back to main window');
+        }
+        // Hide the docked editor panel — pop-out takes full ownership
+        // (locked decision §4.3 α). The placeholder approach was
+        // considered but rejected; the user wants the main window to
+        // show only the video while editing happens elsewhere.
+        if (this._panel) this._panel.hidden = true;
+      } else if (event.type === 'closed') {
+        this._popoutOpen = false;
+        this._setToggleState(this._btnPopout, false);
+        if (this._btnPopout) {
+          this._btnPopout.title = 'Pop out editor to a separate window';
+          this._btnPopout.setAttribute('aria-label', 'Pop out editor to a separate window');
+        }
+        if (this._panel && this._open) {
+          this._panel.hidden = false;
+          // The panel was hidden while the pop-out was open — its canvas
+          // missed every layout / size update during that window.
+          // Force a resize + redraw on the next frame so dots / lines
+          // re-appear without waiting for a `timeupdate` tick (which
+          // never fires when the video is paused).
+          requestAnimationFrame(() => {
+            if (!this.graph) return;
+            this.graph.resize();
+            this.graph.setCursorTime(this.videoPlayer.currentTime * 1000);
+            this.graph.draw();
+            this._updateScrubber();
+          });
+        }
+      } else if (event.type === 'message') {
+        // Future: route incoming state-sync payloads from the pop-out
+        // (edits, undo, viewport changes). For now log so the bridge is
+        // verifiable end-to-end.
+        if (event.payload?.type === 'popout-ready') {
+          // Pop-out finished its initial load — kickoff state sync
+          // here when the protocol is fleshed out. Today: no-op.
+        }
+      }
+    });
+  }
+
+  // --- Stacked multi-axis lane view (§3) ---
+
+  /** Toolbar handler — flip the toggle and rebuild lanes. */
+  async _toggleStackedView() {
+    await this._setStackedView(!this._stackedView);
+  }
+
+  /**
+   * Enable or disable stacked view. When enabling, fetches every
+   * non-active script and renders it as a read-only preview canvas
+   * stacked above the main canvas. When disabling, tears down the
+   * preview row.
+   */
+  async _setStackedView(enable) {
+    if (enable && this._availableScripts.length < 2) {
+      showToast('Stacked view needs multiple scripts (multi-axis or custom routing)', 'info');
+      return;
+    }
+    this._stackedView = !!enable;
+    this._setToggleState(this._btnStacked, this._stackedView);
+    this._panel?.classList.toggle('script-editor--stacked', this._stackedView);
+
+    if (this._stackedView) {
+      if (!this._stackedContainer) {
+        this._stackedContainer = document.createElement('div');
+        this._stackedContainer.className = 'editor__stacked-lanes';
+      }
+      // Insert *before* the main canvas so previews appear above the
+      // active editing surface. Using `before` rather than `prepend` on
+      // _canvasContainer because lanes need to live in the panel root,
+      // not inside the canvas's resize-observed container.
+      if (this._canvasContainer && !this._stackedContainer.parentElement) {
+        this._canvasContainer.parentElement?.insertBefore(this._stackedContainer, this._canvasContainer);
+      }
+      await this._rebuildInactiveLanes();
+    } else {
+      // Tear down: remove DOM, clear lane state.
+      if (this._stackedContainer?.parentElement) {
+        this._stackedContainer.parentElement.removeChild(this._stackedContainer);
+      }
+      this._inactiveLanes.clear();
+    }
+  }
+
+  /**
+   * Drop the existing inactive-lane previews and re-create them from
+   * `_availableScripts` (excluding the currently-active one). Each lane
+   * loads the script from disk into its own EditableScript + ActionGraph
+   * and inherits the active lane's viewport / cursor / video duration so
+   * the previews stay locked to the main timeline.
+   */
+  async _rebuildInactiveLanes() {
+    if (!this._stackedContainer) return;
+    this._stackedContainer.innerHTML = '';
+    this._inactiveLanes.clear();
+
+    const inactive = this._availableScripts.filter(s => s.path !== this._funscriptPath);
+    for (const s of inactive) {
+      const lane = await this._buildLane(s);
+      if (lane) {
+        this._stackedContainer.appendChild(lane.container);
+        this._inactiveLanes.set(s.path, lane);
+        // ActionGraph needs the canvas's actual rendered pixel size to
+        // set its drawing buffer. Has to happen after the canvas is in
+        // the DOM (CSS sizing), so call after append.
+        try { lane.graph.resize(); } catch { /* canvas not yet visible */ }
+      }
+    }
+    this._syncInactiveLanes();
+  }
+
+  /**
+   * Build a single read-only preview lane for `script`. The lane has
+   * its own canvas + ActionGraph but no editor mouse handlers — clicking
+   * anywhere inside it switches the active script (same flow the
+   * dropdown triggers). Returns `null` when the funscript can't be
+   * loaded so the rest of the lane row stays usable.
+   */
+  async _buildLane(script) {
+    const container = document.createElement('div');
+    container.className = 'editor__lane editor__lane--inactive';
+    container.title = `${script.label} — click to edit`;
+
+    const label = document.createElement('span');
+    label.className = 'editor__lane-label';
+    label.textContent = script.label;
+    container.appendChild(label);
+
+    const canvas = document.createElement('canvas');
+    canvas.className = 'editor__lane-canvas';
+    container.appendChild(canvas);
+
+    let editable = new EditableScript();
+    // Prefer the in-memory undo cache (preserves unsaved edits when
+    // toggling stacked view) over a fresh disk read.
+    const cached = this._undoCache.get(script.path);
+    if (cached) {
+      editable._actions = JSON.parse(JSON.stringify(cached.actions));
+    } else {
+      try {
+        const content = await window.funsync.readFunscript(script.path);
+        if (content) {
+          const parsed = JSON.parse(content);
+          editable.loadFromData(parsed);
+        }
+      } catch (err) {
+        console.warn('[Editor] stacked-view lane load failed:', script.path, err?.message || err);
+        return null;
+      }
+    }
+
+    const graph = new ActionGraph(canvas, editable);
+    graph._splineMode = this._splineMode;
+
+    container.addEventListener('click', () => {
+      // Route the click through the dropdown so the dropdown stays in
+      // sync with the editor state — single source of truth for active
+      // script. _onScriptSelectChange handles caching, autosave, and
+      // calls back into _rebuildInactiveLanes for us.
+      if (this._scriptSelect) {
+        this._scriptSelect.value = script.path;
+        this._onScriptSelectChange();
+      }
+    });
+
+    return { script: editable, canvas, graph, container };
+  }
+
+  /**
+   * Push the active lane's viewport / video duration / cursor onto every
+   * inactive lane and trigger a redraw. Called on every active-lane
+   * draw (zoom, pan, cursor tick) so previews stay aligned. Cheap — the
+   * inactive ActionGraphs run RDP-friendly culling internally.
+   */
+  _syncInactiveLanes() {
+    if (!this._stackedView || !this.graph) return;
+    for (const lane of this._inactiveLanes.values()) {
+      lane.graph.setVideoDuration(this.graph._videoDurationMs);
+      lane.graph.setViewport(this.graph.viewStartMs, this.graph.viewEndMs);
+      lane.graph.setCursorTime(this.graph._cursorMs);
+      lane.graph._splineMode = this._splineMode;
+      lane.graph.draw();
     }
   }
 

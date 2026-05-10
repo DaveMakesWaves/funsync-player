@@ -169,6 +169,7 @@ export const EDITOR_SHORTCUT_GROUPS = [
       ['Ctrl+Left / Right',   'Fast frame step (configurable; default 6)'],
       ['Ctrl+A',              'Select all'],
       ['Ctrl+1 / 2 / 3',      'Select top / middle / bottom third'],
+      ['Ctrl+Alt+Left / Right', 'Select all left / right of playhead'],
       ['Esc',                 'Clear selection / close editor'],
     ],
   },
@@ -179,6 +180,8 @@ export const EDITOR_SHORTCUT_GROUPS = [
       ['Ctrl+Shift+Up / Down','Nudge position ±1 (fine)'],
       ['Shift+Left / Right',  'Move action(s) ±1 frame in time'],
       ['Ctrl+Shift+Left / Right', 'Move action(s) ±N frames'],
+      ['End',                 'Move selected action to playhead'],
+      ['E',                   'Equalize selected (distribute evenly in time)'],
       ['Del / Backspace',     'Delete selected'],
       ['Ctrl+I',              'Invert positions'],
     ],
@@ -186,12 +189,17 @@ export const EDITOR_SHORTCUT_GROUPS = [
   {
     title: 'Place / edit actions',
     rows: [
-      ['0 – 9 (or Numpad)',   'Place action at 0 / 11 / 22 / … / 100'],
+      ['0 – 9 (or Numpad)',   'Place action at 0 / 10 / 20 / … / 100'],
       ['Alt+Click',           'Insert action at click position'],
       ['Shift+Drag dot',      'Move selected actions'],
+      ['Q',                   'Alternating insert (flip from last position)'],
+      ['Home',                'Repeat last stroke at playhead'],
       ['B',                   'Add bookmark at playhead'],
+      ['Shift+B / Ctrl+B',    'Jump to next / previous bookmark'],
       ['R',                   'Toggle recording mode'],
       ['W',                   'Toggle waveform'],
+      ['Shift+W',             'Toggle multi-band waveform (low / mid / high)'],
+      ['V',                   'Toggle voice-activity track'],
     ],
   },
   {
@@ -209,6 +217,7 @@ export const EDITOR_SHORTCUT_GROUPS = [
     title: 'View',
     rows: [
       ['+ / -',               'Zoom in / out'],
+      ['[ / ]',               'Step playback speed down / up'],
       ['?',                   'Show this help'],
     ],
   },

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>FunSync — Script Editor</title>
+  <link rel="stylesheet" href="styles/player.css">
+  <link rel="stylesheet" href="styles/modal.css">
+  <link rel="stylesheet" href="styles/editor.css">
+  <style>
+    /* Pop-out chrome — full-window editor surface. The body fills the
+     * window; the editor host fills the body. No nav bar, no library,
+     * no player. Single-purpose window. */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      background: #1a1a2e;
+      color: #fff;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      overflow: hidden;
+    }
+    #editor-popout-host {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+    .popout-placeholder {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 16px;
+      padding: 40px;
+      text-align: center;
+    }
+    .popout-placeholder__title {
+      font-size: 18px;
+      font-weight: 600;
+      color: #fff;
+    }
+    .popout-placeholder__hint {
+      font-size: 13px;
+      color: rgba(255, 255, 255, 0.65);
+      max-width: 520px;
+      line-height: 1.5;
+    }
+    .popout-placeholder__btn {
+      padding: 10px 20px;
+      background: var(--accent, #3498db);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .popout-placeholder__btn:hover {
+      filter: brightness(1.1);
+    }
+  </style>
+</head>
+<body>
+  <div id="editor-popout-host">
+    <div class="popout-placeholder">
+      <div class="popout-placeholder__title">Script Editor — Pop-out window</div>
+      <div class="popout-placeholder__hint">
+        Window scaffolding is wired and the IPC bridge is live. The
+        editor canvas + toolbar mount in this window is the next
+        implementation chunk — the action graph, undo cache, autosave,
+        and live device preview need to be moved over the IPC bridge so
+        they stay in sync with the main window's video element.
+      </div>
+      <button class="popout-placeholder__btn" id="dock-back-btn">Dock back to main window</button>
+    </div>
+  </div>
+  <script src="editor-popout.js" type="module"></script>
+</body>
+</html>

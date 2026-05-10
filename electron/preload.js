@@ -141,6 +141,28 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
   eroscriptsDownload: (url, savePath) => ipcRenderer.invoke('eroscripts-download', url, savePath),
 
+  // Editor pop-out (SCOPE-editor-v2.md §4)
+  editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),
+  editorPopoutClose: () => ipcRenderer.invoke('editor-popout:close'),
+  editorPopoutStatus: () => ipcRenderer.invoke('editor-popout:status'),
+  editorPopoutRelay: (direction, payload) => ipcRenderer.invoke('editor-popout:relay', direction, payload),
+  // Subscribe to lifecycle events: 'opened' / 'closed' / 'message'.
+  // Returns an unsubscribe function so callers can clean up on unmount
+  // without having to manually pair on/off (renderers leak otherwise).
+  onEditorPopoutEvent: (callback) => {
+    const onOpened = () => callback({ type: 'opened' });
+    const onClosed = () => callback({ type: 'closed' });
+    const onMessage = (_e, payload) => callback({ type: 'message', payload });
+    ipcRenderer.on('editor-popout:opened', onOpened);
+    ipcRenderer.on('editor-popout:closed', onClosed);
+    ipcRenderer.on('editor-popout:message', onMessage);
+    return () => {
+      ipcRenderer.removeListener('editor-popout:opened', onOpened);
+      ipcRenderer.removeListener('editor-popout:closed', onClosed);
+      ipcRenderer.removeListener('editor-popout:message', onMessage);
+    };
+  },
+
   // Auto-updater
   updaterCheck: () => ipcRenderer.invoke('updater-check'),
   updaterDownload: () => ipcRenderer.invoke('updater-download'),

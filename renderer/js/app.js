@@ -2953,6 +2953,14 @@ class App {
       fsBadge.hidden = true;
       fsBadge.innerHTML = '';
     }
+    // Tear down any previously-loaded subtitle track so a video without
+    // subtitles doesn't inherit the previous video's captions. Clearing
+    // the badge alone wasn't enough — the `<track>` and its TextTrack
+    // stayed wired, so the browser kept painting cues until the next
+    // loadSubtitles() (which only runs if the new video has subs).
+    if (this.videoPlayer?.clearSubtitles) {
+      this.videoPlayer.clearSubtitles();
+    }
     const subBadge = document.getElementById('subtitle-badge');
     if (subBadge) {
       subBadge.hidden = true;

@@ -42,18 +42,32 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   background: rgba(0, 0, 0, 0.3);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  min-height: 36px;
+  /* Fitts floor: 36px button + 6px top/bottom padding = 48px row.
+   * Matches the nav-bar / connection-panel / settings-panel passes
+   * (DESIGN.md §2.7) — every toolbar surface should clear the same
+   * minimum touch target so muscle memory transfers cleanly. */
+  min-height: 48px;
 }
 
 .editor__toolbar-separator {
   width: 1px;
-  height: 20px;
+  height: 22px;
   background: var(--surface-overlay);
   margin: 0 4px;
+  flex-shrink: 0;
+}
+
+/* Cluster-gap variant — wider margin signals a logical break between
+ * toolbar groups (script | edit | modify | view | save). Same pattern
+ * the nav-bar / connection-panel polish passes use; keeps related
+ * controls visually paired and dissimilar groups visually separated
+ * (Norman grouping). */
+.editor__toolbar-separator--cluster {
+  margin: 0 10px;
 }
 
 .editor__btn {
@@ -69,8 +83,12 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  min-height: 28px;
+  /* Fitts floor: 36×36 px target. Was 28×28 — under the design
+   * backbone's minimum and small enough that adjacent buttons could
+   * be mis-tapped on touch displays. Bumped to match nav-bar /
+   * connection-panel / settings-panel button sizing. */
+  min-width: 36px;
+  min-height: 36px;
 }
 
 .editor__btn svg {
@@ -83,6 +101,14 @@
   background: var(--control-hover);
 }
 
+.editor__btn:focus-visible {
+  /* Keyboard focus ring — matches the focus-visible pattern other
+   * polished toolbars use. Hidden for mouse users (no :focus, no
+   * .focus-visible polyfill needed; modern browsers handle this). */
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 .editor__btn:disabled {
   opacity: 0.3;
   cursor: default;
@@ -92,7 +118,12 @@
   background: none;
 }
 
-.editor__btn--active {
+.editor__btn--active,
+.editor__btn[aria-pressed="true"] {
+  /* Toggle-state surface: accent-soft background + accent-foreground
+   * tint. Single style hook on either the legacy `--active` class or
+   * the canonical `aria-pressed="true"` attribute so we can migrate
+   * incrementally without dropping existing visuals. */
   background: rgba(233, 69, 96, 0.2);
   color: var(--accent);
 }
@@ -236,6 +267,77 @@
 
 .editor__canvas-container--panning {
   cursor: grab;
+}
+
+/* === Stacked multi-axis lane view (§3) === */
+
+/* Container holding the inactive-lane previews. Sits above the main
+ * canvas; the active editing surface keeps its full height below. */
+.editor__stacked-lanes {
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.editor__lane {
+  position: relative;
+  display: flex;
+  align-items: stretch;
+  height: 64px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  overflow: hidden;
+  background: rgb(40, 0, 40);
+}
+
+.editor__lane--inactive {
+  cursor: pointer;
+  transition: border-color 0.12s ease, opacity 0.12s ease;
+  opacity: 0.85;
+}
+
+.editor__lane--inactive:hover {
+  border-color: var(--accent, #3498db);
+  opacity: 1;
+}
+
+.editor__lane-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 2;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: rgba(255, 255, 255, 0.85);
+  background: rgba(0, 0, 0, 0.55);
+  padding: 1px 5px;
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.editor__lane-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Stacked-view toggle button — accent tint when active so the user
+ * can read the toolbar at a glance (Norman state visibility). */
+.editor__btn--active {
+  background: var(--accent-soft, rgba(52, 152, 219, 0.18));
+  color: var(--accent, #3498db);
+}
+
+/* When stacked view is on, the canvas-container shrinks to share
+ * the panel height with the lanes. flex:1 already sizes it; nothing
+ * else to do — the rule is here as a hook for future tweaks. */
+.script-editor--stacked .editor__canvas-container {
+  /* placeholder for future stacked-mode tweaks */
 }
 
 /* === Editor Scrubber (mini timeline) === */

@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { downsamplePeaks, extractPeaks, getCachedPeaks, isExtracting, clearCache, clearCacheFor } from '../../renderer/js/waveform.js';
+import {
+  downsamplePeaks, extractPeaks, getCachedPeaks, isExtracting, clearCache, clearCacheFor,
+  applyBiquad, biquadLowpass, biquadHighpass, applyBandFilter, DEFAULT_BANDS,
+} from '../../renderer/js/waveform.js';
 
 describe('waveform', () => {
   describe('downsamplePeaks', () => {
@@ -295,6 +298,99 @@ describe('waveform', () => {
       clearCacheFor('file:///a.mp4');
       expect(getCachedPeaks('file:///a.mp4')).toBeNull();
       expect(getCachedPeaks('file:///b.mp4')).not.toBeNull();
+    });
+  });
+
+  // --- Multi-band waveform DSP (Audio Event Detection §2.1) -------------
+  //
+  // Network-side coverage (extractMultiBandPeaks) is hard to unit-test
+  // without a real OfflineAudioContext, so these tests pin the pure-DSP
+  // primitives: biquad filter coefficients, the cascaded HP→LP bandpass,
+  // and the band labels. With those locked, the higher-level extractor
+  // is a thin wrapper.
+
+  describe('multi-band DSP', () => {
+    function genSine(freqHz, durationSec, sampleRate) {
+      const n = Math.floor(durationSec * sampleRate);
+      const out = new Float32Array(n);
+      for (let i = 0; i < n; i++) out[i] = Math.sin(2 * Math.PI * freqHz * i / sampleRate);
+      return out;
+    }
+
+    function rms(samples, skipFirst = 0) {
+      let sum = 0; let count = 0;
+      for (let i = skipFirst; i < samples.length; i++) { sum += samples[i] * samples[i]; count++; }
+      return count ? Math.sqrt(sum / count) : 0;
+    }
+
+    it('biquadLowpass passes low frequencies and attenuates high frequencies', () => {
+      const sr = 44100;
+      const lp = biquadLowpass(500, sr);
+      const lowSig = genSine(100, 0.1, sr);
+      const highSig = genSine(8000, 0.1, sr);
+      // Skip the first 200 samples — biquad has a transient ramp-up
+      // before reaching steady-state output for periodic input.
+      const lowOut = rms(applyBiquad(lowSig, lp), 200);
+      const highOut = rms(applyBiquad(highSig, lp), 200);
+      expect(lowOut).toBeGreaterThan(highOut * 5); // strong attenuation
+    });
+
+    it('biquadHighpass passes high frequencies and attenuates low frequencies', () => {
+      const sr = 44100;
+      const hp = biquadHighpass(500, sr);
+      const lowSig = genSine(100, 0.1, sr);
+      const highSig = genSine(8000, 0.1, sr);
+      const lowOut = rms(applyBiquad(lowSig, hp), 200);
+      const highOut = rms(applyBiquad(highSig, hp), 200);
+      expect(highOut).toBeGreaterThan(lowOut * 5);
+    });
+
+    it('applyBandFilter routes types correctly', () => {
+      const sr = 44100;
+      const sig = genSine(2000, 0.1, sr); // mid-band frequency
+      // 'lp' band at 250 Hz should cut a 2 kHz tone heavily.
+      const lpOut = rms(applyBandFilter(sig, sr, { type: 'lp', freq: 250 }), 200);
+      // 'hp' band at 3 kHz should also cut a 2 kHz tone (just below cutoff).
+      const hpOut = rms(applyBandFilter(sig, sr, { type: 'hp', freq: 3000 }), 200);
+      // 'bp' band 250-3000 Hz should pass a 2 kHz tone.
+      const bpOut = rms(applyBandFilter(sig, sr, { type: 'bp', low: 250, high: 3000 }), 200);
+      expect(bpOut).toBeGreaterThan(lpOut);
+      expect(bpOut).toBeGreaterThan(hpOut);
+    });
+
+    it('applyBandFilter returns input unchanged for unknown band type', () => {
+      const sig = new Float32Array([0.1, 0.5, -0.3]);
+      const out = applyBandFilter(sig, 44100, { type: 'xyz' });
+      expect(out).toBe(sig); // same reference — defensive identity
+    });
+
+    it('default bands cover low / mid / high in order', () => {
+      expect(DEFAULT_BANDS.map(b => b.label)).toEqual(['Low', 'Mid', 'High']);
+      expect(DEFAULT_BANDS[0].type).toBe('lp');
+      expect(DEFAULT_BANDS[1].type).toBe('bp');
+      expect(DEFAULT_BANDS[2].type).toBe('hp');
+    });
+
+    it('default band ranges are non-overlapping in the SCOPE-defined ordering', () => {
+      // Low LP cutoff ≤ Mid BP low; Mid BP high ≤ High HP cutoff. Keeps
+      // the visualization free of confusing overlap between adjacent
+      // bands when extracted independently.
+      const [low, mid, high] = DEFAULT_BANDS;
+      expect(low.freq).toBeLessThanOrEqual(mid.low);
+      expect(mid.high).toBeLessThanOrEqual(high.freq);
+    });
+
+    it('applyBiquad is stable for silent input', () => {
+      const sig = new Float32Array(100); // all zeros
+      const out = applyBiquad(sig, biquadLowpass(500, 44100));
+      expect(out.length).toBe(100);
+      for (let i = 0; i < out.length; i++) expect(out[i]).toBe(0);
+    });
+
+    it('applyBiquad preserves length', () => {
+      const sig = new Float32Array(1234);
+      const out = applyBiquad(sig, biquadHighpass(1000, 44100));
+      expect(out.length).toBe(1234);
     });
   });
 });
