@@ -22,6 +22,11 @@ const DEFAULTS = {
         mode: 'off',
         threshold: 10000,
       },
+      upNext: {
+        mode: 'auto',
+        countdownSec: 10,
+      },
+      preferMultiAxis: 'single',
       smoothing: 'linear',
       speedLimit: 0,
     },

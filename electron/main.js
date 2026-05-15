@@ -610,7 +610,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   const dirPaths = Array.isArray(dirPathOrPaths) ? dirPathOrPaths : [dirPathOrPaths];
   const dirPath = dirPaths[0]; // for backward compat logging
   const _sourceMap = sourceMap || {};
-  const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac'];
+  const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
   const FUNSCRIPT_EXT = '.funscript';
   const SUBTITLE_EXTS = ['.srt', '.vtt'];
   const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
@@ -689,16 +689,25 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
     const parenMatch = nameNoExt.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
 
     let videoBase, variantLabel;
+    let isAmbiguousDotVariant = false;
     if (isAxis) {
       videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
       variantLabel = null; // axis, not a variant
     } else if (parenMatch) {
+      // Parenthesized variant — `"Title (Soft).funscript"`. Unambiguous
+      // user intent; treat as variant.
       videoBase = normalizeName(parenMatch[1]);
       variantLabel = parenMatch[2].trim();
     } else if (dotSuffix && dotIdx > 0) {
-      // Dot-separated variant: "video.intense" (not a known axis)
+      // AMBIGUOUS — could be a real variant ("video.intense.funscript")
+      // OR just a filename that happens to contain a dot ("S01.E03.funscript",
+      // "Title.2024.funscript"). We can't tell from the name in isolation.
+      // Classify provisionally as a variant and let the post-pass below
+      // demote it to primary if no sibling funscript exists with the
+      // dot-stripped base (i.e., nothing for it to be a "variant of").
       videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
       variantLabel = dotSuffix;
+      isAmbiguousDotVariant = true;
     } else {
       videoBase = normalizeName(nameNoExt);
       variantLabel = null; // default/primary
@@ -712,8 +721,45 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
       variantLabel,
       isAxis,
       axisSuffix: isAxis ? dotSuffix : null,
+      // Set for funscripts whose variant-ness was inferred from a dot
+      // in the filename. Post-pass below demotes to primary when no
+      // matching primary sibling exists.
+      isAmbiguousDotVariant,
+      // Cache the full-name normalisation for the demotion path so we
+      // don't recompute it after the maps are built.
+      fullNormalisedBase: normalizeName(nameNoExt),
       _used: false,
     });
+  }
+
+  // Post-pass: demote ambiguous dot-variants to primaries when no
+  // sibling exists with the dot-stripped base. This rescues filenames
+  // like "S01.E03.funscript" and "Title.2024.funscript" that the
+  // classifier above would otherwise route to a non-existent base.
+  // A sibling counts if it's a non-axis funscript in the same dir
+  // (preferred) or anywhere (fallback) whose `videoBase` matches the
+  // ambiguous variant's `videoBase`.
+  const siblingBasesLocal = new Set();
+  const siblingBasesGlobal = new Set();
+  for (const fs of funscriptList) {
+    if (fs.isAxis || fs.isAmbiguousDotVariant) continue;
+    siblingBasesLocal.add(fs.dir + '\0' + fs.videoBase);
+    siblingBasesGlobal.add(fs.videoBase);
+  }
+  for (const fs of funscriptList) {
+    if (!fs.isAmbiguousDotVariant) continue;
+    const localKey = fs.dir + '\0' + fs.videoBase;
+    if (siblingBasesLocal.has(localKey) || siblingBasesGlobal.has(fs.videoBase)) {
+      // Confirmed variant — a real primary exists. Clear the flag so
+      // downstream code can treat the classification as settled.
+      fs.isAmbiguousDotVariant = false;
+      continue;
+    }
+    // Demote to primary using the full normalised name. "Title.2024"
+    // becomes its own thing, matching "Title.2024.mp4".
+    fs.videoBase = fs.fullNormalisedBase;
+    fs.variantLabel = null;
+    fs.isAmbiguousDotVariant = false;
   }
 
   // Build two maps: same-directory (preferred) and global (fallback)

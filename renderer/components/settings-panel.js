@@ -13,6 +13,9 @@ import { classifyOverlap } from '../js/path-utils.js';
 const SETTINGS_DEFAULTS = {
   'player.gapSkip.mode': 'off',
   'player.gapSkip.thresholdSec': 10,
+  'player.upNext.mode': 'auto',
+  'player.upNext.countdownSec': 10,
+  'player.preferMultiAxis': 'single',
   'player.smoothing': 'linear',
   'player.speedLimit': 0,
   'player.linearStrategy': 'action-boundary',
@@ -21,15 +24,81 @@ const SETTINGS_DEFAULTS = {
 };
 
 export class SettingsPanel {
-  constructor({ settings, onSourcesChanged, onGapSkipChanged, onSmoothingChanged, onSpeedLimitChanged, onLinearStrategyChanged, onLinearLookaheadChanged, onMinStrokeChanged }) {
+  constructor({
+    settings,
+    onSourcesChanged,
+    onGapSkipChanged,
+    onUpNextChanged,
+    onPreferMultiAxisChanged,
+    getMultiAxisEligibleCount,
+    onSmoothingChanged,
+    onSpeedLimitChanged,
+    onLinearStrategyChanged,
+    onLinearLookaheadChanged,
+    onMinStrokeChanged,
+  }) {
     this._settings = settings;
     this._onSourcesChanged = onSourcesChanged;
     this.onGapSkipChanged = onGapSkipChanged || null;
+    this.onUpNextChanged = onUpNextChanged || null;
+    this.onPreferMultiAxisChanged = onPreferMultiAxisChanged || null;
+    this.getMultiAxisEligibleCount = getMultiAxisEligibleCount || null;
     this.onSmoothingChanged = onSmoothingChanged || null;
     this.onSpeedLimitChanged = onSpeedLimitChanged || null;
     this.onLinearStrategyChanged = onLinearStrategyChanged || null;
     this.onLinearLookaheadChanged = onLinearLookaheadChanged || null;
     this.onMinStrokeChanged = onMinStrokeChanged || null;
+  }
+
+  /**
+   * Confirmation modal shown before flipping `player.preferMultiAxis`
+   * from 'single' to 'multi'. Surfaces the count of eligible videos
+   * because the action is one-way: switching back to Single does NOT
+   * revert auto-assigned videos. Returns true if the user confirmed,
+   * false if cancelled (Esc / backdrop / Cancel button).
+   */
+  _confirmMultiAxisToggle(eligibleCount) {
+    const count = (typeof eligibleCount === 'number' && eligibleCount >= 0)
+      ? eligibleCount : null;
+    const subjectLine = (count == null)
+      ? 'FunSync will auto-assign multi-axis playback to every video with detected companion files.'
+      : count === 0
+        ? 'No videos in your library currently have detected companion files. New videos with companions will be auto-assigned as they appear.'
+        : `FunSync will auto-assign multi-axis playback to ${count} video${count === 1 ? '' : 's'} with detected companion files.`;
+
+    return Modal.open({
+      title: 'Switch to multi-axis default?',
+      onRender: (body, close) => {
+        const msg = document.createElement('div');
+        msg.className = 'modal-message';
+        msg.textContent = subjectLine;
+        body.appendChild(msg);
+
+        const warning = document.createElement('div');
+        warning.className = 'modal-message';
+        warning.style.marginTop = '12px';
+        warning.style.color = 'var(--text-secondary)';
+        warning.textContent = 'Switching back to Single later will not revert these assignments. Use Change funscript on individual videos to undo.';
+        body.appendChild(warning);
+
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'modal-btn modal-btn--secondary';
+        cancelBtn.textContent = 'Cancel';
+        cancelBtn.addEventListener('click', () => close(false));
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'modal-btn';
+        confirmBtn.textContent = 'Switch to Multi-axis';
+        confirmBtn.addEventListener('click', () => close(true));
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        body.appendChild(actions);
+      },
+    }).then((v) => v === true);
   }
 
   async show() {
@@ -400,6 +469,55 @@ export class SettingsPanel {
     `;
     panel.appendChild(gapSection);
 
+    // Up Next — autoplay-countdown card at the end of the video. Sits
+    // next to Gap Skip because both decide what happens at the trailing
+    // edge of a script (Norman: conceptual model — adjacent surfaces
+    // for adjacent decisions).
+    const upNextSection = document.createElement('div');
+    upNextSection.className = 'settings-panel__section';
+    upNextSection.innerHTML = `
+      <h2 class="settings-panel__section-header">Up Next</h2>
+      <div class="settings-panel__field">
+        <span class="settings-panel__field-label">Mode</span>
+        <select id="sp-upnext-mode" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-upnext-hint">
+          <option value="auto">Show countdown card</option>
+          <option value="off">Off</option>
+        </select>
+        <button type="button" id="sp-upnext-mode-reset" class="settings-panel__field-reset" hidden title="Reset to default (Show countdown card)" aria-label="Reset Mode to default">↻</button>
+      </div>
+      <div class="settings-panel__field" id="sp-upnext-countdown-row" hidden>
+        <span class="settings-panel__field-label">Countdown</span>
+        <input type="range" id="sp-upnext-countdown" class="settings-panel__input settings-panel__input--range" min="3" max="20" value="10" step="1" aria-describedby="sp-upnext-hint">
+        <span id="sp-upnext-countdown-val" class="settings-panel__field-value">10s</span>
+        <button type="button" id="sp-upnext-countdown-reset" class="settings-panel__field-reset" hidden title="Reset to default (10s)" aria-label="Reset Countdown to default">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-upnext-hint">Shows the next item in the current library / playlist / category at the end of the video, with an autoplay countdown. Hover the card to pause the countdown; click × or press Esc to dismiss.</div>
+    `;
+    panel.appendChild(upNextSection);
+
+    // Multi-Axis — auto-promote eligible videos to multi-axis playback.
+    // Sits next to Up Next + Gap Skip because all three decide what
+    // happens at the script-funscript boundary (Norman: conceptual
+    // model). The toggle is a one-shot promoter — it writes
+    // `active='multi'` to `library.associations` for eligible videos.
+    // Toggling back to Single does NOT revert the writes (per user
+    // directive); the hint copy makes that explicit.
+    const multiAxisSection = document.createElement('div');
+    multiAxisSection.className = 'settings-panel__section';
+    multiAxisSection.innerHTML = `
+      <h2 class="settings-panel__section-header">Multi-Axis</h2>
+      <div class="settings-panel__field">
+        <span class="settings-panel__field-label">Default playback</span>
+        <select id="sp-prefer-multi" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-multi-hint">
+          <option value="single">Single axis (default)</option>
+          <option value="multi">Multi-axis when available</option>
+        </select>
+        <button type="button" id="sp-prefer-multi-reset" class="settings-panel__field-reset" hidden title="Reset to default (Single axis)" aria-label="Reset Default playback to default">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-multi-hint">When set to Multi-axis, FunSync auto-assigns multi-axis playback to videos with detected companion files (twist, surge, etc.). Already-set videos keep their current selection. Switching back to Single will not revert auto-assignments — use Change funscript on individual videos to undo.</div>
+    `;
+    panel.appendChild(multiAxisSection);
+
     // Smoothing — each control linked to the section hint via
     // aria-describedby so screen readers read the hint when the
     // input gets focus (Nielsen #4 standards — WCAG 1.3.1 Info and
@@ -483,6 +601,70 @@ export class SettingsPanel {
         const mode = gapMode?.value || 'off';
         this._settings.set('player.gapSkip', { mode, threshold: seconds * 1000 });
         if (this.onGapSkipChanged) this.onGapSkipChanged(mode, seconds * 1000);
+      });
+
+      // Up Next
+      const upNextMode = panel.querySelector('#sp-upnext-mode');
+      const upNextCountdown = panel.querySelector('#sp-upnext-countdown');
+      const upNextCountdownVal = panel.querySelector('#sp-upnext-countdown-val');
+      const upNextCountdownRow = panel.querySelector('#sp-upnext-countdown-row');
+
+      const savedUpNext = this._settings.get('player.upNext') || {};
+      const upNextModeVal = savedUpNext.mode || SETTINGS_DEFAULTS['player.upNext.mode'];
+      const upNextCountSec = savedUpNext.countdownSec || SETTINGS_DEFAULTS['player.upNext.countdownSec'];
+      if (upNextMode) upNextMode.value = upNextModeVal;
+      if (upNextCountdown) upNextCountdown.value = upNextCountSec;
+      if (upNextCountdownVal) upNextCountdownVal.textContent = `${upNextCountSec}s`;
+      // Hide countdown row when mode is off (mirrors gap-skip pattern).
+      if (upNextCountdownRow) upNextCountdownRow.hidden = upNextModeVal === 'off';
+
+      upNextMode?.addEventListener('change', () => {
+        const mode = upNextMode.value;
+        const countdownSec = parseInt(upNextCountdown?.value, 10) || SETTINGS_DEFAULTS['player.upNext.countdownSec'];
+        this._settings.set('player.upNext', { mode, countdownSec });
+        if (upNextCountdownRow) upNextCountdownRow.hidden = mode === 'off';
+        if (this.onUpNextChanged) this.onUpNextChanged(mode, countdownSec);
+      });
+
+      upNextCountdown?.addEventListener('input', () => {
+        const seconds = parseInt(upNextCountdown.value, 10) || SETTINGS_DEFAULTS['player.upNext.countdownSec'];
+        if (upNextCountdownVal) upNextCountdownVal.textContent = `${seconds}s`;
+        const mode = upNextMode?.value || 'auto';
+        this._settings.set('player.upNext', { mode, countdownSec: seconds });
+        if (this.onUpNextChanged) this.onUpNextChanged(mode, seconds);
+      });
+
+      // Multi-Axis default playback. Toggle from Single → Multi opens
+      // a confirmation modal that surfaces the eligible-video count
+      // because the action is one-way: switching back to Single does
+      // not revert auto-assigned videos.
+      const preferMulti = panel.querySelector('#sp-prefer-multi');
+      const savedPreferMulti = this._settings.get('player.preferMultiAxis')
+        || SETTINGS_DEFAULTS['player.preferMultiAxis'];
+      if (preferMulti) preferMulti.value = savedPreferMulti;
+
+      preferMulti?.addEventListener('change', async () => {
+        const newValue = preferMulti.value;
+        const previousValue = this._settings.get('player.preferMultiAxis')
+          || SETTINGS_DEFAULTS['player.preferMultiAxis'];
+
+        // Single → Multi triggers the confirmation modal. Multi →
+        // Single is a no-op for already-promoted videos so it doesn't
+        // need a prompt.
+        if (newValue === 'multi' && previousValue !== 'multi') {
+          const eligibleCount = this.getMultiAxisEligibleCount
+            ? this.getMultiAxisEligibleCount()
+            : null;
+          const confirmed = await this._confirmMultiAxisToggle(eligibleCount);
+          if (!confirmed) {
+            // Revert the select silently — no setting write, no callback.
+            preferMulti.value = previousValue;
+            return;
+          }
+        }
+
+        this._settings.set('player.preferMultiAxis', newValue);
+        if (this.onPreferMultiAxisChanged) this.onPreferMultiAxisChanged(newValue);
       });
 
       const smoothing = panel.querySelector('#sp-smoothing');
@@ -605,6 +787,9 @@ export class SettingsPanel {
 
       wireDefault(gapMode, null, panel.querySelector('#sp-gap-mode-reset'), SETTINGS_DEFAULTS['player.gapSkip.mode']);
       wireDefault(gapThreshold, gapThresholdVal, panel.querySelector('#sp-gap-threshold-reset'), SETTINGS_DEFAULTS['player.gapSkip.thresholdSec']);
+      wireDefault(upNextMode, null, panel.querySelector('#sp-upnext-mode-reset'), SETTINGS_DEFAULTS['player.upNext.mode']);
+      wireDefault(upNextCountdown, upNextCountdownVal, panel.querySelector('#sp-upnext-countdown-reset'), SETTINGS_DEFAULTS['player.upNext.countdownSec']);
+      wireDefault(preferMulti, null, panel.querySelector('#sp-prefer-multi-reset'), SETTINGS_DEFAULTS['player.preferMultiAxis']);
       wireDefault(smoothing, null, panel.querySelector('#sp-smoothing-reset'), SETTINGS_DEFAULTS['player.smoothing']);
       wireDefault(speedLimit, speedLimitVal, panel.querySelector('#sp-speed-limit-reset'), SETTINGS_DEFAULTS['player.speedLimit']);
       wireDefault(linearStrategy, null, panel.querySelector('#sp-linear-strategy-reset'), SETTINGS_DEFAULTS['player.linearStrategy']);

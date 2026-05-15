@@ -266,7 +266,19 @@ export class Categories {
     grid.classList.toggle('categories__grid--list', this._viewMode === 'list');
 
     for (const videoPath of validPaths) {
-      const el = this._viewMode === 'list' ? this._createVideoListItem(videoPath, cat) : this._createVideoCard(videoPath, cat);
+      // Capture this category's full path list as the play context so Up
+      // Next can advance through the category. Snapshot is per-card so
+      // each click captures its index correctly.
+      const playContext = {
+        source: 'category',
+        sourceLabel: `category "${cat.name}"`,
+        sourceContext: { categoryId: cat.id },
+        list: validPaths.slice(),
+        index: validPaths.indexOf(videoPath),
+      };
+      const el = this._viewMode === 'list'
+        ? this._createVideoListItem(videoPath, cat, playContext)
+        : this._createVideoCard(videoPath, cat, playContext);
       grid.appendChild(el);
     }
 
@@ -274,7 +286,7 @@ export class Categories {
     this._container.appendChild(wrapper);
   }
 
-  _createVideoCard(videoPath, category) {
+  _createVideoCard(videoPath, category, playContext) {
     const card = document.createElement('div');
     card.className = 'categories__video-card';
 
@@ -327,7 +339,7 @@ export class Categories {
 
     card.addEventListener('click', () => {
       if (card.classList.contains('categories__video-card--broken')) return;
-      this._playVideo(videoPath);
+      this._playVideo(videoPath, playContext);
     });
 
     return card;
@@ -429,21 +441,37 @@ export class Categories {
     });
   }
 
-  async _playVideo(videoPath) {
+  async _playVideo(videoPath, playContext) {
     const fileName = videoPath.split(/[\\/]/).pop();
     const fileData = { name: fileName, path: videoPath, _isPathBased: true };
+    if (playContext) fileData._playContext = playContext;
 
-    // Try to find a matching funscript — prefer library scan (auto-detects
-    // + manual associations) over naive extension swap.
+    // Prefer the library video record (carries `_multiAxis` /
+    // `_customRouting` from explicit or auto-promoted associations).
+    // Falls back to path-only resolution when the video has been
+    // removed from any active source.
+    const libVideo = this._library?.getVideoByPath?.(videoPath);
+    const funscriptPath = (libVideo?.hasFunscript && libVideo.funscriptPath)
+      ? libVideo.funscriptPath
+      : this._resolveFunscriptPath(videoPath);
+
     let funscriptData = null;
-    const funscriptPath = this._resolveFunscriptPath(videoPath);
     try {
       const content = await window.funsync.readFunscript(funscriptPath);
       if (content) {
         const fsName = funscriptPath.split(/[\\/]/).pop();
         funscriptData = { name: fsName, path: funscriptPath, textContent: content };
+        if (libVideo?._multiAxis) funscriptData._multiAxis = libVideo._multiAxis;
+        if (libVideo?._customRouting) funscriptData._customRouting = libVideo._customRouting;
       }
     } catch { /* no funscript found — that's fine */ }
+
+    if (!funscriptData && libVideo?._multiAxis) {
+      funscriptData = { name: '', textContent: null, _multiAxis: libVideo._multiAxis };
+    }
+    if (!funscriptData && libVideo?._customRouting) {
+      funscriptData = { name: '', textContent: null, _customRouting: libVideo._customRouting };
+    }
 
     this._onPlayVideo(fileData, funscriptData);
   }
@@ -671,7 +699,7 @@ export class Categories {
     return row;
   }
 
-  _createVideoListItem(videoPath, category) {
+  _createVideoListItem(videoPath, category, playContext) {
     const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
     const row = document.createElement('div');
     row.className = 'categories__list-item';
@@ -706,7 +734,7 @@ export class Categories {
     row.append(title, heatmap, badges, removeBtn);
 
     row.addEventListener('click', () => {
-      this._playVideoByPath(videoPath);
+      this._playVideo(videoPath, playContext);
     });
 
     this._loadListStats(videoPath, funscriptPath, fsBadge, badges, heatmap, row);

@@ -37,6 +37,8 @@ import { Categories } from '../components/categories.js';
 import { ScriptEditor } from '../components/script-editor.js';
 import { DeviceSimulator } from '../components/device-simulator.js';
 import { GapSkipEngine } from './gap-skip.js';
+import { UpNextEngine } from './up-next.js';
+import { UpNextCard } from '../components/up-next-card.js';
 import { EroScriptsPanel } from '../components/eroscripts-panel.js';
 import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
@@ -189,6 +191,25 @@ class App {
           this.gapSkipEngine.setSettings(mode, threshold);
           if (this.funscriptEngine.isLoaded) this._startGapSkip();
         }
+      },
+      onUpNextChanged: (mode, countdownSec) => {
+        if (this.upNextEngine) {
+          this.upNextEngine.setSettings(mode, countdownSec);
+        }
+      },
+      onPreferMultiAxisChanged: (mode) => {
+        // Confirmation modal already gated this; just trigger the
+        // promotion pass on the existing in-memory `_videos`. Setting
+        // is already persisted by the time we get called.
+        if (mode === 'multi' && this.library?._reapplyAutoPromotion) {
+          const promoted = this.library._reapplyAutoPromotion();
+          if (promoted > 0) {
+            showToast(`Auto-assigned ${promoted} video${promoted === 1 ? '' : 's'} to multi-axis playback`, 'info', 4000);
+          }
+        }
+      },
+      getMultiAxisEligibleCount: () => {
+        return this.library?._countAutoPromotionEligible?.() ?? null;
       },
       onSmoothingChanged: (mode) => {
         if (this.buttplugSync) this.buttplugSync.setInterpolationMode(mode);
@@ -807,18 +828,31 @@ class App {
     });
     this._wireGapSkipUI();
 
+    // Initialize Up Next engine + card
+    this.upNextEngine = new UpNextEngine({
+      videoPlayer: this.videoPlayer,
+      funscriptEngine: this.funscriptEngine,
+    });
+    this._wireUpNextUI();
+
     // Wire script editor + device simulator + gap skip + variants into keyboard handler
     if (this._keyboard) {
       this._keyboard.scriptEditor = this.scriptEditor;
       this._keyboard.deviceSimulator = this.deviceSimulator;
       this._keyboard.gapSkipEngine = this.gapSkipEngine;
+      this._keyboard.upNextEngine = this.upNextEngine;
       this._keyboard.onCycleVariant = (dir) => this._cycleVariant(dir);
     }
 
     // Editor toggle button
     const btnEditor = document.getElementById('btn-editor');
     if (btnEditor) {
-      btnEditor.addEventListener('click', () => this.scriptEditor.toggle());
+      btnEditor.addEventListener('click', () => {
+        this.scriptEditor.toggle();
+        // Editor visibility flips Up Next suppression — sync after the
+        // toggle so an open editor never has a stray Up Next card on top.
+        this._syncUpNextSuppression();
+      });
     }
 
     // Initialize subtitle badge icon — and wire its click to toggle
@@ -3357,6 +3391,15 @@ class App {
     this._playQueueIndex = -1;
     this._updateQueueUI();
 
+    // Capture the play context attached by library/playlists/categories
+    // so Up Next can advance through the user's filtered/sorted view.
+    // Snapshot is immutable for this session — sort/filter changes during
+    // playback don't retroactively alter "next" (Norman: conceptual
+    // model). Drag-and-drop / Open File launches arrive without a
+    // context and Up Next stays silent.
+    this._currentPlayContext = videoData?._playContext || null;
+    this._setUpNextContext(this._currentPlayContext);
+
     this._currentMultiAxis = null;
 
     // Reset custom-routing + axis state from any previous video so we
@@ -3632,6 +3675,179 @@ class App {
     if (!this.gapSkipEngine) return;
     this.gapSkipEngine.stop();
     this.progressBar.setGaps(null);
+  }
+
+  _wireUpNextUI() {
+    const cardEl = document.getElementById('up-next-card');
+    if (!cardEl) return;
+
+    // Apply persisted settings.
+    const cfg = this.settings.get('player.upNext') || {};
+    this.upNextEngine.setSettings(cfg.mode || 'auto', cfg.countdownSec || 10);
+
+    // The card needs library-keyed metadata + a thumbnail. Cache-first
+    // (instant for any video the library has already painted) → backend
+    // ffmpeg (cheap, on-disk cached by content hash) → null skeleton.
+    // Falls back gracefully when the library hasn't initialized yet.
+    this.upNextCard = new UpNextCard({
+      element: cardEl,
+      library: this.library || null,
+      captureFrame: (path) => this._captureUpNextThumb(path),
+      onPlayNext: () => this.upNextEngine.playNext(),
+      onDismiss: () => this.upNextEngine.dismiss(),
+      onHoverEnter: () => this.upNextEngine.pauseCountdown(),
+      onHoverLeave: () => this.upNextEngine.resumeCountdown(),
+      onBackToSource: (sourceContext) => this._upNextBackToSource(sourceContext),
+    });
+
+    // Engine → card.
+    this.upNextEngine.onShowNext = (path, countdownSec) => {
+      this.upNextCard.show(path, countdownSec);
+      // Up Next supersedes gap-skip's trailing overlay (SCOPE §3.4).
+      const gapEl = document.getElementById('gap-skip-overlay');
+      if (gapEl) gapEl.hidden = true;
+    };
+    this.upNextEngine.onShowEndOfList = (sourceLabel, sourceContext) => {
+      this.upNextCard.showEndOfList(sourceLabel, sourceContext);
+    };
+    this.upNextEngine.onTick = (remaining) => this.upNextCard.tick(remaining);
+    this.upNextEngine.onHide = () => this.upNextCard.hide();
+    this.upNextEngine.onPlayNext = (path) => this._playUpNext(path);
+
+    // Video events → engine.check(). The engine is idempotent, so it's
+    // safe to fire on every event — show/hide transitions are
+    // edge-triggered internally. We re-read suppression state on every
+    // tick so A-B loop / video.loop changes are honored without needing
+    // a separate event hook into the player.
+    const checkFn = () => {
+      this._syncUpNextSuppression();
+      this.upNextEngine.check();
+    };
+    this.videoPlayer.video.addEventListener('timeupdate', checkFn);
+    this.videoPlayer.video.addEventListener('seeked', checkFn);
+    this.videoPlayer.video.addEventListener('loadedmetadata', checkFn);
+    this.videoPlayer.video.addEventListener('play', checkFn);
+    this.videoPlayer.video.addEventListener('pause', checkFn);
+    // `ended` is the safety net — when the video finishes naturally the
+    // 200 ms tick may not have fired yet, and the queued `pause` would
+    // freeze the countdown. Fire next immediately if the card is up.
+    this.videoPlayer.video.addEventListener('ended', () => {
+      if (this.upNextEngine.visible && !this.upNextEngine.endOfListShown) {
+        const path = this.upNextEngine._nextPath();
+        this.upNextEngine.hide();
+        if (path) this._playUpNext(path);
+      }
+    });
+  }
+
+  /**
+   * Sync editor / loop suppression state into the engine. Call after any
+   * change to A-B loop, video.loop, or scriptEditor.isOpen.
+   */
+  _syncUpNextSuppression() {
+    if (!this.upNextEngine) return;
+    const editorOpen = !!this.scriptEditor?.isOpen;
+    const ab = this.videoPlayer?._abLoop;
+    const abLoopActive = (ab && ab.a !== null && ab.b !== null)
+      || this.videoPlayer?.video?.loop === true;
+    this.upNextEngine.setSuppressed(editorOpen || abLoopActive);
+  }
+
+  _setUpNextContext(playContext) {
+    if (!this.upNextEngine) return;
+    this.upNextEngine.setPlayContext(playContext || null);
+    this._syncUpNextSuppression();
+  }
+
+  /**
+   * Auto-advance triggered when the countdown reaches zero or the user
+   * clicks Play. Looks the path up in the current library catalog and
+   * routes through library._playVideo so all the existing wiring
+   * (funscript, subtitles, variants, multi-axis) runs the same way as
+   * a manual library click. Snapshot context is forwarded with index+1
+   * via `_playContextOverride` (per SCOPE §3.5 immutability).
+   */
+  async _playUpNext(path) {
+    if (!path || !this.library) return;
+    const video = this.library.getVideoByPath?.(path);
+    if (!video) {
+      // File missing from current library scan — try to walk past it.
+      const next = this.upNextEngine.advancePastMissing();
+      if (next) return this._playUpNext(next);
+      showToast('Next video not found in library', 'warn', 3000);
+      return;
+    }
+    if (this._currentPlayContext) {
+      const nextIdx = (this._currentPlayContext.index || 0) + 1;
+      video._playContextOverride = {
+        ...this._currentPlayContext,
+        index: nextIdx,
+      };
+    }
+    await this.library._playVideo(video);
+  }
+
+  /**
+   * Resolve a thumbnail for the Up Next card. Tries (in order):
+   *   1. The in-memory thumbnail cache the library already populated.
+   *   2. The library's per-card capture (which itself goes backend
+   *      ffmpeg → renderer-<video> fallback) — populates the cache as a
+   *      side-effect.
+   *   3. Backend ffmpeg directly (works even before the library has
+   *      ever scanned the path).
+   * Returns `{ dataUrl }` or `null`.
+   */
+  async _captureUpNextThumb(path) {
+    if (!path) return null;
+    try {
+      const mod = await import('./thumbnail-cache.js');
+      const cached = mod.get(path, 0);
+      if (cached) return { dataUrl: cached };
+    } catch { /* cache miss path */ }
+    if (this.library?._captureVideoFrame) {
+      try {
+        const result = await this.library._captureVideoFrame(path);
+        if (result?.dataUrl) {
+          try {
+            const mod = await import('./thumbnail-cache.js');
+            mod.set(path, 0, result.dataUrl);
+          } catch { /* non-fatal */ }
+          return { dataUrl: result.dataUrl };
+        }
+      } catch { /* fall through */ }
+    }
+    if (window.funsync?.generateSingleThumbnail) {
+      try {
+        const result = await window.funsync.generateSingleThumbnail(path, { seekPct: 0.1, width: 320 });
+        if (result?.dataUrl) {
+          try {
+            const mod = await import('./thumbnail-cache.js');
+            mod.set(path, 0, result.dataUrl);
+          } catch { /* non-fatal */ }
+          return { dataUrl: result.dataUrl };
+        }
+      } catch { /* fall through */ }
+    }
+    return null;
+  }
+
+  _upNextBackToSource(sourceContext) {
+    const ctx = sourceContext || {};
+    if (ctx.playlistId && this.playlists) {
+      this._navigateTo('playlists');
+      this.playlists._detailPlaylistId = ctx.playlistId;
+      this.playlists._view = 'detail';
+      this.playlists._renderDetail?.(ctx.playlistId);
+      return;
+    }
+    if (ctx.categoryId && this.categories) {
+      this._navigateTo('categories');
+      this.categories._detailCategoryId = ctx.categoryId;
+      this.categories._view = 'detail';
+      this.categories._renderDetail?.(ctx.categoryId);
+      return;
+    }
+    this._navigateTo('library');
   }
 
   // --- Library Collections ---

@@ -187,6 +187,8 @@
      accent tokens. Light-theme variants tuned for AA on white. */
   --badge-info: #2196f3;       /* blue: manual funscript, speed-slow */
   --badge-purple: #ab47bc;     /* purple: manual subtitle, speed-insane */
+  --badge-multi: #26a69a;      /* teal: multi-axis playback active */
+  --badge-custom: #7986cb;     /* indigo: custom routing active (paired with Cable icon) */
   --badge-duration-bg: rgba(0, 0, 0, 0.7);  /* duration sits over thumbnails — dark works on both themes */
 
   /* Progress / scrub bar */
@@ -267,6 +269,8 @@
   /* Badge accent tokens — darker variants for AA contrast on white. */
   --badge-info: #1565c0;
   --badge-purple: #6a1b9a;
+  --badge-multi: #00796b;
+  --badge-custom: #3949ab;
   --badge-duration-bg: rgba(0, 0, 0, 0.7);  /* still dark — duration sits over thumbnail */
 
   --progress-bg: rgba(0, 0, 0, 0.16);

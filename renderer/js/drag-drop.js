@@ -9,7 +9,7 @@
 // BEFORE the user releases — Nielsen #5 error prevention), and surfaces
 // a toast for unsupported drops.
 
-const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac'];
+const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
 const FUNSCRIPT_EXTENSIONS = ['.funscript'];
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt'];
 const ALL_ACCEPTED = [...VIDEO_EXTENSIONS, ...FUNSCRIPT_EXTENSIONS, ...SUBTITLE_EXTENSIONS];

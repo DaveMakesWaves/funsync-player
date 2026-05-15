@@ -236,7 +236,16 @@ export class Playlists {
     grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
 
     for (const videoPath of validPaths) {
-      const el = this._viewMode === 'list' ? this._createVideoListItem(videoPath, pl) : this._createVideoCard(videoPath, pl);
+      const playContext = {
+        source: 'playlist',
+        sourceLabel: `playlist "${pl.name}"`,
+        sourceContext: { playlistId: pl.id },
+        list: validPaths.slice(),
+        index: validPaths.indexOf(videoPath),
+      };
+      const el = this._viewMode === 'list'
+        ? this._createVideoListItem(videoPath, pl, playContext)
+        : this._createVideoCard(videoPath, pl, playContext);
       grid.appendChild(el);
     }
 
@@ -244,7 +253,7 @@ export class Playlists {
     this._container.appendChild(wrapper);
   }
 
-  _createVideoCard(videoPath, playlist) {
+  _createVideoCard(videoPath, playlist, playContext) {
     const card = document.createElement('div');
     card.className = 'playlists__video-card';
 
@@ -295,35 +304,58 @@ export class Playlists {
     // Check for funscript and show badge
     this._checkFunscriptBadge(card, thumbnail, videoPath);
 
-    card.addEventListener('click', async () => {
+    card.addEventListener('click', () => {
       if (card.classList.contains('playlists__video-card--broken')) return;
-      const fileName = videoPath.split(/[\\/]/).pop();
-      const fileData = { name: fileName, path: videoPath, _isPathBased: true };
-      const fsPath = this._getFunscriptPath(videoPath);
-      // Only warn when the script path was user-associated (explicit) —
-      // the fallback basename guess silently failing is fine ("user
-      // never set up a script" isn't a failure, it's a no-op).
-      const isExplicit = this._hasExplicitAssociation(videoPath);
-      let funscriptData = null;
-      let readFailed = false;
-      try {
-        const content = await window.funsync.readFunscript(fsPath);
-        if (content) {
-          funscriptData = { name: fsPath.split(/[\\/]/).pop(), textContent: content };
-        } else if (isExplicit) {
-          readFailed = true;
-        }
-      } catch {
-        if (isExplicit) readFailed = true;
-      }
-      if (readFailed) {
-        const { showToast } = await import('../js/toast.js');
-        showToast(`Funscript for ${fileName} couldn't be read — playing without sync`, 'warn', 4000);
-      }
-      this._onPlayVideo(fileData, funscriptData);
+      this._playVideoByPath(videoPath, playContext);
     });
 
     return card;
+  }
+
+  async _playVideoByPath(videoPath, playContext) {
+    const fileName = videoPath.split(/[\\/]/).pop();
+    const fileData = { name: fileName, path: videoPath, _isPathBased: true };
+    if (playContext) fileData._playContext = playContext;
+
+    // Prefer the library's full video record when available — that's
+    // where `_multiAxis` and `_customRouting` live for videos with
+    // explicit (or auto-promoted) associations. Falling back to the
+    // path-only resolution covers playlist items whose source has been
+    // removed since the entry was added.
+    const libVideo = this._library?.getVideoByPath?.(videoPath);
+    const fsPath = (libVideo?.hasFunscript && libVideo.funscriptPath)
+      ? libVideo.funscriptPath
+      : this._getFunscriptPath(videoPath);
+
+    const isExplicit = this._hasExplicitAssociation(videoPath);
+    let funscriptData = null;
+    let readFailed = false;
+    try {
+      const content = await window.funsync.readFunscript(fsPath);
+      if (content) {
+        funscriptData = { name: fsPath.split(/[\\/]/).pop(), textContent: content };
+        if (libVideo?._multiAxis) funscriptData._multiAxis = libVideo._multiAxis;
+        if (libVideo?._customRouting) funscriptData._customRouting = libVideo._customRouting;
+      } else if (isExplicit) {
+        readFailed = true;
+      }
+    } catch {
+      if (isExplicit) readFailed = true;
+    }
+    // Vib-only / no-main fallthrough — mirrors library._playVideo so
+    // multi-axis and custom-routing setups work even when the main file
+    // can't be read.
+    if (!funscriptData && libVideo?._multiAxis) {
+      funscriptData = { name: '', textContent: null, _multiAxis: libVideo._multiAxis };
+    }
+    if (!funscriptData && libVideo?._customRouting) {
+      funscriptData = { name: '', textContent: null, _customRouting: libVideo._customRouting };
+    }
+    if (readFailed) {
+      const { showToast } = await import('../js/toast.js');
+      showToast(`Funscript for ${fileName} couldn't be read — playing without sync`, 'warn', 4000);
+    }
+    this._onPlayVideo(fileData, funscriptData);
   }
 
   async _loadVideoThumbnail(cardEl, thumbnailEl, videoPath) {
@@ -646,7 +678,7 @@ export class Playlists {
     return row;
   }
 
-  _createVideoListItem(videoPath, playlist) {
+  _createVideoListItem(videoPath, playlist, playContext) {
     const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
     const row = document.createElement('div');
     row.className = 'playlists__list-item';
@@ -681,7 +713,7 @@ export class Playlists {
     row.append(title, heatmap, badges, removeBtn);
 
     row.addEventListener('click', () => {
-      this._playVideoByPath(videoPath);
+      this._playVideoByPath(videoPath, playContext);
     });
 
     const funscriptPath = this._getFunscriptPath(videoPath);
