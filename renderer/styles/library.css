@@ -364,12 +364,17 @@
 
 /* Inline badges for list view */
 .library__funscript-badge--inline,
-.library__subtitle-badge--inline {
+.library__subtitle-badge--inline,
+.library__multi-badge--inline,
+.library__custom-badge--inline {
   display: flex;
   align-items: center;
   justify-content: center;
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.3));
 }
+
+.library__multi-badge--inline { color: var(--badge-multi); }
+.library__custom-badge--inline { color: var(--badge-custom); }
 
 /* Hover Video Preview — opacity fade-in respects `prefers-reduced-motion`.
    The canvas still loads / decodes; only the transition is suppressed
@@ -756,6 +761,20 @@
 .library__vr-badge--flat {
   background: var(--badge-info, #3b82f6);
 }
+
+/* Playback-mode badges (multi-axis / custom routing).
+   Same icon shape as funscript/subtitle so they sit cleanly inside the
+   shared .library__card-badges flex row. Skip-when-single keeps the grid
+   uncluttered — absence of badge = default single-axis playback. */
+.library__multi-badge,
+.library__custom-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.library__multi-badge { color: var(--badge-multi); }
+.library__custom-badge { color: var(--badge-custom); }
 
 .library__speed-badge {
   display: inline-flex;

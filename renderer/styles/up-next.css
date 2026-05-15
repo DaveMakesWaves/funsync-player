@@ -1,0 +1,223 @@
+/* Up Next card — end-of-video autoplay countdown.
+ *
+ * Position mirrors .gap-skip (bottom-right above the controls). The card
+ * sits at z-index 16 (one above .gap-skip at 15) — a safety margin in
+ * case the suppression hand-off has an off-by-one frame.
+ *
+ * Tokens are --video-overlay-* per DESIGN.md §2.2 — never theme-app
+ * tokens. The video is dark content; coupling these to the app theme
+ * would make light-mode controls invisible against dark scenes.
+ */
+
+.up-next {
+  position: absolute;
+  bottom: 100px;
+  right: 20px;
+  z-index: 16;
+  width: 320px;
+  max-width: calc(100% - 40px);
+  background: var(--video-overlay-bg);
+  color: var(--video-overlay-text);
+  border: 1px solid var(--video-overlay-border);
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(12px);
+  animation: up-next-in 200ms ease forwards;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .up-next { animation: none; }
+}
+
+.up-next__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--video-overlay-text-dim);
+}
+
+.up-next__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.up-next__countdown {
+  /* Live-updating; aria-live on the card root, not here, so SR doesn't
+     spam every tick. Visual only. */
+  font-variant-numeric: tabular-nums;
+  color: var(--video-overlay-text);
+}
+
+.up-next__dismiss {
+  background: transparent;
+  border: none;
+  color: var(--video-overlay-text-dim);
+  cursor: pointer;
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background 120ms, color 120ms;
+}
+
+.up-next__dismiss:hover,
+.up-next__dismiss:focus-visible {
+  background: var(--video-overlay-control-hover);
+  color: var(--video-overlay-text);
+  outline: none;
+}
+
+.up-next__body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.up-next__thumb {
+  flex: 0 0 96px;
+  width: 96px;
+  height: 54px;
+  position: relative;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-card);
+}
+
+.up-next__thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+/* Skeleton placeholder before thumbnail loads (DESIGN.md §2.9). */
+.up-next__thumb-skeleton {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.10) 50%,
+    rgba(255, 255, 255, 0.04) 100%);
+  background-size: 200% 100%;
+  animation: up-next-shimmer 1400ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .up-next__thumb-skeleton { animation: none; }
+}
+
+/* Play icon revealed on hover/focus — Norman: signifier-on-intent. */
+.up-next__thumb-play {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transition: opacity 150ms ease;
+  pointer-events: none;
+}
+
+.up-next:hover .up-next__thumb-play,
+.up-next:focus-within .up-next__thumb-play {
+  opacity: 1;
+}
+
+.up-next__thumb-play-icon {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  color: var(--video-overlay-text);
+}
+
+.up-next__info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.up-next__title {
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.3;
+  color: var(--video-overlay-text);
+  /* One-line ellipsis */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 4px;
+}
+
+.up-next__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--video-overlay-text-dim);
+}
+
+.up-next__meta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--video-overlay-text);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+/* End-of-list state — different content, same shell. */
+.up-next--end-of-list .up-next__body { cursor: default; }
+
+.up-next__end-text {
+  font-size: 13px;
+  color: var(--video-overlay-text-dim);
+  margin-bottom: 8px;
+}
+
+.up-next__end-cta {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 150ms;
+}
+
+.up-next__end-cta:hover,
+.up-next__end-cta:focus-visible {
+  background: var(--accent-hover);
+  outline: none;
+}
+
+@keyframes up-next-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes up-next-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}

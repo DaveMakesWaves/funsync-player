@@ -148,8 +148,38 @@ backBtn.addEventListener('click', () => {
   location.hash = '';
 });
 
-window.addEventListener('hashchange', render);
-window.addEventListener('load', render);
+// Preserve scroll position across navigations so returning from the
+// player (or any list-like view) lands the user where they clicked the
+// last video, not back at the top. Keyed by the leaving hash so each
+// view (library, folder/X, collection/Y, …) has its own slot.
+const _savedScrollByHash = new Map();
+
+async function navigateAndRestoreScroll(event) {
+  // Save scroll for the view we're leaving — render() is about to
+  // replace mainEl.innerHTML, which resets scrollTop. Skip on initial
+  // load (no oldURL).
+  if (event?.oldURL) {
+    try {
+      const oldHash = new URL(event.oldURL).hash.slice(1);
+      _savedScrollByHash.set(oldHash, mainScrollEl.scrollTop);
+    } catch { /* malformed URL — ignore */ }
+  }
+  await render();
+  // Player view is full-bleed media — scroll position has no meaning,
+  // and skipping it keeps a stale slot from blocking future restores.
+  const newHash = location.hash.slice(1);
+  if (newHash.startsWith('play/')) return;
+  const saved = _savedScrollByHash.get(newHash);
+  if (saved && saved > 0) {
+    // rAF so the new content has painted before we set scrollTop;
+    // otherwise it clamps to the empty/short content height before
+    // the new DOM lays out.
+    requestAnimationFrame(() => { mainScrollEl.scrollTop = saved; });
+  }
+}
+
+window.addEventListener('hashchange', navigateAndRestoreScroll);
+window.addEventListener('load', navigateAndRestoreScroll);
 
 /**
  * Fetch the library once, then cache. Subsequent navigations reuse it.

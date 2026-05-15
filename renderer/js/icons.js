@@ -82,6 +82,9 @@ export { default as Cable } from '../../node_modules/lucide/dist/esm/icons/cable
 export { default as Volume1 } from '../../node_modules/lucide/dist/esm/icons/volume-1.js';
 // Keyboard — overflow menu's "Keyboard shortcuts" item icon.
 export { default as Keyboard } from '../../node_modules/lucide/dist/esm/icons/keyboard.js';
+// Layers2 — multi-axis indicator on library cards (and stacked-editor toggle in the
+// editor toolbar). The "stack of two" shape reads as "more than one script on this video".
+export { default as Layers2 } from '../../node_modules/lucide/dist/esm/icons/layers-2.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

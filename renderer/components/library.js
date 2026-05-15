@@ -4,7 +4,7 @@ import { Modal } from './modal.js';
 import { rankFunscriptMatches, fuzzyMatchScore } from '../js/fuzzy-match.js';
 import { computeGridRange, hasRangeChanged } from '../js/virtual-scroll.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
-import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw } from '../js/icons.js';
+import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable } from '../js/icons.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
 import { fuzzySearch, sortVideos, computeSpeedStats } from '../js/library-search.js';
 import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/multi-axis.js';
@@ -260,6 +260,14 @@ export class Library {
       this._resizeListenerAttached = false;
     }
     clearTimeout(this._resizeDebounceTimer);
+    // Snapshot grid scroll position so the next show() lands the user
+    // back where they clicked the video instead of at the top. The
+    // wrapper is about to be destroyed by the innerHTML clear below, so
+    // capture before that.
+    const wrapper = this._container?.querySelector('.library__grid-wrapper');
+    if (wrapper) {
+      this._savedScrollOnHide = wrapper.scrollTop;
+    }
     if (this._container) {
       this._container.innerHTML = '';
     }
@@ -630,8 +638,46 @@ export class Library {
           video._multiAxis = multi;
         }
       }
+
+      // Backfill an empty `single` slot from the active mode's main script,
+      // so users who were auto-promoted to multi (or manually moved to
+      // multi / custom from an auto-pair) on a previous build can still
+      // round-trip back to single losslessly. Older write paths left
+      // `single: null` for these entries; the modal then showed "No
+      // script associated" and the fuzzy search couldn't surface the
+      // script either (matched scripts aren't in `_unmatchedFunscripts`).
+      // Forward writes now preserve the carry-over; this pass fixes the
+      // already-saved entries.
+      if (!entry.single) {
+        let singleFallback = null;
+        if (resolved.kind === 'multi') {
+          singleFallback = resolved.config.main || null;
+        } else if (resolved.kind === 'custom') {
+          const routes = resolved.config.routes || [];
+          const mainRoute = routes.find((r) => r.role === 'main');
+          singleFallback = mainRoute?.scriptPath || null;
+        }
+        if (singleFallback) {
+          associations[video.path] = buildAssociationEntry(
+            entry.active,
+            singleFallback,
+            entry.multi,
+            entry.custom,
+          );
+          entry.single = singleFallback;
+          assocMigrated = true;
+        }
+      }
     }
-    if (assocMigrated) this._settings.set('library.associations', associations);
+    // Auto-promote eligible un-set videos to multi-axis if the user has
+    // the global preference set. Sacred associations (single / multi /
+    // custom) are skipped — eligibility is `active === null` only. See
+    // `notes/features/SCOPE-multi-axis-default.md` for the full matrix.
+    const autoPromoted = this._autoPromoteEligibleVideos(associations);
+
+    if (assocMigrated || autoPromoted > 0) {
+      this._settings.set('library.associations', associations);
+    }
 
     // Background validation pass — heals or prunes stale associations
     // and manualVariants BEFORE any card renders one. Async + non-blocking
@@ -665,6 +711,110 @@ export class Library {
       }
     }
     if (subMigrated) this._settings.set('library.subtitleAssociations', subAssociations);
+  }
+
+  /**
+   * Auto-promote videos with detected axis-companion files to
+   * multi-axis playback when the user has set Default playback to
+   * "Multi-axis when available". Idempotent: only runs against
+   * `active === null` entries, so already-set videos (single, multi,
+   * custom) are never touched. Mutates the supplied `associations` map
+   * AND the in-memory `_videos` so playback picks up immediately.
+   * Returns the number of videos that were promoted.
+   *
+   * Per SCOPE-multi-axis-default.md §1: the toggle is a one-shot
+   * promoter, not a runtime preference. Once a video has `active` set
+   * (by anything), the global toggle never touches it again — that's
+   * how "user had it set previously, toggling off shouldn't revert"
+   * works for free.
+   */
+  _autoPromoteEligibleVideos(associations) {
+    if (this._settings.get('player.preferMultiAxis') !== 'multi') return 0;
+    if (!this._videos || this._videos.length === 0) return 0;
+
+    const allPaths = (this._allFunscripts || []).map((f) => f.path);
+    if (allPaths.length === 0) return 0;
+
+    let promotedCount = 0;
+    for (const video of this._videos) {
+      if (!video.hasFunscript || !video.funscriptPath) continue;
+      const entry = normalizeAssociation(associations[video.path]);
+      if (entry.active !== null) continue; // sacred — skip
+
+      const companions = detectCompanionFiles(video.funscriptPath, allPaths);
+      if (companions.length === 0) continue;
+
+      const axes = {};
+      for (const c of companions) {
+        // First-wins per axis suffix — `detectCompanionFiles` doesn't
+        // currently de-dupe across directories, but in practice this
+        // is an unrealistic edge case for a real library layout.
+        if (!axes[c.axis.suffix]) axes[c.axis.suffix] = c.path;
+      }
+
+      const multi = {
+        main: video.funscriptPath,
+        axes,
+        buttplugVib: false,
+      };
+      associations[video.path] = buildAssociationEntry(
+        'multi',
+        // Carry the auto-paired script into the single slot so a later
+        // switch back to single via the modal is lossless. Without this,
+        // round-tripping multi → single forced the user to re-pick the
+        // script (and fuzzy search couldn't surface it either, because
+        // matched scripts aren't in `_unmatchedFunscripts`).
+        entry.single || video.funscriptPath || null,
+        multi,
+        entry.custom,
+      );
+
+      // Reflect in the in-memory video object so the very next play
+      // picks up the multi config without waiting on a rescan.
+      video._multiAxis = multi;
+      video._manualAssociation = true;
+      promotedCount++;
+    }
+    return promotedCount;
+  }
+
+  /**
+   * Count how many videos in the current `_videos` would be promoted by
+   * `_autoPromoteEligibleVideos` if the setting were on. Used by the
+   * confirmation modal in the settings panel so the user knows the
+   * scale of the action before committing. Read-only; does not mutate.
+   */
+  _countAutoPromotionEligible() {
+    if (!this._videos || this._videos.length === 0) return 0;
+    const allPaths = (this._allFunscripts || []).map((f) => f.path);
+    if (allPaths.length === 0) return 0;
+    const associations = this._settings.get('library.associations') || {};
+    let count = 0;
+    for (const video of this._videos) {
+      if (!video.hasFunscript || !video.funscriptPath) continue;
+      const entry = normalizeAssociation(associations[video.path]);
+      if (entry.active !== null) continue;
+      const companions = detectCompanionFiles(video.funscriptPath, allPaths);
+      if (companions.length > 0) count++;
+    }
+    return count;
+  }
+
+  /**
+   * Re-run the auto-promotion pass from app.js when the user toggles
+   * the preference on. Reads the current associations map, mutates it,
+   * and writes back if anything changed. No-op when the setting is
+   * off (kept defensive — caller is responsible for the on-toggle
+   * trigger).
+   */
+  _reapplyAutoPromotion() {
+    if (this._settings.get('player.preferMultiAxis') !== 'multi') return 0;
+    const associations = this._settings.get('library.associations') || {};
+    const promoted = this._autoPromoteEligibleVideos(associations);
+    if (promoted > 0) {
+      this._settings.set('library.associations', associations);
+    }
+    return promoted;
   }
 
   /**
@@ -787,7 +937,15 @@ export class Library {
     // collapses content height, the browser resets scrollTop to 0,
     // and the virtual-scroll renderer then computes ranges from
     // scrollTop=0 instead of the user's actual position.
-    const savedScrollTop = wrapper.scrollTop;
+    let savedScrollTop = wrapper.scrollTop;
+    // First render after a hide() (e.g. returning from the player) —
+    // the wrapper was just rebuilt by `_renderWithHeader` and reads as
+    // 0. Pull in the position captured on the way out so the user
+    // lands where they clicked the last video.
+    if (savedScrollTop === 0 && this._savedScrollOnHide) {
+      savedScrollTop = this._savedScrollOnHide;
+      this._savedScrollOnHide = 0;
+    }
 
     grid.classList.add('library__grid--loading');
     grid.innerHTML = '';
@@ -1646,6 +1804,8 @@ export class Library {
       this._addSpeedBadge(badges, { avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
     }
 
+    this._addPlaybackModeBadge(badges, video, { inline: true });
+
     // Category dots
     const catIds = this._settings.getVideoCategories(video.path);
     if (catIds.length > 0) {
@@ -2023,6 +2183,13 @@ export class Library {
     if (video.avgSpeed > 0 || video.maxSpeed > 0) {
       this._addSpeedBadge(info, { avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
     }
+
+    // Playback-mode badge — sits next to speed in the info bar. Skip-when-single
+    // matches the existing pattern: absence = single-axis default, presence =
+    // explicitly configured beyond default. Auto-promoted multi-axis videos
+    // light up here too, giving visual confirmation that the auto-promote did
+    // what the user expected.
+    this._addPlaybackModeBadge(info, video);
 
     card.appendChild(info);
 
@@ -2835,6 +3002,36 @@ export class Library {
     thumbnailEl.appendChild(badge);
   }
 
+  _countMultiAxisScripts(multi) {
+    if (!multi || typeof multi !== 'object') return 0;
+    let n = multi.main ? 1 : 0;
+    const axes = multi.axes;
+    if (axes && typeof axes === 'object') {
+      for (const v of Object.values(axes)) if (v) n++;
+    }
+    return n;
+  }
+
+  _addPlaybackModeBadge(containerEl, video, opts = {}) {
+    if (!containerEl) return;
+    const inline = !!opts.inline;
+    if (video._multiAxis) {
+      const count = this._countMultiAxisScripts(video._multiAxis);
+      const badge = document.createElement('span');
+      badge.className = inline ? 'library__multi-badge--inline' : 'library__multi-badge';
+      badge.title = count > 0 ? `Multi-axis (${count} scripts)` : 'Multi-axis';
+      badge.appendChild(icon(Layers2, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      containerEl.appendChild(badge);
+    } else if (Array.isArray(video._customRouting) && video._customRouting.length > 0) {
+      const n = video._customRouting.length;
+      const badge = document.createElement('span');
+      badge.className = inline ? 'library__custom-badge--inline' : 'library__custom-badge';
+      badge.title = `Custom routing (${n} ${n === 1 ? 'route' : 'routes'})`;
+      badge.appendChild(icon(Cable, { width: 14, height: 14, 'stroke-width': 2.5 }));
+      containerEl.appendChild(badge);
+    }
+  }
+
   /**
    * Get or create the bottom-left flex container that holds funscript +
    * subtitle badges on a card thumbnail. Used by the initial render and
@@ -3144,10 +3341,16 @@ export class Library {
     this._openMenuCard = cardEl;
     this._openMenuButton = buttonEl;
 
-    // Close on outside click (next tick to avoid immediate close)
-    setTimeout(() => {
-      document.addEventListener('click', this._boundCloseMenu, { once: true });
-    }, 0);
+    // Close on outside click. Defer attachment one animation frame so
+    // the opening click's bubble phase is fully complete before the
+    // document listener becomes active — setTimeout(0) was occasionally
+    // attaching during the same task and catching the opening click,
+    // closing the menu immediately. Listener is NOT `{ once: true }`
+    // anymore: the handler now self-removes only on a true outside
+    // click (handled inside `_handleOutsideClick`).
+    requestAnimationFrame(() => {
+      document.addEventListener('click', this._boundCloseMenu, true);
+    });
   }
 
   _closeMenu() {
@@ -3160,10 +3363,30 @@ export class Library {
       this._openMenuCard = null;
     }
     this._openMenuButton = null;
-    document.removeEventListener('click', this._boundCloseMenu);
+    // Listener was attached in capture phase; match here.
+    document.removeEventListener('click', this._boundCloseMenu, true);
   }
 
-  _handleOutsideClick() {
+  /**
+   * Capture-phase document click listener. Only closes the menu when
+   * the click is genuinely outside the open menu (and outside the
+   * button that opened it — that button's own handler toggles).
+   * The previous implementation closed on any document click, which
+   * triggered intermittently when a click on a menu item slipped past
+   * `e.stopPropagation()` (rare timing window when virtual scroll
+   * re-rendered between menu open and item click).
+   */
+  _handleOutsideClick(e) {
+    if (!this._openMenu) return;
+    const target = e?.target;
+    if (target && (target === this._openMenu || this._openMenu.contains(target))) {
+      // Click is inside the menu — the item's own handler will close it.
+      return;
+    }
+    if (target && this._openMenuButton && (target === this._openMenuButton || this._openMenuButton.contains(target))) {
+      // Click is on the kebab button itself — its handler toggles the menu.
+      return;
+    }
     this._closeMenu();
   }
 
@@ -3759,7 +3982,10 @@ export class Library {
     const entry = normalizeAssociation(associations[video.path]);
     associations[video.path] = buildAssociationEntry(
       'custom',
-      entry.single,
+      // Preserve any auto-paired funscript into the single slot so
+      // round-tripping custom → single doesn't strand the user with a
+      // blank pane and no fuzzy-search hit on the original script.
+      entry.single || video.funscriptPath || null,
       entry.multi,
       { routes },
     );
@@ -4042,7 +4268,10 @@ export class Library {
     const entry = normalizeAssociation(associations[video.path]);
     associations[video.path] = buildAssociationEntry(
       'multi',
-      entry.single,
+      // Preserve any auto-paired funscript into the single slot so
+      // round-tripping multi → single doesn't strand the user with a
+      // blank pane and no fuzzy-search hit on the original script.
+      entry.single || video.funscriptPath || null,
       multi,
       entry.custom,
     );
@@ -4675,6 +4904,31 @@ export class Library {
       path: video.path,
       _isPathBased: true,
     };
+
+    // Snapshot the current visible list so Up Next can advance through the
+    // user's filtered/sorted view. Snapshot is immutable for this play
+    // session — sort/filter changes during playback don't retroactively
+    // alter "next" (Norman: conceptual model).
+    //
+    // Up Next auto-advance routes back through this method with the next
+    // video and a `_playContextOverride` so the original snapshot keeps
+    // travelling forward (same list, index + 1) regardless of whether
+    // the user changed filters mid-playback.
+    if (video._playContextOverride) {
+      fileData._playContext = video._playContextOverride;
+      delete video._playContextOverride;
+    } else {
+      const ctxIndex = this._filteredVideos ? this._filteredVideos.indexOf(video) : -1;
+      if (ctxIndex >= 0) {
+        fileData._playContext = {
+          source: 'library',
+          sourceLabel: 'library',
+          sourceContext: {},
+          list: this._filteredVideos.map((v) => v.path),
+          index: ctxIndex,
+        };
+      }
+    }
 
     // If funscript is available, read it and build a funscript file-like object
     let funscriptData = null;

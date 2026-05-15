@@ -172,6 +172,14 @@ export class KeyboardHandler {
         break;
 
       case 'Escape':
+        // Up Next dismiss runs FIRST so a visible card can be cleared
+        // without also clearing the user's A-B loop. Other Esc handlers
+        // only run when the card isn't showing.
+        if (this.upNextEngine?.visible) {
+          e.preventDefault();
+          this.upNextEngine.dismiss();
+          break;
+        }
         e.preventDefault();
         if (this.scriptEditor?.isOpen) {
           this.scriptEditor.hide();
