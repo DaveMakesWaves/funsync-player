@@ -488,6 +488,39 @@
   border-color: var(--accent);
 }
 
+/* Folder-scope pill — surfaces "you're seeing a scoped flat view" + Show all
+   escape (Norman: visibility of cause-of-state). Visually mirrors
+   .library__search-scope so users read the two as a family. */
+.library__folder-scope {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 16px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.library__folder-scope-label {
+  flex-shrink: 0;
+}
+
+.library__folder-scope-clear {
+  background: none;
+  border: 1px solid var(--border-subtle);
+  color: var(--accent);
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-family: inherit;
+  transition: background 120ms, border-color 120ms;
+}
+
+.library__folder-scope-clear:hover {
+  background: rgba(233, 69, 96, 0.1);
+  border-color: var(--accent);
+}
+
 .library__folder-card {
   background: var(--bg-secondary);
   border-radius: 8px;

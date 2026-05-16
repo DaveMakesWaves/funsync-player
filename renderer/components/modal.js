@@ -222,15 +222,56 @@ export class Modal {
 
   /**
    * Selectable list dialog. Returns selected item's id, or null on cancel.
+   *
+   * Optionally supports an inline "+ Create new" affordance: pass
+   * `options.onCreateNew` (a function returning the id of the newly-created
+   * item, or null if creation was cancelled). When provided, a button is
+   * rendered at the top of the list — and in the empty state too, so the
+   * surface still has a primary action when there's nothing to pick.
+   *
    * @param {string} title
    * @param {Array<{id: string, label: string, subtitle?: string}>} items
+   * @param {Object} [options]
+   * @param {() => Promise<string|null>|string|null} [options.onCreateNew]
+   * @param {string} [options.createLabel='+ Create new']
    * @returns {Promise<string|null>}
    */
-  static selectFromList(title, items) {
+  static selectFromList(title, items, options = {}) {
+    const { onCreateNew, createLabel = '+ Create new' } = options;
     return Modal.open({
       title,
       onRender(body, close) {
+        const renderCreateButton = (placement) => {
+          if (!onCreateNew) return;
+          const btn = document.createElement('button');
+          btn.className = `modal-btn modal-btn--secondary modal-list-create modal-list-create--${placement}`;
+          btn.type = 'button';
+          btn.textContent = createLabel;
+          btn.addEventListener('click', async () => {
+            // Disable while running so a double-click doesn't fire twice.
+            btn.disabled = true;
+            try {
+              const newId = await onCreateNew();
+              if (newId) {
+                close(newId);
+              } else {
+                btn.disabled = false;
+              }
+            } catch (err) {
+              btn.disabled = false;
+              throw err;
+            }
+          });
+          body.appendChild(btn);
+        };
+
         if (items.length === 0) {
+          if (onCreateNew) {
+            // Empty + creatable: lead with the create button. No bail-out
+            // copy; the affordance IS the next action.
+            renderCreateButton('empty');
+            return;
+          }
           const empty = document.createElement('div');
           empty.className = 'modal-message modal-message--muted';
           empty.textContent = 'No items available';
@@ -246,6 +287,8 @@ export class Modal {
           body.appendChild(actions);
           return;
         }
+
+        renderCreateButton('top');
 
         const list = document.createElement('div');
         list.className = 'modal-list';

@@ -30,19 +30,46 @@ export class TCodeManager {
   }
 
   /**
-   * Connect to a serial port.
-   * @param {string} portPath — e.g. 'COM3' or '/dev/ttyUSB0'
-   * @param {number} [baudRate=115200]
+   * Connect to a TCode device. Supports three transports — the call shape
+   * differs by which one the user picked in the connection panel.
+   *
+   *   serial   → connect('serial', { path: 'COM3', baudRate: 115200 })
+   *   udp      → connect('udp',    { host: '192.168.1.42', port: 8080 })
+   *   websocket→ connect('ws',     { url: 'ws://192.168.1.42:81' })
+   *
+   * Back-compat: `connect(portPath, baudRate)` (two strings/numbers) still
+   * routes to serial — preserves the original call sites and any saved
+   * scripts that hardcoded the old signature.
+   *
    * @returns {boolean} success
    */
-  async connect(portPath, baudRate = 115200) {
+  async connect(kindOrPath, optsOrBaud = {}) {
     if (this._connected) await this.disconnect();
 
-    this._portPath = portPath;
-    this._baudRate = baudRate;
+    // Normalise the two call shapes into a single { kind, opts } pair so
+    // the IPC payload + downstream state writes stay uniform.
+    let kind;
+    let opts;
+    const isLegacyCall = typeof kindOrPath === 'string'
+      && kindOrPath !== 'serial' && kindOrPath !== 'udp'
+      && kindOrPath !== 'websocket' && kindOrPath !== 'ws';
+    if (isLegacyCall) {
+      kind = 'serial';
+      opts = { path: kindOrPath, baudRate: typeof optsOrBaud === 'number' ? optsOrBaud : 115200 };
+    } else {
+      kind = kindOrPath;
+      opts = optsOrBaud && typeof optsOrBaud === 'object' ? optsOrBaud : {};
+    }
+
+    this._transportKind = kind;
+    this._transportOpts = opts;
+    // Retain legacy fields for the connection panel's reconnect-on-error
+    // helper, which still reads _portPath / _baudRate. Empty when not serial.
+    this._portPath = kind === 'serial' ? (opts.path || '') : '';
+    this._baudRate = kind === 'serial' ? (opts.baudRate || 115200) : 0;
 
     try {
-      const result = await window.funsync.tcodeConnect(portPath, baudRate);
+      const result = await window.funsync.tcodeConnect(kind, opts);
       if (result.success) {
         this._connected = true;
 
@@ -52,7 +79,8 @@ export class TCodeManager {
           if (this.onDisconnect) this.onDisconnect();
         });
 
-        console.log(`[TCode] Connected to ${portPath} @ ${baudRate}`);
+        const summary = this._describeTransport(kind, opts);
+        console.log(`[TCode] Connected via ${kind}: ${summary}`);
         if (this.onConnect) this.onConnect();
         return true;
       } else {
@@ -63,6 +91,14 @@ export class TCodeManager {
       this._emitError(`Connection error: ${err.message}`);
       return false;
     }
+  }
+
+  /** Render a one-liner summary of the transport (for logs/UI). Pure. */
+  _describeTransport(kind, opts) {
+    if (kind === 'serial') return `${opts.path || '?'} @ ${opts.baudRate || 115200}`;
+    if (kind === 'udp') return `${opts.host || '?'}:${opts.port || '?'}`;
+    if (kind === 'websocket' || kind === 'ws') return opts.url || '?';
+    return JSON.stringify(opts);
   }
 
   /**

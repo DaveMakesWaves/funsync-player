@@ -207,21 +207,45 @@ export class ConnectionPanel {
       </div>
 
       <div class="connection-panel__form">
-        <label class="connection-panel__label">Serial Port</label>
-        <div class="connection-panel__input-row">
-          <select id="tcode-port-select" class="connection-panel__input" style="flex:1" aria-label="Serial port"></select>
-          <button id="tcode-refresh-btn" class="connection-panel__action connection-panel__action--utility" title="Refresh ports" aria-label="Refresh serial port list">↻</button>
+        <label class="connection-panel__label">Transport</label>
+        <select id="tcode-transport-select" class="connection-panel__input" aria-label="TCode transport">
+          <option value="serial" selected>Serial (USB)</option>
+          <option value="udp">UDP (2.4 GHz wireless)</option>
+          <option value="websocket">WebSocket</option>
+        </select>
+
+        <div id="tcode-serial-fields" class="connection-panel__transport-fields">
+          <label class="connection-panel__label" style="margin-top:8px">Serial Port</label>
+          <div class="connection-panel__input-row">
+            <select id="tcode-port-select" class="connection-panel__input" style="flex:1" aria-label="Serial port"></select>
+            <button id="tcode-refresh-btn" class="connection-panel__action connection-panel__action--utility" title="Refresh ports" aria-label="Refresh serial port list">↻</button>
+          </div>
+
+          <label class="connection-panel__label" style="margin-top:8px">Baud Rate</label>
+          <select id="tcode-baud-select" class="connection-panel__input" aria-label="Baud rate">
+            <option value="9600">9600</option>
+            <option value="19200">19200</option>
+            <option value="38400">38400</option>
+            <option value="57600">57600</option>
+            <option value="115200" selected>115200</option>
+            <option value="250000">250000</option>
+          </select>
         </div>
 
-        <label class="connection-panel__label" style="margin-top:8px">Baud Rate</label>
-        <select id="tcode-baud-select" class="connection-panel__input" aria-label="Baud rate">
-          <option value="9600">9600</option>
-          <option value="19200">19200</option>
-          <option value="38400">38400</option>
-          <option value="57600">57600</option>
-          <option value="115200" selected>115200</option>
-          <option value="250000">250000</option>
-        </select>
+        <div id="tcode-udp-fields" class="connection-panel__transport-fields" hidden>
+          <label for="tcode-udp-host" class="connection-panel__label" style="margin-top:8px">Host</label>
+          <input id="tcode-udp-host" type="text" class="connection-panel__input"
+                 placeholder="192.168.1.42" aria-label="UDP host">
+          <label for="tcode-udp-port" class="connection-panel__label" style="margin-top:8px">Port</label>
+          <input id="tcode-udp-port" type="number" class="connection-panel__input"
+                 min="1" max="65535" placeholder="8080" aria-label="UDP port">
+        </div>
+
+        <div id="tcode-ws-fields" class="connection-panel__transport-fields" hidden>
+          <label for="tcode-ws-url" class="connection-panel__label" style="margin-top:8px">WebSocket URL</label>
+          <input id="tcode-ws-url" type="text" class="connection-panel__input"
+                 placeholder="ws://192.168.1.42:81" aria-label="WebSocket URL">
+        </div>
 
         <div class="connection-panel__input-row" style="margin-top:10px">
           <button id="tcode-connect-btn" class="connection-panel__btn" style="flex:1">Connect</button>
@@ -503,11 +527,28 @@ export class ConnectionPanel {
     if (this.tcodeManager) {
       this._panel.querySelector('#tcode-connect-btn').addEventListener('click', () => this._onTCodeConnect());
       this._panel.querySelector('#tcode-refresh-btn').addEventListener('click', () => this._refreshTCodePorts());
+      const transportSelect = this._panel.querySelector('#tcode-transport-select');
+      if (transportSelect) {
+        transportSelect.addEventListener('change', () => this._onTCodeTransportChange());
+      }
 
-      // Restore saved settings
+      // Restore saved settings — both legacy (serial) and new transport-aware.
+      const savedTransport = this.settings.get('tcode.transport') || 'serial';
       const savedPort = this.settings.get('tcode.port') || '';
       const savedBaud = this.settings.get('tcode.baudRate') || 115200;
+      const savedUdpHost = this.settings.get('tcode.udpHost') || '';
+      const savedUdpPort = this.settings.get('tcode.udpPort') || '';
+      const savedWsUrl = this.settings.get('tcode.wsUrl') || '';
+
+      if (transportSelect) transportSelect.value = savedTransport;
       this._panel.querySelector('#tcode-baud-select').value = String(savedBaud);
+      const udpHost = this._panel.querySelector('#tcode-udp-host');
+      const udpPort = this._panel.querySelector('#tcode-udp-port');
+      const wsUrl = this._panel.querySelector('#tcode-ws-url');
+      if (udpHost) udpHost.value = savedUdpHost;
+      if (udpPort && savedUdpPort) udpPort.value = String(savedUdpPort);
+      if (wsUrl) wsUrl.value = savedWsUrl;
+      this._onTCodeTransportChange();
 
       this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
       this.tcodeManager.onDisconnect = () => this._updateTCodeStatus('disconnected');
@@ -516,7 +557,7 @@ export class ConnectionPanel {
       // as soon as the device connects — no need to open the panel first.
       this._applyTCodeAxisSettings();
 
-      // Initial port scan
+      // Initial port scan (only meaningful for serial transport, but cheap)
       this._refreshTCodePorts(savedPort);
     }
 
@@ -1358,7 +1399,22 @@ export class ConnectionPanel {
     if (text) text.textContent = message;
   }
 
-  // --- TCode Serial ---
+  // --- TCode (serial / UDP / WebSocket) ---
+
+  /**
+   * Show only the input fields relevant to the selected transport. Pure
+   * UI concern — no state writes. Wired to the #tcode-transport-select
+   * change event in _bindEvents.
+   */
+  _onTCodeTransportChange() {
+    const kind = this._panel.querySelector('#tcode-transport-select')?.value || 'serial';
+    const serial = this._panel.querySelector('#tcode-serial-fields');
+    const udp = this._panel.querySelector('#tcode-udp-fields');
+    const ws = this._panel.querySelector('#tcode-ws-fields');
+    if (serial) serial.hidden = kind !== 'serial';
+    if (udp) udp.hidden = kind !== 'udp';
+    if (ws) ws.hidden = kind !== 'websocket';
+  }
 
   async _onTCodeConnect() {
     if (!this.tcodeManager) return;
@@ -1369,24 +1425,62 @@ export class ConnectionPanel {
       return;
     }
 
-    const portSelect = this._panel.querySelector('#tcode-port-select');
-    const baudSelect = this._panel.querySelector('#tcode-baud-select');
-    const portPath = portSelect.value;
-    const baudRate = parseInt(baudSelect.value, 10) || 115200;
+    const kind = this._panel.querySelector('#tcode-transport-select')?.value || 'serial';
+    const text = this._panel.querySelector('#tcode-status-text');
 
-    if (!portPath) {
-      this._updateTCodeStatus('disconnected');
-      const text = this._panel.querySelector('#tcode-status-text');
-      if (text) text.textContent = 'Select a port';
+    let opts;
+    if (kind === 'serial') {
+      const portSelect = this._panel.querySelector('#tcode-port-select');
+      const baudSelect = this._panel.querySelector('#tcode-baud-select');
+      const portPath = portSelect?.value || '';
+      const baudRate = parseInt(baudSelect?.value, 10) || 115200;
+      if (!portPath) {
+        this._updateTCodeStatus('disconnected');
+        if (text) text.textContent = 'Select a port';
+        return;
+      }
+      opts = { path: portPath, baudRate };
+    } else if (kind === 'udp') {
+      const host = this._panel.querySelector('#tcode-udp-host')?.value.trim() || '';
+      const port = parseInt(this._panel.querySelector('#tcode-udp-port')?.value, 10);
+      if (!host) {
+        this._updateTCodeStatus('disconnected');
+        if (text) text.textContent = 'Enter a host';
+        return;
+      }
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        this._updateTCodeStatus('disconnected');
+        if (text) text.textContent = 'Enter a valid port (1-65535)';
+        return;
+      }
+      opts = { host, port };
+    } else if (kind === 'websocket') {
+      const url = this._panel.querySelector('#tcode-ws-url')?.value.trim() || '';
+      if (!/^wss?:\/\//.test(url)) {
+        this._updateTCodeStatus('disconnected');
+        if (text) text.textContent = 'URL must start with ws:// or wss://';
+        return;
+      }
+      opts = { url };
+    } else {
       return;
     }
 
     this._updateTCodeStatus('connecting');
-    const success = await this.tcodeManager.connect(portPath, baudRate);
+    const success = await this.tcodeManager.connect(kind, opts);
 
     if (success) {
-      this.settings.set('tcode.port', portPath);
-      this.settings.set('tcode.baudRate', baudRate);
+      // Persist per-transport so the next launch restores the right inputs.
+      this.settings.set('tcode.transport', kind);
+      if (kind === 'serial') {
+        this.settings.set('tcode.port', opts.path);
+        this.settings.set('tcode.baudRate', opts.baudRate);
+      } else if (kind === 'udp') {
+        this.settings.set('tcode.udpHost', opts.host);
+        this.settings.set('tcode.udpPort', opts.port);
+      } else if (kind === 'websocket') {
+        this.settings.set('tcode.wsUrl', opts.url);
+      }
     }
   }
 

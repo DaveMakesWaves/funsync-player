@@ -1334,11 +1334,30 @@ ipcMain.handle('show-in-folder', (_event, filePath) => {
   if (filePath) shell.showItemInFolder(filePath);
 });
 
-// --- IPC Handlers: TCode Serial ---
+// --- IPC Handlers: TCode (multi-transport — serial / UDP / WebSocket) ---
 
-let tcodePort = null; // active SerialPort instance
+const { createTransport } = require('./tcode-transports');
+
+// Module-level handle to the active transport (only one at a time —
+// connecting a new transport tears down the previous). Initial value is
+// null so the first connect attempt builds a fresh instance.
+let tcodeTransport = null;
+let tcodeTransportKind = null;
+
+function broadcastTcodeDisconnected() {
+  BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tcode-disconnected'));
+}
+
+async function tearDownActiveTcodeTransport() {
+  if (!tcodeTransport) return;
+  try { tcodeTransport.destroy(); } catch {}
+  tcodeTransport = null;
+  tcodeTransportKind = null;
+}
 
 ipcMain.handle('tcode-list-ports', async () => {
+  // Serial-specific — UDP and WebSocket transports don't enumerate; the
+  // user types the address directly in the connection-panel inputs.
   try {
     const { SerialPort } = require('serialport');
     const ports = await SerialPort.list();
@@ -1354,74 +1373,73 @@ ipcMain.handle('tcode-list-ports', async () => {
   }
 });
 
-ipcMain.handle('tcode-connect', async (_event, portPath, baudRate = 115200) => {
+/**
+ * Unified connect handler. Renderer passes a transport kind plus
+ * transport-specific options:
+ *   - serial:    { path, baudRate }
+ *   - udp:       { host, port }
+ *   - websocket: { url }
+ *
+ * Legacy two-arg form `(portPath, baudRate)` from pre-UDP renderers is
+ * still accepted — falls through to the serial branch with default kind.
+ */
+ipcMain.handle('tcode-connect', async (_event, kindOrPath, optsOrBaud) => {
+  // Back-compat: old renderer calls `tcode-connect(path, baudRate)`. The
+  // first arg is a string path (not a kind keyword). Map it onto the new
+  // shape so the rest of the handler stays uniform.
+  let kind;
+  let opts;
+  if (typeof kindOrPath === 'string'
+      && kindOrPath !== 'serial'
+      && kindOrPath !== 'udp'
+      && kindOrPath !== 'websocket'
+      && kindOrPath !== 'ws') {
+    kind = 'serial';
+    opts = { path: kindOrPath, baudRate: typeof optsOrBaud === 'number' ? optsOrBaud : 115200 };
+  } else {
+    kind = kindOrPath;
+    opts = optsOrBaud || {};
+  }
+
+  await tearDownActiveTcodeTransport();
   try {
-    if (tcodePort) {
-      tcodePort.removeAllListeners();
-      if (tcodePort.isOpen) tcodePort.close();
-      tcodePort = null;
+    tcodeTransport = createTransport(kind, { log });
+    tcodeTransportKind = kind;
+    tcodeTransport.onDisconnect(() => {
+      tcodeTransport = null;
+      tcodeTransportKind = null;
+      broadcastTcodeDisconnected();
+    });
+    const result = await tcodeTransport.connect(opts);
+    if (!result?.success) {
+      // Leave the slot empty so subsequent send() calls don't pretend to
+      // be connected.
+      await tearDownActiveTcodeTransport();
     }
-    const { SerialPort } = require('serialport');
-    tcodePort = new SerialPort({
-      path: portPath,
-      baudRate,
-      dataBits: 8,
-      stopBits: 1,
-      parity: 'none',
-      autoOpen: false,
-    });
-
-    return new Promise((resolve) => {
-      tcodePort.open((err) => {
-        if (err) {
-          log.warn('[TCode] Open failed:', err.message);
-          tcodePort = null;
-          resolve({ success: false, error: err.message });
-        } else {
-          log.info(`[TCode] Connected to ${portPath} @ ${baudRate}`);
-
-          tcodePort.on('close', () => {
-            log.info('[TCode] Port closed');
-            tcodePort = null;
-            BrowserWindow.getAllWindows().forEach(w => w.webContents.send('tcode-disconnected'));
-          });
-
-          tcodePort.on('error', (e) => {
-            log.warn('[TCode] Port error:', e.message);
-          });
-
-          resolve({ success: true });
-        }
-      });
-    });
+    return result;
   } catch (err) {
     log.warn('[TCode] Connect error:', err.message);
+    await tearDownActiveTcodeTransport();
     return { success: false, error: err.message };
   }
 });
 
-ipcMain.handle('tcode-disconnect', () => {
-  if (tcodePort && tcodePort.isOpen) {
-    tcodePort.close();
-    tcodePort = null;
-    log.info('[TCode] Disconnected');
-  }
+ipcMain.handle('tcode-disconnect', async () => {
+  await tearDownActiveTcodeTransport();
+  log.info('[TCode] Disconnected');
   return { success: true };
 });
 
 ipcMain.handle('tcode-send', (_event, command) => {
-  if (!tcodePort || !tcodePort.isOpen) return false;
-  try {
-    tcodePort.write(command);
-    return true;
-  } catch (err) {
-    log.debug('[TCode] Write error:', err.message);
-    return false;
-  }
+  if (!tcodeTransport) return false;
+  return tcodeTransport.send(command);
 });
 
 ipcMain.handle('tcode-status', () => {
-  return { connected: !!(tcodePort && tcodePort.isOpen) };
+  return {
+    connected: !!(tcodeTransport && tcodeTransport.connected),
+    transport: tcodeTransportKind,
+  };
 });
 
 // --- IPC Handlers: VR Bridge (TCP) ---

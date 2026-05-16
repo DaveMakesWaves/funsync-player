@@ -56,8 +56,12 @@ const DEFAULTS = {
       port: 12345,
     },
     tcode: {
-      port: '',
+      transport: 'serial',  // 'serial' | 'udp' | 'websocket'
+      port: '',             // serial port path (legacy field, still in use)
       baudRate: 115200,
+      udpHost: '',          // 2.4 GHz wireless ESP-NOW bridge etc.
+      udpPort: 0,
+      wsUrl: '',            // ws://device.local:81
       axisRanges: {},
       axisEnabled: {},
     },

@@ -354,6 +354,7 @@ export class Library {
       </div>
       <div class="library__breadcrumb" hidden></div>
       <div class="library__search-scope" hidden></div>
+      <div class="library__folder-scope" hidden></div>
       <div class="library__chips" id="library-chips" hidden></div>
       <div class="library__grid-wrapper">
         <div class="library__grid"></div>
@@ -1681,6 +1682,74 @@ export class Library {
       this._applyFilters();
     });
     pill.appendChild(toggle);
+  }
+
+  /**
+   * Resolve the video pool the flat view should render.
+   * - When folder browse is on (or we're in the escape-scope branch) and a
+   *   sub-folder is selected: descendants of that folder.
+   * - When at folder root, no folder index, or no current folder: the full
+   *   library.
+   * Pure — testable without DOM (just needs the videos / folderIndex / path).
+   */
+  _getFlatScopeVideos() {
+    if (!this._currentFolderPath) return this._videos;
+    if (!this._folderIndex) return this._videos;
+    const node = this._folderIndex.get(this._currentFolderPath);
+    if (!node) return this._videos;
+    // Source-root scoping in flat view is identical to "show this source",
+    // which the source-picker in the header already handles. Skip — flat-mode
+    // shows the full library at the source level.
+    if (node.isSourceRoot) return this._videos;
+    return descendantsOf(this._folderIndex, this._currentFolderPath);
+  }
+
+  /**
+   * Pill below the header that surfaces the active folder scope in flat
+   * view so the user can see why some videos are missing AND clear it
+   * without round-tripping through folder browse. Hidden whenever
+   * `_getFlatScopeVideos` would return the full library.
+   */
+  _updateFolderScope() {
+    const pill = this._container?.querySelector('.library__folder-scope');
+    if (!pill) return;
+
+    const inFlatView = !this._folderBrowse
+      || (this._folderBrowse && this._searchGlobalOverride && !!this._searchQuery);
+    const scoped = inFlatView
+      && !!this._currentFolderPath
+      && this._folderIndex?.has(this._currentFolderPath)
+      && !this._folderIndex.get(this._currentFolderPath).isSourceRoot;
+
+    if (!scoped) {
+      pill.hidden = true;
+      pill.innerHTML = '';
+      return;
+    }
+    pill.hidden = false;
+    pill.innerHTML = '';
+
+    const node = this._folderIndex.get(this._currentFolderPath);
+    const label = document.createElement('span');
+    label.className = 'library__folder-scope-label';
+    label.textContent = `Showing: ${node?.label || this._currentFolderPath.split('/').pop() || 'current folder'}`;
+    pill.appendChild(label);
+
+    const clear = document.createElement('button');
+    clear.className = 'library__folder-scope-clear';
+    clear.type = 'button';
+    clear.textContent = 'Show all';
+    clear.title = 'Clear folder scope';
+    clear.addEventListener('click', () => this._clearFolderScope());
+    pill.appendChild(clear);
+  }
+
+  _clearFolderScope() {
+    this._currentFolderPath = null;
+    this._renderBreadcrumb();
+    this._applyFilters();
+    const wrapper = this._container?.querySelector('.library__grid-wrapper');
+    if (wrapper) wrapper.scrollTop = 0;
   }
 
   _updateHeaderPath() {
@@ -4526,17 +4595,26 @@ export class Library {
     const [sortField, sortDir] = effectiveSortKey.split(':');
     const countEl = this._container.querySelector('.library__video-count');
 
-    // Keep the search-scope pill in sync with current state on every render.
+    // Keep the search-scope + folder-scope pills in sync with current state.
     this._updateSearchScope();
+    this._updateFolderScope();
     this._updateRelevanceHint();
 
-    // --- Flat view (unchanged) ---
+    // --- Flat view ---
     // Also taken when folder view is on but the user escaped search scope via
     // the "Search everywhere" pill — render a flat matching list until they
     // clear the query or flip the pill back.
     const scopeEscaped = this._folderBrowse && this._searchGlobalOverride && !!this._searchQuery;
     if (!this._folderBrowse || scopeEscaped) {
-      let filtered = runFilters(this._videos);
+      // When the user toggles folder→flat from inside a sub-folder, scope the
+      // flat list to descendants of that folder (mental model: "I'm browsing
+      // sub2, flip to flat, show only sub2 videos"). Falls back to the full
+      // library when _currentFolderPath is null (i.e. they were at the folder
+      // root, or never opened folder browse). _updateFolderScope renders a
+      // dismissable "Showing: <folder> ✕" pill so the user can see and clear
+      // the scope (Norman: visibility of cause-of-state).
+      const scoped = this._getFlatScopeVideos();
+      let filtered = runFilters(scoped);
       // When searching, fuzzySearch returns results already ranked by
       // relevance — re-running sortVideos (name/duration/etc.) would throw
       // that ranking away and the exact-title match could sink below
@@ -4544,9 +4622,13 @@ export class Library {
       if (!this._searchQuery) {
         filtered = sortVideos(filtered, sortField, sortDir || 'asc');
       }
+      // Denominator for the search-count display reflects the scoped pool,
+      // not the global library — otherwise "5 / 800" is misleading when the
+      // user only intended to search within sub2.
+      const totalForCount = scoped.length;
       if (countEl) {
         countEl.textContent = this._searchQuery
-          ? `${filtered.length} / ${this._videos.length} videos`
+          ? `${filtered.length} / ${totalForCount} videos`
           : `${filtered.length} video${filtered.length !== 1 ? 's' : ''}`;
       }
       this._renderGrid(filtered);
@@ -5103,22 +5185,25 @@ export class Library {
 
   async _assignCategory(videoPath, cardEl) {
     const categories = this._settings.getCategories();
-    if (categories.length === 0) {
-      // No categories yet — tell the user
-      await Modal.confirm('No Categories', 'Create categories from the Categories view first.');
-      return;
-    }
     const current = this._settings.getVideoCategories(videoPath);
     const items = categories
       .filter((c) => !current.includes(c.id))
       .map((c) => ({ id: c.id, label: c.name }));
 
-    if (items.length === 0) {
+    // "All Assigned" only applies when there ARE categories AND every one
+    // already lives on this video. With zero categories the user wants to
+    // create one — fall through to selectFromList's empty-state with the
+    // + New affordance.
+    if (categories.length > 0 && items.length === 0) {
       await Modal.confirm('All Assigned', 'This video already has all categories assigned.');
       return;
     }
 
-    const selectedId = await Modal.selectFromList('Assign Category', items);
+    const { promptCreateCategory } = await import('../js/category-create-modal.js');
+    const selectedId = await Modal.selectFromList('Assign Category', items, {
+      createLabel: '+ New category',
+      onCreateNew: () => promptCreateCategory({ settings: this._settings }),
+    });
     if (selectedId) {
       this._settings.assignCategory(videoPath, selectedId);
       this._updateCardCategoryDots(cardEl, videoPath);
@@ -5257,12 +5342,12 @@ export class Library {
   async _bulkAssignCategory() {
     if (this._selectedPaths.size === 0) return;
     const categories = this._settings.getCategories();
-    if (categories.length === 0) {
-      await Modal.confirm('No Categories', 'Create categories from the Categories view first.');
-      return;
-    }
     const items = categories.map((c) => ({ id: c.id, label: c.name }));
-    const selectedId = await Modal.selectFromList('Assign Category', items);
+    const { promptCreateCategory } = await import('../js/category-create-modal.js');
+    const selectedId = await Modal.selectFromList('Assign Category', items, {
+      createLabel: '+ New category',
+      onCreateNew: () => promptCreateCategory({ settings: this._settings }),
+    });
     if (selectedId) {
       for (const path of this._selectedPaths) {
         this._settings.assignCategory(path, selectedId);

@@ -47,6 +47,7 @@ import {
   Pencil, FileCheck, Captions, RotateCcw,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
+import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
 
 class App {
   constructor() {
@@ -3332,6 +3333,12 @@ class App {
     // Show/hide nav bar (hidden during player)
     if (viewId === 'player') {
       this.navBar.hide();
+      // If a deferred PiP teardown is pending (user navigated away with PiP
+      // open and now they're back), signal the leavepictureinpicture handler
+      // to NOT run the teardown when PiP eventually closes. They returned
+      // to active playback before PiP ended; the normal next-leave will
+      // teardown properly.
+      if (this._pipTeardownPending) this._pipTeardownCancelled = true;
     } else {
       this.navBar.show();
       this.navBar.setActive(viewId);
@@ -3353,23 +3360,18 @@ class App {
   /** Hook called when leaving a view. */
   _onLeaveView(viewId) {
     if (viewId === 'player') {
-      // Pause video first — stops playback immediately in the browser
-      this.videoPlayer.video.pause();
-
-      // Stop all sync engines (prevents any new commands from being queued)
-      if (this.syncEngine) this.syncEngine.stop();
-      if (this.buttplugSync?._active) this.buttplugSync.stop();
-      if (this.tcodeSync?._active) this.tcodeSync.stop();
-      if (this.autoblowSync?._active) this.autoblowSync.stop();
-
-      // Stop all devices (network calls — async but fire-and-forget)
-      if (this.handyManager?.connected) this.handyManager.hsspStop();
-      if (this.buttplugManager?.connected) this.buttplugManager.stopAll();
-      if (this.tcodeManager?.connected) this.tcodeManager.stop();
-      if (this.autoblowManager?.connected) this.autoblowManager.syncStop();
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => {});
+      // PiP guard: if the user popped the video into Picture-in-Picture and
+      // is navigating away, they explicitly opted into continued playback in
+      // a floating window. Tearing the video + sync engines down here breaks
+      // that expectation — the video would either freeze (we pause it) or
+      // keep playing silently without driving the device (we stop sync).
+      // Defer the teardown until PiP actually closes; if the user comes
+      // back to the player view first, the deferred teardown is cancelled.
+      if (this._isOurVideoInPip()) {
+        this._beginDeferredPipTeardown();
+        return;
       }
+      this._teardownPlayback();
     } else if (viewId === 'library') {
       this.library.hide();
     } else if (viewId === 'playlists') {
@@ -3377,6 +3379,21 @@ class App {
     } else if (viewId === 'categories') {
       this.categories.hide();
     }
+  }
+
+  /** Thin App method delegating to the pure pip-guard helper for testability. */
+  _isOurVideoInPip() {
+    return isVideoInPip(this.videoPlayer?.video);
+  }
+
+  /** Thin App method delegating to the pure pip-guard helper. */
+  _teardownPlayback() {
+    teardownPlayback(this);
+  }
+
+  /** Thin App method delegating to the pure pip-guard helper. */
+  _beginDeferredPipTeardown() {
+    beginDeferredPipTeardown(this, this);
   }
 
   // --- View Actions ---
