@@ -1334,6 +1334,17 @@ ipcMain.handle('show-in-folder', (_event, filePath) => {
   if (filePath) shell.showItemInFolder(filePath);
 });
 
+// --- IPC Handler: System Locale (for first-launch i18n offer-toast) ---
+//
+// Renderer calls this at boot to decide whether to surface the
+// "language detected" toast. `app.getLocale()` returns Chromium's
+// best-guess locale (e.g. `zh-CN`, `en-US`). The renderer's i18n module
+// folds the regional variant into the language-base code per the locked
+// IMPL-multi-language.md decisions (variant policy = language base).
+ipcMain.handle('get-system-locale', () => {
+  try { return app.getLocale() || 'en'; } catch { return 'en'; }
+});
+
 // --- IPC Handlers: TCode (multi-transport — serial / UDP / WebSocket) ---
 
 const { createTransport } = require('./tcode-transports');

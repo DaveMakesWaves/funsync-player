@@ -4,6 +4,7 @@
 // in app.js. See `notes/features/SCOPE-up-next.md` for the full spec.
 
 import { icon, X, Play } from '../js/icons.js';
+import { t } from '../js/i18n.js';
 
 function _esc(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -70,7 +71,7 @@ export class UpNextCard {
     // Card-level a11y: aria-live on the root so the countdown text
     // change is announced (polite — once, not on every tick).
     this._el.setAttribute('role', 'region');
-    this._el.setAttribute('aria-label', 'Up Next');
+    this._el.setAttribute('aria-label', t('upNext.regionAria'));
     this._el.setAttribute('aria-live', 'polite');
 
     // Hover / focus pause-resume — applied at the root so all child
@@ -102,11 +103,11 @@ export class UpNextCard {
 
     this._el.innerHTML = `
       <div class="up-next__header">
-        <span class="up-next__label">UP NEXT &middot; in <span class="up-next__countdown" aria-label="seconds remaining">${countdownSec}</span> s</span>
-        <button type="button" class="up-next__dismiss" aria-label="Dismiss Up Next" title="Dismiss">
+        <span class="up-next__label">${t('upNext.labelPrefix')} <span class="up-next__countdown" aria-label="${_esc(t('upNext.secondsAria'))}">${countdownSec}</span> ${t('upNext.labelSuffix')}</span>
+        <button type="button" class="up-next__dismiss" aria-label="${_esc(t('upNext.dismissAria'))}" title="${_esc(t('upNext.dismissTitle'))}">
         </button>
       </div>
-      <div class="up-next__body" tabindex="0" role="button" aria-label="Play next: ${_esc(meta.name)}">
+      <div class="up-next__body" tabindex="0" role="button" aria-label="${_esc(t('upNext.playNextAria', { name: meta.name }))}">
         <div class="up-next__thumb">
           <div class="up-next__thumb-skeleton" aria-hidden="true"></div>
           <div class="up-next__thumb-play" aria-hidden="true">
@@ -117,7 +118,7 @@ export class UpNextCard {
           <div class="up-next__title" title="${_esc(meta.name)}">${_esc(meta.name)}</div>
           <div class="up-next__meta">
             ${meta.durationLabel ? `<span class="up-next__duration">${_esc(meta.durationLabel)}</span>` : ''}
-            ${meta.hasFunscript ? '<span class="up-next__meta-chip">Funscript</span>' : ''}
+            ${meta.hasFunscript ? `<span class="up-next__meta-chip">${_esc(t('upNext.funscriptChip'))}</span>` : ''}
           </div>
         </div>
       </div>
@@ -157,18 +158,18 @@ export class UpNextCard {
     this._el.classList.add('up-next--end-of-list');
     this._el.hidden = false;
 
-    const safeSource = _esc(sourceLabel || 'list');
+    const safeSource = _esc(sourceLabel || t('upNext.endSourceFallback'));
 
     this._el.innerHTML = `
       <div class="up-next__header">
-        <span class="up-next__label">END OF LIST</span>
-        <button type="button" class="up-next__dismiss" aria-label="Dismiss" title="Dismiss">
+        <span class="up-next__label">${_esc(t('upNext.endLabel'))}</span>
+        <button type="button" class="up-next__dismiss" aria-label="${_esc(t('upNext.endDismissAria'))}" title="${_esc(t('upNext.dismissTitle'))}">
         </button>
       </div>
       <div class="up-next__body">
         <div class="up-next__info">
-          <div class="up-next__end-text">No more videos in this ${safeSource}.</div>
-          <button type="button" class="up-next__end-cta">Back to ${safeSource}</button>
+          <div class="up-next__end-text">${_esc(t('upNext.endText', { source: sourceLabel || t('upNext.endSourceFallback') }))}</div>
+          <button type="button" class="up-next__end-cta">${_esc(t('upNext.endCta', { source: sourceLabel || t('upNext.endSourceFallback') }))}</button>
         </div>
       </div>
     `;

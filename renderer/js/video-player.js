@@ -1,6 +1,7 @@
 // VideoPlayer — HTML5 video wrapper with custom controls
 
 import { showToast } from './toast.js';
+import { t } from './i18n.js';
 
 /**
  * Format seconds into human-readable time string.
@@ -305,8 +306,8 @@ export class VideoPlayer {
         await this.container.requestFullscreen();
       }
     } catch (err) {
-      const msg = (err && err.message) || 'Fullscreen unavailable in this context.';
-      showToast(`Fullscreen blocked: ${msg}`, 'warn');
+      const msg = (err && err.message) || t('toast.fullscreenUnavailable');
+      showToast(t('toast.fullscreenBlocked', { error: msg }), 'warn');
     }
   }
 
@@ -321,11 +322,11 @@ export class VideoPlayer {
       } else if (document.pictureInPictureEnabled) {
         await this.video.requestPictureInPicture();
       } else {
-        showToast('Picture-in-Picture is not supported by this browser.', 'warn');
+        showToast(t('toast.pipUnsupported'), 'warn');
       }
     } catch (err) {
-      const msg = (err && err.message) || 'Picture-in-Picture failed.';
-      showToast(`Picture-in-Picture: ${msg}`, 'warn');
+      const msg = (err && err.message) || t('toast.pipFailed');
+      showToast(t('toast.pipError', { error: msg }), 'warn');
     }
   }
 
@@ -337,8 +338,8 @@ export class VideoPlayer {
     this.iconPlay.hidden = true;
     this.iconPause.hidden = true;
     if (this.iconReplay) this.iconReplay.hidden = false;
-    this.btnPlay.setAttribute('aria-label', 'Replay');
-    this.btnPlay.title = 'Replay (K)';
+    this.btnPlay.setAttribute('aria-label', t('player.replay'));
+    this.btnPlay.title = t('player.replayTitle');
 
     // Center overlay — show replay icon persistently
     clearTimeout(this._centerFlashTimer);
@@ -347,15 +348,15 @@ export class VideoPlayer {
     this.centerIconPause.hidden = true;
     if (this.centerIconReplay) this.centerIconReplay.hidden = false;
     this.centerPlayBtn.classList.add('center-play--visible');
-    this.centerPlayBtn.setAttribute('aria-label', 'Replay');
+    this.centerPlayBtn.setAttribute('aria-label', t('player.replay'));
   }
 
   _updatePlayButton(isPlaying) {
     this.iconPlay.hidden = isPlaying;
     this.iconPause.hidden = !isPlaying;
     if (this.iconReplay) this.iconReplay.hidden = true;
-    this.btnPlay.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
-    this.btnPlay.title = isPlaying ? 'Pause (K)' : 'Play (K)';
+    this.btnPlay.setAttribute('aria-label', isPlaying ? t('player.pause') : t('player.play'));
+    this.btnPlay.title = isPlaying ? t('player.pauseTitle') : t('player.playTitle');
     this._updateCenterPlay(isPlaying);
   }
 
@@ -376,14 +377,14 @@ export class VideoPlayer {
     this.iconVolume.hidden = isMuted || isLow;
     if (this.iconVolumeLow) this.iconVolumeLow.hidden = !isLow;
     this.iconMuted.hidden = !isMuted;
-    this.btnMute.setAttribute('aria-label', isMuted ? 'Unmute' : 'Mute');
+    this.btnMute.setAttribute('aria-label', isMuted ? t('player.unmute') : t('player.mute'));
   }
 
   _updateFullscreenButton() {
     const isFs = !!document.fullscreenElement;
     this.iconExpand.hidden = isFs;
     this.iconCompress.hidden = !isFs;
-    this.btnFullscreen.setAttribute('aria-label', isFs ? 'Exit fullscreen' : 'Fullscreen');
+    this.btnFullscreen.setAttribute('aria-label', isFs ? t('player.exitFullscreen') : t('player.fullscreen'));
   }
 
   _updateCenterPlay(isPlaying) {
@@ -406,7 +407,7 @@ export class VideoPlayer {
       this.centerPlayBtn.classList.add('center-play--visible');
     }
 
-    this.centerPlayBtn.setAttribute('aria-label', isPlaying ? 'Pause' : 'Play');
+    this.centerPlayBtn.setAttribute('aria-label', isPlaying ? t('player.pause') : t('player.play'));
   }
 
   _onTimeUpdate() {
@@ -553,11 +554,11 @@ export class VideoPlayer {
       const h = this.video.videoHeight;
       const codec = this.video.videoWidth ? 'H.264' : '—';
       overlay.innerHTML = `
-        <div>Resolution: ${w}x${h}</div>
-        <div>Duration: ${this._formatTime(this.video.duration)}</div>
-        <div>Current: ${this._formatTime(this.video.currentTime)}</div>
-        <div>Volume: ${Math.round(this.video.volume * 100)}%</div>
-        <div>Playback Rate: ${this.video.playbackRate}x</div>
+        <div>${t('player.infoResolution')}: ${w}x${h}</div>
+        <div>${t('player.infoDuration')}: ${this._formatTime(this.video.duration)}</div>
+        <div>${t('player.infoCurrent')}: ${this._formatTime(this.video.currentTime)}</div>
+        <div>${t('player.infoVolume')}: ${Math.round(this.video.volume * 100)}%</div>
+        <div>${t('player.infoPlaybackRate')}: ${this.video.playbackRate}x</div>
       `;
       overlay.hidden = false;
     } else {
@@ -614,6 +615,58 @@ export class VideoPlayer {
 
     const labels = { contain: 'Fit', cover: 'Fill', '16 / 9': '16:9', '4 / 3': '4:3' };
     console.log(`Aspect ratio: ${labels[mode]}`);
+  }
+
+  // --- VR Flatten ---
+  //
+  // Apply / clear a VR-as-flat playback transform. The format is one of
+  // `'sbs-half'`, `'sbs-full'`, `'tb-half'`, `'tb-full'`, `'off'`, or
+  // null/undefined (= 'off'). `eye` is 1 (left/top, default) or 2
+  // (right/bottom). Pure CSS state — no impact on the video element's
+  // intrinsic dimensions or playback rate.
+  //
+  // Idempotent: applying the same format+eye twice is a no-op.
+  setVRFlatten(format, eye = 1) {
+    const VALID = ['sbs-half', 'sbs-full', 'tb-half', 'tb-full'];
+    // Clear prior flat-* classes regardless of next state — cheap and
+    // avoids the trap where switching SBS → TB leaves both on.
+    for (const v of VALID) {
+      this.video.classList.remove(`player__video--flat-${v}`);
+    }
+    this.video.classList.remove('player__video--flat-eye-2');
+    this._vrFlattenFormat = null;
+    this._vrFlattenEye = 1;
+    if (!format || format === 'off' || !VALID.includes(format)) return;
+    this.video.classList.add(`player__video--flat-${format}`);
+    if (eye === 2) this.video.classList.add('player__video--flat-eye-2');
+    this._vrFlattenFormat = format;
+    this._vrFlattenEye = eye;
+  }
+
+  /**
+   * Cycle the VR-flatten state through Off → Left/Top eye → Right/Bottom
+   * eye → Off. Caller passes the detected `format` for the loaded video;
+   * when null, only the Off state is reachable (no-op cycle).
+   */
+  cycleVRFlatten(format) {
+    if (!format) {
+      this.setVRFlatten('off');
+      return 'off';
+    }
+    if (!this._vrFlattenFormat) {
+      this.setVRFlatten(format, 1);
+      return `${format} (left)`;
+    }
+    if (this._vrFlattenEye === 1) {
+      this.setVRFlatten(format, 2);
+      return `${format} (right)`;
+    }
+    this.setVRFlatten('off');
+    return 'off';
+  }
+
+  get vrFlattenState() {
+    return { format: this._vrFlattenFormat || null, eye: this._vrFlattenEye || 1 };
   }
 
   // --- Subtitles ---

@@ -50,6 +50,7 @@ export function teardownPlayback(deps) {
 
   // Stop all sync engines (prevents any new commands from being queued)
   if (deps?.syncEngine) deps.syncEngine.stop();
+  if (deps?.handyHdspSync?.active) deps.handyHdspSync.stop();
   if (deps?.buttplugSync?._active) deps.buttplugSync.stop();
   if (deps?.tcodeSync?._active) deps.tcodeSync.stop();
   if (deps?.autoblowSync?._active) deps.autoblowSync.stop();

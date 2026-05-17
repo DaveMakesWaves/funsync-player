@@ -34,6 +34,8 @@ window.funsync = {
   // Shell
   openExternal: vi.fn().mockResolvedValue(undefined),
   showInFolder: vi.fn().mockResolvedValue(undefined),
+  // i18n — system locale lookup
+  getSystemLocale: vi.fn().mockResolvedValue('en-US'),
 
   // VR Bridge
   vrConnect: vi.fn().mockResolvedValue({ success: true }),
@@ -248,4 +250,21 @@ if (!crypto.randomUUID) {
       return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
     });
   };
+}
+
+// --- i18n preload ---
+// Components using `t()` need a baseline English bundle so the lookup
+// returns the expected string instead of the raw key. Inject synchronously
+// from the JSON file before any component renders.
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { _setBundlesForTests } from '../renderer/js/i18n.js';
+try {
+  const __dirname = dirname(fileURLToPath(import.meta.url));
+  const enPath = resolve(__dirname, '../renderer/locales/en.json');
+  const enBundle = JSON.parse(readFileSync(enPath, 'utf8'));
+  _setBundlesForTests('en', enBundle, enBundle);
+} catch {
+  // Tests that don't use t() still pass without the bundle; ignore.
 }

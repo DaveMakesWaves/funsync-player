@@ -7,6 +7,8 @@ import { computeBins, renderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
 import { pathToFileURL } from '../js/path-utils.js';
 import { promptCreateCategory, PRESET_COLORS } from '../js/category-create-modal.js';
+import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 
 export class Categories {
   constructor({ settings, onPlayVideo, library }) {
@@ -43,6 +45,20 @@ export class Categories {
 
   show(containerEl) {
     this._container = containerEl;
+    // Re-render on locale change — kebab tooltips, empty-state text,
+    // Back-to-categories aria, etc. are all baked via t() into innerHTML
+    // at render time, so translatePage() doesn't catch them.
+    if (!this._languageListenerAttached) {
+      eventBus.on('language:changed', () => {
+        if (!this._container) return;
+        if (this._view === 'detail' && this._detailCategoryId) {
+          this._renderDetail(this._detailCategoryId);
+        } else {
+          this._renderGrid();
+        }
+      });
+      this._languageListenerAttached = true;
+    }
     if (this._view === 'detail' && this._detailCategoryId) {
       this._renderDetail(this._detailCategoryId);
     } else {
@@ -74,7 +90,7 @@ export class Categories {
 
     const header = document.createElement('div');
     header.className = 'categories__header';
-    header.innerHTML = `<span class="categories__title">Categories</span>`;
+    header.innerHTML = `<span class="categories__title">${t('categories.title')}</span>`;
     this._addViewToggle(header);
     this._container.appendChild(header);
 
@@ -85,8 +101,8 @@ export class Categories {
       wrapper.innerHTML = `
         <div class="categories__empty">
           <div class="categories__empty-icon"></div>
-          <div class="categories__empty-text">No categories yet</div>
-          <button class="categories__empty-cta">Create Your First Category</button>
+          <div class="categories__empty-text">${t('categories.emptyTitle')}</div>
+          <button class="categories__empty-cta">${t('categories.emptyCta')}</button>
         </div>
       `;
       wrapper.querySelector('.categories__empty-icon')
@@ -112,7 +128,7 @@ export class Categories {
     createCard.className = 'categories__card categories__card--create';
     createCard.innerHTML = `
       <div class="categories__card-create-icon"></div>
-      <div class="categories__card-create-label">New Category</div>
+      <div class="categories__card-create-label">${t('categories.newCategory')}</div>
     `;
     createCard.querySelector('.categories__card-create-icon')
       .appendChild(icon(Plus, { width: 28, height: 28 }));
@@ -154,7 +170,7 @@ export class Categories {
     const renameBtn = document.createElement('button');
     renameBtn.className = 'categories__card-action-btn';
     renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
-    renameBtn.title = 'Rename';
+    renameBtn.title = t('common.rename');
     renameBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._renameCategory(cat);
@@ -163,7 +179,7 @@ export class Categories {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'categories__card-action-btn categories__card-action-btn--danger';
     deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
-    deleteBtn.title = 'Delete';
+    deleteBtn.title = t('common.delete');
     deleteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._deleteCategory(cat);
@@ -202,7 +218,7 @@ export class Categories {
     const backBtn = document.createElement('button');
     backBtn.className = 'categories__back-btn';
     backBtn.appendChild(icon(ArrowLeft, { width: 20, height: 20 }));
-    backBtn.title = 'Back to categories';
+    backBtn.title = t('categories.backToCategories');
     backBtn.addEventListener('click', () => this.navigateBack());
 
     const colorDot = document.createElement('span');
@@ -248,8 +264,8 @@ export class Categories {
     if (validPaths.length === 0) {
       wrapper.innerHTML = `
         <div class="categories__empty">
-          <div class="categories__empty-text">No videos in this category</div>
-          <div class="categories__empty-hint">Assign videos from the Library using the kebab menu</div>
+          <div class="categories__empty-text">${t('categories.detailEmpty')}</div>
+          <div class="categories__empty-hint">${t('categories.detailEmptyHint')}</div>
         </div>
       `;
       this._container.appendChild(wrapper);
@@ -306,7 +322,7 @@ export class Categories {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'categories__video-remove-btn';
     removeBtn.appendChild(icon(X, { width: 12, height: 12 }));
-    removeBtn.title = 'Remove from category';
+    removeBtn.title = t('categories.removeFromCategory');
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._settings.unassignCategory(videoPath, category.id);
@@ -374,7 +390,7 @@ export class Categories {
       placeholder.classList.add('categories__video-placeholder--broken');
     }
     cardEl.classList.add('categories__video-card--broken');
-    cardEl.title = `File not found: ${videoPath}`;
+    cardEl.title = t('library.fileNotFound', { path: videoPath });
   }
 
   /**
@@ -480,7 +496,7 @@ export class Categories {
       // Funscript icon badge on thumbnail
       const badge = document.createElement('span');
       badge.className = 'library__funscript-badge library__funscript-badge--auto';
-      badge.title = 'Funscript linked';
+      badge.title = t('playlists.funscriptLinked');
       badge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
       thumbnailEl.appendChild(badge);
 
@@ -511,7 +527,7 @@ export class Categories {
 
     const speedBadge = document.createElement('span');
     speedBadge.className = `library__speed-badge ${colorClass}`;
-    speedBadge.title = `Avg: ${stats.avgSpeed} units/s — Max: ${stats.maxSpeed} units/s`;
+    speedBadge.title = t('library.speedBadgeTitle', { avg: stats.avgSpeed, max: stats.maxSpeed });
     speedBadge.appendChild(icon(Gauge, { width: 12, height: 12, 'stroke-width': 2.5 }));
     containerEl.appendChild(speedBadge);
   }
@@ -541,14 +557,14 @@ export class Categories {
   }
 
   async _renameCategory(cat) {
-    const name = await Modal.prompt('Rename Category', 'New name', cat.name);
+    const name = await Modal.prompt(t('categories.renameCategory'), t('categories.categoryNamePlaceholder'), cat.name);
     if (!name) return;
     this._settings.renameCategory(cat.id, name);
     this._renderGrid();
   }
 
   async _deleteCategory(cat) {
-    const confirmed = await Modal.confirm('Delete Category', `Delete "${cat.name}"? This cannot be undone.`);
+    const confirmed = await Modal.confirm(t('categories.deleteCategory'), t('categories.confirmDelete'));
     if (!confirmed) return;
     this._settings.deleteCategory(cat.id);
     this._renderGrid();
@@ -562,14 +578,14 @@ export class Categories {
 
     const btnGrid = document.createElement('button');
     btnGrid.className = 'view-toggle view-toggle--grid';
-    btnGrid.title = 'Grid view';
+    btnGrid.title = t('categories.gridView');
     btnGrid.appendChild(icon(LayoutGrid, { width: 16, height: 16 }));
     btnGrid.classList.toggle('view-toggle--active', this._viewMode === 'grid');
     btnGrid.addEventListener('click', () => this._setViewMode('grid'));
 
     const btnList = document.createElement('button');
     btnList.className = 'view-toggle view-toggle--list';
-    btnList.title = 'List view';
+    btnList.title = t('categories.listView');
     btnList.appendChild(icon(LayoutList, { width: 16, height: 16 }));
     btnList.classList.toggle('view-toggle--active', this._viewMode === 'list');
     btnList.addEventListener('click', () => this._setViewMode('list'));
@@ -610,13 +626,13 @@ export class Categories {
     const renameBtn = document.createElement('button');
     renameBtn.className = 'categories__card-action-btn';
     renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
-    renameBtn.title = 'Rename';
+    renameBtn.title = t('common.rename');
     renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this._renameCategory(cat); });
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'categories__card-action-btn categories__card-action-btn--danger';
     deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
-    deleteBtn.title = 'Delete';
+    deleteBtn.title = t('common.delete');
     deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this._deleteCategory(cat); });
 
     actions.append(renameBtn, deleteBtn);
@@ -656,7 +672,7 @@ export class Categories {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'categories__card-action-btn categories__card-action-btn--danger';
     removeBtn.appendChild(icon(X, { width: 14, height: 14 }));
-    removeBtn.title = 'Remove from category';
+    removeBtn.title = t('categories.removeFromCategory');
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._settings.unassignCategory(videoPath, category.id);

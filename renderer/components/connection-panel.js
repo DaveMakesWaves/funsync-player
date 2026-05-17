@@ -1,6 +1,7 @@
 // ConnectionPanel — UI for connecting to Handy or Buttplug.io devices
 
 import { icon, X, Info } from '../js/icons.js';
+import { SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, translatePage, getCurrentLocale, t } from '../js/i18n.js';
 import {
   classifyTransport,
   computeSuggestedOffset,
@@ -13,8 +14,12 @@ import { showToast } from '../js/toast.js';
 // specification. L0 is the main stroke; R0-R2 are rotation, V* are vibration,
 // A0 is the first auxiliary channel (typically a valve/aux output on the SR6).
 // Order matters — rendered top→bottom.
+// Kinematic axis names (Surge/Sway/Twist/Roll/Pitch/Vibe/Lube/Pump/Suction/Valve)
+// are international protocol-standard TCode terminology — kept literal in every
+// locale so users recognise them across scripts, forums, and other tools.
+// Only L0's "Stroke (main)" label is app-flavour framing and gets translated.
 const TCODE_UI_AXES = [
-  { tcode: 'L0', label: 'Stroke (main)',   type: 'linear'  },
+  { tcode: 'L0', labelKey: 'connection.tcode.l0Label', type: 'linear'  },
   { tcode: 'L1', label: 'Surge',           type: 'linear'  },
   { tcode: 'L2', label: 'Sway',            type: 'linear'  },
   { tcode: 'R0', label: 'Twist',           type: 'rotate'  },
@@ -64,10 +69,10 @@ export class ConnectionPanel {
 
     this._panel.innerHTML = `
       <div class="connection-panel__header">
-        <h2 id="connection-panel__title" class="connection-panel__title">Device Connection</h2>
-        <button class="connection-panel__close control-btn" aria-label="Close Device Connection"><i data-lucide="x"></i></button>
+        <h2 id="connection-panel__title" class="connection-panel__title" data-i18n="connection.title">${_esc(t('connection.title'))}</h2>
+        <button class="connection-panel__close control-btn" data-i18n-aria-label="connection.closeAria" aria-label="${_esc(t('connection.closeAria'))}"><i data-lucide="x"></i></button>
       </div>
-      <div class="connection-panel__tabs" role="tablist" aria-label="Device tabs">
+      <div class="connection-panel__tabs" role="tablist" data-i18n-aria-label="connection.tabsAria" aria-label="${_esc(t('connection.tabsAria'))}">
         <button class="connection-panel__tab connection-panel__tab--active" role="tab" id="connection-panel__tab-btn-handy" aria-selected="true" aria-controls="tab-handy" data-tab="handy">
           <span class="connection-panel__tab-led" data-tab-led="handy" aria-hidden="true"></span>
           <span class="connection-panel__tab-label">Handy</span>
@@ -85,7 +90,10 @@ export class ConnectionPanel {
           <span class="connection-panel__tab-label">Autoblow</span>
         </button>
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-sync" aria-selected="false" aria-controls="tab-sync" data-tab="sync" tabindex="-1">
-          <span class="connection-panel__tab-label">Sync</span>
+          <span class="connection-panel__tab-label" data-i18n="connection.tabSync">Sync</span>
+        </button>
+        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-settings" aria-selected="false" aria-controls="tab-settings" data-tab="settings" tabindex="-1">
+          <span class="connection-panel__tab-label" data-i18n="settings.title">Settings</span>
         </button>
       </div>
 
@@ -93,61 +101,65 @@ export class ConnectionPanel {
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="connection-led"></span>
-        <span class="connection-panel__status-text" id="connection-status-text">Not connected</span>
+        <span class="connection-panel__status-text" id="connection-status-text" data-i18n="connection.status.notConnected">${_esc(t('connection.status.notConnected'))}</span>
       </div>
 
       <div class="connection-panel__form">
-        <label for="connection-key-input" class="connection-panel__label">Connection Key</label>
+        <label for="connection-key-input" class="connection-panel__label" data-i18n="connection.handy.connectionKey">${_esc(t('connection.handy.connectionKey'))}</label>
         <div class="connection-panel__input-row">
           <input type="text" id="connection-key-input"
                  class="connection-panel__input"
-                 placeholder="Enter connection key"
+                 data-i18n-placeholder="connection.handy.connectionKeyPlaceholder"
+                 placeholder="${_esc(t('connection.handy.connectionKeyPlaceholder'))}"
                  maxlength="32"
-                 aria-label="Connection key">
-          <button id="btn-connect" class="connection-panel__btn">Connect</button>
+                 data-i18n-aria-label="connection.handy.connectionKeyAria"
+                 aria-label="${_esc(t('connection.handy.connectionKeyAria'))}">
+          <button id="btn-connect" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
         </div>
       </div>
 
       <div class="connection-panel__info" id="device-info-section" hidden>
         <div class="connection-panel__info-row">
-          <span>Firmware</span>
+          <span data-i18n="connection.handy.firmware">${_esc(t('connection.handy.firmware'))}</span>
           <span id="device-firmware">—</span>
         </div>
         <div class="connection-panel__info-row">
-          <span>Model</span>
+          <span data-i18n="connection.handy.model">${_esc(t('connection.handy.model'))}</span>
           <span id="device-model">—</span>
         </div>
         <div class="connection-panel__info-row">
-          <span>RTD</span>
+          <span data-i18n="connection.handy.rtd">${_esc(t('connection.handy.rtd'))}</span>
           <span id="device-rtd">—</span>
         </div>
-        <div id="firmware-warning" class="connection-panel__warning" hidden>
-          Firmware update available. Visit handyfeeling.com to update.
+        <div id="firmware-warning" class="connection-panel__warning" hidden data-i18n="connection.handy.firmwareUpdate">
+          ${_esc(t('connection.handy.firmwareUpdate'))}
         </div>
       </div>
 
       <div class="connection-panel__sync" id="sync-section" hidden>
-        <button id="btn-resync" class="connection-panel__btn connection-panel__btn--secondary">
-          Re-sync Time
+        <button id="btn-resync" class="connection-panel__btn connection-panel__btn--secondary" data-i18n="connection.btn.resync">
+          ${_esc(t('connection.btn.resync'))}
         </button>
         <span id="sync-quality" class="connection-panel__sync-quality"></span>
       </div>
 
       <div class="connection-panel__section" id="offset-section" hidden>
-        <label class="connection-panel__section-label">Sync Offset</label>
+        <label class="connection-panel__section-label" data-i18n="connection.handy.syncOffset">${_esc(t('connection.handy.syncOffset'))}</label>
         <div class="connection-panel__offset-row">
           <input type="range" class="connection-panel__offset-slider" id="offset-slider"
                  min="-1000" max="1000" step="10" value="0"
-                 aria-label="Script offset in milliseconds">
+                 data-i18n-aria-label="connection.handy.offsetSliderAria"
+                 aria-label="${_esc(t('connection.handy.offsetSliderAria'))}">
           <input type="number" class="connection-panel__offset-number" id="offset-number"
                  min="-1000" max="1000" step="10" value="0"
-                 aria-label="Script offset value">
+                 data-i18n-aria-label="connection.handy.offsetValueAria"
+                 aria-label="${_esc(t('connection.handy.offsetValueAria'))}">
           <span class="connection-panel__offset-unit">ms</span>
         </div>
       </div>
 
       <div class="connection-panel__section" id="stroke-section" hidden>
-        <label class="connection-panel__section-label">Stroke Range</label>
+        <label class="connection-panel__section-label" data-i18n="connection.handy.strokeRange">${_esc(t('connection.handy.strokeRange'))}</label>
         <div class="connection-panel__stroke-container">
           <span class="connection-panel__stroke-value" id="stroke-min-val">0</span>
           <div class="connection-panel__stroke-track-wrapper">
@@ -155,15 +167,17 @@ export class ConnectionPanel {
             <div class="connection-panel__stroke-fill" id="stroke-fill"></div>
             <input type="range" class="connection-panel__stroke-input" id="stroke-min-slider"
                    min="0" max="100" value="0"
-                   aria-label="Minimum stroke position">
+                   data-i18n-aria-label="connection.handy.strokeMinAria"
+                   aria-label="${_esc(t('connection.handy.strokeMinAria'))}">
             <input type="range" class="connection-panel__stroke-input" id="stroke-max-slider"
                    min="0" max="100" value="100"
-                   aria-label="Maximum stroke position">
+                   data-i18n-aria-label="connection.handy.strokeMaxAria"
+                   aria-label="${_esc(t('connection.handy.strokeMaxAria'))}">
           </div>
           <span class="connection-panel__stroke-value" id="stroke-max-val">100</span>
         </div>
-        <button id="btn-reset-stroke" class="connection-panel__btn connection-panel__btn--reset">
-          Reset Stroke
+        <button id="btn-reset-stroke" class="connection-panel__btn connection-panel__btn--reset" data-i18n="connection.btn.resetStroke">
+          ${_esc(t('connection.btn.resetStroke'))}
         </button>
       </div>
 
@@ -173,27 +187,28 @@ export class ConnectionPanel {
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="bp-connection-led"></span>
-        <span class="connection-panel__status-text" id="bp-connection-status-text">Not connected</span>
+        <span class="connection-panel__status-text" id="bp-connection-status-text" data-i18n="connection.status.notConnected">${_esc(t('connection.status.notConnected'))}</span>
       </div>
 
       <div class="connection-panel__form">
-        <label for="bp-port-input" class="connection-panel__label">Intiface Port</label>
+        <label for="bp-port-input" class="connection-panel__label" data-i18n="connection.buttplug.port">${_esc(t('connection.buttplug.port'))}</label>
         <div class="connection-panel__input-row">
           <input type="number" id="bp-port-input"
                  class="connection-panel__input"
                  value="12345" min="1024" max="65535"
-                 aria-label="Intiface WebSocket port">
-          <button id="btn-bp-connect" class="connection-panel__btn">Connect</button>
+                 data-i18n-aria-label="connection.buttplug.portAria"
+                 aria-label="${_esc(t('connection.buttplug.portAria'))}">
+          <button id="btn-bp-connect" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
         </div>
       </div>
 
       <div class="connection-panel__info" id="bp-device-section" hidden>
-        <div class="connection-panel__section-label">Devices</div>
+        <div class="connection-panel__section-label" data-i18n="connection.buttplug.devices">${_esc(t('connection.buttplug.devices'))}</div>
         <div id="bp-device-list" class="connection-panel__device-list">
-          <div class="connection-panel__no-devices">No devices found — click Scan to search</div>
+          <div class="connection-panel__no-devices" data-i18n="connection.buttplug.noDevices">${_esc(t('connection.buttplug.noDevices'))}</div>
         </div>
-        <button id="btn-bp-scan" class="connection-panel__btn connection-panel__btn--secondary">
-          Scan for Devices
+        <button id="btn-bp-scan" class="connection-panel__btn connection-panel__btn--secondary" data-i18n="connection.btn.scan">
+          ${_esc(t('connection.btn.scan'))}
         </button>
       </div>
 
@@ -203,26 +218,26 @@ export class ConnectionPanel {
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="tcode-led"></span>
-        <span class="connection-panel__status-text" id="tcode-status-text">Not connected</span>
+        <span class="connection-panel__status-text" id="tcode-status-text" data-i18n="connection.status.notConnected">${_esc(t('connection.status.notConnected'))}</span>
       </div>
 
       <div class="connection-panel__form">
-        <label class="connection-panel__label">Transport</label>
-        <select id="tcode-transport-select" class="connection-panel__input" aria-label="TCode transport">
-          <option value="serial" selected>Serial (USB)</option>
-          <option value="udp">UDP (2.4 GHz wireless)</option>
-          <option value="websocket">WebSocket</option>
+        <label class="connection-panel__label" data-i18n="connection.tcode.transport">${_esc(t('connection.tcode.transport'))}</label>
+        <select id="tcode-transport-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.transportAria" aria-label="${_esc(t('connection.tcode.transportAria'))}">
+          <option value="serial" selected data-i18n="connection.tcode.transportSerial">${_esc(t('connection.tcode.transportSerial'))}</option>
+          <option value="udp" data-i18n="connection.tcode.transportUdp">${_esc(t('connection.tcode.transportUdp'))}</option>
+          <option value="websocket" data-i18n="connection.tcode.transportWs">${_esc(t('connection.tcode.transportWs'))}</option>
         </select>
 
         <div id="tcode-serial-fields" class="connection-panel__transport-fields">
-          <label class="connection-panel__label" style="margin-top:8px">Serial Port</label>
+          <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.serialPort">${_esc(t('connection.tcode.serialPort'))}</label>
           <div class="connection-panel__input-row">
-            <select id="tcode-port-select" class="connection-panel__input" style="flex:1" aria-label="Serial port"></select>
-            <button id="tcode-refresh-btn" class="connection-panel__action connection-panel__action--utility" title="Refresh ports" aria-label="Refresh serial port list">↻</button>
+            <select id="tcode-port-select" class="connection-panel__input" style="flex:1" data-i18n-aria-label="connection.tcode.serialPortAria" aria-label="${_esc(t('connection.tcode.serialPortAria'))}"></select>
+            <button id="tcode-refresh-btn" class="connection-panel__action connection-panel__action--utility" data-i18n-title="connection.tcode.refreshPortsTitle" title="${_esc(t('connection.tcode.refreshPortsTitle'))}" data-i18n-aria-label="connection.tcode.refreshPortsAria" aria-label="${_esc(t('connection.tcode.refreshPortsAria'))}">↻</button>
           </div>
 
-          <label class="connection-panel__label" style="margin-top:8px">Baud Rate</label>
-          <select id="tcode-baud-select" class="connection-panel__input" aria-label="Baud rate">
+          <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.baudRate">${_esc(t('connection.tcode.baudRate'))}</label>
+          <select id="tcode-baud-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.baudRateAria" aria-label="${_esc(t('connection.tcode.baudRateAria'))}">
             <option value="9600">9600</option>
             <option value="19200">19200</option>
             <option value="38400">38400</option>
@@ -233,27 +248,36 @@ export class ConnectionPanel {
         </div>
 
         <div id="tcode-udp-fields" class="connection-panel__transport-fields" hidden>
-          <label for="tcode-udp-host" class="connection-panel__label" style="margin-top:8px">Host</label>
+          <label for="tcode-udp-host" class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.host">${_esc(t('connection.tcode.host'))}</label>
           <input id="tcode-udp-host" type="text" class="connection-panel__input"
-                 placeholder="192.168.1.42" aria-label="UDP host">
-          <label for="tcode-udp-port" class="connection-panel__label" style="margin-top:8px">Port</label>
+                 placeholder="192.168.1.42" data-i18n-aria-label="connection.tcode.hostAria" aria-label="${_esc(t('connection.tcode.hostAria'))}">
+          <label for="tcode-udp-port" class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.port">${_esc(t('connection.tcode.port'))}</label>
           <input id="tcode-udp-port" type="number" class="connection-panel__input"
-                 min="1" max="65535" placeholder="8080" aria-label="UDP port">
+                 min="1" max="65535" placeholder="8080" data-i18n-aria-label="connection.tcode.portAria" aria-label="${_esc(t('connection.tcode.portAria'))}">
         </div>
 
         <div id="tcode-ws-fields" class="connection-panel__transport-fields" hidden>
-          <label for="tcode-ws-url" class="connection-panel__label" style="margin-top:8px">WebSocket URL</label>
+          <label for="tcode-ws-url" class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.wsUrl">${_esc(t('connection.tcode.wsUrl'))}</label>
           <input id="tcode-ws-url" type="text" class="connection-panel__input"
-                 placeholder="ws://192.168.1.42:81" aria-label="WebSocket URL">
+                 placeholder="ws://192.168.1.42:81" data-i18n-aria-label="connection.tcode.wsUrlAria" aria-label="${_esc(t('connection.tcode.wsUrlAria'))}">
+          <div class="connection-panel__hint" style="margin-top:4px;font-size:11px;color:var(--text-secondary)" data-i18n="connection.tcode.wsHint">
+            ${_esc(t('connection.tcode.wsHint'))}
+          </div>
         </div>
 
+        <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.precision">${_esc(t('connection.tcode.precision'))}</label>
+        <select id="tcode-precision-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.precisionAria" aria-label="${_esc(t('connection.tcode.precisionAria'))}">
+          <option value="3" selected data-i18n="settings.tcodePrecision3">${_esc(t('settings.tcodePrecision3'))}</option>
+          <option value="4" data-i18n="settings.tcodePrecision4">${_esc(t('settings.tcodePrecision4'))}</option>
+        </select>
+
         <div class="connection-panel__input-row" style="margin-top:10px">
-          <button id="tcode-connect-btn" class="connection-panel__btn" style="flex:1">Connect</button>
+          <button id="tcode-connect-btn" class="connection-panel__btn" style="flex:1" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
         </div>
       </div>
 
       <div id="tcode-axis-settings" class="connection-panel__section" hidden>
-        <label class="connection-panel__section-label">Axis Ranges</label>
+        <label class="connection-panel__section-label" data-i18n="connection.tcode.axisRanges">${_esc(t('connection.tcode.axisRanges'))}</label>
         <div id="tcode-axis-list"></div>
       </div>
 
@@ -263,33 +287,35 @@ export class ConnectionPanel {
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="ab-led"></span>
-        <span class="connection-panel__status-text" id="ab-status-text">Not connected</span>
+        <span class="connection-panel__status-text" id="ab-status-text" data-i18n="connection.status.notConnected">${_esc(t('connection.status.notConnected'))}</span>
       </div>
 
       <div class="connection-panel__form">
-        <label for="ab-token-input" class="connection-panel__label">Device Token</label>
+        <label for="ab-token-input" class="connection-panel__label" data-i18n="connection.autoblow.deviceToken">${_esc(t('connection.autoblow.deviceToken'))}</label>
         <div class="connection-panel__input-row">
           <input type="password" id="ab-token-input"
                  class="connection-panel__input"
-                 placeholder="Enter device token"
-                 aria-label="Autoblow device token">
-          <button id="ab-connect-btn" class="connection-panel__btn">Connect</button>
+                 data-i18n-placeholder="connection.autoblow.deviceTokenPlaceholder"
+                 placeholder="${_esc(t('connection.autoblow.deviceTokenPlaceholder'))}"
+                 data-i18n-aria-label="connection.autoblow.deviceTokenAria"
+                 aria-label="${_esc(t('connection.autoblow.deviceTokenAria'))}">
+          <button id="ab-connect-btn" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
         </div>
       </div>
 
       <div id="ab-device-info" class="connection-panel__section" hidden>
-        <label class="connection-panel__section-label">Device</label>
+        <label class="connection-panel__section-label" data-i18n="connection.autoblow.device">${_esc(t('connection.autoblow.device'))}</label>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Type</span>
+          <span class="connection-panel__setting-label" data-i18n="connection.autoblow.type">${_esc(t('connection.autoblow.type'))}</span>
           <span id="ab-device-type" class="connection-panel__setting-value">—</span>
         </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Latency</span>
+          <span class="connection-panel__setting-label" data-i18n="connection.autoblow.latency">${_esc(t('connection.autoblow.latency'))}</span>
           <span id="ab-latency" class="connection-panel__setting-value">—</span>
-          <button id="ab-latency-btn" class="connection-panel__action connection-panel__action--utility">Measure</button>
+          <button id="ab-latency-btn" class="connection-panel__action connection-panel__action--utility" data-i18n="connection.btn.measure">${_esc(t('connection.btn.measure'))}</button>
         </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Offset</span>
+          <span class="connection-panel__setting-label" data-i18n="connection.autoblow.offset">${_esc(t('connection.autoblow.offset'))}</span>
           <input type="range" id="ab-offset" min="-1000" max="1000" value="0" class="connection-panel__safety-slider" style="flex:1">
           <span id="ab-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
         </div>
@@ -300,41 +326,48 @@ export class ConnectionPanel {
       <div class="connection-panel__tab-content" id="tab-sync" role="tabpanel" aria-labelledby="connection-panel__tab-btn-sync" hidden>
 
       <div class="connection-panel__section" style="padding:8px 12px;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:6px;margin-bottom:10px">
-        <span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px">EXPERIMENTAL</span>
-        <span style="font-size:11px;opacity:0.85;margin-left:6px">Auto-offset is a first-pass implementation — preset values are placeholders and unmeasured display lag means manual fine-tuning may still be needed.</span>
+        <span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px" data-i18n="connection.sync.experimental">${_esc(t('connection.sync.experimental'))}</span>
+        <span style="font-size:11px;opacity:0.85;margin-left:6px" data-i18n="connection.sync.experimentalNote">${_esc(t('connection.sync.experimentalNote'))}</span>
       </div>
 
       <div class="connection-panel__section">
-        <label class="connection-panel__section-label">Measured Latency</label>
-        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7">
-          Auto-suggested offsets are computed from the measurable components. VR display lag is unmeasurable from outside the headset, so a per-player preset is added; you can fine-tune the slider afterward.
+        <label class="connection-panel__section-label" data-i18n="connection.sync.measuredLatency">${_esc(t('connection.sync.measuredLatency'))}</label>
+        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7" data-i18n="connection.sync.measuredLatencyHint">
+          ${_esc(t('connection.sync.measuredLatencyHint'))}
         </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">VR network jitter</span>
+          <span class="connection-panel__setting-label" data-i18n="connection.sync.vrJitter">${_esc(t('connection.sync.vrJitter'))}</span>
           <span id="sync-vr-jitter" class="connection-panel__setting-value">—</span>
         </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">Handy RTD</span>
+          <span class="connection-panel__setting-label" data-i18n="connection.sync.handyRtd">${_esc(t('connection.sync.handyRtd'))}</span>
           <span id="sync-handy-rtd" class="connection-panel__setting-value">—</span>
         </div>
         <div class="connection-panel__setting-row">
-          <span class="connection-panel__setting-label">VR transport</span>
+          <span class="connection-panel__setting-label" data-i18n="connection.sync.vrTransport">${_esc(t('connection.sync.vrTransport'))}</span>
           <span id="sync-vr-transport" class="connection-panel__setting-value">—</span>
         </div>
         <div style="display:flex;justify-content:flex-end;margin-top:6px">
-          <button id="sync-refresh-btn" class="connection-panel__action connection-panel__action--utility">Refresh</button>
+          <button id="sync-refresh-btn" class="connection-panel__action connection-panel__action--utility" data-i18n="connection.btn.refresh">${_esc(t('connection.btn.refresh'))}</button>
         </div>
       </div>
 
       <div class="connection-panel__section">
-        <label class="connection-panel__section-label">Per-Device Offsets</label>
-        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7">
-          Each device has its own offset to compensate for command latency. Negative values fire commands earlier. The slider here mirrors the offset on the device's own tab — change either, and both update.
+        <label class="connection-panel__section-label" data-i18n="connection.sync.perDeviceOffsets">${_esc(t('connection.sync.perDeviceOffsets'))}</label>
+        <div class="connection-panel__hint" style="margin-bottom:8px;font-size:11px;opacity:0.7" data-i18n="connection.sync.perDeviceHint">
+          ${_esc(t('connection.sync.perDeviceHint'))}
         </div>
         <div id="sync-device-rows"></div>
       </div>
 
       </div><!-- end tab-sync -->
+
+      <div class="connection-panel__tab-content" id="tab-settings" role="tabpanel" aria-labelledby="connection-panel__tab-btn-settings" hidden>
+        <div class="connection-panel__form">
+          <label for="settings-language-select" class="connection-panel__label" data-i18n="settings.language">${_esc(t('settings.language'))}</label>
+          <select id="settings-language-select" class="connection-panel__input" data-i18n-aria-label="settings.language" aria-label="${_esc(t('settings.language'))}"></select>
+        </div>
+      </div><!-- end tab-settings -->
 
     `;
 
@@ -396,6 +429,26 @@ export class ConnectionPanel {
       offsetSlider.value = val;
       offsetNumber.value = val;
       this._onOffsetChange(val);
+    });
+
+    // Re-render dynamic strings when the active locale changes. The
+    // global translatePage() handles all `data-i18n*` attributes in the
+    // static markup, but the per-device rows, status text (set via JS
+    // textContent), and Sync tab values bypass that path — so refresh
+    // them here. Idempotent — re-rendering doesn't lose user state.
+    eventBus.on('language:changed', () => {
+      try {
+        // Re-derive status text on all four device tabs from current
+        // connection state — picks up the new locale immediately.
+        if (this.handy) this._updateStatus(this.handy.connected ? 'connected' : 'disconnected');
+        if (this.buttplug) this._updateButtplugStatus(this.buttplug.connected ? 'connected' : 'disconnected');
+        if (this.tcodeManager) this._updateTCodeStatus(this.tcodeManager.connected ? 'connected' : 'disconnected');
+        if (this.autoblowManager) this._updateAutoblowStatus(this.autoblowManager.connected ? 'connected' : 'disconnected');
+        if (this.buttplug?.connected) this._updateButtplugDeviceList();
+        if (this._activeTab === 'sync') this._refreshSyncTab();
+      } catch (err) {
+        console.warn('[ConnectionPanel] language re-render failed:', err.message);
+      }
     });
 
     // Keep the Handy tab slider + Sync tab Handy row in sync with each
@@ -539,15 +592,28 @@ export class ConnectionPanel {
       const savedUdpHost = this.settings.get('tcode.udpHost') || '';
       const savedUdpPort = this.settings.get('tcode.udpPort') || '';
       const savedWsUrl = this.settings.get('tcode.wsUrl') || '';
+      const savedPrecision = Number(this.settings.get('tcode.precision')) || 3;
 
       if (transportSelect) transportSelect.value = savedTransport;
       this._panel.querySelector('#tcode-baud-select').value = String(savedBaud);
       const udpHost = this._panel.querySelector('#tcode-udp-host');
       const udpPort = this._panel.querySelector('#tcode-udp-port');
       const wsUrl = this._panel.querySelector('#tcode-ws-url');
+      const precisionSelect = this._panel.querySelector('#tcode-precision-select');
       if (udpHost) udpHost.value = savedUdpHost;
       if (udpPort && savedUdpPort) udpPort.value = String(savedUdpPort);
       if (wsUrl) wsUrl.value = savedWsUrl;
+      if (precisionSelect) {
+        precisionSelect.value = String(savedPrecision);
+        // Apply immediately so the manager emits the right precision even
+        // before the user clicks Connect.
+        this.tcodeManager.setPrecision?.(savedPrecision);
+        precisionSelect.addEventListener('change', () => {
+          const digits = parseInt(precisionSelect.value, 10);
+          this.tcodeManager.setPrecision?.(digits);
+          this.settings.set('tcode.precision', digits);
+        });
+      }
       this._onTCodeTransportChange();
 
       this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
@@ -560,6 +626,9 @@ export class ConnectionPanel {
       // Initial port scan (only meaningful for serial transport, but cheap)
       this._refreshTCodePorts(savedPort);
     }
+
+    // Settings tab — language dropdown (Phase 4 of the i18n rollout)
+    this._wireSettingsTab();
 
     // Autoblow callbacks + events
     if (this.autoblowManager) {
@@ -587,13 +656,13 @@ export class ConnectionPanel {
         const display = this._panel.querySelector('#ab-latency');
         const originalText = btn.textContent;
         btn.disabled = true;
-        btn.textContent = 'Measuring…';
+        btn.textContent = t('connection.btn.measuring');
         try {
           const latency = await this.autoblowManager.estimateLatency();
           display.textContent = `${latency}ms`;
-          showToast(`Autoblow latency: ${latency} ms`, 'info', 2500);
+          showToast(t('connection.autoblow.latencyToast', { ms: latency }), 'info', 2500);
         } catch (err) {
-          showToast(`Latency measurement failed: ${err?.message || 'unknown error'}`, 'error', 4000);
+          showToast(t('connection.autoblow.latencyFailed', { error: err?.message || 'unknown error' }), 'error', 4000);
         } finally {
           btn.textContent = originalText;
           btn.disabled = false;
@@ -646,7 +715,7 @@ export class ConnectionPanel {
     const key = keyInput.value.trim();
 
     if (!key || key.length < 5) {
-      this._showError('Connection key must be at least 5 characters');
+      this._showError(t('error.connectionKeyTooShort'));
       return;
     }
 
@@ -677,13 +746,13 @@ export class ConnectionPanel {
 
   async _onResync() {
     const syncQuality = this._panel.querySelector('#sync-quality');
-    syncQuality.textContent = 'Syncing...';
+    syncQuality.textContent = t('connection.handy.syncing');
 
     const result = await this.handy.syncTime();
     if (result) {
-      syncQuality.textContent = `RTD: ${Math.round(result.avgRtd)}ms`;
+      syncQuality.textContent = t('connection.handy.rtdResult', { rtd: Math.round(result.avgRtd) });
     } else {
-      syncQuality.textContent = 'Sync failed';
+      syncQuality.textContent = t('connection.handy.syncFailed');
     }
   }
 
@@ -702,8 +771,8 @@ export class ConnectionPanel {
     switch (status) {
       case 'connected':
         led.classList.add('connection-panel__led--connected');
-        text.textContent = 'Connected';
-        btn.textContent = 'Disconnect';
+        text.textContent = t('connection.status.connected');
+        btn.textContent = t('connection.btn.disconnect');
         infoSection.hidden = false;
         syncSection.hidden = false;
         offsetSection.hidden = false;
@@ -715,15 +784,15 @@ export class ConnectionPanel {
 
       case 'connecting':
         led.classList.add('connection-panel__led--connecting');
-        text.textContent = 'Connecting...';
-        btn.textContent = 'Connecting...';
+        text.textContent = t('connection.status.connecting');
+        btn.textContent = t('connection.status.connecting');
         btn.disabled = true;
         break;
 
       case 'error':
         led.classList.add('connection-panel__led--error');
-        text.textContent = 'Connection Failed';
-        btn.textContent = 'Connect';
+        text.textContent = t('connection.status.failed');
+        btn.textContent = t('connection.btn.connect');
         btn.disabled = false;
         break;
 
@@ -732,8 +801,8 @@ export class ConnectionPanel {
         // "Disconnected" only when the device was previously connected
         // in this session (real drop-out). On first launch / after error
         // we say "Not connected" — neutral, not failure framing.
-        text.textContent = this._handyEverConnected ? 'Disconnected' : 'Not connected';
-        btn.textContent = 'Connect';
+        text.textContent = this._handyEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected');
+        btn.textContent = t('connection.btn.connect');
         btn.disabled = false;
         infoSection.hidden = true;
         syncSection.hidden = true;
@@ -835,8 +904,10 @@ export class ConnectionPanel {
       tcode: 'TCode', autoblow: 'Autoblow',
     };
     const stateMap = {
-      connected: 'connected', connecting: 'connecting...',
-      error: 'connection failed', disconnected: 'not connected',
+      connected: t('connection.status.connected'),
+      connecting: t('connection.status.connecting'),
+      error: t('connection.status.failed'),
+      disconnected: t('connection.status.notConnected'),
     };
     const tabBtn = this._panel.querySelector(`#connection-panel__tab-btn-${tabId}`);
     if (tabBtn) {
@@ -910,8 +981,8 @@ export class ConnectionPanel {
     switch (status) {
       case 'connected':
         led.classList.add('connection-panel__led--connected');
-        text.textContent = 'Connected to Intiface';
-        btn.textContent = 'Disconnect';
+        text.textContent = t('connection.status.connectedToIntiface');
+        btn.textContent = t('connection.btn.disconnect');
         btn.disabled = false;
         deviceSection.hidden = false;
         this._buttplugEverConnected = true;
@@ -920,22 +991,22 @@ export class ConnectionPanel {
 
       case 'connecting':
         led.classList.add('connection-panel__led--connecting');
-        text.textContent = 'Connecting...';
-        btn.textContent = 'Connecting...';
+        text.textContent = t('connection.status.connecting');
+        btn.textContent = t('connection.status.connecting');
         btn.disabled = true;
         break;
 
       case 'error':
         led.classList.add('connection-panel__led--error');
-        text.textContent = 'Connection Failed — is Intiface running?';
-        btn.textContent = 'Connect';
+        text.textContent = t('connection.status.failedIntiface');
+        btn.textContent = t('connection.btn.connect');
         btn.disabled = false;
         break;
 
       case 'disconnected':
       default:
-        text.textContent = this._buttplugEverConnected ? 'Disconnected' : 'Not connected';
-        btn.textContent = 'Connect';
+        text.textContent = this._buttplugEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected');
+        btn.textContent = t('connection.btn.connect');
         btn.disabled = false;
         deviceSection.hidden = true;
         break;
@@ -949,7 +1020,7 @@ export class ConnectionPanel {
     const devices = this.buttplug.devices;
 
     if (devices.length === 0) {
-      list.innerHTML = '<div class="connection-panel__no-devices">No devices found — click Scan to search</div>';
+      list.innerHTML = `<div class="connection-panel__no-devices" data-i18n="connection.buttplug.noDevices">${_esc(t('connection.buttplug.noDevices'))}</div>`;
       return;
     }
 
@@ -969,16 +1040,16 @@ export class ConnectionPanel {
 
       const badges = document.createElement('span');
       badges.className = 'connection-panel__device-badges';
-      if (dev.canLinear) badges.appendChild(this._makeBadge('Linear', 'linear'));
-      if (dev.canVibrate) badges.appendChild(this._makeBadge('Vibrate', 'vibrate'));
-      if (dev.canRotate) badges.appendChild(this._makeBadge('Rotate', 'rotate'));
-      if (dev.canScalar) badges.appendChild(this._makeBadge('E-Stim', 'estim'));
+      if (dev.canLinear) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeLinear'), 'linear'));
+      if (dev.canVibrate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeVibrate'), 'vibrate'));
+      if (dev.canRotate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeRotate'), 'rotate'));
+      if (dev.canScalar) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeEstim'), 'estim'));
       header.appendChild(badges);
 
       const testBtn = document.createElement('button');
       testBtn.className = 'connection-panel__action connection-panel__action--utility connection-panel__device-test';
-      testBtn.textContent = 'Test';
-      testBtn.title = 'Send a brief test movement';
+      testBtn.textContent = t('connection.btn.test');
+      testBtn.title = t('connection.buttplug.testTitle');
       testBtn.addEventListener('click', () => this._testDevice(dev));
       header.appendChild(testBtn);
 
@@ -989,19 +1060,24 @@ export class ConnectionPanel {
       axisRow.className = 'connection-panel__device-axis-row';
       const axisLabel = document.createElement('span');
       axisLabel.className = 'connection-panel__device-axis-label';
-      axisLabel.textContent = 'Source:';
+      axisLabel.textContent = t('connection.buttplug.source');
       const axisSelect = document.createElement('select');
       axisSelect.className = 'connection-panel__device-select';
-      axisSelect.title = 'What drives this device';
+      axisSelect.title = t('connection.buttplug.sourceTitle');
 
       // Per-device axis assignment dropdown. Labels follow "Name (Code)"
       // so the user can recognise both the friendly name AND the TCode
       // identifier they see elsewhere (TCode panel, library cards).
       // Previously L0 was labelled "Main Script" without the code,
       // breaking that recognition pattern.
+      // TCode axis names (Surge/Sway/Twist/Roll/Pitch/Vibe/Lube/Pump/Suction/Valve)
+      // are standard kinematics terminology in the funscript community across
+      // every language — kept as English so users recognise the codes they see
+      // in scripts/forums. Only the leading "Main / Stroke" portion of L0 is
+      // translated since that's an app-specific framing.
       const axisOptions = [
-        { value: 'L0', label: 'Main / Stroke (L0)' },
-        { value: '__custom__', label: 'Follow Custom Routing' },
+        { value: 'L0', label: t('connection.buttplug.axisMainStroke') },
+        { value: '__custom__', label: t('connection.buttplug.axisCustom') },
         { value: 'L1', label: 'Surge (L1)' },
         { value: 'L2', label: 'Sway (L2)' },
         { value: 'R0', label: 'Twist (R0)' },
@@ -1047,19 +1123,19 @@ export class ConnectionPanel {
       controlsRow.appendChild(axisRow);
 
       if (dev.canVibrate) {
-        controlsRow.appendChild(this._makeModeSelect(dev, 'vibe', 'Vibration mode', 'speed',
+        controlsRow.appendChild(this._makeModeSelect(dev, 'vibe', t('connection.buttplug.vibrationModeTitle'), 'speed',
           () => this.buttplugSync?.getVibeMode(dev.index) || 'speed',
           (val) => { if (this.buttplugSync) this.buttplugSync.setVibeMode(dev.index, val); }
         ));
       }
       if (dev.canRotate) {
-        controlsRow.appendChild(this._makeModeSelect(dev, 'rotate', 'Rotation mode', 'speed',
+        controlsRow.appendChild(this._makeModeSelect(dev, 'rotate', t('connection.buttplug.rotationModeTitle'), 'speed',
           () => this.buttplugSync?.getRotateMode(dev.index) || 'speed',
           (val) => { if (this.buttplugSync) this.buttplugSync.setRotateMode(dev.index, val); }
         ));
       }
       if (dev.canScalar) {
-        controlsRow.appendChild(this._makeModeSelect(dev, 'scalar', 'E-stim mode', 'position',
+        controlsRow.appendChild(this._makeModeSelect(dev, 'scalar', t('connection.buttplug.estimModeTitle'), 'position',
           () => this.buttplugSync?.getScalarMode(dev.index) || 'position',
           (val) => { if (this.buttplugSync) this.buttplugSync.setScalarMode(dev.index, val); }
         ));
@@ -1078,14 +1154,14 @@ export class ConnectionPanel {
         }
       });
       invertLabel.appendChild(invertCheck);
-      invertLabel.appendChild(document.createTextNode(' Invert'));
+      invertLabel.appendChild(document.createTextNode(' ' + t('connection.buttplug.invert')));
       controlsRow.appendChild(invertLabel);
 
       // Info button
       if (dev.canVibrate || dev.canScalar || dev.canRotate) {
         const infoBtn = document.createElement('button');
         infoBtn.className = 'connection-panel__device-info-btn';
-        infoBtn.title = 'What do these modes do?';
+        infoBtn.title = t('connection.buttplug.modeHelp');
         infoBtn.appendChild(icon(Info, { width: 14, height: 14 }));
         infoBtn.addEventListener('click', (e) => {
           e.stopPropagation();
@@ -1104,7 +1180,7 @@ export class ConnectionPanel {
         const maxRow = document.createElement('div');
         maxRow.className = 'connection-panel__device-safety';
         const maxLabel = document.createElement('span');
-        maxLabel.textContent = 'Max:';
+        maxLabel.textContent = t('connection.buttplug.max');
         const maxVal = document.createElement('span');
         maxVal.className = 'connection-panel__safety-value';
         const currentMax = this.buttplugSync?.getMaxIntensity(dev.index) ?? 70;
@@ -1129,8 +1205,10 @@ export class ConnectionPanel {
           const v = parseInt(maxSlider.value, 10);
           if (v > 90) {
             const { Modal } = await import('./modal.js');
-            const confirmed = await Modal.confirm('High Intensity',
-              `Setting e-stim intensity to ${v}% — high levels can cause discomfort. Continue?`);
+            const confirmed = await Modal.confirm(
+              t('connection.buttplug.highIntensityTitle'),
+              t('connection.buttplug.highIntensityBody', { percent: v })
+            );
             if (!confirmed) {
               maxSlider.value = '70';
               maxVal.textContent = '70%';
@@ -1160,7 +1238,7 @@ export class ConnectionPanel {
           }
         });
         rampLabel.appendChild(rampCheck);
-        rampLabel.appendChild(document.createTextNode(' Ramp-up (2s)'));
+        rampLabel.appendChild(document.createTextNode(' ' + t('connection.buttplug.rampUp')));
         safetySection.appendChild(rampLabel);
 
         row.appendChild(safetySection);
@@ -1229,9 +1307,9 @@ export class ConnectionPanel {
     modeSelect.className = 'connection-panel__device-select connection-panel__vib-control';
     modeSelect.title = title;
     const modes = [
-      { value: 'speed', label: 'Speed' },
-      { value: 'position', label: 'Position' },
-      { value: 'intensity', label: 'Hybrid' },
+      { value: 'speed', label: t('connection.buttplug.modeSpeed') },
+      { value: 'position', label: t('connection.buttplug.modePosition') },
+      { value: 'intensity', label: t('connection.buttplug.modeHybrid') },
     ];
     for (const m of modes) {
       const opt = document.createElement('option');
@@ -1340,24 +1418,11 @@ export class ConnectionPanel {
     const tooltip = document.createElement('div');
     tooltip.className = 'connection-panel__vibe-help';
     tooltip.innerHTML = `
-      <div class="connection-panel__vibe-help-title">Vibration Mapping Modes</div>
-      <div class="connection-panel__vibe-help-section">
-        <strong>Speed</strong> — Intensity follows how fast the script moves.
-        Fast strokes = strong vibration, pauses = none.
-      </div>
-      <div class="connection-panel__vibe-help-section">
-        <strong>Position</strong> — Intensity matches the script position directly.
-        High position (100) = full power, low (0) = off.
-      </div>
-      <div class="connection-panel__vibe-help-section">
-        <strong>Hybrid</strong> — Blends both: 40% from position + 60% from speed.
-        Feels active during movement but maintains a base level.
-      </div>
-      <div class="connection-panel__vibe-help-section" style="margin-top:6px;border-top:1px solid rgba(255,255,255,0.1);padding-top:6px;">
-        <strong>Invert</strong> — Flips the script values (0 becomes 100, 100 becomes 0).
-        In Speed mode this has no effect on vibration strength (speed is absolute).
-        In Position/Hybrid modes, low positions become strong and high become weak.
-      </div>
+      <div class="connection-panel__vibe-help-title">${t('connection.vibeHelp.title')}</div>
+      <div class="connection-panel__vibe-help-section">${t('connection.vibeHelp.speed')}</div>
+      <div class="connection-panel__vibe-help-section">${t('connection.vibeHelp.position')}</div>
+      <div class="connection-panel__vibe-help-section">${t('connection.vibeHelp.hybrid')}</div>
+      <div class="connection-panel__vibe-help-section" style="margin-top:6px;border-top:1px solid rgba(255,255,255,0.1);padding-top:6px;">${t('connection.vibeHelp.invert')}</div>
     `;
 
     // Close on click anywhere
@@ -1399,6 +1464,44 @@ export class ConnectionPanel {
     if (text) text.textContent = message;
   }
 
+  // --- Settings tab (Phase 4 of i18n rollout) ---
+
+  /**
+   * Populate the language dropdown and wire its change handler. Called
+   * once during constructor wiring; the dropdown content is the
+   * SUPPORTED_LOCALES list with each locale displayed in its OWN script
+   * (so a Chinese user sees "中文" rather than "Chinese") — Norman:
+   * speak the user's language.
+   *
+   * On change: setLocale → translatePage → persist → toast confirmation.
+   */
+  _wireSettingsTab() {
+    const select = this._panel?.querySelector('#settings-language-select');
+    if (!select) return;
+    // Defensive: clear any pre-existing options (in case the panel is
+    // rebuilt during a hot reload).
+    select.innerHTML = '';
+    for (const code of SUPPORTED_LOCALES) {
+      const opt = document.createElement('option');
+      opt.value = code;
+      opt.textContent = LOCALE_LABELS[code] || code;
+      select.appendChild(opt);
+    }
+    select.value = getCurrentLocale();
+    select.addEventListener('change', async () => {
+      const next = select.value;
+      await setLocale(next);
+      translatePage(document);
+      this.settings.set('player.language', next);
+      // Mark the offer-toast as already shown for this locale — flipping
+      // via the dropdown is an explicit acceptance.
+      this.settings.set('player._localeOfferedFor', next);
+      const langName = LOCALE_LABELS[next] || next;
+      const { showToast } = await import('../js/toast.js');
+      showToast(t('i18n.switched', { language: langName }), 'success', 2000);
+    });
+  }
+
   // --- TCode (serial / UDP / WebSocket) ---
 
   /**
@@ -1436,7 +1539,7 @@ export class ConnectionPanel {
       const baudRate = parseInt(baudSelect?.value, 10) || 115200;
       if (!portPath) {
         this._updateTCodeStatus('disconnected');
-        if (text) text.textContent = 'Select a port';
+        if (text) text.textContent = t('connection.tcode.errSelectPort');
         return;
       }
       opts = { path: portPath, baudRate };
@@ -1445,12 +1548,12 @@ export class ConnectionPanel {
       const port = parseInt(this._panel.querySelector('#tcode-udp-port')?.value, 10);
       if (!host) {
         this._updateTCodeStatus('disconnected');
-        if (text) text.textContent = 'Enter a host';
+        if (text) text.textContent = t('connection.tcode.errEnterHost');
         return;
       }
       if (!Number.isInteger(port) || port < 1 || port > 65535) {
         this._updateTCodeStatus('disconnected');
-        if (text) text.textContent = 'Enter a valid port (1-65535)';
+        if (text) text.textContent = t('connection.tcode.errInvalidPort');
         return;
       }
       opts = { host, port };
@@ -1458,7 +1561,7 @@ export class ConnectionPanel {
       const url = this._panel.querySelector('#tcode-ws-url')?.value.trim() || '';
       if (!/^wss?:\/\//.test(url)) {
         this._updateTCodeStatus('disconnected');
-        if (text) text.textContent = 'URL must start with ws:// or wss://';
+        if (text) text.textContent = t('connection.tcode.errInvalidUrl');
         return;
       }
       opts = { url };
@@ -1494,7 +1597,7 @@ export class ConnectionPanel {
     if (ports.length === 0) {
       const opt = document.createElement('option');
       opt.value = '';
-      opt.textContent = 'No serial ports found — click ↻ to refresh';
+      opt.textContent = t('connection.tcode.noPorts');
       select.appendChild(opt);
     } else {
       for (const p of ports) {
@@ -1521,12 +1624,12 @@ export class ConnectionPanel {
     }
     if (status === 'connected') this._tcodeEverConnected = true;
     if (text) {
-      text.textContent = status === 'connected' ? 'Connected'
-        : status === 'connecting' ? 'Connecting...'
-        : (this._tcodeEverConnected ? 'Disconnected' : 'Not connected');
+      text.textContent = status === 'connected' ? t('connection.status.connected')
+        : status === 'connecting' ? t('connection.status.connecting')
+        : (this._tcodeEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
     }
     if (btn) {
-      btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
+      btn.textContent = status === 'connected' ? t('connection.btn.disconnect') : t('connection.btn.connect');
     }
     if (axisSection) {
       axisSection.hidden = status !== 'connected';
@@ -1566,7 +1669,9 @@ export class ConnectionPanel {
     list.replaceChildren();
     const saved = this.settings.get('tcode.axes') || {};
 
-    for (const { tcode, label, type } of TCODE_UI_AXES) {
+    for (const axisDef of TCODE_UI_AXES) {
+      const { tcode, type } = axisDef;
+      const label = axisDef.labelKey ? t(axisDef.labelKey) : axisDef.label;
       const cfg = saved[tcode] || {};
       const enabled = cfg.enabled !== false;
       const min = Number.isFinite(cfg.min) ? cfg.min : 0;
@@ -1599,7 +1704,7 @@ export class ConnectionPanel {
 
       const typePill = document.createElement('span');
       typePill.className = `connection-panel__tcode-axis-type connection-panel__tcode-axis-type--${type}`;
-      typePill.textContent = type;
+      typePill.textContent = t(`connection.tcode.type.${type}`);
       head.appendChild(typePill);
 
       row.appendChild(head);
@@ -1609,7 +1714,7 @@ export class ConnectionPanel {
       rangeRow.className = 'connection-panel__device-safety';
 
       const minLabel = document.createElement('span');
-      minLabel.textContent = 'Min';
+      minLabel.textContent = t('connection.tcode.min');
       minLabel.className = 'connection-panel__tcode-range-label';
       const minSlider = document.createElement('input');
       minSlider.type = 'range';
@@ -1620,7 +1725,7 @@ export class ConnectionPanel {
       if (!enabled) minSlider.disabled = true;
 
       const maxLabel = document.createElement('span');
-      maxLabel.textContent = 'Max';
+      maxLabel.textContent = t('connection.tcode.max');
       maxLabel.className = 'connection-panel__tcode-range-label';
       const maxSlider = document.createElement('input');
       maxSlider.type = 'range';
@@ -1698,7 +1803,7 @@ export class ConnectionPanel {
     const token = tokenInput.value.trim();
     if (!token) {
       const text = this._panel.querySelector('#ab-status-text');
-      if (text) text.textContent = 'Enter device token';
+      if (text) text.textContent = t('connection.autoblow.errEnterToken');
       return;
     }
 
@@ -1725,18 +1830,18 @@ export class ConnectionPanel {
     }
     if (status === 'connected') this._autoblowEverConnected = true;
     if (text) {
-      text.textContent = status === 'connected' ? 'Connected'
-        : status === 'connecting' ? 'Connecting...'
-        : (this._autoblowEverConnected ? 'Disconnected' : 'Not connected');
+      text.textContent = status === 'connected' ? t('connection.status.connected')
+        : status === 'connecting' ? t('connection.status.connecting')
+        : (this._autoblowEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
     }
     if (btn) {
-      btn.textContent = status === 'connected' ? 'Disconnect' : 'Connect';
+      btn.textContent = status === 'connected' ? t('connection.btn.disconnect') : t('connection.btn.connect');
     }
     if (infoSection) {
       infoSection.hidden = status !== 'connected';
     }
     if (typeEl && this.autoblowManager?.deviceType) {
-      typeEl.textContent = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
+      typeEl.textContent = this.autoblowManager.isUltra ? t('connection.autoblow.deviceUltra') : t('connection.autoblow.deviceVacu2');
     }
   }
 
@@ -1866,7 +1971,7 @@ export class ConnectionPanel {
     if (hasVibScript && !existingNote) {
       const note = document.createElement('div');
       note.className = 'connection-panel__vib-override-note';
-      note.textContent = 'Vibration controlled by dedicated script — mode and invert settings have no effect.';
+      note.textContent = t('connection.buttplug.vibScriptOverride');
       const deviceList = this._panel.querySelector('.connection-panel__device-list');
       if (deviceList) {
         deviceList.parentElement.appendChild(note);
@@ -1896,8 +2001,8 @@ export class ConnectionPanel {
       const el = this._panel.querySelector(id);
       if (el) el.textContent = txt;
     };
-    set('#sync-vr-jitter', jitter != null ? `${jitter} ms` : 'no VR session');
-    set('#sync-handy-rtd', handyRtd != null ? `${Math.round(handyRtd)} ms` : 'Handy not connected');
+    set('#sync-vr-jitter', jitter != null ? `${jitter} ms` : t('connection.sync.noVrSession'));
+    set('#sync-handy-rtd', handyRtd != null ? `${Math.round(handyRtd)} ms` : t('connection.sync.handyNotConnected'));
     set('#sync-vr-transport', transport ?? '—');
 
     // 2) Per-device offset rows
@@ -1926,7 +2031,7 @@ export class ConnectionPanel {
         vrPlayerType,
       });
       rowsEl.appendChild(this._buildSyncRow({
-        label: 'The Handy (WiFi)',
+        label: t('connection.sync.deviceHandy'),
         currentMs: this.settings.get('handy.defaultOffset') || 0,
         suggestedMs: suggested,
         vrOffsetMs,
@@ -1956,7 +2061,7 @@ export class ConnectionPanel {
         vrPlayerType,
       });
       rowsEl.appendChild(this._buildSyncRow({
-        label: 'Buttplug.io devices',
+        label: t('connection.sync.deviceButtplug'),
         currentMs: this.settings.get('buttplug.defaultOffset') || 0,
         suggestedMs: suggested,
         vrOffsetMs,
@@ -1984,7 +2089,7 @@ export class ConnectionPanel {
         vrPlayerType,
       });
       rowsEl.appendChild(this._buildSyncRow({
-        label: 'TCode (serial)',
+        label: t('connection.sync.deviceTcode'),
         currentMs: this.settings.get('tcode.defaultOffset') || 0,
         suggestedMs: suggested,
         vrOffsetMs,
@@ -2006,7 +2111,7 @@ export class ConnectionPanel {
       const empty = document.createElement('div');
       empty.className = 'connection-panel__hint';
       empty.style.cssText = 'padding:12px;text-align:center;opacity:0.6';
-      empty.textContent = 'Connect a device to see its offset controls.';
+      empty.textContent = t('connection.sync.connectDeviceHint');
       rowsEl.appendChild(empty);
     }
 
@@ -2017,7 +2122,7 @@ export class ConnectionPanel {
       refreshBtn.addEventListener('click', async () => {
         const originalText = refreshBtn.textContent;
         refreshBtn.disabled = true;
-        refreshBtn.textContent = 'Refreshing…';
+        refreshBtn.textContent = t('connection.btn.refreshing');
         try {
           // Re-measure Handy RTD; the SDK's measurement cycle returns a
           // refreshed avgRtd. Rest is read fresh on every paint.
@@ -2025,9 +2130,9 @@ export class ConnectionPanel {
             await this.handy.syncTime(10);
           }
           this._refreshSyncTab();
-          showToast('Latency refreshed', 'info', 2000);
+          showToast(t('connection.sync.latencyRefreshed'), 'info', 2000);
         } catch (err) {
-          showToast(`Refresh failed: ${err?.message || 'unknown error'}`, 'error', 4000);
+          showToast(t('connection.sync.refreshFailed', { error: err?.message || 'unknown error' }), 'error', 4000);
         } finally {
           refreshBtn.textContent = originalText;
           refreshBtn.disabled = false;
@@ -2069,7 +2174,7 @@ export class ConnectionPanel {
       totalEl.className = 'connection-panel__sync-row-total';
       totalEl.style.cssText = 'font-size:11px;opacity:0.6;margin-bottom:6px';
       const total = currentMs + vrOffsetMs;
-      totalEl.textContent = `VR mode: ${fmt(currentMs)} (device) ${fmt(vrOffsetMs)} (VR) = ${fmt(total)} ms effective`;
+      totalEl.textContent = t('connection.sync.vrModeTotal', { device: fmt(currentMs), vr: fmt(vrOffsetMs), total: fmt(total) });
       row.appendChild(totalEl);
     }
 
@@ -2078,10 +2183,10 @@ export class ConnectionPanel {
     sugRow.style.cssText = 'display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;font-size:11px';
     const sugTxt = document.createElement('span');
     sugTxt.style.opacity = '0.7';
-    sugTxt.textContent = `Suggested: ${suggestedMs} ms`;
+    sugTxt.textContent = t('connection.sync.suggested', { ms: suggestedMs });
     const applyBtn = document.createElement('button');
     applyBtn.className = 'connection-panel__action connection-panel__action--utility';
-    applyBtn.textContent = 'Apply';
+    applyBtn.textContent = t('connection.btn.apply');
     applyBtn.disabled = currentMs === suggestedMs;
     applyBtn.addEventListener('click', () => onApply(suggestedMs));
     sugRow.appendChild(sugTxt);
@@ -2099,7 +2204,7 @@ export class ConnectionPanel {
       valEl.textContent = `${v} ms`;
       if (totalEl) {
         const total = v + vrOffsetMs;
-        totalEl.textContent = `VR mode: ${fmt(v)} (device) ${fmt(vrOffsetMs)} (VR) = ${fmt(total)} ms effective`;
+        totalEl.textContent = t('connection.sync.vrModeTotal', { device: fmt(v), vr: fmt(vrOffsetMs), total: fmt(total) });
       }
     });
     slider.addEventListener('change', () => {

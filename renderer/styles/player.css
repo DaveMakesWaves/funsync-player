@@ -335,12 +335,61 @@ html, body {
   left: 0;
   width: 100%;
   height: 100%;
+  /* Required so the VR-flatten transforms (which double the video
+     element's effective bounds) don't bleed past the player chrome. */
+  overflow: hidden;
 }
 
 .player__video {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  /* GPU-composited transform property so the VR-flatten modes don't
+     trigger CPU paint passes. See SCOPE notes for the alternatives
+     considered (clip-path is not reliably composited cross-browser). */
+  transform-origin: 0 0;
+  transition: transform 100ms ease;
+}
+
+/* VR "show as flat" modes — community ask from Monoinc 2026-05-17.
+   Half-SBS / half-TB: each eye is horizontally / vertically compressed,
+   so we need to scale BOTH dimensions of the chosen half back up to
+   restore the eye's correct aspect ratio. Full-SBS / full-TB: each eye
+   is already correct-aspect, so just translate to the right half.
+   Half-stereo math:
+     - Crop = top-or-left 50% of the frame
+     - Scale = 2× on the cropped axis to undo the half-compression
+     - The other axis already fills the wrapper (object-fit:contain)
+   Full-stereo math (HereSphere `_LRF` convention):
+     - Crop = top-or-left 50%
+     - No scale — eye is already at the correct aspect
+   See classifyStereoFormat() in renderer/js/vr-detect.js. */
+.player__video--flat-sbs-half {
+  transform: scaleX(2);
+}
+.player__video--flat-sbs-full {
+  transform: scaleX(2);
+}
+.player__video--flat-tb-half {
+  transform: scaleY(2);
+}
+.player__video--flat-tb-full {
+  transform: scaleY(2);
+}
+/* Right-eye / bottom-eye variants — same scale, opposite translate.
+   Combined with the wrapper's `overflow: hidden`, the un-displayed eye
+   simply paints off-canvas and is clipped. */
+.player__video--flat-sbs-half.player__video--flat-eye-2,
+.player__video--flat-sbs-full.player__video--flat-eye-2 {
+  transform: scaleX(2) translateX(-50%);
+}
+.player__video--flat-tb-half.player__video--flat-eye-2,
+.player__video--flat-tb-full.player__video--flat-eye-2 {
+  transform: scaleY(2) translateY(-50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player__video { transition: none; }
 }
 
 /* === Center Play/Pause Overlay === */

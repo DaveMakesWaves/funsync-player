@@ -11,7 +11,10 @@
 //      open it is a small but real Nielsen #10 violation).
 
 import { describe, it, expect } from 'vitest';
-import { PLAYER_SHORTCUT_GROUPS, EDITOR_SHORTCUT_GROUPS } from '../../renderer/js/keyboard-help.js';
+import { getPlayerShortcutGroups, getEditorShortcutGroups } from '../../renderer/js/keyboard-help.js';
+
+const PLAYER_SHORTCUT_GROUPS = getPlayerShortcutGroups();
+const EDITOR_SHORTCUT_GROUPS = getEditorShortcutGroups();
 
 function assertWellFormed(groups, name) {
   expect(Array.isArray(groups), `${name} is an array`).toBe(true);

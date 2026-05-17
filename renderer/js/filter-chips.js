@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 // filter-chips — Active-filter chip strip with × to remove each one.
 //
 // Used by:
@@ -94,7 +96,7 @@ function _buildChip(key, label, iconFactory, onRemove) {
   const chip = document.createElement('button');
   chip.className = 'filter-chip';
   chip.type = 'button';
-  chip.setAttribute('aria-label', `Remove filter: ${label}`);
+  chip.setAttribute('aria-label', t('filterChip.removeAria', { label }));
   chip.dataset.filterKey = key;
 
   const text = document.createElement('span');

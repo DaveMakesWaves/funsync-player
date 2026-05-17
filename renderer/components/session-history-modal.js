@@ -3,10 +3,11 @@
 // duration, start time, and the videos played during each session.
 
 import { Modal } from './modal.js';
+import { t } from '../js/i18n.js';
 
-const SOURCE_LABEL = {
-  'web-remote': 'Web Remote',
-  'vr':         'VR Companion',
+const SOURCE_KEYS = {
+  'web-remote': 'session.source.web-remote',
+  'vr':         'session.source.vr',
 };
 
 /**
@@ -14,14 +15,14 @@ const SOURCE_LABEL = {
  */
 export async function openSessionHistory(tracker) {
   await Modal.open({
-    title: 'Session History',
+    title: t('session.history.title'),
     onRender: (body, close) => {
       const entries = tracker.getHistory();
 
       if (entries.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'session-history__empty';
-        empty.textContent = 'No sessions recorded yet. Connect a phone or VR headset to log one.';
+        empty.textContent = t('session.history.empty');
         body.appendChild(empty);
         return;
       }
@@ -38,14 +39,14 @@ export async function openSessionHistory(tracker) {
       footer.className = 'session-history__footer';
       const count = document.createElement('span');
       count.className = 'session-history__count';
-      count.textContent = `${entries.length} session${entries.length !== 1 ? 's' : ''}`;
+      count.textContent = t('session.history.count', { count: entries.length });
       footer.appendChild(count);
 
       const clearBtn = document.createElement('button');
       clearBtn.className = 'session-history__clear';
-      clearBtn.textContent = 'Clear history';
+      clearBtn.textContent = t('session.history.clear');
       clearBtn.addEventListener('click', async () => {
-        const ok = await Modal.confirm('Clear session history', 'Delete all recorded sessions?');
+        const ok = await Modal.confirm(t('session.history.clearTitle'), t('session.history.clearConfirm'));
         if (ok) {
           tracker.clearHistory();
           close();
@@ -67,7 +68,7 @@ function renderEntry(entry) {
 
   const src = document.createElement('span');
   src.className = 'session-history__source';
-  src.textContent = SOURCE_LABEL[entry.source] || entry.source;
+  src.textContent = SOURCE_KEYS[entry.source] ? t(SOURCE_KEYS[entry.source]) : entry.source;
   head.appendChild(src);
 
   const id = document.createElement('span');
@@ -85,7 +86,7 @@ function renderEntry(entry) {
   const durMs = (entry.endedAt || Date.now()) - entry.startedAt;
   const dur = document.createElement('div');
   dur.className = 'session-history__duration';
-  dur.textContent = `Duration: ${formatDurationMs(durMs)}`;
+  dur.textContent = t('session.history.duration', { duration: formatDurationMs(durMs) });
   item.appendChild(dur);
 
   if (entry.videos && entry.videos.length > 0) {
@@ -109,10 +110,10 @@ function formatWhen(ts) {
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   const time = d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
-  if (sameDay) return `Today, ${time}`;
+  if (sameDay) return t('session.history.today', { time });
   const yesterday = new Date(now);
   yesterday.setDate(now.getDate() - 1);
-  if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
+  if (d.toDateString() === yesterday.toDateString()) return t('session.history.yesterday', { time });
   return `${d.toLocaleDateString()} ${time}`;
 }
 

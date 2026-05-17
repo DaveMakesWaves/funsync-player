@@ -2,6 +2,7 @@
 
 import { icon, X } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
+import { t } from '../js/i18n.js';
 
 export class EroScriptsPanel {
   constructor({ settings }) {
@@ -32,25 +33,25 @@ export class EroScriptsPanel {
 
     this._panel.innerHTML = `
       <div class="eroscripts-panel__header">
-        <h2 id="eroscripts-panel__title" class="eroscripts-panel__title">EroScripts</h2>
+        <h2 id="eroscripts-panel__title" class="eroscripts-panel__title">${t('eroscripts.title')}</h2>
         <span class="eroscripts-panel__status" id="es-status"></span>
-        <button class="eroscripts-panel__close" aria-label="Close EroScripts"></button>
+        <button class="eroscripts-panel__close" aria-label="${t('eroscripts.closeAria')}"></button>
       </div>
 
       <div class="eroscripts-panel__auth-bar" id="es-auth-bar">
-        <span id="es-auth-label" class="eroscripts-panel__auth-label">Not logged in</span>
-        <button id="es-auth-btn" class="eroscripts-panel__btn eroscripts-panel__btn--secondary">Log In</button>
+        <span id="es-auth-label" class="eroscripts-panel__auth-label">${t('eroscripts.notLoggedIn')}</span>
+        <button id="es-auth-btn" class="eroscripts-panel__btn eroscripts-panel__btn--secondary">${t('eroscripts.logIn')}</button>
       </div>
 
       <div class="eroscripts-panel__search">
         <div class="eroscripts-panel__input-row">
-          <input type="text" id="es-search-input" class="eroscripts-panel__input eroscripts-panel__search-input" placeholder="Search for scripts...">
-          <button id="es-search-btn" class="eroscripts-panel__btn">Search</button>
+          <input type="text" id="es-search-input" class="eroscripts-panel__input eroscripts-panel__search-input" placeholder="${t('eroscripts.searchPlaceholder')}">
+          <button id="es-search-btn" class="eroscripts-panel__btn">${t('eroscripts.search')}</button>
         </div>
       </div>
 
       <div class="eroscripts-panel__results" id="es-results">
-        <div class="eroscripts-panel__placeholder">Search for a video name to find community scripts</div>
+        <div class="eroscripts-panel__placeholder">${t('eroscripts.placeholder')}</div>
       </div>
     `;
 
@@ -86,7 +87,7 @@ export class EroScriptsPanel {
       this._settings.set('eroscripts.session', null);
       await window.funsync.eroscriptsLogout();
       this._setLoggedOut();
-      showToast('EroScripts session expired — log in again via the EroScripts panel', 'warn', 6000);
+      showToast(t('eroscripts.sessionExpired'), 'warn', 6000);
     }
   }
 
@@ -98,13 +99,13 @@ export class EroScriptsPanel {
     const btn = this._panel.querySelector('#es-auth-btn');
     if (label) label.textContent = username;
     if (btn) {
-      btn.textContent = 'Log Out';
+      btn.textContent = t('eroscripts.logOut');
       btn.onclick = () => this._logout();
     }
 
     const status = this._panel.querySelector('#es-status');
     if (status) {
-      status.textContent = 'Connected';
+      status.textContent = t('eroscripts.connected');
       status.className = 'eroscripts-panel__status eroscripts-panel__status--ok';
     }
 
@@ -117,9 +118,9 @@ export class EroScriptsPanel {
 
     const label = this._panel.querySelector('#es-auth-label');
     const btn = this._panel.querySelector('#es-auth-btn');
-    if (label) label.textContent = 'Not logged in';
+    if (label) label.textContent = t('eroscripts.notLoggedIn');
     if (btn) {
-      btn.textContent = 'Log In';
+      btn.textContent = t('eroscripts.logIn');
       btn.onclick = () => this._loginViaWindow();
     }
 
@@ -150,7 +151,7 @@ export class EroScriptsPanel {
     const prevText = btn?.textContent;
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Waiting for login…';
+      btn.textContent = t('eroscripts.waitingLogin');
     }
     try {
       const result = await window.funsync.eroscriptsLoginWindow();
@@ -166,7 +167,7 @@ export class EroScriptsPanel {
     } finally {
       if (btn) {
         btn.disabled = false;
-        if (!this._loggedIn) btn.textContent = prevText || 'Log In';
+        if (!this._loggedIn) btn.textContent = prevText || t('eroscripts.logIn');
       }
     }
   }
@@ -179,7 +180,7 @@ export class EroScriptsPanel {
 
     this._searching = true;
     const resultsEl = this._panel.querySelector('#es-results');
-    resultsEl.innerHTML = '<div class="eroscripts-panel__placeholder">Searching...</div>';
+    resultsEl.innerHTML = `<div class="eroscripts-panel__placeholder">${t('eroscripts.searching')}</div>`;
 
     const { results, error } = await window.funsync.eroscriptsSearch(query);
     this._searching = false;
@@ -196,8 +197,8 @@ export class EroScriptsPanel {
       // smaller / dimmer, mirroring the library / playlists pattern.
       resultsEl.innerHTML = `
         <div class="eroscripts-panel__placeholder">
-          <div>No scripts found for "${this._esc(query)}"</div>
-          <div class="eroscripts-panel__placeholder--hint">Try a shorter or more general search term — partial titles often match better than full filenames.</div>
+          <div>${this._esc(t('eroscripts.noResultsTitle', { query }))}</div>
+          <div class="eroscripts-panel__placeholder--hint">${t('eroscripts.noResultsHint')}</div>
         </div>`;
       return;
     }
@@ -244,8 +245,8 @@ export class EroScriptsPanel {
       meta.className = 'eroscripts-panel__result-meta';
       const parts = [];
       if (topic.creator) parts.push(`@${topic.creator}`);
-      if (topic.likeCount > 0) parts.push(`${topic.likeCount} likes`);
-      if (topic.views > 0) parts.push(`${topic.views} views`);
+      if (topic.likeCount > 0) parts.push(t('eroscripts.likes', { count: topic.likeCount }));
+      if (topic.views > 0) parts.push(t('eroscripts.views', { count: topic.views }));
       meta.textContent = parts.join(' · ');
 
       const tags = document.createElement('div');
@@ -262,12 +263,12 @@ export class EroScriptsPanel {
 
       const dlBtn = document.createElement('button');
       dlBtn.className = 'eroscripts-panel__btn';
-      dlBtn.textContent = 'Get Script';
+      dlBtn.textContent = t('eroscripts.getScript');
       dlBtn.addEventListener('click', () => this._downloadFromTopic(topic, dlBtn));
 
       const viewBtn = document.createElement('button');
       viewBtn.className = 'eroscripts-panel__btn eroscripts-panel__btn--secondary';
-      viewBtn.textContent = 'View';
+      viewBtn.textContent = t('eroscripts.view');
       viewBtn.addEventListener('click', () => {
         window.funsync.openExternal(topic.url);
       });
@@ -286,14 +287,14 @@ export class EroScriptsPanel {
 
   async _downloadFromTopic(topic, btn) {
     btn.disabled = true;
-    btn.textContent = 'Fetching...';
+    btn.textContent = t('eroscripts.fetching');
 
     const { attachments, error } = await window.funsync.eroscriptsTopic(topic.id);
 
     if (error || attachments.length === 0) {
       btn.disabled = false;
-      btn.textContent = 'Get Script';
-      showToast(error || 'No funscript attachments found in this topic', error ? 'error' : 'warn');
+      btn.textContent = t('eroscripts.getScript');
+      showToast(error || t('eroscripts.noAttachments'), error ? 'error' : 'warn');
       return;
     }
 
@@ -304,7 +305,7 @@ export class EroScriptsPanel {
 
     // Multiple attachments — show picker
     btn.disabled = false;
-    btn.textContent = 'Get Script';
+    btn.textContent = t('eroscripts.getScript');
     this._showAttachmentPicker(attachments, btn.parentElement);
   }
 
@@ -330,7 +331,7 @@ export class EroScriptsPanel {
   }
 
   async _downloadAttachment(attachment, btn) {
-    if (btn) { btn.disabled = true; btn.textContent = 'Saving script...'; }
+    if (btn) { btn.disabled = true; btn.textContent = t('eroscripts.savingScript'); }
 
     const sources = (this._settings.get('library.sources') || []).filter(s => s.enabled !== false);
     const playerContainer = document.getElementById('player-container');
@@ -351,7 +352,7 @@ export class EroScriptsPanel {
       // No open video, OR multi-source library — ask the user where to save rather
       // than arbitrarily picking sources[0]. Dialog pre-fills the attachment name.
       const result = await window.funsync.saveFunscript('', attachment.name);
-      if (!result) { if (btn) { btn.disabled = false; btn.textContent = 'Get Script'; } return; }
+      if (!result) { if (btn) { btn.disabled = false; btn.textContent = t('eroscripts.getScript'); } return; }
       savePath = result;
     }
 
@@ -359,13 +360,13 @@ export class EroScriptsPanel {
 
     const { success, error } = await window.funsync.eroscriptsDownload(attachment.url, savePath);
 
-    if (btn) { btn.disabled = false; btn.textContent = success ? 'Script saved' : 'Get Script'; }
+    if (btn) { btn.disabled = false; btn.textContent = success ? t('eroscripts.scriptSaved') : t('eroscripts.getScript'); }
 
     if (success) {
-      showToast(`Script saved: ${savedName}`, 'info');
+      showToast(t('eroscripts.savedToast', { name: savedName }), 'info');
       if (this.onScriptDownloaded) this.onScriptDownloaded(savePath, savedName);
     } else {
-      showToast(error || 'Download failed', 'error');
+      showToast(error || t('eroscripts.downloadFailed'), 'error');
     }
   }
 
@@ -382,7 +383,7 @@ export class EroScriptsPanel {
     if (query !== this._lastSearchQuery) {
       const resultsEl = this._panel.querySelector('#es-results');
       if (resultsEl) {
-        resultsEl.innerHTML = '<div class="eroscripts-panel__placeholder">Search for a video name to find community scripts</div>';
+        resultsEl.innerHTML = `<div class="eroscripts-panel__placeholder">${t('eroscripts.placeholder')}</div>`;
       }
     }
 

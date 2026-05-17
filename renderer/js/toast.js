@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 // Toast — Lightweight notification system
 //
 // Polish pass 2026-04-27 (SCOPE-desktop-redesign §4.8):
@@ -60,7 +62,7 @@ export function showToast(message, type = 'info', duration = TOAST_DURATION) {
   const closeBtn = document.createElement('button');
   closeBtn.className = 'toast__close';
   closeBtn.type = 'button';
-  closeBtn.setAttribute('aria-label', 'Dismiss notification');
+  closeBtn.setAttribute('aria-label', t('toast.dismissAria'));
   closeBtn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
   closeBtn.addEventListener('click', (e) => { e.stopPropagation(); dismiss(); });
   el.appendChild(closeBtn);

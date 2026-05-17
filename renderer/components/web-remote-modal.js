@@ -4,6 +4,7 @@
 // the user switches networks.
 
 import { Modal } from './modal.js';
+import { t } from '../js/i18n.js';
 
 /**
  * @param {object} opts
@@ -14,7 +15,7 @@ export async function openWebRemoteModal({ settings } = {}) {
   const port = settings?.get?.('backend.port') || 5123;
 
   await Modal.open({
-    title: 'Web Remote',
+    title: t('webRemote.title'),
     onRender: (body, _close) => {
       const wrap = document.createElement('div');
       wrap.className = 'web-remote-modal';
@@ -24,15 +25,13 @@ export async function openWebRemoteModal({ settings } = {}) {
       const expBanner = document.createElement('div');
       expBanner.style.cssText = 'padding:8px 12px;background:rgba(255,193,7,0.1);border:1px solid rgba(255,193,7,0.3);border-radius:6px;margin-bottom:10px';
       expBanner.innerHTML =
-        '<span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px">EXPERIMENTAL</span>' +
-        '<span style="font-size:11px;opacity:0.85;margin-left:6px">Web Remote is still being polished — phone-side device sync and reconnection edge cases may surface.</span>';
+        `<span style="font-weight:600;color:#ffc107;font-size:11px;letter-spacing:0.5px">${t('webRemote.experimental')}</span>` +
+        `<span style="font-size:11px;opacity:0.85;margin-left:6px">${t('webRemote.experimentalDetail')}</span>`;
       wrap.appendChild(expBanner);
 
       const intro = document.createElement('div');
       intro.className = 'web-remote-modal__intro';
-      intro.textContent =
-        'Open your library on a phone or tablet in a browser on the same Wi-Fi. ' +
-        'Scan the QR code with the device’s camera, or type the URL.';
+      intro.textContent = t('webRemote.intro');
       wrap.appendChild(intro);
 
       const row = document.createElement('div');
@@ -44,23 +43,23 @@ export async function openWebRemoteModal({ settings } = {}) {
 
       const urlLabel = document.createElement('label');
       urlLabel.className = 'web-remote-modal__label';
-      urlLabel.textContent = 'URL';
+      urlLabel.textContent = t('webRemote.urlLabel');
       info.appendChild(urlLabel);
 
       const urlInput = document.createElement('input');
       urlInput.type = 'text';
       urlInput.readOnly = true;
       urlInput.className = 'web-remote-modal__url';
-      urlInput.value = '(detecting…)';
+      urlInput.value = t('webRemote.detecting');
       urlInput.addEventListener('click', () => urlInput.select());
       info.appendChild(urlInput);
 
       const features = document.createElement('ul');
       features.className = 'web-remote-modal__features';
       features.innerHTML = `
-        <li>Browse and play videos on the phone</li>
-        <li>Connected devices follow the phone's playback</li>
-        <li>Only one phone or VR headset drives devices at a time</li>
+        <li>${t('webRemote.feature1')}</li>
+        <li>${t('webRemote.feature2')}</li>
+        <li>${t('webRemote.feature3')}</li>
       `;
       info.appendChild(features);
 
@@ -69,7 +68,7 @@ export async function openWebRemoteModal({ settings } = {}) {
       // Right side: QR code (auto-populated after we fetch the IP)
       const qrWrap = document.createElement('div');
       qrWrap.className = 'web-remote-modal__qr';
-      qrWrap.title = 'Scan with your phone’s camera';
+      qrWrap.title = t('webRemote.qrTitle');
       row.appendChild(qrWrap);
 
       wrap.appendChild(row);
@@ -92,7 +91,7 @@ async function _populate(urlInput, qrWrap, port) {
   } catch { /* backend down */ }
 
   if (!ip) {
-    urlInput.value = 'Backend not running';
+    urlInput.value = t('webRemote.backendNotRunning');
     qrWrap.innerHTML = '';
     return;
   }
@@ -107,6 +106,6 @@ async function _populate(urlInput, qrWrap, port) {
     qr.make();
     qrWrap.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 1 });
   } catch {
-    qrWrap.innerHTML = '<div class="web-remote-modal__qr-fallback">QR unavailable</div>';
+    qrWrap.innerHTML = `<div class="web-remote-modal__qr-fallback">${t('webRemote.qrUnavailable')}</div>`;
   }
 }

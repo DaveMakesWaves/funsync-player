@@ -1,7 +1,14 @@
-// TCodeManager — Serial connection + TCode v0.3 protocol for OSR2/SR6 devices
-// Communicates via IPC to main process serialport instance
+// TCodeManager — Serial / UDP / WebSocket TCode protocol for OSR2/SR6 devices
+// and MFP-protocol consumers (restim etc.). Communicates via IPC to main
+// process transports.
+//
+// Precision: TCode-0.2 emits 3-digit values (0-999 → 0.000-0.999), TCode-0.3
+// emits 4-digit (0-9999 → 0.0000-0.9999). Configurable per-session via
+// `setPrecision(3 | 4)` because target devices vary — restim accepts either
+// but TCode-0.3-only firmware (newer OSR2+/SR6 builds) needs 4-digit, and
+// some MFP-compatible consumers infer the version from digit count.
 
-const TCODE_VALUE_MAX = 999; // TCode range 0-999 (0.000-0.999)
+const PRECISION_LIMITS = { 3: 999, 4: 9999 };
 
 export class TCodeManager {
   constructor() {
@@ -9,12 +16,28 @@ export class TCodeManager {
     this._portPath = '';
     this._baudRate = 115200;
     this._disconnectCleanup = null;
+    this._precision = 3;       // digits per axis value
+    this._valueMax = 999;      // derived from precision
 
     // Callbacks
     this.onConnect = null;
     this.onDisconnect = null;
     this.onError = null;
   }
+
+  /**
+   * Set the TCode value-precision (3 = TCode-0.2, 4 = TCode-0.3). Default
+   * is 3-digit. Setting an unknown precision is a no-op; the manager
+   * stays at its current setting. Persisted by the connection-panel UI
+   * via `tcode.precision`.
+   */
+  setPrecision(digits) {
+    if (PRECISION_LIMITS[digits] == null) return;
+    this._precision = digits;
+    this._valueMax = PRECISION_LIMITS[digits];
+  }
+
+  get precision() { return this._precision; }
 
   /**
    * List available serial ports.
@@ -144,8 +167,8 @@ export class TCodeManager {
 
     const parts = [];
     for (const [axis, value] of Object.entries(axisValues)) {
-      const tcodeVal = Math.round(Math.max(0, Math.min(100, value)) / 100 * TCODE_VALUE_MAX);
-      const valStr = String(tcodeVal).padStart(3, '0');
+      const tcodeVal = Math.round(Math.max(0, Math.min(100, value)) / 100 * this._valueMax);
+      const valStr = String(tcodeVal).padStart(this._precision, '0');
       let cmd = `${axis}${valStr}`;
       if (durationMs && durationMs > 0) {
         cmd += `I${Math.round(durationMs)}`;
@@ -159,11 +182,23 @@ export class TCodeManager {
   }
 
   /**
-   * Stop all axes (send to neutral position 500 = 50%).
+   * Stop all axes. For serial / UDP targets (typical TCode firmware) we
+   * still emit `DSTOP\n` because OSR2/SR6 builds recognise it as a
+   * shorthand. For MFP-protocol consumers (WebSocket → restim, Howl,
+   * etc.) DSTOP is non-standard — they expect axis values — so we ALSO
+   * send a neutral-position frame on every axis. Sending both is
+   * harmless on the firmware side (the second frame wins; DSTOP just
+   * acts as a hint).
    */
   stop() {
     if (!this._connected) return;
     this.send('DSTOP\n');
+    // Neutral-position fallback frame for MFP-style listeners. 50% on
+    // every TCode v0.3 axis we support. Pads to the configured precision.
+    const half = Math.round(this._valueMax / 2);
+    const valStr = String(half).padStart(this._precision, '0');
+    const axes = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'V0', 'A0', 'A1', 'A2'];
+    this.send(axes.map((a) => `${a}${valStr}`).join(' ') + '\n');
   }
 
   get connected() { return this._connected; }

@@ -4,6 +4,7 @@ import { Modal } from './modal.js';
 import { icon, Trash2, Pencil, GripVertical } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { classifyOverlap } from '../js/path-utils.js';
+import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale, translatePage } from '../js/i18n.js';
 
 // Canonical default values for each tunable Playback field. Used by the
 // per-field reset-to-default `↻` button (Shneiderman #6 reversibility)
@@ -61,13 +62,13 @@ export class SettingsPanel {
     const count = (typeof eligibleCount === 'number' && eligibleCount >= 0)
       ? eligibleCount : null;
     const subjectLine = (count == null)
-      ? 'FunSync will auto-assign multi-axis playback to every video with detected companion files.'
+      ? t('settingsPanel.multiAxisConfirm.bodyUnknown')
       : count === 0
-        ? 'No videos in your library currently have detected companion files. New videos with companions will be auto-assigned as they appear.'
-        : `FunSync will auto-assign multi-axis playback to ${count} video${count === 1 ? '' : 's'} with detected companion files.`;
+        ? t('settingsPanel.multiAxisConfirm.bodyNone')
+        : t('settingsPanel.multiAxisConfirm.bodyCount', { count });
 
     return Modal.open({
-      title: 'Switch to multi-axis default?',
+      title: t('settingsPanel.multiAxisConfirm.title'),
       onRender: (body, close) => {
         const msg = document.createElement('div');
         msg.className = 'modal-message';
@@ -78,7 +79,7 @@ export class SettingsPanel {
         warning.className = 'modal-message';
         warning.style.marginTop = '12px';
         warning.style.color = 'var(--text-secondary)';
-        warning.textContent = 'Switching back to Single later will not revert these assignments. Use Change funscript on individual videos to undo.';
+        warning.textContent = t('settingsPanel.multiAxisConfirm.warning');
         body.appendChild(warning);
 
         const actions = document.createElement('div');
@@ -86,12 +87,12 @@ export class SettingsPanel {
 
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'modal-btn modal-btn--secondary';
-        cancelBtn.textContent = 'Cancel';
+        cancelBtn.textContent = t('common.cancel');
         cancelBtn.addEventListener('click', () => close(false));
 
         const confirmBtn = document.createElement('button');
         confirmBtn.className = 'modal-btn';
-        confirmBtn.textContent = 'Switch to Multi-axis';
+        confirmBtn.textContent = t('settingsPanel.multiAxisConfirm.confirm');
         confirmBtn.addEventListener('click', () => close(true));
 
         actions.appendChild(cancelBtn);
@@ -103,19 +104,19 @@ export class SettingsPanel {
 
   async show() {
     await Modal.open({
-      title: 'Settings',
+      title: t('settingsPanel.modalTitle'),
       onRender: (body, close) => {
         // Tab bar
         const tabBar = document.createElement('div');
         tabBar.className = 'settings-panel__tabs';
         tabBar.setAttribute('role', 'tablist');
-        tabBar.setAttribute('aria-label', 'Settings sections');
+        tabBar.setAttribute('aria-label', t('settingsPanel.tabsAria'));
 
         const tabs = [
-          { id: 'sources', label: 'Sources' },
-          { id: 'playback', label: 'Playback' },
-          { id: 'appearance', label: 'Appearance' },
-          { id: 'data', label: 'Data' },
+          { id: 'sources', label: t('settingsPanel.tabSources') },
+          { id: 'playback', label: t('settingsPanel.tabPlayback') },
+          { id: 'appearance', label: t('settingsPanel.tabAppearance') },
+          { id: 'data', label: t('settingsPanel.tabData') },
         ];
 
         const panels = {};
@@ -199,7 +200,7 @@ export class SettingsPanel {
         // a semantic class mismatch flagged by the design audit).
         const doneBtn = document.createElement('button');
         doneBtn.className = 'settings-panel__done-btn';
-        doneBtn.textContent = 'Done';
+        doneBtn.textContent = t('settingsPanel.done');
         doneBtn.addEventListener('click', () => close());
         body.appendChild(doneBtn);
       },
@@ -220,7 +221,7 @@ export class SettingsPanel {
       if (sources.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'settings-panel__empty';
-        empty.textContent = 'No source folders added';
+        empty.textContent = t('settingsPanel.sources.empty');
         sourcesList.appendChild(empty);
       } else {
         for (const src of sources) {
@@ -235,7 +236,7 @@ export class SettingsPanel {
           // records the id, dragover targets highlight, drop swaps ids.
           const grip = document.createElement('span');
           grip.className = 'settings-panel__source-grip';
-          grip.title = 'Drag to reorder';
+          grip.title = t('settingsPanel.sources.dragHandle');
           grip.appendChild(icon(GripVertical, { width: 14, height: 14 }));
           row.appendChild(grip);
 
@@ -281,7 +282,7 @@ export class SettingsPanel {
           const isEnabled = src.enabled !== false;
           toggle.setAttribute('aria-checked', String(isEnabled));
           toggle.classList.toggle('settings-panel__source-toggle--on', isEnabled);
-          toggle.title = isEnabled ? 'Enabled — click to disable' : 'Disabled — click to enable';
+          toggle.title = isEnabled ? t('settingsPanel.sources.enabledHint') : t('settingsPanel.sources.disabledHint');
           toggle.addEventListener('click', () => {
             const srcs = this._settings.get('library.sources') || [];
             const target = srcs.find(s => s.id === src.id);
@@ -290,7 +291,10 @@ export class SettingsPanel {
             this._settings.set('library.sources', srcs);
             renderSources();
             if (this._onSourcesChanged) this._onSourcesChanged();
-            showToast(`Source "${src.name}" ${target.enabled ? 'enabled' : 'disabled'}`, 'info');
+            showToast(t('settingsPanel.sources.toggled', {
+              name: src.name,
+              state: target.enabled ? t('settingsPanel.sources.stateEnabled') : t('settingsPanel.sources.stateDisabled'),
+            }), 'info');
           });
           row.appendChild(toggle);
 
@@ -311,10 +315,10 @@ export class SettingsPanel {
 
           const renameBtn = document.createElement('button');
           renameBtn.className = 'settings-panel__source-btn';
-          renameBtn.title = 'Rename';
+          renameBtn.title = t('settingsPanel.sources.rename');
           renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
           renameBtn.addEventListener('click', async () => {
-            const newName = await Modal.prompt('Rename Source', 'Name', src.name);
+            const newName = await Modal.prompt(t('settingsPanel.sources.renameTitle'), t('settingsPanel.sources.nameLabel'), src.name);
             if (newName && newName !== src.name) {
               const srcs = this._settings.get('library.sources') || [];
               const target = srcs.find(s => s.id === src.id);
@@ -324,10 +328,10 @@ export class SettingsPanel {
 
           const deleteBtn = document.createElement('button');
           deleteBtn.className = 'settings-panel__source-btn settings-panel__source-btn--danger';
-          deleteBtn.title = 'Remove';
+          deleteBtn.title = t('settingsPanel.sources.remove');
           deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
           deleteBtn.addEventListener('click', async () => {
-            const confirmed = await Modal.confirm('Remove Source', `Remove "${src.name}"? Your files won't be deleted.`);
+            const confirmed = await Modal.confirm(t('settingsPanel.sources.removeTitle'), t('settingsPanel.sources.removeConfirm', { name: src.name }));
             if (confirmed) {
               // Pre-action snapshot — removing a source can cascade
               // into collection conversions, so this is one of the
@@ -353,7 +357,7 @@ export class SettingsPanel {
               if (convertedCount > 0) {
                 this._settings.set('library.collections', collections);
                 showToast(
-                  `${convertedCount} synced collection${convertedCount !== 1 ? 's' : ''} now tracks the folder directly. Add the folder back as a source to see videos.`,
+                  t('settingsPanel.sources.convertedCollections', { count: convertedCount }),
                   'info',
                   6000,
                 );
@@ -375,7 +379,7 @@ export class SettingsPanel {
 
               renderSources();
               if (this._onSourcesChanged) this._onSourcesChanged();
-              showToast(`Source "${src.name}" removed`, 'info');
+              showToast(t('settingsPanel.sources.removed', { name: src.name }), 'info');
             }
           });
 
@@ -393,7 +397,7 @@ export class SettingsPanel {
 
     const addBtn = document.createElement('button');
     addBtn.className = 'settings-panel__add-btn';
-    addBtn.textContent = '+ Add Source Folder';
+    addBtn.textContent = t('settingsPanel.sources.add');
     addBtn.addEventListener('click', async () => {
       const dirPath = await window.funsync.selectDirectory();
       if (!dirPath) return;
@@ -403,14 +407,14 @@ export class SettingsPanel {
       let removeChildrenIds = null;
 
       if (overlap.kind === 'exact') {
-        showToast(`Already added as "${overlap.source.name}"`, 'warn');
+        showToast(t('settingsPanel.sources.alreadyAdded', { name: overlap.source.name }), 'warn');
         return;
       }
 
       if (overlap.kind === 'child') {
         const proceed = await Modal.confirm(
-          'Folder already covered',
-          `"${dirPath}" is inside "${overlap.parent.name}" (${overlap.parent.path}). Files here are already scanned — adding it will double-count every video.\n\nAdd anyway?`
+          t('settingsPanel.sources.childOverlapTitle'),
+          t('settingsPanel.sources.childOverlapBody', { path: dirPath, parentName: overlap.parent.name, parentPath: overlap.parent.path }),
         );
         if (!proceed) return;
       }
@@ -418,12 +422,12 @@ export class SettingsPanel {
       if (overlap.kind === 'parent') {
         const childNames = overlap.children.map(c => `"${c.name}"`).join(', ');
         const msg = `"${dirPath}" contains existing source${overlap.children.length !== 1 ? 's' : ''} ${childNames}. Those files will be scanned twice unless you remove the nested source${overlap.children.length !== 1 ? 's' : ''}.\n\nRemove nested source${overlap.children.length !== 1 ? 's' : ''} and add this one?`;
-        const confirmed = await Modal.confirm('Overlapping source', msg);
+        const confirmed = await Modal.confirm(t('settingsPanel.sources.parentOverlapTitle'), msg);
         if (!confirmed) return;
         removeChildrenIds = new Set(overlap.children.map(c => c.id));
       }
 
-      const name = await Modal.prompt('Name this source', 'Source name', dirPath.split(/[\\/]/).pop());
+      const name = await Modal.prompt(t('settingsPanel.sources.addNamePrompt'), t('settingsPanel.sources.addNamePlaceholder'), dirPath.split(/[\\/]/).pop());
       if (!name) return;
 
       let nextSrcs = srcs;
@@ -434,7 +438,7 @@ export class SettingsPanel {
       this._settings.set('library.sources', nextSrcs);
       renderSources();
       if (this._onSourcesChanged) this._onSourcesChanged();
-      showToast(`Source "${name}" added`, 'info');
+      showToast(t('settingsPanel.sources.added', { name }), 'info');
     });
     panel.appendChild(addBtn);
 
@@ -449,23 +453,23 @@ export class SettingsPanel {
     const gapSection = document.createElement('div');
     gapSection.className = 'settings-panel__section';
     gapSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Gap Skip</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.gapSkipHeader')}</h2>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">Mode</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldMode')}</span>
         <select id="sp-gap-mode" class="settings-panel__input settings-panel__input--select">
-          <option value="off">Off</option>
-          <option value="auto">Auto (countdown)</option>
-          <option value="button">Show Skip Button</option>
+          <option value="off">${t('settingsPanel.playback.gapModeOff')}</option>
+          <option value="auto">${t('settingsPanel.playback.gapModeAuto')}</option>
+          <option value="button">${t('settingsPanel.playback.gapModeButton')}</option>
         </select>
-        <button type="button" id="sp-gap-mode-reset" class="settings-panel__field-reset" hidden title="Reset to default (Off)" aria-label="Reset Mode to default">↻</button>
+        <button type="button" id="sp-gap-mode-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.gapResetMode')}" aria-label="${t('settingsPanel.playback.gapResetModeAria')}">↻</button>
       </div>
       <div class="settings-panel__field" id="sp-gap-threshold-row" hidden>
-        <span class="settings-panel__field-label">Threshold</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldThreshold')}</span>
         <input type="range" id="sp-gap-threshold" class="settings-panel__input settings-panel__input--range" min="5" max="60" value="10" aria-describedby="sp-gap-hint">
         <span id="sp-gap-threshold-val" class="settings-panel__field-value">10s</span>
-        <button type="button" id="sp-gap-threshold-reset" class="settings-panel__field-reset" hidden title="Reset to default (10s)" aria-label="Reset Threshold to default">↻</button>
+        <button type="button" id="sp-gap-threshold-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.gapResetThreshold')}" aria-label="${t('settingsPanel.playback.gapResetThresholdAria')}">↻</button>
       </div>
-      <div class="settings-panel__hint" id="sp-gap-hint">Gaps shorter than the threshold are ignored. Press G to skip manually.</div>
+      <div class="settings-panel__hint" id="sp-gap-hint">${t('settingsPanel.playback.gapHint')}</div>
     `;
     panel.appendChild(gapSection);
 
@@ -476,22 +480,22 @@ export class SettingsPanel {
     const upNextSection = document.createElement('div');
     upNextSection.className = 'settings-panel__section';
     upNextSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Up Next</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.upNextHeader')}</h2>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">Mode</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldMode')}</span>
         <select id="sp-upnext-mode" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-upnext-hint">
-          <option value="auto">Show countdown card</option>
-          <option value="off">Off</option>
+          <option value="auto">${t('settingsPanel.playback.upNextModeAuto')}</option>
+          <option value="off">${t('settingsPanel.playback.upNextModeOff')}</option>
         </select>
-        <button type="button" id="sp-upnext-mode-reset" class="settings-panel__field-reset" hidden title="Reset to default (Show countdown card)" aria-label="Reset Mode to default">↻</button>
+        <button type="button" id="sp-upnext-mode-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.upNextResetMode')}" aria-label="${t('settingsPanel.playback.gapResetModeAria')}">↻</button>
       </div>
       <div class="settings-panel__field" id="sp-upnext-countdown-row" hidden>
-        <span class="settings-panel__field-label">Countdown</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldCountdown')}</span>
         <input type="range" id="sp-upnext-countdown" class="settings-panel__input settings-panel__input--range" min="3" max="20" value="10" step="1" aria-describedby="sp-upnext-hint">
         <span id="sp-upnext-countdown-val" class="settings-panel__field-value">10s</span>
-        <button type="button" id="sp-upnext-countdown-reset" class="settings-panel__field-reset" hidden title="Reset to default (10s)" aria-label="Reset Countdown to default">↻</button>
+        <button type="button" id="sp-upnext-countdown-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.upNextResetCountdown')}" aria-label="${t('settingsPanel.playback.upNextResetCountdownAria')}">↻</button>
       </div>
-      <div class="settings-panel__hint" id="sp-upnext-hint">Shows the next item in the current library / playlist / category at the end of the video, with an autoplay countdown. Hover the card to pause the countdown; click × or press Esc to dismiss.</div>
+      <div class="settings-panel__hint" id="sp-upnext-hint">${t('settingsPanel.playback.upNextHint')}</div>
     `;
     panel.appendChild(upNextSection);
 
@@ -505,16 +509,16 @@ export class SettingsPanel {
     const multiAxisSection = document.createElement('div');
     multiAxisSection.className = 'settings-panel__section';
     multiAxisSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Multi-Axis</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.multiHeader')}</h2>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">Default playback</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldDefaultPlayback')}</span>
         <select id="sp-prefer-multi" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-multi-hint">
-          <option value="single">Single axis (default)</option>
-          <option value="multi">Multi-axis when available</option>
+          <option value="single">${t('settingsPanel.playback.preferSingle')}</option>
+          <option value="multi">${t('settingsPanel.playback.preferMulti')}</option>
         </select>
-        <button type="button" id="sp-prefer-multi-reset" class="settings-panel__field-reset" hidden title="Reset to default (Single axis)" aria-label="Reset Default playback to default">↻</button>
+        <button type="button" id="sp-prefer-multi-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.preferResetTitle')}" aria-label="${t('settingsPanel.playback.preferResetAria')}">↻</button>
       </div>
-      <div class="settings-panel__hint" id="sp-multi-hint">When set to Multi-axis, FunSync auto-assigns multi-axis playback to videos with detected companion files (twist, surge, etc.). Already-set videos keep their current selection. Switching back to Single will not revert auto-assignments — use Change funscript on individual videos to undo.</div>
+      <div class="settings-panel__hint" id="sp-multi-hint">${t('settingsPanel.playback.multiHint')}</div>
     `;
     panel.appendChild(multiAxisSection);
 
@@ -525,23 +529,23 @@ export class SettingsPanel {
     const smoothSection = document.createElement('div');
     smoothSection.className = 'settings-panel__section';
     smoothSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Motion Smoothing</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.smoothingHeader')}</h2>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">Interpolation</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldInterpolation')}</span>
         <select id="sp-smoothing" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-smoothing-hint">
-          <option value="linear">Linear (default)</option>
-          <option value="pchip">Smooth (PCHIP)</option>
-          <option value="makima">Extra Smooth (Makima)</option>
+          <option value="linear">${t('settingsPanel.playback.smoothLinear')}</option>
+          <option value="pchip">${t('settingsPanel.playback.smoothPchip')}</option>
+          <option value="makima">${t('settingsPanel.playback.smoothMakima')}</option>
         </select>
-        <button type="button" id="sp-smoothing-reset" class="settings-panel__field-reset" hidden title="Reset to default (Linear)" aria-label="Reset Interpolation to default">↻</button>
+        <button type="button" id="sp-smoothing-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.smoothResetTitle')}" aria-label="${t('settingsPanel.playback.smoothResetAria')}">↻</button>
       </div>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">Speed Limit</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldSpeedLimit')}</span>
         <input type="range" id="sp-speed-limit" class="settings-panel__input settings-panel__input--range" min="0" max="500" value="0" step="10" aria-describedby="sp-smoothing-hint">
-        <span id="sp-speed-limit-val" class="settings-panel__field-value">Off</span>
-        <button type="button" id="sp-speed-limit-reset" class="settings-panel__field-reset" hidden title="Reset to default (Off)" aria-label="Reset Speed Limit to default">↻</button>
+        <span id="sp-speed-limit-val" class="settings-panel__field-value">${t('settingsPanel.playback.speedLimitOff')}</span>
+        <button type="button" id="sp-speed-limit-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.speedLimitResetTitle')}" aria-label="${t('settingsPanel.playback.speedLimitResetAria')}">↻</button>
       </div>
-      <div class="settings-panel__hint" id="sp-smoothing-hint">Smoothing affects Buttplug.io linear devices. Handy uses its own interpolation.</div>
+      <div class="settings-panel__hint" id="sp-smoothing-hint">${t('settingsPanel.playback.smoothingHint')}</div>
     `;
     panel.appendChild(smoothSection);
 
@@ -549,28 +553,28 @@ export class SettingsPanel {
     const bpSection = document.createElement('div');
     bpSection.className = 'settings-panel__section';
     bpSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Buttplug Linear Output (BLE)</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.bpHeader')}</h2>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">Strategy</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldStrategy')}</span>
         <select id="sp-linear-strategy" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-bp-hint">
-          <option value="action-boundary">Per-stroke (smoother on BLE)</option>
-          <option value="interpolated">Per-tick (legacy)</option>
+          <option value="action-boundary">${t('settingsPanel.playback.strategyActionBoundary')}</option>
+          <option value="interpolated">${t('settingsPanel.playback.strategyInterpolated')}</option>
         </select>
-        <button type="button" id="sp-linear-strategy-reset" class="settings-panel__field-reset" hidden title="Reset to default (Per-stroke)" aria-label="Reset Strategy to default">↻</button>
+        <button type="button" id="sp-linear-strategy-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.strategyResetTitle')}" aria-label="${t('settingsPanel.playback.strategyResetAria')}">↻</button>
       </div>
       <div class="settings-panel__field" id="sp-lookahead-row">
-        <span class="settings-panel__field-label">Lookahead</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldLookahead')}</span>
         <input type="range" id="sp-lookahead" class="settings-panel__input settings-panel__input--range" min="0" max="200" value="60" step="10" aria-describedby="sp-bp-hint">
         <span id="sp-lookahead-val" class="settings-panel__field-value">60ms</span>
-        <button type="button" id="sp-lookahead-reset" class="settings-panel__field-reset" hidden title="Reset to default (60ms)" aria-label="Reset Lookahead to default">↻</button>
+        <button type="button" id="sp-lookahead-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.lookaheadResetTitle')}" aria-label="${t('settingsPanel.playback.lookaheadResetAria')}">↻</button>
       </div>
       <div class="settings-panel__field" id="sp-min-stroke-row">
-        <span class="settings-panel__field-label">Min stroke</span>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldMinStroke')}</span>
         <input type="range" id="sp-min-stroke" class="settings-panel__input settings-panel__input--range" min="0" max="200" value="60" step="10" aria-describedby="sp-bp-hint">
         <span id="sp-min-stroke-val" class="settings-panel__field-value">60ms</span>
-        <button type="button" id="sp-min-stroke-reset" class="settings-panel__field-reset" hidden title="Reset to default (60ms)" aria-label="Reset Min Stroke to default">↻</button>
+        <button type="button" id="sp-min-stroke-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.minStrokeResetTitle')}" aria-label="${t('settingsPanel.playback.minStrokeResetAria')}">↻</button>
       </div>
-      <div class="settings-panel__hint" id="sp-bp-hint">Per-stroke sends one command per action and lets the device's firmware interpolate — matches how the Handy's WiFi API (HSSP) feels. Lookahead compensates for BLE round-trip; min stroke stretches too-short strokes up so BLE can honor them. For Handy via connection code (HSSP), these have no effect.</div>
+      <div class="settings-panel__hint" id="sp-bp-hint">${t('settingsPanel.playback.bpHint')}</div>
     `;
     panel.appendChild(bpSection);
 
@@ -682,10 +686,10 @@ export class SettingsPanel {
       if (speedLimit) {
         const savedLimit = this._settings.get('player.speedLimit') || 0;
         speedLimit.value = savedLimit;
-        if (speedLimitVal) speedLimitVal.textContent = savedLimit > 0 ? `${savedLimit}` : 'Off';
+        if (speedLimitVal) speedLimitVal.textContent = savedLimit > 0 ? `${savedLimit}` : t('settingsPanel.playback.speedLimitOff');
         speedLimit.addEventListener('input', () => {
           const val = parseInt(speedLimit.value, 10) || 0;
-          if (speedLimitVal) speedLimitVal.textContent = val > 0 ? `${val}` : 'Off';
+          if (speedLimitVal) speedLimitVal.textContent = val > 0 ? `${val}` : t('settingsPanel.playback.speedLimitOff');
           this._settings.set('player.speedLimit', val);
           if (this.onSpeedLimitChanged) this.onSpeedLimitChanged(val);
         });
@@ -812,32 +816,31 @@ export class SettingsPanel {
     // real choice (not a hidden default) so users who change OS theme
     // mid-session see the app respect it. Hidden-system would mislead.
     themeSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Theme</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.themeHeader')}</h2>
       <div class="settings-panel__hint" id="theme-hint">
-        Choose how the app looks. "System" follows your OS preference and
-        switches automatically when you toggle dark / light at the OS level.
+        ${t('settingsPanel.appearance.themeHint')}
       </div>
       <div class="settings-panel__theme-options" role="radiogroup"
            aria-labelledby="theme-hint" data-setting="player.theme">
         <label class="settings-panel__theme-option">
           <input type="radio" name="theme" value="system" ${current === 'system' ? 'checked' : ''}>
           <span class="settings-panel__theme-label">
-            <span class="settings-panel__theme-name">System</span>
-            <span class="settings-panel__theme-desc">Match my operating system</span>
+            <span class="settings-panel__theme-name">${t('settingsPanel.appearance.themeSystem')}</span>
+            <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.themeSystemDesc')}</span>
           </span>
         </label>
         <label class="settings-panel__theme-option">
           <input type="radio" name="theme" value="dark" ${current === 'dark' ? 'checked' : ''}>
           <span class="settings-panel__theme-label">
-            <span class="settings-panel__theme-name">Dark</span>
-            <span class="settings-panel__theme-desc">FunSync's original look</span>
+            <span class="settings-panel__theme-name">${t('settingsPanel.appearance.themeDark')}</span>
+            <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.themeDarkDesc')}</span>
           </span>
         </label>
         <label class="settings-panel__theme-option">
           <input type="radio" name="theme" value="light" ${current === 'light' ? 'checked' : ''}>
           <span class="settings-panel__theme-label">
-            <span class="settings-panel__theme-name">Light</span>
-            <span class="settings-panel__theme-desc">Off-white surfaces, dark text</span>
+            <span class="settings-panel__theme-name">${t('settingsPanel.appearance.themeLight')}</span>
+            <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.themeLightDesc')}</span>
           </span>
         </label>
       </div>
@@ -855,6 +858,46 @@ export class SettingsPanel {
       });
 
     panel.appendChild(themeSection);
+
+    // Language section — locale picker. Native names in the dropdown so a
+    // user who can't read the current UI language still recognises their
+    // own (Nielsen #6 recognition over recall).
+    const languageSection = document.createElement('div');
+    languageSection.className = 'settings-panel__section';
+    const currentLocale = this._settings.get('player.language') || getCurrentLocale() || 'en';
+    const options = SUPPORTED_LOCALES.map(code => {
+      const label = LOCALE_LABELS[code] || code;
+      const selected = code === currentLocale ? 'selected' : '';
+      return `<option value="${code}" ${selected}>${label}</option>`;
+    }).join('');
+    languageSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.languageHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">
+        ${t('settingsPanel.appearance.languageHint')}
+      </div>
+      <select class="settings-panel__input settings-panel__input--select" data-setting="player.language" aria-label="${t('settingsPanel.appearance.languageHeader')}">
+        ${options}
+      </select>
+    `;
+    languageSection.querySelector('[data-setting="player.language"]')
+      .addEventListener('change', async (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        const next = target.value;
+        this._settings.set('player.language', next);
+        // Picking from Settings is an explicit choice — same as picking
+        // from the first-launch modal. Mark the flag so the modal does
+        // not re-prompt on next launch.
+        this._settings.set('player.languageSelected', true);
+        try {
+          await setLocale(next);
+          translatePage(document);
+        } catch (err) {
+          console.warn('[settings] setLocale failed:', err);
+        }
+      });
+    panel.appendChild(languageSection);
+
     return panel;
   }
 
@@ -872,15 +915,15 @@ export class SettingsPanel {
     const backupSection = document.createElement('div');
     backupSection.className = 'settings-panel__section';
     backupSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Backup &amp; Recovery</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.data.backupHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">
-        Your settings are automatically backed up every minute while you use the app and before any destructive change. If something goes wrong you can restore an earlier state.
+        ${t('settingsPanel.data.backupBlurb')}
       </div>
-      <div id="sp-backup-status" class="settings-panel__hint" style="margin-bottom:12px">Loading backup status…</div>
+      <div id="sp-backup-status" class="settings-panel__hint" style="margin-bottom:12px">${t('settingsPanel.data.backupLoading')}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button id="sp-backup-now" class="settings-panel__add-btn" style="border-style:solid">Snapshot Now</button>
-        <button id="sp-backup-restore" class="settings-panel__add-btn" style="border-style:solid">Restore From Backup…</button>
-        <button id="sp-backup-folder" class="settings-panel__add-btn" style="border-style:solid">Open Backup Folder</button>
+        <button id="sp-backup-now" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.data.snapshotNow')}</button>
+        <button id="sp-backup-restore" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.data.restore')}</button>
+        <button id="sp-backup-folder" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.data.openFolder')}</button>
       </div>
     `;
     panel.appendChild(backupSection);
@@ -892,11 +935,11 @@ export class SettingsPanel {
     const exportSection = document.createElement('div');
     exportSection.className = 'settings-panel__section';
     exportSection.innerHTML = `
-      <h2 class="settings-panel__section-header">Export &amp; Import</h2>
-      <div class="settings-panel__hint" style="margin-bottom:10px">Save your settings, playlists, categories, and associations to a portable file — useful for moving to another machine or for an extra off-host backup.</div>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.data.exportHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.data.exportBlurb')}</div>
       <div style="display:flex;gap:8px">
-        <button id="sp-export" class="settings-panel__add-btn" style="border-style:solid">Export Backup File</button>
-        <button id="sp-import" class="settings-panel__add-btn" style="border-style:solid">Import Backup File</button>
+        <button id="sp-export" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.data.export')}</button>
+        <button id="sp-import" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.data.import')}</button>
       </div>
     `;
     panel.appendChild(exportSection);
@@ -915,15 +958,15 @@ export class SettingsPanel {
   // snapshots so they don't read as "47 days ago" (loses precision).
   _formatRelativeTime(date) {
     const ms = Date.now() - date.getTime();
-    if (ms < 0) return 'Just now';
+    if (ms < 0) return t('settingsPanel.data.relJustNow');
     const min = Math.floor(ms / 60_000);
     const hr = Math.floor(ms / 3_600_000);
     const day = Math.floor(ms / 86_400_000);
-    if (min < 1) return 'Just now';
-    if (min < 60) return `${min} minute${min === 1 ? '' : 's'} ago`;
-    if (hr < 24) return `${hr} hour${hr === 1 ? '' : 's'} ago`;
-    if (day === 1) return 'Yesterday';
-    if (day < 7) return `${day} days ago`;
+    if (min < 1) return t('settingsPanel.data.relJustNow');
+    if (min < 60) return t('settingsPanel.data.relMinutesAgo', { count: min });
+    if (hr < 24) return t('settingsPanel.data.relHoursAgo', { count: hr });
+    if (day === 1) return t('settingsPanel.data.relYesterday');
+    if (day < 7) return t('settingsPanel.data.relDaysAgo', { count: day });
     return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
   }
 
@@ -932,14 +975,14 @@ export class SettingsPanel {
   // to thread a constants file across the contextBridge.
   _formatTrigger(trigger, label) {
     switch (trigger) {
-      case 'startup':       return 'Startup';
-      case 'debounced':     return 'Auto-save';
-      case 'pre-action':    return label ? `Before ${label.replace(/-/g, ' ')}` : 'Before action';
-      case 'manual':        return 'Manual';
-      case 'quit':          return 'App quit';
-      case 'post-recovery': return 'After recovery';
-      case 'baseline':      return 'First snapshot';
-      default:              return trigger || 'Snapshot';
+      case 'startup':       return t('settingsPanel.data.triggerStartup');
+      case 'debounced':     return t('settingsPanel.data.triggerDebounced');
+      case 'pre-action':    return label ? t('settingsPanel.data.triggerPreAction', { label: label.replace(/-/g, ' ') }) : t('settingsPanel.data.triggerPreActionFallback');
+      case 'manual':        return t('settingsPanel.data.triggerManual');
+      case 'quit':          return t('settingsPanel.data.triggerQuit');
+      case 'post-recovery': return t('settingsPanel.data.triggerPostRecovery');
+      case 'baseline':      return t('settingsPanel.data.triggerBaseline');
+      default:              return trigger || t('settingsPanel.data.triggerSnapshot');
     }
   }
 
@@ -955,16 +998,16 @@ export class SettingsPanel {
     try {
       const result = await window.funsync.backupList();
       if (!result?.success || !result.snapshots?.length) {
-        statusEl.textContent = 'No snapshots yet. One will be taken automatically as you make changes.';
+        statusEl.textContent = t('settingsPanel.data.backupNone');
         return;
       }
       const newest = result.snapshots[0];
       const totalBytes = result.snapshots.reduce((s, e) => s + (e.sizeBytes || 0), 0);
       const when = this._formatRelativeTime(new Date(newest.timestamp));
       const count = result.snapshots.length;
-      statusEl.textContent = `Last backup: ${when}. ${count} backup${count === 1 ? '' : 's'} stored, ${this._formatBytes(totalBytes)} total.`;
+      statusEl.textContent = t('settingsPanel.data.backupLastLine', { when, count, total: this._formatBytes(totalBytes) });
     } catch (err) {
-      statusEl.textContent = 'Backup status unavailable.';
+      statusEl.textContent = t('settingsPanel.data.backupUnavailable');
     }
   }
 
@@ -972,19 +1015,19 @@ export class SettingsPanel {
     // --- Snapshot Now ----------------------------------------------------
     panel.querySelector('#sp-backup-now')?.addEventListener('click', async () => {
       const btn = panel.querySelector('#sp-backup-now');
-      btn.disabled = true; btn.textContent = 'Snapshotting…';
+      btn.disabled = true; btn.textContent = t('settingsPanel.data.snapshotting');
       try {
         const result = await window.funsync.backupSnapshotNow();
         if (result?.success) {
-          showToast('Snapshot taken', 'info');
+          showToast(t('settingsPanel.data.snapshotTaken'), 'info');
           this._refreshBackupStatus(panel);
         } else {
-          showToast(`Snapshot failed: ${result?.error || 'unknown error'}`, 'error');
+          showToast(t('settingsPanel.data.snapshotFailedReason', { error: result?.error || 'unknown error' }), 'error');
         }
       } catch (err) {
-        showToast('Snapshot failed', 'error');
+        showToast(t('settingsPanel.data.snapshotFailed'), 'error');
       }
-      btn.disabled = false; btn.textContent = 'Snapshot Now';
+      btn.disabled = false; btn.textContent = t('settingsPanel.data.snapshotNow');
     });
 
     // --- Restore From Backup ---------------------------------------------
@@ -993,11 +1036,11 @@ export class SettingsPanel {
       try {
         listResult = await window.funsync.backupList();
       } catch (err) {
-        showToast('Could not load backup list', 'error');
+        showToast(t('settingsPanel.data.noBackupsList'), 'error');
         return;
       }
       if (!listResult?.success || !listResult.snapshots?.length) {
-        showToast('No backups available yet', 'info');
+        showToast(t('settingsPanel.data.noBackupsAvailable'), 'info');
         return;
       }
 
@@ -1011,11 +1054,11 @@ export class SettingsPanel {
         const trig = this._formatTrigger(snap.trigger, snap.label);
         const summary = snap.summary || {};
         const parts = [];
-        if (summary.sources)        parts.push(`${summary.sources} source${summary.sources === 1 ? '' : 's'}`);
-        if (summary.collections)    parts.push(`${summary.collections} collection${summary.collections === 1 ? '' : 's'}`);
-        if (summary.playlists)      parts.push(`${summary.playlists} playlist${summary.playlists === 1 ? '' : 's'}`);
-        if (summary.customRoutings) parts.push(`${summary.customRoutings} routing${summary.customRoutings === 1 ? '' : 's'}`);
-        const subtitle = `${this._formatBytes(snap.sizeBytes)} · ${parts.join(', ') || 'empty'}`;
+        if (summary.sources)        parts.push(t('settingsPanel.data.summarySources', { count: summary.sources }));
+        if (summary.collections)    parts.push(t('settingsPanel.data.summaryCollections', { count: summary.collections }));
+        if (summary.playlists)      parts.push(t('settingsPanel.data.summaryPlaylists', { count: summary.playlists }));
+        if (summary.customRoutings) parts.push(t('settingsPanel.data.summaryRoutings', { count: summary.customRoutings }));
+        const subtitle = `${this._formatBytes(snap.sizeBytes)} · ${parts.join(', ') || t('settingsPanel.data.summaryEmpty')}`;
         return {
           id: `${snap.subdir}/${snap.filename}`,
           label: `${when}  ·  ${trig}`,
@@ -1023,7 +1066,7 @@ export class SettingsPanel {
         };
       });
 
-      const picked = await Modal.selectFromList('Restore from backup', items);
+      const picked = await Modal.selectFromList(t('settingsPanel.data.restoreModalTitle'), items);
       if (!picked) return;
 
       // Confirm — restore is destructive (overwrites live config) and
@@ -1031,8 +1074,8 @@ export class SettingsPanel {
       // dialog closure) and that we save the current state first
       // (Shneiderman #6 reversibility) so the user knows they can undo.
       const ok = await Modal.confirm(
-        'Restore this snapshot?',
-        'Your current settings will be saved as an emergency snapshot first, so you can undo if needed. The app will relaunch to apply the restored state.'
+        t('settingsPanel.data.restoreConfirmTitle'),
+        t('settingsPanel.data.restoreConfirmBody'),
       );
       if (!ok) return;
 
@@ -1040,12 +1083,12 @@ export class SettingsPanel {
       try {
         const result = await window.funsync.backupRestore(subdir, filename);
         if (!result?.success) {
-          showToast(`Restore failed: ${result?.error || 'unknown error'}`, 'error');
+          showToast(t('settingsPanel.data.restoreFailedReason', { error: result?.error || 'unknown error' }), 'error');
         }
         // On success the main process relaunches the app, so this
         // renderer is about to be torn down — no further UI updates.
       } catch (err) {
-        showToast('Restore failed', 'error');
+        showToast(t('settingsPanel.data.restoreFailed'), 'error');
       }
     });
 
@@ -1053,33 +1096,33 @@ export class SettingsPanel {
     panel.querySelector('#sp-backup-folder')?.addEventListener('click', async () => {
       try {
         const result = await window.funsync.backupOpenFolder();
-        if (!result?.success) showToast('Could not open folder', 'error');
+        if (!result?.success) showToast(t('settingsPanel.data.openFolderFailed'), 'error');
       } catch (err) {
-        showToast('Could not open folder', 'error');
+        showToast(t('settingsPanel.data.openFolderFailed'), 'error');
       }
     });
 
     // --- Export / Import (existing zip flow) -----------------------------
     panel.querySelector('#sp-export')?.addEventListener('click', async () => {
       const btn = panel.querySelector('#sp-export');
-      btn.disabled = true; btn.textContent = 'Exporting…';
+      btn.disabled = true; btn.textContent = t('settingsPanel.data.exporting');
       try {
         const result = await window.funsync.exportData();
-        if (result.success) showToast(`Backup saved: ${result.path}`, 'info');
-        else showToast('Export failed', 'error');
-      } catch { showToast('Export failed', 'error'); }
-      btn.disabled = false; btn.textContent = 'Export Backup File';
+        if (result.success) showToast(t('settingsPanel.data.exportSaved', { path: result.path }), 'info');
+        else showToast(t('settingsPanel.data.exportFailed'), 'error');
+      } catch { showToast(t('settingsPanel.data.exportFailed'), 'error'); }
+      btn.disabled = false; btn.textContent = t('settingsPanel.data.export');
     });
 
     panel.querySelector('#sp-import')?.addEventListener('click', async () => {
       const btn = panel.querySelector('#sp-import');
-      btn.disabled = true; btn.textContent = 'Importing…';
+      btn.disabled = true; btn.textContent = t('settingsPanel.data.importing');
       try {
         const result = await window.funsync.importData();
-        if (result.success) showToast(`Imported (${result.funscriptCount || 0} scripts)`, 'info');
-        else showToast('Import cancelled', 'info');
-      } catch { showToast('Import failed', 'error'); }
-      btn.disabled = false; btn.textContent = 'Import Backup File';
+        if (result.success) showToast(t('settingsPanel.data.importDone', { count: result.funscriptCount || 0 }), 'info');
+        else showToast(t('settingsPanel.data.importCancelled'), 'info');
+      } catch { showToast(t('settingsPanel.data.importFailed'), 'error'); }
+      btn.disabled = false; btn.textContent = t('settingsPanel.data.import');
     });
   }
 }

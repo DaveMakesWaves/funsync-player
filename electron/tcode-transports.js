@@ -225,14 +225,31 @@ class WebsocketTransport {
    * TCode device. Send is sync-returning-bool to match the contract;
    * delivery is best-effort (no ack model in the TCode protocol).
    *
+   * Auto-reconnects with exponential backoff when the remote drops the
+   * connection AFTER an initial successful open. This matters for
+   * MFP-protocol consumers like restim — if restim restarts while
+   * FunSync is playing, the user shouldn't have to manually disconnect
+   * and reconnect.
+   *
    * @param opts.WebSocketImpl optional override for tests — must match
    *   the browser WebSocket shape (constructor `(url)`, `.send(data)`,
    *   `.close()`, `.readyState`, `.onopen/.onmessage/.onclose/.onerror`).
+   * @param opts.setTimeoutImpl optional override for tests — must match
+   *   the `setTimeout(fn, ms) -> id` shape.
+   * @param opts.clearTimeoutImpl optional override for tests.
+   * @param opts.reconnect (default true) — disable to keep tests simple.
    */
-  constructor({ log = console, WebSocketImpl } = {}) {
+  constructor({ log = console, WebSocketImpl, setTimeoutImpl, clearTimeoutImpl, reconnect = true } = {}) {
     this._ws = null;
     this._log = log;
     this._onDisconnect = null;
+    this._url = null;
+    this._reconnectEnabled = !!reconnect;
+    this._reconnectTimer = null;
+    this._reconnectAttempts = 0;
+    this._stopped = false;
+    this._setTimeout = setTimeoutImpl || ((typeof setTimeout !== 'undefined') ? setTimeout : null);
+    this._clearTimeout = clearTimeoutImpl || ((typeof clearTimeout !== 'undefined') ? clearTimeout : null);
     // Distinguish "caller did not pass WebSocketImpl" (undefined → fall
     // back to global) from "caller explicitly passed null" (no runtime,
     // tested explicitly).
@@ -243,6 +260,16 @@ class WebsocketTransport {
     }
   }
 
+  /**
+   * Compute backoff for the Nth reconnect attempt (0-indexed). Capped
+   * at 30s to keep the wait bounded; the sequence is 1s, 2s, 4s, 8s,
+   * 16s, 30s, 30s, ... — matches the pattern used in
+   * `renderer/js/vr-bridge.js` for the VR companion. Exposed for tests.
+   */
+  _backoffMs(attempt) {
+    return Math.min(30000, 1000 * Math.pow(2, attempt));
+  }
+
   async connect({ url } = {}) {
     if (!this._WebSocket) {
       return { success: false, error: 'WebSocket runtime not available' };
@@ -250,10 +277,30 @@ class WebsocketTransport {
     if (!url || typeof url !== 'string' || !/^wss?:\/\//.test(url)) {
       return { success: false, error: 'url must start with ws:// or wss://' };
     }
+    // User-initiated connect resets the stopped flag and attempt counter
+    // — clearing whatever state a prior `disconnect()` set. The internal
+    // reconnect path (`_openSocket`) skips this reset so backoff grows
+    // across consecutive failed reconnects.
+    this._stopped = false;
+    this._reconnectAttempts = 0;
+    this._hasEverConnected = false;
+    if (this._reconnectTimer && this._clearTimeout) {
+      this._clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    this._url = url;
+    return this._openSocket(url);
+  }
+
+  /**
+   * Open a fresh WebSocket and resolve when it either opens or closes.
+   * Shared between user-initiated `connect()` and internal `_scheduleReconnect()` so
+   * the latter can grow the backoff across consecutive failures without
+   * `connect()` resetting state on every attempt.
+   */
+  async _openSocket(url) {
     // Synchronous teardown of any prior socket — avoid awaiting so the
-    // new socket is constructed on the same tick. Tests that read
-    // `instances[0]` immediately after the connect call depend on this,
-    // and runtime callers don't observe any ordering difference.
+    // new socket is constructed on the same tick.
     if (this._ws) {
       const prior = this._ws;
       this._ws = null;
@@ -270,19 +317,32 @@ class WebsocketTransport {
         let resolved = false;
         this._ws.onopen = () => {
           this._log.info?.(`[TCode/ws] Connected ${url}`);
+          this._reconnectAttempts = 0;
+          this._hasEverConnected = true;
           settle({ success: true });
         };
         this._ws.onclose = (ev) => {
-          // If the socket closes before opening, surface the failure as
-          // the connect promise's error rather than hanging.
-          if (!resolved) {
+          const wasPreOpen = !resolved;
+          if (wasPreOpen) {
             settle({ success: false, error: `closed before open (${ev?.code ?? ''})` });
             this._ws = null;
-            return;
+          } else {
+            this._log.info?.('[TCode/ws] Closed');
+            this._ws = null;
           }
-          this._log.info?.('[TCode/ws] Closed');
-          this._ws = null;
-          if (this._onDisconnect) this._onDisconnect();
+          // Schedule a reconnect on remote-initiated drops AND on
+          // pre-open closes inside an active reconnect session (we'd
+          // already opened at least once). The very-first connect that
+          // closes before open is reported as a failure to the caller —
+          // user just typed a bad URL — no auto-retry.
+          const shouldRetry = this._reconnectEnabled
+            && !this._stopped
+            && (this._hasEverConnected || !wasPreOpen);
+          if (shouldRetry) {
+            this._scheduleReconnect();
+          } else if (!wasPreOpen && this._onDisconnect) {
+            this._onDisconnect();
+          }
         };
         this._ws.onerror = (ev) => {
           this._log.warn?.('[TCode/ws] Socket error');
@@ -296,7 +356,37 @@ class WebsocketTransport {
     }
   }
 
+  /**
+   * Schedule the next reconnect attempt. Called from the close handler
+   * when reconnection is enabled and the user didn't explicitly stop.
+   * Pulled out so tests can assert backoff timing without faking a
+   * full WebSocket lifecycle.
+   */
+  _scheduleReconnect() {
+    if (!this._setTimeout) return;
+    const delay = this._backoffMs(this._reconnectAttempts);
+    this._reconnectAttempts++;
+    this._log.info?.(`[TCode/ws] Reconnecting in ${delay}ms (attempt ${this._reconnectAttempts})`);
+    this._reconnectTimer = this._setTimeout(() => {
+      this._reconnectTimer = null;
+      if (this._stopped || !this._url) return;
+      // Don't await — if it fails, the close handler fires again and
+      // schedules the next attempt with grown backoff. Call _openSocket
+      // directly so the user-initiated state reset in connect() doesn't
+      // wipe `_reconnectAttempts` on every retry.
+      this._openSocket(this._url).catch(() => {});
+    }, delay);
+  }
+
   async disconnect() {
+    // Mark as user-initiated so the close handler doesn't schedule
+    // a reconnect.
+    this._stopped = true;
+    if (this._reconnectTimer && this._clearTimeout) {
+      this._clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
+    this._reconnectAttempts = 0;
     if (!this._ws) return;
     const ws = this._ws;
     this._ws = null;
@@ -319,10 +409,18 @@ class WebsocketTransport {
 
   get connected() { return !!this._ws && this._ws.readyState === 1; }
 
+  /** Was a reconnect scheduled? Exposed for tests. */
+  get reconnecting() { return this._reconnectTimer !== null; }
+
   onDisconnect(cb) { this._onDisconnect = cb; }
 
   destroy() {
     this._onDisconnect = null;
+    this._stopped = true;
+    if (this._reconnectTimer && this._clearTimeout) {
+      this._clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
     if (this._ws) {
       try { this._ws.close(); } catch {}
       this._ws = null;

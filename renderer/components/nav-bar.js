@@ -1,6 +1,8 @@
 // NavBar — Persistent top navigation bar
 
 import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown } from '../js/icons.js';
+import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 
 export class NavBar {
   constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
@@ -25,10 +27,13 @@ export class NavBar {
     this._collections = [];
     this._activeCollectionId = null;
     this._sources = [];
+    // Labels resolved via `t()` at render time AND on every
+    // language:changed event (subscribed in `init`). Storing the
+    // key, not the string, so the label is always current.
     this._items = [
-      { id: 'library', label: 'Library', iconNode: Library },
-      { id: 'playlists', label: 'Playlists', iconNode: ListVideo },
-      { id: 'categories', label: 'Categories', iconNode: Tag },
+      { id: 'library', labelKey: 'nav.library', iconNode: Library },
+      { id: 'playlists', labelKey: 'nav.playlists', iconNode: ListVideo },
+      { id: 'categories', labelKey: 'nav.categories', iconNode: Tag },
     ];
   }
 
@@ -36,7 +41,7 @@ export class NavBar {
     this._el = document.createElement('nav');
     this._el.className = 'nav-bar';
     this._el.setAttribute('role', 'navigation');
-    this._el.setAttribute('aria-label', 'Main navigation');
+    this._el.setAttribute('aria-label', t('nav.mainNavAria'));
 
     for (const item of this._items) {
       if (item.id === 'library') {
@@ -47,7 +52,7 @@ export class NavBar {
         const btn = document.createElement('button');
         btn.className = 'nav-bar__item';
         btn.dataset.viewId = 'library';
-        btn.title = 'Library';
+        btn.title = t(item.labelKey);
 
         const iconEl = document.createElement('span');
         iconEl.className = 'nav-bar__icon';
@@ -55,7 +60,8 @@ export class NavBar {
 
         this._libraryLabel = document.createElement('span');
         this._libraryLabel.className = 'nav-bar__label';
-        this._libraryLabel.textContent = 'Library';
+        this._libraryLabel.dataset.i18nKey = item.labelKey;
+        this._libraryLabel.textContent = t(item.labelKey);
 
         btn.appendChild(iconEl);
         btn.appendChild(this._libraryLabel);
@@ -68,8 +74,8 @@ export class NavBar {
         const arrow = document.createElement('button');
         arrow.className = 'nav-bar__library-arrow';
         arrow.appendChild(icon(ChevronDown, { width: 16, height: 16 }));
-        arrow.title = 'Switch library';
-        arrow.setAttribute('aria-label', 'Switch library');
+        arrow.title = t('nav.switchLibrary');
+        arrow.setAttribute('aria-label', t('nav.switchLibrary'));
         arrow.setAttribute('aria-haspopup', 'menu');
         arrow.setAttribute('aria-expanded', 'false');
         arrow.addEventListener('click', (e) => {
@@ -90,7 +96,7 @@ export class NavBar {
         const btn = document.createElement('button');
         btn.className = 'nav-bar__item';
         btn.dataset.viewId = item.id;
-        btn.title = item.label;
+        btn.title = t(item.labelKey);
 
         const iconEl = document.createElement('span');
         iconEl.className = 'nav-bar__icon';
@@ -98,7 +104,8 @@ export class NavBar {
 
         const label = document.createElement('span');
         label.className = 'nav-bar__label';
-        label.textContent = item.label;
+        label.dataset.i18nKey = item.labelKey;
+        label.textContent = t(item.labelKey);
 
         btn.appendChild(iconEl);
         btn.appendChild(label);
@@ -124,11 +131,12 @@ export class NavBar {
     // EroScripts (margin-left: auto pushes the entire right side over)
     this._esBtn = document.createElement('button');
     this._esBtn.className = 'nav-bar__action nav-bar__eroscripts';
-    this._esBtn.title = 'Search EroScripts';
+    this._esBtn.title = t('nav.eroscriptsTitle');
     this._esBtn.appendChild(icon(Download, { width: 14, height: 14 }));
     const esLabel = document.createElement('span');
     esLabel.className = 'nav-bar__action-label';
-    esLabel.textContent = 'EroScripts';
+    esLabel.dataset.i18nKey = 'nav.eroscripts';
+    esLabel.textContent = t('nav.eroscripts');
     this._esBtn.appendChild(esLabel);
     this._esBtn.addEventListener('click', () => {
       if (this._onEroScriptsClick) this._onEroScriptsClick();
@@ -142,8 +150,8 @@ export class NavBar {
     // announce connect/disconnect transitions without re-focusing.
     this._handyBtn = document.createElement('button');
     this._handyBtn.className = 'nav-bar__action nav-bar__handy';
-    this._handyBtn.title = 'Device Connection';
-    this._handyBtn.setAttribute('aria-label', 'Devices: Not connected');
+    this._handyBtn.title = t('nav.deviceConnection');
+    this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: t('nav.notConnected') }));
 
     this._handyLed = document.createElement('span');
     this._handyLed.className = 'nav-bar__handy-led';
@@ -151,14 +159,14 @@ export class NavBar {
 
     this._handyLabel = document.createElement('span');
     this._handyLabel.className = 'nav-bar__handy-label nav-bar__action-label';
-    this._handyLabel.textContent = 'Devices';
+    this._handyLabel.textContent = t('nav.devices');
 
     this._handyText = document.createElement('span');
     this._handyText.className = 'nav-bar__handy-text';
     // Default state is "Not connected" (neutral) — was "Disconnected"
     // which read as a failure even on first launch. Reserve
     // "Disconnected" for actual drop-out (see setHandyStatus).
-    this._handyText.textContent = 'Not connected';
+    this._handyText.textContent = t('nav.notConnected');
     this._handyText.setAttribute('aria-live', 'polite');
 
     this._handyBtn.appendChild(this._handyLed);
@@ -176,12 +184,13 @@ export class NavBar {
     // (mirrors the VR pattern). State updated via setRemoteState().
     this._remoteBtn = document.createElement('button');
     this._remoteBtn.className = 'nav-bar__action nav-bar__remote-btn';
-    this._remoteBtn.title = 'Web Remote — open on phone';
-    this._remoteBtn.setAttribute('aria-label', 'Web Remote');
+    this._remoteBtn.title = t('nav.webRemoteTitle');
+    this._remoteBtn.setAttribute('aria-label', t('nav.webRemote'));
     this._remoteBtn.appendChild(icon(Smartphone, { width: 16, height: 16 }));
     const remoteLabel = document.createElement('span');
     remoteLabel.className = 'nav-bar__action-label';
-    remoteLabel.textContent = 'Web Remote';
+    remoteLabel.dataset.i18nKey = 'nav.webRemote';
+    remoteLabel.textContent = t('nav.webRemote');
     this._remoteBtn.appendChild(remoteLabel);
     this._remoteBtn.addEventListener('click', () => {
       if (this._onRemoteClick) this._onRemoteClick();
@@ -192,12 +201,13 @@ export class NavBar {
     // the PCVR companion bridge is actively connected.
     this._vrBtn = document.createElement('button');
     this._vrBtn.className = 'nav-bar__action nav-bar__vr-btn';
-    this._vrBtn.title = 'VR — Quest server + PCVR companion';
-    this._vrBtn.setAttribute('aria-label', 'VR');
+    this._vrBtn.title = t('nav.vrTitle');
+    this._vrBtn.setAttribute('aria-label', t('nav.vr'));
     this._vrBtn.appendChild(icon(Goggles, { width: 18, height: 18 }));
     const vrLabel = document.createElement('span');
     vrLabel.className = 'nav-bar__action-label';
-    vrLabel.textContent = 'VR';
+    vrLabel.dataset.i18nKey = 'nav.vr';
+    vrLabel.textContent = t('nav.vr');
     this._vrBtn.appendChild(vrLabel);
     this._vrBtn.addEventListener('click', () => {
       if (this._onVRClick) this._onVRClick();
@@ -210,12 +220,13 @@ export class NavBar {
     // GitHub, Notion all do this).
     this._settingsBtn = document.createElement('button');
     this._settingsBtn.className = 'nav-bar__action nav-bar__settings';
-    this._settingsBtn.title = 'Settings';
-    this._settingsBtn.setAttribute('aria-label', 'Settings');
+    this._settingsBtn.title = t('nav.settings');
+    this._settingsBtn.setAttribute('aria-label', t('nav.settings'));
     this._settingsBtn.appendChild(icon(Settings, { width: 16, height: 16 }));
     const settingsLabel = document.createElement('span');
     settingsLabel.className = 'nav-bar__action-label';
-    settingsLabel.textContent = 'Settings';
+    settingsLabel.dataset.i18nKey = 'nav.settings';
+    settingsLabel.textContent = t('nav.settings');
     this._settingsBtn.appendChild(settingsLabel);
     this._settingsBtn.addEventListener('click', () => {
       if (this._onSettingsClick) this._onSettingsClick();
@@ -224,6 +235,46 @@ export class NavBar {
 
     // Insert at the top of the parent
     parentEl.prepend(this._el);
+
+    // Re-translate when the user switches locale. Walks every label with
+    // a stashed `data-i18n-key` so we don't re-construct the DOM tree
+    // (preserves event listeners, dropdown state, etc.).
+    if (eventBus?.on) {
+      eventBus.on('language:changed', () => this._retranslate());
+    }
+  }
+
+  /** Re-apply translations to existing label elements + dynamic tooltips
+   *  whose values were baked at the last setter call (handy status text,
+   *  Web Remote tooltip, VR tooltip). Static data-i18n-key labels handled
+   *  by walking the DOM; dynamic ones replayed from their cached args. */
+  _retranslate() {
+    if (!this._el) return;
+    for (const el of this._el.querySelectorAll('[data-i18n-key]')) {
+      const key = el.dataset.i18nKey;
+      if (key) el.textContent = t(key);
+    }
+    // Replay the last dynamic setter calls so their translated strings
+    // refresh to the new locale.
+    if (this._lastHandyStatus) {
+      this.setHandyStatus(this._lastHandyStatus.status, this._lastHandyStatus.deviceCount);
+    }
+    if (this._lastRemoteState) {
+      this.setRemoteState(this._lastRemoteState.connected, this._lastRemoteState.count);
+    }
+    if (this._lastVRTooltip) {
+      this.setVRTooltip(this._lastVRTooltip.status, this._lastVRTooltip.detail);
+    }
+    // Static button titles set once in init() — re-apply now too.
+    if (this._libraryBtn) this._libraryBtn.title = t('nav.library');
+    if (this._esBtn) this._esBtn.title = t('nav.eroscriptsTitle');
+    if (this._handyBtn && !this._lastHandyStatus) {
+      this._handyBtn.title = t('nav.deviceConnection');
+    }
+    if (this._settingsBtn) {
+      this._settingsBtn.title = t('nav.settings');
+      this._settingsBtn.setAttribute('aria-label', t('nav.settings'));
+    }
   }
 
   setActive(viewId) {
@@ -253,13 +304,17 @@ export class NavBar {
    */
   setRemoteState(connected, count = 0) {
     if (!this._remoteBtn) return;
+    // Stash for re-translation on language:changed — the tooltip text
+    // is built with t() at call time, so without remembering the inputs
+    // a locale switch leaves stale strings on the button.
+    this._lastRemoteState = { connected, count };
     this._remoteBtn.classList.toggle('nav-bar__remote-btn--connected', !!connected);
     if (connected) {
       this._remoteBtn.title = count > 1
-        ? `Web Remote — ${count} phones connected`
-        : 'Web Remote — phone connected';
+        ? t('nav.webRemotePhonesConnected', { count })
+        : t('nav.webRemotePhoneConnected');
     } else {
-      this._remoteBtn.title = 'Web Remote — open on phone';
+      this._remoteBtn.title = t('nav.webRemoteTitle');
     }
   }
 
@@ -299,27 +354,29 @@ export class NavBar {
    */
   setVRTooltip(status, detail = {}) {
     if (!this._vrBtn) return;
+    this._lastVRTooltip = { status, detail };
     let title;
     if (status === 'connected') {
-      title = detail.host ? `VR — connected to ${detail.host}` : 'VR — connected';
+      title = detail.host ? t('nav.vrConnectedTo', { host: detail.host }) : t('nav.vrConnected');
     } else if (status === 'waiting') {
       title = detail.host
-        ? `VR — connected to ${detail.host}, waiting for HereSphere to send timestamps. Make sure 'Timestamp Server' is on.`
-        : "VR — waiting for HereSphere to send timestamps. Make sure 'Timestamp Server' is on.";
+        ? t('nav.vrWaitingHost', { host: detail.host })
+        : t('nav.vrWaiting');
     } else if (status === 'connecting') {
-      title = 'VR — connecting...';
+      title = t('nav.vrConnecting');
     } else {
-      title = 'VR — Quest server + PCVR companion';
+      title = t('nav.vrTitle');
     }
     this._vrBtn.title = title;
   }
 
   setHandyStatus(status, deviceCount = 0) {
     if (!this._handyLed || !this._handyText) return;
+    this._lastHandyStatus = { status, deviceCount };
     this._handyLed.className = 'nav-bar__handy-led';
 
     if (this._handyLabel) {
-      this._handyLabel.textContent = deviceCount === 1 ? 'Device' : 'Devices';
+      this._handyLabel.textContent = deviceCount === 1 ? t('nav.device') : t('nav.devices');
     }
 
     // "Not connected" is the neutral default — no failure framing
@@ -327,19 +384,19 @@ export class NavBar {
     // "something went wrong" even on first launch when nothing had
     // ever been connected (Nielsen #2 match real world). The status
     // strings here are user-facing.
-    let textValue = 'Not connected';
+    let textValue = t('nav.notConnected');
     switch (status) {
       case 'connected':
         this._handyLed.classList.add('nav-bar__handy-led--connected');
-        textValue = deviceCount > 0 ? `${deviceCount} Connected` : 'Connected';
+        textValue = deviceCount > 0 ? t('nav.deviceCount', { count: deviceCount }) : t('nav.connected');
         break;
       case 'connecting':
         this._handyLed.classList.add('nav-bar__handy-led--connecting');
-        textValue = 'Connecting...';
+        textValue = t('nav.connecting');
         break;
       case 'disconnected':
       default:
-        textValue = 'Not connected';
+        textValue = t('nav.notConnected');
         break;
     }
     this._handyText.textContent = textValue;
@@ -347,7 +404,7 @@ export class NavBar {
     // "Devices: 2 Connected" or similar (Norman signifier — text is
     // canonical, colour is secondary).
     if (this._handyBtn) {
-      this._handyBtn.setAttribute('aria-label', `Devices: ${textValue}`);
+      this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: textValue }));
     }
   }
 
@@ -360,9 +417,9 @@ export class NavBar {
     if (this._libraryLabel) {
       if (activeCollectionId) {
         const col = this._collections.find(c => c.id === activeCollectionId);
-        this._libraryLabel.textContent = col ? col.name : 'Library';
+        this._libraryLabel.textContent = col ? col.name : t('nav.library');
       } else {
-        this._libraryLabel.textContent = 'Library';
+        this._libraryLabel.textContent = t('nav.library');
       }
     }
   }
@@ -404,7 +461,7 @@ export class NavBar {
     const allBtn = document.createElement('button');
     allBtn.className = 'nav-bar__library-option';
     if (isAllActive) allBtn.classList.add('nav-bar__library-option--active');
-    allBtn.textContent = 'All Videos';
+    allBtn.textContent = t('nav.allVideos');
     allBtn.addEventListener('click', () => {
       dd.hidden = true;
       if (this._onLibraryCollectionChange) this._onLibraryCollectionChange(null);
@@ -436,8 +493,8 @@ export class NavBar {
           syncBadge.className = 'nav-bar__library-sync-badge';
           syncBadge.textContent = '↻';
           syncBadge.title = col.syncSource.folderPath
-            ? `Synced with folder: ${col.syncSource.folderPath}`
-            : 'Synced with source';
+            ? t('nav.syncedWithFolder', { path: col.syncSource.folderPath })
+            : t('nav.syncedWithSource');
           btn.appendChild(syncBadge);
         }
 
@@ -445,7 +502,7 @@ export class NavBar {
           const unplugIcon = icon(Unplug, { width: 12, height: 12 });
           unplugIcon.classList.add('nav-bar__library-unplug');
           btn.appendChild(unplugIcon);
-          btn.title = 'Source disconnected';
+          btn.title = t('nav.sourceDisconnected');
           btn.disabled = true;
         } else {
           btn.addEventListener('click', () => {
@@ -461,7 +518,7 @@ export class NavBar {
           const renameBtn = document.createElement('button');
           renameBtn.className = 'nav-bar__library-action';
           renameBtn.textContent = '✎';
-          renameBtn.title = 'Edit';
+          renameBtn.title = t('nav.edit');
           renameBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onRenameCollection) this._onRenameCollection(col.id); });
           actions.appendChild(renameBtn);
         }
@@ -469,7 +526,7 @@ export class NavBar {
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'nav-bar__library-action nav-bar__library-action--danger';
         deleteBtn.textContent = '✕';
-        deleteBtn.title = 'Delete';
+        deleteBtn.title = t('common.delete');
         deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onDeleteCollection) this._onDeleteCollection(col.id); });
         actions.appendChild(deleteBtn);
         row.appendChild(btn);
@@ -485,13 +542,13 @@ export class NavBar {
 
     const addSourceBtn = document.createElement('button');
     addSourceBtn.className = 'nav-bar__library-option nav-bar__library-option--new';
-    addSourceBtn.textContent = '+ Add Source Folder...';
+    addSourceBtn.textContent = t('nav.addSourceFolder');
     addSourceBtn.addEventListener('click', () => { dd.hidden = true; if (this._onAddSource) this._onAddSource(); });
     dd.appendChild(addSourceBtn);
 
     const newBtn = document.createElement('button');
     newBtn.className = 'nav-bar__library-option nav-bar__library-option--new';
-    newBtn.textContent = '+ New Collection...';
+    newBtn.textContent = t('nav.newCollection');
     newBtn.addEventListener('click', () => {
       dd.hidden = true;
       if (this._onNewCollection) this._onNewCollection();

@@ -118,6 +118,72 @@ function _check(s) {
   return false;
 }
 
+// Stereo-layout tokens for the "show as flat" feature (Monoinc 2026-05-17).
+// When the user is on a desktop monitor (not in a headset), an SBS / TB
+// VR video looks squished — half the image width / height = wrong aspect
+// for that eye. The flat-view feature crops to one eye and rescales.
+//
+// Detection is filename-based using the HereSphere / DeoVR token
+// conventions. Half-SBS vs full-SBS is distinguished by the `F` suffix
+// (HereSphere convention) — full means each eye is already at the
+// container's natural aspect; half means the eye is horizontally
+// compressed and needs a 2× horizontal scale-up.
+const STEREO_SBS_HALF = /(?:^|[_\-. \/\\])(?:sbs|lr|3dh|180x180|180_lr|180_sbs|mono180)(?=$|[_\-. \/\\])/i;
+const STEREO_SBS_FULL = /(?:^|[_\-. \/\\])(?:sbsf|lrf|sbs_full|fullsbs|180x360)(?=$|[_\-. \/\\])/i;
+const STEREO_TB_HALF  = /(?:^|[_\-. \/\\])(?:tb|ou|3dv|tb_half)(?=$|[_\-. \/\\])/i;
+const STEREO_TB_FULL  = /(?:^|[_\-. \/\\])(?:tbf|ouf|tb_full)(?=$|[_\-. \/\\])/i;
+// Fisheye / equirect / mkx projections — non-planar, naive crop would
+// still look distorted. We DETECT them so the UI can disable the flatten
+// affordance for these inputs (extension point for v2: WebGL shader).
+const STEREO_NONPLANAR = /(?:^|[_\-. \/\\])(?:mkx\d+|rf52|fisheye\d+|vrca\d+|eac|eac360|fb360|360x180|mono360)(?=$|[_\-. \/\\])/i;
+
+/**
+ * Classify the stereo packing of a VR file by filename + path.
+ *
+ * Returns one of:
+ *   - 'sbs-half'   — side-by-side, each eye horizontally compressed (most common)
+ *   - 'sbs-full'   — side-by-side, each eye full-aspect (HereSphere `_LRF` etc.)
+ *   - 'tb-half'    — top-bottom, each eye vertically compressed
+ *   - 'tb-full'    — top-bottom full-aspect
+ *   - 'nonplanar'  — fisheye / equirect / mkx — flatten is meaningless without 3D unproject
+ *   - null         — couldn't determine; treat as mono or skip flatten
+ *
+ * Filename tokens (HereSphere/DeoVR convention) win over aspect-ratio
+ * heuristics because the container's reported aspect is often wrong on
+ * VR rips. Aspect-fallback intentionally NOT implemented in v1 — the
+ * token approach is precise enough for the user's reported case and
+ * a false aspect-heuristic guess (e.g. "this 32:9 movie is full-SBS")
+ * would corrupt non-VR ultrawide content.
+ *
+ * @param {string | {name?: string, path?: string} | null | undefined} input
+ * @returns {'sbs-half'|'sbs-full'|'tb-half'|'tb-full'|'nonplanar'|null}
+ */
+export function classifyStereoFormat(input) {
+  if (!input) return null;
+  const s = typeof input === 'string' ? input : (input.path || input.name || '');
+  if (!s) return null;
+  const stem = s.replace(/\.[^./\\]+$/, '');
+  // Check for projection-bearing tokens first — these often co-exist
+  // with stereo tokens (e.g. `_mkx200_sbs`); the projection is the
+  // load-bearing fact (no flatten possible).
+  if (STEREO_NONPLANAR.test(stem)) return 'nonplanar';
+  // FULL takes priority over HALF (the F-suffix tokens are a superset).
+  if (STEREO_SBS_FULL.test(stem)) return 'sbs-full';
+  if (STEREO_TB_FULL.test(stem)) return 'tb-full';
+  if (STEREO_SBS_HALF.test(stem)) return 'sbs-half';
+  if (STEREO_TB_HALF.test(stem)) return 'tb-half';
+  return null;
+}
+
+/**
+ * Convenience: is this format flat-flattenable via simple crop+scale?
+ * False for nonplanar (fisheye/equirect) and null (no detection).
+ */
+export function isFlattenableStereo(format) {
+  return format === 'sbs-half' || format === 'sbs-full'
+      || format === 'tb-half' || format === 'tb-full';
+}
+
 /**
  * @param {string | {name?: string, path?: string} | null | undefined} input
  * @returns {boolean}

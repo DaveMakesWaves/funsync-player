@@ -8,6 +8,7 @@
 // there's a single source of truth for the preset colours.
 
 import { Modal } from '../components/modal.js';
+import { t } from './i18n.js';
 
 export const PRESET_COLORS = [
   '#e94560', '#ff6b81', '#f39c12', '#2ecc71',
@@ -25,17 +26,17 @@ export const PRESET_COLORS = [
  */
 export async function promptCreateCategory({ settings }) {
   const result = await Modal.open({
-    title: 'New Category',
+    title: t('categories.newCategory'),
     onRender(body, close) {
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'modal-input';
-      input.placeholder = 'Category name';
+      input.placeholder = t('categories.categoryNamePlaceholder');
       body.appendChild(input);
 
       const colorLabel = document.createElement('div');
       colorLabel.className = 'categories__color-label';
-      colorLabel.textContent = 'Color';
+      colorLabel.textContent = t('categories.color');
       body.appendChild(colorLabel);
 
       let selectedColor = PRESET_COLORS[0];
@@ -64,13 +65,13 @@ export async function promptCreateCategory({ settings }) {
       const cancelBtn = document.createElement('button');
       cancelBtn.className = 'modal-btn modal-btn--secondary';
       cancelBtn.type = 'button';
-      cancelBtn.textContent = 'Cancel';
+      cancelBtn.textContent = t('common.cancel');
       cancelBtn.addEventListener('click', () => close(null));
 
       const createBtn = document.createElement('button');
       createBtn.className = 'modal-btn modal-btn--primary';
       createBtn.type = 'button';
-      createBtn.textContent = 'Create';
+      createBtn.textContent = t('common.create');
       createBtn.addEventListener('click', () => {
         const val = input.value.trim();
         if (val) close({ name: val, color: selectedColor });

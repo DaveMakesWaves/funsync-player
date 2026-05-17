@@ -85,6 +85,9 @@ export { default as Keyboard } from '../../node_modules/lucide/dist/esm/icons/ke
 // Layers2 — multi-axis indicator on library cards (and stacked-editor toggle in the
 // editor toolbar). The "stack of two" shape reads as "more than one script on this video".
 export { default as Layers2 } from '../../node_modules/lucide/dist/esm/icons/layers-2.js';
+// Languages — first-launch language-prompt modal header glyph. Read as
+// "choose your language" by non-English speakers via the icon alone.
+export { default as Languages } from '../../node_modules/lucide/dist/esm/icons/languages.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

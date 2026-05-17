@@ -9,6 +9,8 @@
 // BEFORE the user releases — Nielsen #5 error prevention), and surfaces
 // a toast for unsupported drops.
 
+import { t } from './i18n.js';
+
 const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
 const FUNSCRIPT_EXTENSIONS = ['.funscript'];
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt'];
@@ -71,7 +73,7 @@ export class DragDrop {
           const file = new File([blob], fileData.name);
           this.onSubtitleFile(file);
         } else {
-          this.onUnsupported(`Unsupported file type: ${fileData.name}`);
+          this.onUnsupported(t('dropZone.unsupportedFileType', { name: fileData.name }));
         }
       }
     } catch (err) {
@@ -180,8 +182,8 @@ export class DragDrop {
       const supportedList = ALL_ACCEPTED.join(', ');
       this.onUnsupported(
         rejectedNames.length === 1
-          ? `Unsupported file: ${rejectedNames[0]}. Supported types: ${supportedList}`
-          : `Unsupported files: ${rejectedNames.join(', ')}. Supported types: ${supportedList}`
+          ? t('dropZone.unsupportedFile', { name: rejectedNames[0], supported: supportedList })
+          : t('dropZone.unsupportedFiles', { names: rejectedNames.join(', '), supported: supportedList })
       );
     }
   }

@@ -24,6 +24,7 @@
 // the info toggle, aria-describedby on form fields, no inline styles).
 
 import { Modal } from './modal.js';
+import { t } from '../js/i18n.js';
 
 /**
  * @param {object} opts
@@ -35,7 +36,7 @@ export async function openVRModal({ settings, vrBridge } = {}) {
   const port = settings?.get?.('backend.port') || 5123;
 
   await Modal.open({
-    title: 'VR',
+    title: t('vrModal.title'),
     onRender: (body, close) => {
       const wrap = document.createElement('div');
       wrap.className = 'vr-modal';
@@ -79,65 +80,65 @@ function _template() {
   //    the toggle reads correctly as a disclosure widget.
   //  - vr-now-playing is a sub-cluster, not a section (no nested border).
   return `
-    <div class="vr-modal__experimental" role="note" aria-label="Experimental feature notice">
-      <span class="vr-modal__experimental-label">EXPERIMENTAL</span>
-      <span class="vr-modal__experimental-text">VR streaming and device sync are still being tuned. Expect rough edges around reconnection, sync timing, and player-specific quirks.</span>
+    <div class="vr-modal__experimental" role="note" aria-label="${t('vrModal.experimentalAria')}">
+      <span class="vr-modal__experimental-label">${t('vrModal.experimentalLabel')}</span>
+      <span class="vr-modal__experimental-text">${t('vrModal.experimentalText')}</span>
     </div>
 
     <section class="vr-modal__section" aria-labelledby="vr-modal-streaming-h">
       <h2 class="vr-modal__section-header" id="vr-modal-streaming-h">
         <span class="vr-modal__section-num" aria-hidden="true">1</span>
-        Library Streaming
+        ${t('vrModal.streamingHeader')}
       </h2>
       <p class="vr-modal__section-intro">
-        Set up HereSphere to browse and stream FunSync's library directly. No file transfers — works on Quest standalone or PCVR.
+        ${t('vrModal.streamingIntro')}
       </p>
 
       <div class="connection-panel__setting-row vr-modal__url-row">
-        <label class="connection-panel__setting-label" for="vr-server-hs-url">HereSphere URL</label>
+        <label class="connection-panel__setting-label" for="vr-server-hs-url">${t('vrModal.hsUrlLabel')}</label>
         <input type="text" id="vr-server-hs-url" class="connection-panel__input vr-modal__url-input" readonly aria-describedby="vr-server-hs-url-hint">
         <button id="vr-setup-info-btn" class="vr-modal__info-btn" type="button"
                 aria-controls="vr-setup-info" aria-expanded="false"
-                aria-label="Toggle setup guide" title="Setup guide">i</button>
+                aria-label="${t('vrModal.setupToggleAria')}" title="${t('vrModal.setupToggleTitle')}">i</button>
       </div>
       <p class="vr-modal__hint" id="vr-server-hs-url-hint">
-        Type this into the URL bar at the top of HereSphere's home screen on your Quest.
+        ${t('vrModal.hsUrlHint')}
       </p>
 
       <div id="vr-setup-info" class="vr-modal__setup-info" hidden>
-        <div class="vr-modal__setup-info-title">HereSphere Setup Guide</div>
+        <div class="vr-modal__setup-info-title">${t('vrModal.setupTitle')}</div>
 
-        <div class="vr-modal__setup-info-group-label">First time setup</div>
+        <div class="vr-modal__setup-info-group-label">${t('vrModal.setupFirstTime')}</div>
         <ol class="vr-modal__setup-info-list">
-          <li>Open HereSphere on your Quest.</li>
-          <li>Type the URL above into HereSphere's <strong>URL bar</strong> (at the top of the home screen) and press Enter.</li>
-          <li>Your FunSync library appears — pick a video to play.</li>
-          <li><em>Optional:</em> bookmark or favourite the page in HereSphere so you don't have to retype next time.</li>
+          <li>${t('vrModal.setupFirstTimeStep1')}</li>
+          <li>${t('vrModal.setupFirstTimeStep2')}</li>
+          <li>${t('vrModal.setupFirstTimeStep3')}</li>
+          <li>${t('vrModal.setupFirstTimeStep4')}</li>
         </ol>
 
-        <div class="vr-modal__setup-info-group-label">For device sync</div>
+        <div class="vr-modal__setup-info-group-label">${t('vrModal.setupDeviceSync')}</div>
         <ol class="vr-modal__setup-info-list">
-          <li>In HereSphere, open <strong>Settings &gt; Timestamp Server</strong>.</li>
-          <li><strong>Enable the timestamp server</strong> — required for FunSync to drive non-Handy devices.</li>
-          <li>Check that the <strong>IP field</strong> shows your Quest's current IP. If it's blank or stale (e.g. your Quest got a new IP since you set this up), press the <strong>auto-find button next to the IP field</strong> — HereSphere fills it in for you. Port should be <strong>23554</strong>.</li>
-          <li>FunSync auto-detects your Quest and connects when you open a video in HereSphere.</li>
+          <li>${t('vrModal.setupSyncStep1')}</li>
+          <li>${t('vrModal.setupSyncStep2')}</li>
+          <li>${t('vrModal.setupSyncStep3')}</li>
+          <li>${t('vrModal.setupSyncStep4')}</li>
         </ol>
 
-        <div class="vr-modal__setup-info-group-label">Troubleshooting</div>
+        <div class="vr-modal__setup-info-group-label">${t('vrModal.setupTroubleshooting')}</div>
         <ul class="vr-modal__setup-info-list">
-          <li><strong>URL bar not visible?</strong> It's at the top of HereSphere's home screen — tap the address area to bring up the keyboard.</li>
-          <li><strong>No videos showing?</strong> Make sure FunSync is open with at least one source added.</li>
-          <li><strong>FunSync shows "VR companion can't reach HereSphere's timestamp server", or only the Handy moves while other devices stay silent?</strong> HereSphere isn't accepting connections on the address FunSync is reaching for. Two common fixes, in order:
+          <li>${t('vrModal.setupTrUrlBar')}</li>
+          <li>${t('vrModal.setupTrNoVideos')}</li>
+          <li>${t('vrModal.setupTrUnreachable')}
             <ol>
-              <li>Press the <strong>auto-find button next to the IP field</strong> in HereSphere's Timestamp Server settings — captures your Quest's current local IP. Useful when the IP has changed since setup (DHCP lease renewed, new router, etc.).</li>
-              <li>Toggle the timestamp server <strong>off and back on</strong> — clears any stuck state. HereSphere has had bugs in older versions where the listener didn't re-initialise after switching profiles; toggling fixes that.</li>
+              <li>${t('vrModal.setupTrUnreachableStep1')}</li>
+              <li>${t('vrModal.setupTrUnreachableStep2')}</li>
             </ol>
-            As a last resort, manually type the Quest's IP and port <strong>23554</strong> into the fields — same end result, less convenient.
+            ${t('vrModal.setupTrUnreachableTail')}
           </li>
-          <li><strong>Nav-bar VR icon yellow / status reads "Waiting"?</strong> TCP is connected but HereSphere isn't sending timestamp packets. Most often this means no video is playing in HereSphere — start one and the status flips to green within a second. If it stays yellow while a video is playing, toggle the timestamp server off and on in HereSphere to force a re-init.</li>
-          <li><strong>Can't connect at all?</strong> Make sure your Quest and PC are on the same Wi-Fi network.</li>
-          <li><strong>VPN active?</strong> Disable it — VPNs change your network IP and block local connections.</li>
-          <li><strong>Video looks wrong?</strong> Adjust projection mode in HereSphere (SBS, fisheye, etc.).</li>
+          <li>${t('vrModal.setupTrWaiting')}</li>
+          <li>${t('vrModal.setupTrNoConnect')}</li>
+          <li>${t('vrModal.setupTrVpn')}</li>
+          <li>${t('vrModal.setupTrProjection')}</li>
         </ul>
       </div>
     </section>
@@ -145,43 +146,43 @@ function _template() {
     <section class="vr-modal__section" aria-labelledby="vr-modal-sync-h">
       <h2 class="vr-modal__section-header" id="vr-modal-sync-h">
         <span class="vr-modal__section-num" aria-hidden="true">2</span>
-        Device Sync
+        ${t('vrModal.syncHeader')}
       </h2>
       <p class="vr-modal__section-intro">
-        Connect FunSync to HereSphere so devices follow playback. Works on Quest standalone, Quest Link, or PCVR.
+        ${t('vrModal.syncIntro')}
       </p>
 
       <div class="connection-panel__status">
         <span class="connection-panel__led" id="vr-led"></span>
-        <span class="connection-panel__status-text" id="vr-status-text">Disconnected</span>
+        <span class="connection-panel__status-text" id="vr-status-text">${t('vrModal.statusDisconnected')}</span>
       </div>
 
       <div class="connection-panel__form">
         <div class="connection-panel__input-row">
-          <label for="vr-host-input" class="vr-modal__sr-only">HereSphere host (Quest IP)</label>
+          <label for="vr-host-input" class="vr-modal__sr-only">${t('vrModal.hostSrLabel')}</label>
           <input type="text" id="vr-host-input" class="connection-panel__input vr-modal__host-input"
                  placeholder="127.0.0.1" aria-describedby="vr-host-input-hint">
-          <button id="vr-connect-btn" class="connection-panel__btn" type="button">Connect</button>
+          <button id="vr-connect-btn" class="connection-panel__btn" type="button">${t('vrModal.connect')}</button>
         </div>
         <p class="vr-modal__hint" id="vr-host-input-hint">
-          Tip: leave the host field with your Quest's IP — FunSync remembers it and auto-reconnects next launch.
+          ${t('vrModal.hostHint')}
         </p>
       </div>
 
       <div id="vr-now-playing" class="vr-modal__now-playing" hidden>
         <div class="connection-panel__setting-row vr-modal__now-playing-row">
-          <span class="connection-panel__setting-label">Playing</span>
+          <span class="connection-panel__setting-label">${t('vrModal.playing')}</span>
           <span id="vr-video-name" class="connection-panel__setting-value vr-modal__video-name" aria-live="polite">—</span>
         </div>
         <div class="connection-panel__setting-row vr-modal__now-playing-row">
-          <label class="connection-panel__setting-label" for="vr-offset">Offset</label>
+          <label class="connection-panel__setting-label" for="vr-offset">${t('vrModal.offset')}</label>
           <input type="range" id="vr-offset" min="-1000" max="1000" value="0"
                  class="connection-panel__safety-slider vr-modal__offset-slider"
                  aria-describedby="vr-offset-hint vr-offset-value">
           <span id="vr-offset-value" class="connection-panel__setting-value vr-modal__offset-value">0ms</span>
         </div>
         <p class="vr-modal__hint" id="vr-offset-hint">
-          Compensates VR display lag. Stacks on top of each device's own offset — see the Sync tab for the combined effective value per device.
+          ${t('vrModal.offsetHint')}
         </p>
       </div>
     </section>
@@ -235,20 +236,20 @@ function _wire(root, { settings, vrBridge, port }) {
     }
 
     let text;
-    if (status === 'connected') text = `Connected${detail ? ` (${detail})` : ''} — receiving timestamps`;
+    if (status === 'connected') text = detail ? t('vrModal.statusConnectedDetail', { detail }) : t('vrModal.statusConnected');
     else if (status === 'waiting') {
       text = detail
-        ? `Connected (${detail}) — waiting for HereSphere to send timestamps. Check 'Timestamp Server' is on.`
-        : "Waiting for HereSphere to send timestamps. Check 'Timestamp Server' is on.";
+        ? t('vrModal.statusWaitingDetail', { detail })
+        : t('vrModal.statusWaiting');
     }
-    else if (status === 'connecting') text = 'Connecting...';
-    else text = 'Disconnected';
+    else if (status === 'connecting') text = t('vrModal.statusConnecting');
+    else text = t('vrModal.statusDisconnected');
     statusText.textContent = text;
 
     // Connect button text: "Disconnect" when the link is up at all
     // (connected or waiting); "Connect" otherwise.
     const linkUp = status === 'connected' || status === 'waiting';
-    connectBtn.textContent = linkUp ? 'Disconnect' : 'Connect';
+    connectBtn.textContent = linkUp ? t('vrModal.disconnect') : t('vrModal.connect');
     nowPlaying.hidden = status !== 'connected';
   };
 
@@ -292,7 +293,7 @@ function _wire(root, { settings, vrBridge, port }) {
       const success = await vrBridge.connect('heresphere', host, 23554);
       if (!success) {
         paintStatus('disconnected');
-        statusText.textContent = 'Failed — check VR player settings';
+        statusText.textContent = t('vrModal.statusFailed');
       }
     } finally {
       connectBtn.disabled = false;
@@ -364,10 +365,10 @@ async function _loadServerUrl(root, port) {
       const ip = data.ip || '127.0.0.1';
       hsUrl.value = `http://${ip}:${port}/heresphere`;
     } else {
-      hsUrl.value = 'Backend not running';
+      hsUrl.value = t('vrModal.backendNotRunning');
     }
   } catch {
-    hsUrl.value = 'Backend not running';
+    hsUrl.value = t('vrModal.backendNotRunning');
   }
   hsUrl.addEventListener('click', () => hsUrl.select());
 }

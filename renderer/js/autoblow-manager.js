@@ -1,6 +1,8 @@
 // AutoblowManager — Renderer-side wrapper for Autoblow Ultra / VacuGlide 2
 // API calls proxied through main process via IPC (avoids SDK ESM issues)
 
+import { t } from './i18n.js';
+
 export class AutoblowManager {
   constructor() {
     this._connected = false;
@@ -33,7 +35,7 @@ export class AutoblowManager {
         if (this.onConnect) this.onConnect();
         return true;
       } else {
-        this._emitError(result.error || 'Connection failed');
+        this._emitError(result.error || t('error.connectionFailed'));
         return false;
       }
     } catch (err) {
@@ -69,7 +71,7 @@ export class AutoblowManager {
         console.log('[Autoblow] Script uploaded');
         return true;
       }
-      this._emitError(result.error || 'Upload failed');
+      this._emitError(result.error || t('error.uploadFailed'));
       return false;
     } catch (err) {
       this._emitError(err.message);

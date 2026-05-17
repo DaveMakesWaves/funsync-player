@@ -29,6 +29,12 @@ const DEFAULTS = {
       preferMultiAxis: 'single',
       smoothing: 'linear',
       speedLimit: 0,
+      // i18n — locked decisions in notes/features/IMPL-multi-language.md
+      // #2: default is English, not 'auto'.
+      // #3: _localeOfferedFor tracks the locale that's already been
+      //     surfaced via the first-launch toast so we don't re-offer.
+      language: 'en',
+      _localeOfferedFor: null,
     },
     backend: {
       port: 5123,
@@ -44,6 +50,12 @@ const DEFAULTS = {
       // Tri-state covers both flipping a missed VR file → VR and
       // clearing a false-positive on a flat file with a VR-like token.
       manualVRType: {},
+      // Per-path VR-as-flat playback override. Value is `'left'` or
+      // `'right'`; absent / null means show the full SBS / TB frame as
+      // shipped. Community feature ask 2026-05-17 — desktop users on
+      // 2D monitors want one eye cropped + scaled so VR content isn't
+      // squished. Format auto-detected via classifyStereoFormat().
+      vrFlatten: {},
       collections: [],
       activeCollectionId: null,
     },
@@ -61,7 +73,8 @@ const DEFAULTS = {
       baudRate: 115200,
       udpHost: '',          // 2.4 GHz wireless ESP-NOW bridge etc.
       udpPort: 0,
-      wsUrl: '',            // ws://device.local:81
+      wsUrl: '',            // ws://device.local:81  (also restim/MFP-consumer URLs)
+      precision: 3,         // 3 = TCode-0.2 (L0500), 4 = TCode-0.3 (L05000)
       axisRanges: {},
       axisEnabled: {},
     },

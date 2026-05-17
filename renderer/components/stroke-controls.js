@@ -1,5 +1,7 @@
 // StrokeControls — Stroke range and manual mode controls
 
+import { t } from '../js/i18n.js';
+
 export class StrokeControls {
   constructor({ handyManager, settings }) {
     this.handy = handyManager;
@@ -14,27 +16,27 @@ export class StrokeControls {
     this._element = document.createElement('div');
     this._element.className = 'stroke-controls';
     this._element.innerHTML = `
-      <label class="stroke-controls__label">Stroke Range</label>
+      <label class="stroke-controls__label">${t('stroke.rangeLabel')}</label>
       <div class="stroke-controls__row">
         <span class="stroke-controls__value" id="stroke-min-val">${this._min}</span>
         <input type="range" class="stroke-controls__slider"
                id="stroke-min-slider"
                min="0" max="100" value="${this._min}"
-               aria-label="Minimum stroke position">
+               aria-label="${t('stroke.minAria')}">
         <input type="range" class="stroke-controls__slider"
                id="stroke-max-slider"
                min="0" max="100" value="${this._max}"
-               aria-label="Maximum stroke position">
+               aria-label="${t('stroke.maxAria')}">
         <span class="stroke-controls__value" id="stroke-max-val">${this._max}</span>
       </div>
       <div class="stroke-controls__manual">
         <label class="stroke-controls__manual-label">
           <input type="checkbox" id="manual-mode-toggle">
-          Manual Mode (HAMP)
+          ${t('stroke.manualMode')}
         </label>
         <input type="range" class="stroke-controls__speed-slider"
                id="manual-speed" min="0" max="100" value="50"
-               disabled aria-label="Manual speed">
+               disabled aria-label="${t('stroke.manualSpeedAria')}">
       </div>
     `;
 

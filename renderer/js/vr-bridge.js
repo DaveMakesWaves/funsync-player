@@ -20,6 +20,8 @@ import { VRPlaybackProxy } from './vr-playback-proxy.js';
 // disconnects on network blips.
 const LIVENESS_TIMEOUT_MS = 8000;
 
+import { t } from './i18n.js';
+
 export class VRBridge {
   constructor() {
     this.proxy = new VRPlaybackProxy();
@@ -86,7 +88,7 @@ export class VRBridge {
         if (this.onConnect) this.onConnect();
         return true;
       } else {
-        this._emitError(result.error || 'Connection failed');
+        this._emitError(result.error || t('error.connectionFailed'));
         return false;
       }
     } catch (err) {

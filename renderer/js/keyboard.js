@@ -1,6 +1,7 @@
 // KeyboardHandler — Keyboard shortcuts for video playback
 
-import { openKeyboardHelp, PLAYER_SHORTCUT_GROUPS } from './keyboard-help.js';
+import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
+import { t } from './i18n.js';
 
 export class KeyboardHandler {
   constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate }) {
@@ -128,9 +129,20 @@ export class KeyboardHandler {
         break;
 
       case 'r':
-      case 'R':
         e.preventDefault();
         this.player.cycleAspectRatio();
+        break;
+
+      case 'R':
+        // Shift+R cycles the VR-as-flat playback mode (Off → Left → Right → Off).
+        // The format is taken from the current video's stereo classification
+        // — fed in by app.js after loadVideo runs. No-op if no format set.
+        e.preventDefault();
+        if (this.onCycleVRFlatten) {
+          this.onCycleVRFlatten();
+        } else {
+          this.player.cycleAspectRatio();
+        }
         break;
 
       case 'd':
@@ -198,7 +210,7 @@ export class KeyboardHandler {
       case '?':
         if (!this.scriptEditor?.isOpen) {
           e.preventDefault();
-          openKeyboardHelp('Player keyboard shortcuts', PLAYER_SHORTCUT_GROUPS);
+          openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
         }
         break;
 

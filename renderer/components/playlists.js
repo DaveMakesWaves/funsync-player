@@ -2,6 +2,8 @@
 
 import { Modal } from './modal.js';
 import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
+import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 import { computeSpeedStats } from '../js/library-search.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
@@ -22,6 +24,20 @@ export class Playlists {
 
   show(containerEl) {
     this._container = containerEl;
+    // Re-render on locale change — most strings are baked via t() into
+    // innerHTML at render time, so translatePage() alone doesn't catch
+    // them (kebab tooltips, empty-state, Play All label, etc.).
+    if (!this._languageListenerAttached) {
+      eventBus.on('language:changed', () => {
+        if (!this._container) return;
+        if (this._view === 'detail' && this._detailPlaylistId) {
+          this._renderDetail(this._detailPlaylistId);
+        } else {
+          this._renderGrid();
+        }
+      });
+      this._languageListenerAttached = true;
+    }
     if (this._view === 'detail' && this._detailPlaylistId) {
       this._renderDetail(this._detailPlaylistId);
     } else {
@@ -53,7 +69,7 @@ export class Playlists {
 
     const header = document.createElement('div');
     header.className = 'playlists__header';
-    header.innerHTML = `<span class="playlists__title">Playlists</span>`;
+    header.innerHTML = `<span class="playlists__title">${t('playlists.title')}</span>`;
 
     this._addViewToggle(header);
     this._container.appendChild(header);
@@ -65,8 +81,8 @@ export class Playlists {
       wrapper.innerHTML = `
         <div class="playlists__empty">
           <div class="playlists__empty-icon"></div>
-          <div class="playlists__empty-text">No playlists yet</div>
-          <button class="playlists__empty-cta">Create Your First Playlist</button>
+          <div class="playlists__empty-text">${t('playlists.emptyTitle')}</div>
+          <button class="playlists__empty-cta">${t('playlists.emptyCta')}</button>
         </div>
       `;
       wrapper.querySelector('.playlists__empty-icon')
@@ -92,7 +108,7 @@ export class Playlists {
     createCard.className = 'playlists__card playlists__card--create';
     createCard.innerHTML = `
       <div class="playlists__card-create-icon"></div>
-      <div class="playlists__card-create-label">New Playlist</div>
+      <div class="playlists__card-create-label">${t('playlists.newPlaylist')}</div>
     `;
     createCard.querySelector('.playlists__card-create-icon')
       .appendChild(icon(Plus, { width: 28, height: 28 }));
@@ -128,7 +144,7 @@ export class Playlists {
     const renameBtn = document.createElement('button');
     renameBtn.className = 'playlists__card-action-btn';
     renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
-    renameBtn.title = 'Rename';
+    renameBtn.title = t('common.rename');
     renameBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._renamePlaylist(pl);
@@ -137,7 +153,7 @@ export class Playlists {
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
     deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
-    deleteBtn.title = 'Delete';
+    deleteBtn.title = t('common.delete');
     deleteBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._deletePlaylist(pl);
@@ -175,7 +191,7 @@ export class Playlists {
     const backBtn = document.createElement('button');
     backBtn.className = 'playlists__back-btn';
     backBtn.appendChild(icon(ArrowLeft, { width: 20, height: 20 }));
-    backBtn.title = 'Back to playlists';
+    backBtn.title = t('playlists.backToPlaylists');
     backBtn.addEventListener('click', () => this.navigateBack());
 
     const title = document.createElement('span');
@@ -194,7 +210,7 @@ export class Playlists {
       const playAllBtn = document.createElement('button');
       playAllBtn.className = 'playlists__play-all-btn';
       playAllBtn.appendChild(icon(Play, { width: 14, height: 14 }));
-      playAllBtn.appendChild(document.createTextNode(' Play All'));
+      playAllBtn.appendChild(document.createTextNode(' ' + t('playlists.playAll')));
       playAllBtn.addEventListener('click', () => this._playAll(pl));
       header.appendChild(playAllBtn);
     }
@@ -223,8 +239,8 @@ export class Playlists {
     if (validPaths.length === 0) {
       wrapper.innerHTML = `
         <div class="playlists__empty">
-          <div class="playlists__empty-text">No videos in this playlist</div>
-          <div class="playlists__empty-hint">Add videos from the Library using the kebab menu</div>
+          <div class="playlists__empty-text">${t('playlists.detailEmpty')}</div>
+          <div class="playlists__empty-hint">${t('playlists.detailEmptyHint')}</div>
         </div>
       `;
       this._container.appendChild(wrapper);
@@ -278,7 +294,7 @@ export class Playlists {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'playlists__video-remove-btn';
     removeBtn.appendChild(icon(X, { width: 12, height: 12 }));
-    removeBtn.title = 'Remove from playlist';
+    removeBtn.title = t('playlists.removeFromPlaylist');
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._settings.removeVideoFromPlaylist(playlist.id, videoPath);
@@ -353,7 +369,7 @@ export class Playlists {
     }
     if (readFailed) {
       const { showToast } = await import('../js/toast.js');
-      showToast(`Funscript for ${fileName} couldn't be read — playing without sync`, 'warn', 4000);
+      showToast(t('toast.funscriptUnreadable', { name: fileName }), 'warn', 4000);
     }
     this._onPlayVideo(fileData, funscriptData);
   }
@@ -392,7 +408,7 @@ export class Playlists {
       placeholder.classList.add('playlists__video-placeholder--broken');
     }
     cardEl.classList.add('playlists__video-card--broken');
-    cardEl.title = `File not found: ${videoPath}`;
+    cardEl.title = t('library.fileNotFound', { path: videoPath });
   }
 
   /**
@@ -473,21 +489,21 @@ export class Playlists {
   }
 
   async _createPlaylist() {
-    const name = await Modal.prompt('New Playlist', 'Playlist name');
+    const name = await Modal.prompt(t('playlists.newPlaylist'), t('playlists.playlistNamePlaceholder'));
     if (!name) return;
     await this._settings.addPlaylist(name);
     this._renderGrid();
   }
 
   async _renamePlaylist(pl) {
-    const name = await Modal.prompt('Rename Playlist', 'New name', pl.name);
+    const name = await Modal.prompt(t('playlists.renamePlaylist'), t('playlists.playlistNamePlaceholder'), pl.name);
     if (!name) return;
     this._settings.renamePlaylist(pl.id, name);
     this._renderGrid();
   }
 
   async _deletePlaylist(pl) {
-    const confirmed = await Modal.confirm('Delete Playlist', `Delete "${pl.name}"? This cannot be undone.`);
+    const confirmed = await Modal.confirm(t('playlists.deletePlaylist'), t('playlists.confirmDelete'));
     if (!confirmed) return;
     this._settings.deletePlaylist(pl.id);
     this._renderGrid();
@@ -502,7 +518,7 @@ export class Playlists {
       // Funscript icon badge on thumbnail
       const badge = document.createElement('span');
       badge.className = 'library__funscript-badge library__funscript-badge--auto';
-      badge.title = 'Funscript linked';
+      badge.title = t('playlists.funscriptLinked');
       badge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
       thumbnailEl.appendChild(badge);
 
@@ -533,7 +549,7 @@ export class Playlists {
 
     const speedBadge = document.createElement('span');
     speedBadge.className = `library__speed-badge ${colorClass}`;
-    speedBadge.title = `Avg: ${stats.avgSpeed} units/s — Max: ${stats.maxSpeed} units/s`;
+    speedBadge.title = t('library.speedBadgeTitle', { avg: stats.avgSpeed, max: stats.maxSpeed });
     speedBadge.appendChild(icon(Gauge, { width: 12, height: 12, 'stroke-width': 2.5 }));
     containerEl.appendChild(speedBadge);
   }
@@ -592,7 +608,7 @@ export class Playlists {
 
     if (validPaths.length === 0) {
       const { showToast } = await import('../js/toast.js');
-      showToast('No playable videos in this playlist', 'warn');
+      showToast(t('toast.playlistNoPlayable'), 'warn');
       return;
     }
 
@@ -612,14 +628,14 @@ export class Playlists {
 
     const btnGrid = document.createElement('button');
     btnGrid.className = 'view-toggle view-toggle--grid';
-    btnGrid.title = 'Grid view';
+    btnGrid.title = t('playlists.gridView');
     btnGrid.appendChild(icon(LayoutGrid, { width: 16, height: 16 }));
     btnGrid.classList.toggle('view-toggle--active', this._viewMode === 'grid');
     btnGrid.addEventListener('click', () => this._setViewMode('grid'));
 
     const btnList = document.createElement('button');
     btnList.className = 'view-toggle view-toggle--list';
-    btnList.title = 'List view';
+    btnList.title = t('playlists.listView');
     btnList.appendChild(icon(LayoutList, { width: 16, height: 16 }));
     btnList.classList.toggle('view-toggle--active', this._viewMode === 'list');
     btnList.addEventListener('click', () => this._setViewMode('list'));
@@ -657,13 +673,13 @@ export class Playlists {
     const renameBtn = document.createElement('button');
     renameBtn.className = 'playlists__card-action-btn';
     renameBtn.appendChild(icon(Pencil, { width: 14, height: 14 }));
-    renameBtn.title = 'Rename';
+    renameBtn.title = t('common.rename');
     renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this._renamePlaylist(pl); });
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
     deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
-    deleteBtn.title = 'Delete';
+    deleteBtn.title = t('common.delete');
     deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this._deletePlaylist(pl); });
 
     actions.append(renameBtn, deleteBtn);
@@ -703,7 +719,7 @@ export class Playlists {
     const removeBtn = document.createElement('button');
     removeBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
     removeBtn.appendChild(icon(X, { width: 14, height: 14 }));
-    removeBtn.title = 'Remove from playlist';
+    removeBtn.title = t('playlists.removeFromPlaylist');
     removeBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._settings.removeVideoFromPlaylist(playlist.id, videoPath);

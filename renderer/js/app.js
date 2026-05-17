@@ -48,6 +48,9 @@ import {
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
+import { classifyStereoFormat, isFlattenableStereo } from './vr-detect.js';
+import { HandyHdspSync } from './handy-hdsp-sync.js';
+import { initI18n, setLocale, translatePage, t, LOCALE_LABELS } from './i18n.js';
 
 class App {
   constructor() {
@@ -104,6 +107,12 @@ class App {
     // visual paint hits the user. Cheap (sets one attribute on <html>)
     // and must happen post-dataService-init since we read the setting.
     initTheme(dataService);
+
+    // i18n — load the active-locale bundle BEFORE any component renders
+    // so the initial DOM is in the right language. The first-launch
+    // language-offer toast (decision #3) fires later from
+    // `_offerLocaleIfApplicable` once toast.js is wired.
+    await this._initI18n();
 
     // Renderer error handlers (electron-log forwards console to main log file)
     window.onerror = (msg, src, line, col, err) => console.error('[Window]', msg, err);
@@ -205,7 +214,7 @@ class App {
         if (mode === 'multi' && this.library?._reapplyAutoPromotion) {
           const promoted = this.library._reapplyAutoPromotion();
           if (promoted > 0) {
-            showToast(`Auto-assigned ${promoted} video${promoted === 1 ? '' : 's'} to multi-axis playback`, 'info', 4000);
+            showToast(t('toast.autoPromotedMulti', { count: promoted }), 'info', 4000);
           }
         }
       },
@@ -342,8 +351,8 @@ class App {
     // shared help overlay. Same content the `?` shortcut shows.
     document.getElementById('btn-help')?.addEventListener('click', () => {
       // Lazy-import to keep startup tree small.
-      import('./keyboard-help.js').then(({ openKeyboardHelp, PLAYER_SHORTCUT_GROUPS }) => {
-        openKeyboardHelp('Player keyboard shortcuts', PLAYER_SHORTCUT_GROUPS);
+      import('./keyboard-help.js').then(({ openKeyboardHelp, getPlayerShortcutGroups }) => {
+        openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
       });
     });
 
@@ -402,6 +411,15 @@ class App {
         videoPlayer: this.videoPlayer,
         handyManager: this.handyManager,
         funscriptEngine: this.funscriptEngine,
+      });
+      // Parallel HDSP-polled engine for non-1.0× playback rates. HSSP
+      // (used by syncEngine) can't follow rate changes — the cloud
+      // schedules the script at 1.0× regardless. HDSP is per-tick and
+      // reads video.currentTime so it scales naturally. See
+      // notes/UPDATES.md and `renderer/js/handy-hdsp-sync.js`.
+      this.handyHdspSync = new HandyHdspSync({
+        handyManager: this.handyManager,
+        player: this.videoPlayer.video,
       });
     } catch (err) {
       console.warn('Handy integration unavailable:', err.message);
@@ -773,10 +791,10 @@ class App {
           if (content) {
             this.loadFunscript({ name: fsName, textContent: content, path: fsPath });
           } else {
-            showToast(`Downloaded ${fsName} but the file couldn't be read — try a manual load from Library`, 'warn', 6000);
+            showToast(t('toast.downloadedButUnreadable', { name: fsName }), 'warn', 6000);
           }
         }).catch((err) => {
-          showToast(`Failed to auto-load downloaded script: ${err.message}`, 'error', 5000);
+          showToast(t('toast.downloadAutoLoadFailed', { error: err.message }), 'error', 5000);
         });
       }
 
@@ -794,6 +812,7 @@ class App {
       funscriptEngine: this.funscriptEngine,
       progressBar: this.progressBar,
       syncEngine: this.syncEngine,
+      handyHdspSync: this.handyHdspSync,
       handyManager: this.handyManager,
       settings: this.settings,
     });
@@ -843,6 +862,10 @@ class App {
       this._keyboard.gapSkipEngine = this.gapSkipEngine;
       this._keyboard.upNextEngine = this.upNextEngine;
       this._keyboard.onCycleVariant = (dir) => this._cycleVariant(dir);
+      this._keyboard.onCycleVRFlatten = () => {
+        const label = this._cycleVRFlatten();
+        if (label) showToast(t('toast.vrFlattenLabel', { label }), 'info', 1500);
+      };
     }
 
     // Editor toggle button
@@ -869,7 +892,7 @@ class App {
       // Convert to a real button-equivalent via role + tabindex.
       subBadgeInit.setAttribute('role', 'button');
       subBadgeInit.setAttribute('tabindex', '0');
-      subBadgeInit.setAttribute('aria-label', 'Toggle subtitles');
+      subBadgeInit.setAttribute('aria-label', t('app.toggleSubtitles'));
       subBadgeInit.style.cursor = 'pointer';
       const toggleSubs = () => {
         const tracks = this.videoPlayer?.video?.textTracks;
@@ -904,7 +927,7 @@ class App {
     if (fsBadgeInit) {
       fsBadgeInit.setAttribute('role', 'button');
       fsBadgeInit.setAttribute('tabindex', '0');
-      fsBadgeInit.setAttribute('aria-label', 'Open script editor');
+      fsBadgeInit.setAttribute('aria-label', t('app.openScriptEditor'));
       fsBadgeInit.style.cursor = 'pointer';
       const openEditor = () => this.scriptEditor?.toggle?.();
       fsBadgeInit.addEventListener('click', openEditor);
@@ -986,6 +1009,14 @@ class App {
     // using the last-known host closes that gap for the "app restarted
     // while HereSphere is still running" case.
     this._attemptSavedHostReconnect();
+
+    // First-launch language picker — modal prompts users who have not yet
+    // explicitly chosen a language. Replaces the prior offer-toast (which
+    // only surfaced for non-English OS locales). Now every existing user
+    // also gets prompted on first launch of the update, so the new locales
+    // are visible to all (Nielsen #2 match between system and real world —
+    // an English-OS user might still prefer another language).
+    this._promptLanguageIfApplicable();
 
     mark('init() complete (library scan + thumbnails still in flight)');
     console.log('FunSync Player initialized');
@@ -1485,7 +1516,7 @@ class App {
     // Ensure the library has scanned at least once — re-uses existing _videos
     // + manual associations instead of duplicating that logic here.
     if (!this.library) {
-      showToast('Library unavailable — cannot match VR script', 'warn');
+      showToast(t('toast.vrLibraryUnavailable'), 'warn');
       return;
     }
     await this.library.ensureScanned();
@@ -1494,14 +1525,14 @@ class App {
     if (gen !== this._vrMatchGeneration) return;
 
     if (!this.library._videos?.length) {
-      showToast('No library sources configured — cannot match VR script', 'warn');
+      showToast(t('toast.vrNoSources'), 'warn');
       return;
     }
 
     const matched = this.library.findVideoByVRPath(normalizedName, rawPath);
 
     if (!matched || !matched.hasFunscript) {
-      showToast(`No script found for: ${displayName}`, 'info', 4000);
+      showToast(t('toast.vrNoScript', { name: displayName }), 'info', 4000);
       return;
     }
 
@@ -1519,7 +1550,7 @@ class App {
       const fsName = matched.funscriptPath.split(/[\\/]/).pop();
       await this.funscriptEngine.loadContent(content, fsName);
       if (gen !== this._vrMatchGeneration) return;
-      showToast(`VR script loaded: ${fsName}`, 'info', 3000);
+      showToast(t('toast.vrScriptLoaded', { name: fsName }), 'info', 3000);
 
       // Build a player-like wrapper around the VR proxy
       // Sync engines read player.video for event binding and player.currentTime/paused/duration for state
@@ -1596,7 +1627,7 @@ class App {
       this._pushRemoteDeviceStatus();  // reuses the status pusher — also updates tracker
     } catch (err) {
       console.warn('[VR] Failed to load script:', err.message);
-      showToast('Failed to load VR script', 'error');
+      showToast(t('toast.vrScriptLoadFailed'), 'error');
       this.sessionTracker?.setState('error');
     }
   }
@@ -1613,9 +1644,12 @@ class App {
       const { evicted, incoming } = e.detail || {};
       if (!evicted) return;
 
-      const sourceLabel = (src) => src === 'web-remote' ? 'Web Remote' : 'VR Companion';
+      const sourceLabel = (src) => src === 'web-remote' ? t('session.source.web-remote') : t('session.source.vr');
       showToast(
-        `${sourceLabel(incoming?.source)} took over from ${sourceLabel(evicted.source)}`,
+        t('toast.mutexTakeover', {
+          incoming: sourceLabel(incoming?.source),
+          evicted: sourceLabel(evicted.source),
+        }),
         'info',
         4000,
       );
@@ -1643,7 +1677,7 @@ class App {
       });
     };
     this.remoteBridge.onPhoneReplaced = (oldIp, newIp) => {
-      showToast(`Remote taken over by ${newIp}`, 'info', 4000);
+      showToast(t('toast.remoteTakenOver', { ip: newIp }), 'info', 4000);
     };
     this.remoteBridge.onPhoneDisconnected = (ip) => {
       this._onRemotePhoneDisconnected(ip);
@@ -1737,7 +1771,7 @@ class App {
     if (!video || !video.hasFunscript || !video.funscriptPath) {
       this.remoteBridge.sendToPhone({ type: 'script-missing', videoId });
       this.sessionTracker?.markScriptMissing();
-      showToast(`Remote playing ${displayName} — no script`, 'info', 4000);
+      showToast(t('toast.remoteNoScript', { name: displayName }), 'info', 4000);
       return;
     }
 
@@ -1831,7 +1865,7 @@ class App {
       this.sessionTracker?.markScriptReady(actionCount);
       this._pushRemoteDeviceStatus();
 
-      showToast(`Remote connected from ${ip}`, 'info', 3500);
+      showToast(t('toast.remoteConnected', { ip }), 'info', 3500);
     } catch (err) {
       console.warn('[Remote] failed to prepare script:', err);
       this.remoteBridge.sendToPhone({ type: 'script-missing', videoId });
@@ -1866,7 +1900,7 @@ class App {
       this.sessionTracker?.endSession();
     }
 
-    showToast('Remote disconnected', 'info', 2500);
+    showToast(t('toast.remoteDisconnected'), 'info', 2500);
   }
 
   _pushRemoteDeviceStatus() {
@@ -2055,7 +2089,7 @@ class App {
     console.log(`[VR] Trying saved host ${host}:${port}`);
     const success = await this.vrBridge.connect(playerType, host, port);
     if (success) {
-      showToast('VR companion reconnected — devices syncing', 'info', 3000);
+      showToast(t('toast.vrReconnected'), 'info', 3000);
     }
     // Silent on failure — polling takes over.
   }
@@ -2137,7 +2171,7 @@ class App {
         const success = await this.vrBridge.connect('heresphere', data.clientIp, 23554);
         if (success) {
           this._vrPollFailedAttempts = 0; // reset backoff on success
-          showToast('VR companion connected — devices syncing', 'info', 3000);
+          showToast(t('toast.vrConnected'), 'info', 3000);
           // Tear down any stale hint toast that's still on screen, and
           // reset the "already hinted" flag so if the Quest later drops
           // and the user closes+reopens HereSphere mid-session, the
@@ -2251,11 +2285,11 @@ class App {
     const tryAgainBtn = document.createElement('button');
     tryAgainBtn.type = 'button';
     tryAgainBtn.className = 'toast__action';
-    tryAgainBtn.textContent = 'Try again';
+    tryAgainBtn.textContent = t('toast.tryAgain');
     tryAgainBtn.addEventListener('click', async (e) => {
       e.stopPropagation(); // don't trigger click-to-dismiss on the toast body
       tryAgainBtn.disabled = true;
-      tryAgainBtn.textContent = 'Connecting…';
+      tryAgainBtn.textContent = t('toast.connecting');
       // Reset the backoff state so the next activity-poll tick (or the
       // direct attempt below) fires immediately.
       this._vrPollFailedAttempts = 0;
@@ -2269,7 +2303,7 @@ class App {
       const success = await this.vrBridge.connect('heresphere', host, 23554);
       if (!success) {
         tryAgainBtn.disabled = false;
-        tryAgainBtn.textContent = 'Try again';
+        tryAgainBtn.textContent = t('toast.tryAgain');
       }
     });
     wrapper.appendChild(tryAgainBtn);
@@ -2323,8 +2357,8 @@ class App {
       if (state === 'restarting') {
         banner.hidden = false;
         banner.classList.add('backend-banner--restarting');
-        titleEl.textContent = 'Restarting backend…';
-        detailEl.textContent = 'This usually takes a couple of seconds.';
+        titleEl.textContent = t('backend.restartingTitle');
+        detailEl.textContent = t('backend.restartingDetail');
         restartBtn.disabled = true;
         return;
       }
@@ -2332,23 +2366,23 @@ class App {
       if (userDismissed) return;
       banner.hidden = false;
       banner.classList.remove('backend-banner--restarting');
-      titleEl.textContent = 'Backend is not responding';
+      titleEl.textContent = t('backend.title');
       detailEl.textContent = detail
-        ? `Library scans, thumbnails, and VR features need it. Playback still works for files already open. (${detail})`
-        : 'Library scans, thumbnails, and VR features need it. Playback still works for files already open.';
+        ? t('backend.detailWithError', { error: detail })
+        : t('backend.detail');
       restartBtn.disabled = false;
     };
 
     restartBtn.addEventListener('click', async () => {
       restartBtn.disabled = true;
-      restartBtn.textContent = 'Restarting…';
+      restartBtn.textContent = t('backend.restarting');
       try {
         const result = await window.funsync.restartBackend();
         if (!result.success) {
-          showToast(`Restart failed: ${result.error || 'unknown error'}`, 'error', 5000);
+          showToast(t('toast.restartFailed', { error: result.error || 'unknown error' }), 'error', 5000);
         }
       } finally {
-        restartBtn.textContent = 'Restart Backend';
+        restartBtn.textContent = t('backend.restart');
         // The health monitor will emit a state event; render() handles
         // the banner visibility from there.
       }
@@ -2357,7 +2391,7 @@ class App {
     logsBtn.addEventListener('click', async () => {
       const result = await window.funsync.openLogFile();
       if (!result.success) {
-        showToast(`Couldn't open log file: ${result.error || 'unknown error'}`, 'warn', 4000);
+        showToast(t('toast.logsOpenFailed', { error: result.error || 'unknown error' }), 'warn', 4000);
       }
     });
 
@@ -2394,7 +2428,7 @@ class App {
       (Number.isFinite(buttplugIndex) ? ` (index ${buttplugIndex})` : ''));
 
     if (deviceId === 'handy') {
-      if (!this.handyManager?.connected) return { ok: false, reason: 'Handy not connected' };
+      if (!this.handyManager?.connected) return { ok: false, reason: t('deviceTest.handyNotConnected') };
       try {
         // HandyManager wraps the raw SDK hdsp() — use the wrapper, not the
         // private SDK object. Arguments are (position%, durationMs).
@@ -2403,12 +2437,12 @@ class App {
         await this.handyManager.hdspMove(20, 500);
         return { ok: true };
       } catch (err) {
-        return { ok: false, reason: err.message || 'Handy test failed' };
+        return { ok: false, reason: err.message || t('deviceTest.handyFailed') };
       }
     }
 
     if (deviceId === 'tcode') {
-      if (!this.tcodeManager?.connected) return { ok: false, reason: 'TCode device not connected' };
+      if (!this.tcodeManager?.connected) return { ok: false, reason: t('deviceTest.tcodeNotConnected') };
       try {
         // L0 stroke: 700→200 over ~500ms. Value scale is 000–999.
         await this.tcodeManager.send('L0700I500\n');
@@ -2416,19 +2450,19 @@ class App {
         await this.tcodeManager.send('L0200I500\n');
         return { ok: true };
       } catch (err) {
-        return { ok: false, reason: err.message || 'TCode test failed' };
+        return { ok: false, reason: err.message || t('deviceTest.tcodeFailed') };
       }
     }
 
     if (deviceId === 'autoblow') {
-      if (!this.autoblowManager?.connected) return { ok: false, reason: 'Autoblow not connected' };
+      if (!this.autoblowManager?.connected) return { ok: false, reason: t('deviceTest.autoblowNotConnected') };
       // No standalone pulse command on the Autoblow cloud API — best we can
       // do is tell the user we know about it but can't test without a script.
-      return { ok: false, reason: 'Autoblow has no pulse API — play a video to verify' };
+      return { ok: false, reason: t('deviceTest.autoblowNoPulse') };
     }
 
     if (deviceId?.startsWith('buttplug:')) {
-      if (!this.buttplugManager?.connected) return { ok: false, reason: 'Intiface not connected' };
+      if (!this.buttplugManager?.connected) return { ok: false, reason: t('deviceTest.intifaceNotConnected') };
       // Match by index first (stable), then name — same priority as routing.
       const bpDevices = this.buttplugManager.devices;
       let dev = null;
@@ -2437,7 +2471,7 @@ class App {
         if (dev && `buttplug:${dev.name}` !== deviceId) dev = null; // name must confirm
       }
       if (!dev) dev = bpDevices.find(d => `buttplug:${d.name}` === deviceId);
-      if (!dev) return { ok: false, reason: `Device "${deviceId.replace(/^buttplug:/, '')}" not connected` };
+      if (!dev) return { ok: false, reason: t('deviceTest.deviceNotConnected', { name: deviceId.replace(/^buttplug:/, '') }) };
 
       try {
         if (dev.canLinear) {
@@ -2457,15 +2491,15 @@ class App {
           await new Promise(r => setTimeout(r, 500));
           await this.buttplugManager.sendRotate(dev.index, 0, true);
         } else {
-          return { ok: false, reason: 'Device has no testable output' };
+          return { ok: false, reason: t('deviceTest.noTestableOutput') };
         }
         return { ok: true };
       } catch (err) {
-        return { ok: false, reason: err.message || 'Buttplug test failed' };
+        return { ok: false, reason: err.message || t('deviceTest.buttplugFailed') };
       }
     }
 
-    return { ok: false, reason: `Unknown device id "${deviceId}"` };
+    return { ok: false, reason: t('deviceTest.unknownDevice', { id: deviceId }) };
   }
 
   _registerKnownDevice(id, label, type, extras = {}) {
@@ -2603,7 +2637,7 @@ class App {
 
     if (becameUnavailable.length > 0) {
       const names = sources.filter(s => becameUnavailable.includes(s.path)).map(s => s.name);
-      showToast(`Source disconnected: ${names.join(', ')}`, 'warn', 5000);
+      showToast(t('toast.sourceDisconnected', { names: names.join(', ') }), 'warn', 5000);
       // Invalidate library cache
       if (this.library) this.library._lastScanKey = null;
       // If library is the active view, re-render
@@ -2614,7 +2648,7 @@ class App {
 
     if (becameAvailable.length > 0) {
       const names = sources.filter(s => becameAvailable.includes(s.path)).map(s => s.name);
-      showToast(`Source reconnected: ${names.join(', ')}`, 'info', 5000);
+      showToast(t('toast.sourceReconnected', { names: names.join(', ') }), 'info', 5000);
       if (this.library) this.library._lastScanKey = null;
       if (this._currentView() === 'library') {
         this.library.show(this._getViewEl('library'));
@@ -2683,7 +2717,7 @@ class App {
     // Player control button tooltip
     const btn = document.getElementById('btn-handy');
     if (btn) {
-      btn.title = deviceCount === 1 ? 'Device Connection (H)' : 'Devices Connection (H)';
+      btn.title = deviceCount === 1 ? t('player.deviceConnectionShortcut') : t('player.devicesConnectionShortcut');
     }
   }
 
@@ -2710,7 +2744,7 @@ class App {
     // Player control button tooltip
     const btn = document.getElementById('btn-handy');
     if (btn) {
-      btn.title = deviceCount === 1 ? 'Device Connection (H)' : 'Devices Connection (H)';
+      btn.title = deviceCount === 1 ? t('player.deviceConnectionShortcut') : t('player.devicesConnectionShortcut');
     }
 
     // Top-bar canonical sync chip — aggregates device + script + play
@@ -2748,16 +2782,18 @@ class App {
                           || (this.handyManager?.connected && hasScript && isPlaying));
 
     if (deviceCount === 0) {
-      return { state: 'idle', label: 'No devices' };
+      return { state: 'idle', label: t('syncChip.noDevices') };
     }
     if (!hasScript) {
-      return { state: 'idle', label: 'No script' };
+      return { state: 'idle', label: t('syncChip.noScript') };
     }
     if (syncActive) {
-      const label = deviceCount === 1 ? 'Syncing' : `Syncing • ${deviceCount} devices`;
+      const label = deviceCount === 1
+        ? t('syncChip.syncing')
+        : t('syncChip.syncingDevices', { count: deviceCount });
       return { state: 'syncing', label };
     }
-    return { state: 'ready', label: 'Ready' };
+    return { state: 'ready', label: t('syncChip.ready') };
   }
 
   _updatePlayerSyncChip() {
@@ -2859,7 +2895,7 @@ class App {
         // The onConnect callback will handle the rest (indicators + sync)
       } else {
         console.warn('[Handy] Auto-connect failed');
-        showToast('Handy auto-connect failed — use H to connect manually', 'warn');
+        showToast(t('toast.handyAutoFailed'), 'warn');
         this._updateHandyIndicators('disconnected');
       }
     } catch (err) {
@@ -2940,7 +2976,7 @@ class App {
         this._hideScriptLoadingOverlay();
         this.videoPlayer.video.play().catch(() => {});
       }
-      showToast('Failed to upload script to Handy', 'error');
+      showToast(t('toast.handyUploadFailed'), 'error');
     }
   }
 
@@ -2953,6 +2989,7 @@ class App {
       this._currentVideoUrl = null;
     }
     this.syncEngine?.stop();
+    if (this.handyHdspSync?.active) this.handyHdspSync.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
     if (this.tcodeSync?._active) this.tcodeSync.stop();
     if (this.autoblowSync?._active) this.autoblowSync.stop();
@@ -3032,6 +3069,15 @@ class App {
     this.progressBar.setVideoSource(videoUrl);
     this._updateCategoryDots();
 
+    // Apply any saved VR-as-flat preference for this video. Two inputs:
+    //   - per-video saved eye ('left' / 'right' / null) in
+    //     `library.vrFlatten[path]`
+    //   - per-video format auto-detected by `classifyStereoFormat`
+    // No saved preference + a detectable format = leave Off (the user
+    // opts in explicitly via Shift+R or the library kebab). This avoids
+    // silently squishing every flat-but-VR-tagged video the user opens.
+    this._applyVRFlattenForCurrent();
+
     // One-time HEVC codec install guidance — fires once per session if
     // the OS lacks a hardware HEVC decoder (and the user hasn't
     // permanently dismissed it). Cheap to call on every load; the
@@ -3073,17 +3119,17 @@ class App {
 
       // Show appropriate error message
       if (isFileUrl && code === 2) {
-        showToast('Source disconnected — file no longer available', 'error', 5000);
+        showToast(t('toast.sourceDisconnectedFile'), 'error', 5000);
         // Invalidate library cache so re-scan catches the change
         if (this.library) this.library._lastScanKey = null;
       } else {
         const msgs = {
-          1: 'Video loading aborted',
-          2: 'Network error loading video',
-          3: 'Video decoding failed — unsupported codec?',
-          4: 'Video format not supported',
+          1: t('toast.videoErrorAborted'),
+          2: t('toast.videoErrorNetwork'),
+          3: t('toast.videoErrorDecode'),
+          4: t('toast.videoErrorFormat'),
         };
-        showToast(msgs[code] || 'Failed to load video', 'error');
+        showToast(msgs[code] || t('toast.videoErrorGeneric'), 'error');
       }
     });
 
@@ -3131,12 +3177,12 @@ class App {
         container.className = 'update-toast';
 
         const text = document.createElement('span');
-        text.textContent = `Script found: ${top.title}`;
+        text.textContent = t('toast.scriptFound', { title: top.title });
         container.appendChild(text);
 
         const btn = document.createElement('button');
         btn.className = 'update-toast__btn';
-        btn.textContent = 'Get Script';
+        btn.textContent = t('toast.getScript');
         btn.addEventListener('click', () => {
           if (this.eroscriptsPanel) {
             this.eroscriptsPanel.setSearchQuery(query, true);
@@ -3170,6 +3216,14 @@ class App {
       console.log('Funscript loaded:', info);
 
       this._showFunscriptBadge(info);
+
+      // Feed actions to the parallel HDSP-polled engine — used at
+      // non-1.0× playback rates where HSSP can't follow. The engine
+      // doesn't start until rate diverges from 1.0× (see _setSpeed in
+      // script-editor.js), so this is a cheap cache.
+      if (this.handyHdspSync) {
+        this.handyHdspSync.setActions(this.funscriptEngine.getActions());
+      }
 
       // Render heatmap if video duration is known
       if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
@@ -3217,7 +3271,7 @@ class App {
       }
     } catch (err) {
       console.error('Failed to load funscript:', err.message);
-      showToast('Failed to load funscript: ' + err.message, 'error');
+      showToast(t('toast.scriptLoadFailed', { error: err.message }), 'error');
     }
   }
 
@@ -3232,7 +3286,7 @@ class App {
       for (const route of this._currentCustomRoutes) {
         const scriptName = route.scriptName || route.scriptPath?.split(/[\\/]/).pop() || '(none)';
         const device = this._findKnownDeviceForRoute(route);
-        const deviceLabel = device ? device.label : (route.deviceId || 'Unassigned');
+        const deviceLabel = device ? device.label : (route.deviceId || t('syncChip.unassigned'));
         const roleLabel = route.role === 'main' ? '★ ' : '';
         lines.push(`${roleLabel}${deviceLabel}: ${scriptName}`);
       }
@@ -3381,6 +3435,53 @@ class App {
     }
   }
 
+  /**
+   * Load the active-locale bundle at boot. Order matters:
+   *   1. Read saved `settings.player.language` (default 'en').
+   *   2. Read system locale via the preload bridge (used later by the
+   *      language-prompt modal to highlight the OS-detected option).
+   *   3. initI18n() activates the saved locale.
+   *   4. translatePage() walks the initial DOM after a microtask so
+   *      index.html's data-i18n elements pick up the active strings.
+   * The language-prompt modal fires later via `_promptLanguageIfApplicable`
+   * once init is otherwise complete (so it lands on top of the rendered UI,
+   * not during paint).
+   */
+  async _initI18n() {
+    const savedLocale = dataService.get('player.language') || 'en';
+    let systemLocale = 'en';
+    try {
+      systemLocale = await window.funsync.getSystemLocale();
+    } catch { /* preload bridge missing — fall through with 'en' */ }
+    this._systemLocale = systemLocale;
+    await initI18n({ savedLocale });
+    translatePage(document);
+  }
+
+  /**
+   * Surface the first-launch language picker modal if the user has not
+   * yet explicitly chosen a language (i.e. `player.languageSelected` is
+   * falsy). If they dismiss the modal without choosing, the flag stays
+   * falsy and the modal re-appears on the next launch — they cannot
+   * accidentally "miss" the prompt by clicking outside it.
+   *
+   * Existing 0.5.x users who upgrade to this build will see the modal
+   * once on their next launch, regardless of OS locale, because the
+   * flag is absent from their config.json until they pick.
+   */
+  async _promptLanguageIfApplicable() {
+    if (dataService.get('player.languageSelected')) return;
+    const { openLanguagePromptModal } = await import('../components/language-prompt-modal.js');
+    const { locale } = await openLanguagePromptModal({
+      settings: dataService,
+      systemLocale: this._systemLocale,
+    });
+    if (locale) {
+      const langName = LOCALE_LABELS[locale] || locale;
+      showToast(t('i18n.switched', { language: langName }), 'success', 2000);
+    }
+  }
+
   /** Thin App method delegating to the pure pip-guard helper for testability. */
   _isOurVideoInPip() {
     return isVideoInPip(this.videoPlayer?.video);
@@ -3394,6 +3495,62 @@ class App {
   /** Thin App method delegating to the pure pip-guard helper. */
   _beginDeferredPipTeardown() {
     beginDeferredPipTeardown(this, this);
+  }
+
+  // --- VR-as-flat playback (community ask: Monoinc 2026-05-17) ---
+  //
+  // Two responsibilities:
+  //   1. On video load, look up the per-video flatten preference from
+  //      `library.vrFlatten[path]` (value: 'left' | 'right' | null) AND
+  //      the auto-detected stereo format from filename. If both are
+  //      present, apply the corresponding CSS transform.
+  //   2. Expose a cycle callback for the Shift+R keyboard shortcut and
+  //      the kebab menu entry — cycles Off → Left → Right → Off, mirrors
+  //      MPC-HC's Pan&Scan precedent.
+  //
+  // No-op on non-flattenable formats (fisheye / equirect / mkx) — the
+  // CSS crop would still look distorted; v2 would need a WebGL shader
+  // pass for those.
+
+  _applyVRFlattenForCurrent() {
+    if (!this.videoPlayer) return;
+    const path = this._currentVideoPath;
+    const name = this._currentVideoName;
+    const format = classifyStereoFormat(path || name || '');
+    this._currentStereoFormat = isFlattenableStereo(format) ? format : null;
+    if (!this._currentStereoFormat) {
+      this.videoPlayer.setVRFlatten('off');
+      return;
+    }
+    const saved = (this.dataService?.get?.('library.vrFlatten') || {})[path] || null;
+    if (saved === 'left') this.videoPlayer.setVRFlatten(this._currentStereoFormat, 1);
+    else if (saved === 'right') this.videoPlayer.setVRFlatten(this._currentStereoFormat, 2);
+    else this.videoPlayer.setVRFlatten('off');
+  }
+
+  /**
+   * Cycle the VR-flatten state for the current video and persist the new
+   * setting. Called by the keyboard (Shift+R) and the library kebab.
+   * Returns the new state label (for the toast).
+   */
+  _cycleVRFlatten() {
+    if (!this.videoPlayer) return null;
+    if (!this._currentStereoFormat) {
+      showToast(t('toast.noVRDetected'), 'info');
+      return null;
+    }
+    const label = this.videoPlayer.cycleVRFlatten(this._currentStereoFormat);
+    // Persist per-video. 'off' clears the entry so the next load defaults
+    // back to un-flattened.
+    const path = this._currentVideoPath;
+    if (path && this.dataService) {
+      const map = { ...(this.dataService.get('library.vrFlatten') || {}) };
+      const next = this.videoPlayer.vrFlattenState;
+      if (!next.format) delete map[path];
+      else map[path] = next.eye === 2 ? 'right' : 'left';
+      this.dataService.set('library.vrFlatten', map);
+    }
+    return label;
   }
 
   // --- View Actions ---
@@ -3546,7 +3703,7 @@ class App {
         // Tell the user WHICH axis dropped — a multi-axis setup that
         // "sort of works" with one axis missing is confusing without
         // feedback, and the console-only log is invisible to most users.
-        showToast(`Multi-axis: ${suffix} script failed to load (${err.message})`, 'warn', 5000);
+        showToast(t('toast.multiAxisFailed', { suffix, error: err.message }), 'warn', 5000);
       }
     }
 
@@ -3580,7 +3737,7 @@ class App {
 
     // Update editor script list for multi-axis
     if (this.scriptEditor) {
-      const scripts = [{ label: 'Main (L0)', path: this.scriptEditor?._funscriptPath || '' }];
+      const scripts = [{ label: t('editor.mainAxisLabel'), path: this.scriptEditor?._funscriptPath || '' }];
       for (const [suffix, axisPath] of axisEntries) {
         if (!axisPath) continue;
         const SUFFIX_LABELS = { surge: 'Surge', sway: 'Sway', twist: 'Twist', roll: 'Roll', pitch: 'Pitch', vib: 'Vibe', lube: 'Lube', pump: 'Pump', suction: 'Suction', valve: 'Valve' };
@@ -3610,14 +3767,16 @@ class App {
     this.gapSkipEngine.setSettings(gapSettings.mode || 'off', gapSettings.threshold || 10000);
 
     // Wire overlay callbacks
+    const gapSkipLabel = (gapType) => gapType === 'leading' ? t('gapSkip.skipToAction')
+      : gapType === 'trailing' ? t('gapSkip.skipToEnd')
+      : t('gapSkip.skipToNextAction');
+
     this.gapSkipEngine.onShowOverlay = (gap, countdown, gapType) => {
       overlay.hidden = false;
-      const label = gapType === 'leading' ? 'Skip to action'
-        : gapType === 'trailing' ? 'Skip to end'
-        : 'Skip to next action';
+      const label = gapSkipLabel(gapType);
 
       if (countdown !== null) {
-        btnSkip.textContent = `${label} in ${countdown}...`;
+        btnSkip.textContent = t('gapSkip.countdown', { label, seconds: countdown });
         btnCancel.hidden = false;
       } else {
         btnSkip.textContent = label;
@@ -3630,24 +3789,24 @@ class App {
     };
 
     this.gapSkipEngine.onCountdownTick = (remaining) => {
-      const gapType = this.gapSkipEngine._currentGapType || 'mid';
-      const label = gapType === 'leading' ? 'Skip to action'
-        : gapType === 'trailing' ? 'Skip to end'
-        : 'Skip to next action';
-      btnSkip.textContent = remaining > 0 ? `${label} in ${remaining}...` : 'Skipping...';
+      const label = gapSkipLabel(this.gapSkipEngine._currentGapType || 'mid');
+      btnSkip.textContent = remaining > 0
+        ? t('gapSkip.countdown', { label, seconds: remaining })
+        : t('gapSkip.skipping');
     };
 
     this.gapSkipEngine.onSkipped = (skippedMs) => {
       const sec = Math.round(Math.abs(skippedMs) / 1000);
-      const dir = skippedMs > 0 ? 'forward' : 'back';
       const container = document.createElement('div');
       container.className = 'update-toast';
       const text = document.createElement('span');
-      text.textContent = `Skipped ${sec}s ${dir}`;
+      text.textContent = skippedMs > 0
+        ? t('toast.gapSkippedForward', { sec })
+        : t('toast.gapSkippedBack', { sec });
       container.appendChild(text);
       const undoBtn = document.createElement('button');
       undoBtn.className = 'update-toast__btn';
-      undoBtn.textContent = 'Undo';
+      undoBtn.textContent = t('toast.undo');
       undoBtn.addEventListener('click', () => this.gapSkipEngine.undo());
       container.appendChild(undoBtn);
       showToast(container, 'info', 4000);
@@ -3791,7 +3950,7 @@ class App {
       // File missing from current library scan — try to walk past it.
       const next = this.upNextEngine.advancePastMissing();
       if (next) return this._playUpNext(next);
-      showToast('Next video not found in library', 'warn', 3000);
+      showToast(t('toast.nextNotFound'), 'warn', 3000);
       return;
     }
     if (this._currentPlayContext) {
@@ -3877,7 +4036,7 @@ class App {
     // Auto-migrate: if legacy directory exists but not in sources, add it
     const legacyDir = this.settings.get('library.directory');
     if (legacyDir && !sources.some(s => s.path === legacyDir)) {
-      const dirName = legacyDir.split(/[\\/]/).pop() || 'Library';
+      const dirName = legacyDir.split(/[\\/]/).pop() || t('nav.library');
       sources.push({ id: crypto.randomUUID(), name: dirName, path: legacyDir, enabled: true });
       this.settings.set('library.sources', sources);
     }
@@ -3928,13 +4087,13 @@ class App {
     const dirPath = await window.funsync.selectDirectory();
     if (!dirPath) return;
 
-    const name = await Modal.prompt('Name this source', 'Source name', dirPath.split(/[\\/]/).pop());
+    const name = await Modal.prompt(t('toast.nameSourcePrompt'), t('toast.nameSourcePlaceholder'), dirPath.split(/[\\/]/).pop());
     if (!name) return;
 
     const sources = this.settings.get('library.sources') || [];
     // Don't add duplicates
     if (sources.some(s => s.path === dirPath)) {
-      showToast('This folder is already a source', 'warn');
+      showToast(t('toast.folderAlreadySource'), 'warn');
       return;
     }
 
@@ -4002,7 +4161,7 @@ class App {
 
         const sourceLabel = document.createElement('span');
         sourceLabel.className = 'library__collection-count';
-        sourceLabel.textContent = 'Source:';
+        sourceLabel.textContent = t('collectionModal.sourceLabel');
         sourceLabel.style.marginRight = '6px';
 
         const sourceSelect = document.createElement('select');
@@ -4011,21 +4170,21 @@ class App {
 
         const allOpt = document.createElement('option');
         allOpt.value = 'all';
-        allOpt.textContent = 'All Sources';
+        allOpt.textContent = t('collectionModal.allSources');
         sourceSelect.appendChild(allOpt);
 
         for (const src of sources) {
           const opt = document.createElement('option');
           opt.value = src.id;
           const isOffline = unavailable.has(src.path);
-          opt.textContent = isOffline ? `${src.name} (disconnected)` : src.name;
+          opt.textContent = isOffline ? t('collectionModal.sourceDisconnected', { name: src.name }) : src.name;
           opt.disabled = isOffline;
           sourceSelect.appendChild(opt);
         }
 
         const browseOpt = document.createElement('option');
         browseOpt.value = '__browse__';
-        browseOpt.textContent = '+ Browse for folder...';
+        browseOpt.textContent = t('collectionModal.browseFolder');
         sourceSelect.appendChild(browseOpt);
 
         sourceRow.appendChild(sourceLabel);
@@ -4046,7 +4205,7 @@ class App {
         syncCheckbox.type = 'checkbox';
         syncCheckbox.id = 'col-sync-checkbox';
         const syncText = document.createElement('span');
-        syncText.textContent = 'Sync with source — new videos added to the folder will automatically join this collection';
+        syncText.textContent = t('collectionModal.syncLabel');
         syncLabel.appendChild(syncCheckbox);
         syncLabel.appendChild(syncText);
         syncRow.appendChild(syncLabel);
@@ -4056,7 +4215,7 @@ class App {
         const nameInput = document.createElement('input');
         nameInput.type = 'text';
         nameInput.className = 'modal-input';
-        nameInput.placeholder = 'Collection name...';
+        nameInput.placeholder = t('collectionModal.namePlaceholder');
         nameInput.value = existingName || '';
         nameInput.style.marginBottom = '8px';
         body.appendChild(nameInput);
@@ -4068,16 +4227,16 @@ class App {
         const searchInput = document.createElement('input');
         searchInput.type = 'text';
         searchInput.className = 'library__search-input';
-        searchInput.placeholder = 'Search...';
+        searchInput.placeholder = t('collectionModal.searchPlaceholder');
         searchInput.style.flex = '1';
 
         const countLabel = document.createElement('span');
         countLabel.className = 'library__collection-count';
-        countLabel.textContent = `${existingPaths.size} selected`;
+        countLabel.textContent = t('collectionModal.selectionCount', { count: existingPaths.size });
 
         const selectAllBtn = document.createElement('button');
         selectAllBtn.className = 'library__collection-select-all';
-        selectAllBtn.textContent = 'Select All';
+        selectAllBtn.textContent = t('collectionModal.selectAll');
         selectAllBtn.addEventListener('click', () => {
           const query = searchInput.value.toLowerCase().trim();
           const visible = query
@@ -4091,7 +4250,7 @@ class App {
               selected.add(v.path);
             }
           }
-          countLabel.textContent = `${selected.size} selected`;
+          countLabel.textContent = t('collectionModal.selectionCount', { count: selected.size });
           renderGrid();
         });
 
@@ -4142,10 +4301,10 @@ class App {
                 card.classList.add('library__collection-card--selected');
                 checkbox.classList.add('library__collection-card-check--on');
               }
-              countLabel.textContent = `${selected.size} selected`;
+              countLabel.textContent = t('collectionModal.selectionCount', { count: selected.size });
               // Sync Select All button text
               const allVis = filtered.every(v => selected.has(v.path));
-              selectAllBtn.textContent = allVis ? 'Deselect All' : 'Select All';
+              selectAllBtn.textContent = allVis ? t('collectionModal.deselectAll') : t('collectionModal.selectAll');
             });
 
             grid.appendChild(card);
@@ -4156,13 +4315,13 @@ class App {
             empty.className = 'library__collection-count';
             empty.style.padding = '20px';
             empty.style.textAlign = 'center';
-            empty.textContent = currentVideos.length === 0 ? 'No videos in this source' : 'No matches';
+            empty.textContent = currentVideos.length === 0 ? t('library.emptyTitle') : t('collectionModal.noMatches');
             grid.appendChild(empty);
           }
 
           // Sync Select All button text
           const allVisible = filtered.length > 0 && filtered.every(v => selected.has(v.path));
-          selectAllBtn.textContent = allVisible ? 'Deselect All' : 'Select All';
+          selectAllBtn.textContent = allVisible ? t('collectionModal.deselectAll') : t('collectionModal.selectAll');
           selectAllBtn.hidden = filtered.length === 0;
         };
 
@@ -4261,7 +4420,7 @@ class App {
                 for (const p of existingPaths) {
                   if (!currentVideos.some(v => v.path === p)) selected.add(p);
                 }
-                countLabel.textContent = `${selected.size} selected`;
+                countLabel.textContent = t('collectionModal.selectionCount', { count: selected.size });
                 renderGrid();
               })();
             }
@@ -4282,7 +4441,7 @@ class App {
         syncCheckbox.addEventListener('change', () => {
           if (syncCheckbox.checked) {
             for (const v of currentVideos) selected.add(v.path);
-            countLabel.textContent = `${selected.size} selected`;
+            countLabel.textContent = t('collectionModal.selectionCount', { count: selected.size });
             renderGrid();
           }
           // When unchecked: selected stays as-is (freeze snapshot).
@@ -4299,7 +4458,7 @@ class App {
             setTimeout(() => {
               selected.clear();
               for (const v of currentVideos) selected.add(v.path);
-              countLabel.textContent = `${selected.size} selected`;
+              countLabel.textContent = t('collectionModal.selectionCount', { count: selected.size });
               renderGrid();
             }, 100);
           }
@@ -4308,7 +4467,7 @@ class App {
         // Save/Create button
         const saveBtn = document.createElement('button');
         saveBtn.className = 'library__assoc-save-btn';
-        saveBtn.textContent = existingName ? 'Save' : 'Create';
+        saveBtn.textContent = existingName ? t('common.save') : t('common.create');
         saveBtn.style.marginTop = '12px';
         saveBtn.addEventListener('click', () => {
           const name = nameInput.value.trim();
@@ -4403,7 +4562,7 @@ class App {
     const col = collections.find(c => c.id === id);
     if (!col) return;
 
-    const confirmed = await Modal.confirm('Delete Library', `Delete "${col.name}"? Your videos won't be affected.`);
+    const confirmed = await Modal.confirm(t('toast.deleteCollectionTitle'), t('toast.deleteCollectionConfirm', { name: col.name }));
     if (!confirmed) return;
 
     // Pre-action snapshot — deleting a collection drops the entire
@@ -4470,7 +4629,7 @@ class App {
         ? this._currentVideoName.replace(/\.[^/.]+$/, '') + '.funscript'
         : 'current.funscript';
       if (rawContent) {
-        baseVariants.push({ label: 'Default', path: currentPath || '', name: currentName });
+        baseVariants.push({ label: t('variants.defaultLabel'), path: currentPath || '', name: currentName });
       }
     }
 
@@ -4508,7 +4667,7 @@ class App {
     if (allVariants.length > 1 || this._currentVideoPath) {
       selector.hidden = false;
       const active = allVariants[this._activeVariantIndex];
-      btn.textContent = active ? active.label : 'Default';
+      btn.textContent = active ? active.label : t('variants.defaultLabel');
     } else {
       selector.hidden = true;
     }
@@ -4545,7 +4704,7 @@ class App {
     // Add variation button
     const addBtn = document.createElement('button');
     addBtn.className = 'variant-selector__add';
-    addBtn.textContent = '+ Add variation...';
+    addBtn.textContent = t('variants.addVariation');
     addBtn.addEventListener('click', async () => {
       dropdown.hidden = true;
       this._showAddVariantModal();
@@ -4559,7 +4718,7 @@ class App {
     if (manualForVideo.length > 0) {
       const manageBtn = document.createElement('button');
       manageBtn.className = 'variant-selector__add';
-      manageBtn.textContent = 'Manage variations...';
+      manageBtn.textContent = t('variants.manageVariations');
       manageBtn.addEventListener('click', () => {
         dropdown.hidden = true;
         this._showManageVariantsModal();
@@ -4607,7 +4766,7 @@ class App {
 
     // Show naming modal
     const label = await Modal.open({
-      title: 'Name This Variation',
+      title: t('variants.nameVariationTitle'),
       onRender: (body, close) => {
         const hint = document.createElement('div');
         hint.className = 'library__collection-count';
@@ -4619,7 +4778,7 @@ class App {
           const sugLabel = document.createElement('div');
           sugLabel.className = 'library__collection-count';
           sugLabel.style.marginBottom = '6px';
-          sugLabel.textContent = 'Suggestions:';
+          sugLabel.textContent = t('variants.suggestions');
           body.appendChild(sugLabel);
 
           const sugList = document.createElement('div');
@@ -4648,13 +4807,13 @@ class App {
         const customLabel = document.createElement('div');
         customLabel.className = 'library__collection-count';
         customLabel.style.marginBottom = '6px';
-        customLabel.textContent = 'Custom name:';
+        customLabel.textContent = t('variants.customName');
         body.appendChild(customLabel);
 
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'modal-input';
-        input.placeholder = 'Enter a name...';
+        input.placeholder = t('variants.enterNamePlaceholder');
         input.style.marginBottom = '12px';
         body.appendChild(input);
 
@@ -4663,7 +4822,7 @@ class App {
         confirmBtn.style.display = 'block';
         confirmBtn.style.width = '66%';
         confirmBtn.style.margin = '0 auto';
-        confirmBtn.textContent = 'OK';
+        confirmBtn.textContent = t('common.ok');
         confirmBtn.addEventListener('click', () => {
           const val = input.value.trim();
           if (val) close(val);
@@ -4722,7 +4881,7 @@ class App {
     const ranked = rankFunscriptMatches(videoName, allScripts, 0);
 
     const chosen = await Modal.open({
-      title: 'Add Script Variation',
+      title: t('variants.addScriptVariation'),
       onRender: (body, close) => {
         if (ranked.length > 0) {
           const list = document.createElement('div');
@@ -4757,7 +4916,7 @@ class App {
 
         const browseRow = document.createElement('button');
         browseRow.className = 'modal-list-item library__browse-fallback';
-        browseRow.textContent = 'Browse...';
+        browseRow.textContent = t('variants.browse');
         browseRow.addEventListener('click', async () => {
           const result = await window.funsync.selectFunscript();
           if (result) close(result);
@@ -4781,7 +4940,7 @@ class App {
     let changed = false;
 
     await Modal.open({
-      title: 'Manage Variations',
+      title: t('variants.manageVariationsTitle'),
       onRender: (body, close) => {
         const list = document.createElement('div');
         list.className = 'modal-list';
@@ -4794,7 +4953,7 @@ class App {
             empty.className = 'library__collection-count';
             empty.style.padding = '16px';
             empty.style.textAlign = 'center';
-            empty.textContent = 'No manual variations';
+            empty.textContent = t('variants.noManualVariations');
             list.appendChild(empty);
             return;
           }
@@ -4828,10 +4987,10 @@ class App {
             const renameBtn = document.createElement('button');
             renameBtn.className = 'nav-bar__library-action';
             renameBtn.textContent = '✎';
-            renameBtn.title = 'Rename';
+            renameBtn.title = t('toast.renameTooltip');
             renameBtn.addEventListener('click', async (e) => {
               e.stopPropagation();
-              const newName = await Modal.prompt('Rename Variation', 'Name', v.label);
+              const newName = await Modal.prompt(t('toast.renameVariationTitle'), t('toast.renameVariationLabel'), v.label);
               if (newName && newName !== v.label) {
                 manualForVideo[i].label = newName;
                 changed = true;
@@ -4843,7 +5002,7 @@ class App {
             const deleteBtn = document.createElement('button');
             deleteBtn.className = 'nav-bar__library-action nav-bar__library-action--danger';
             deleteBtn.textContent = '✕';
-            deleteBtn.title = 'Remove';
+            deleteBtn.title = t('common.remove');
             deleteBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               manualForVideo.splice(i, 1);
@@ -4864,7 +5023,7 @@ class App {
         doneBtn.style.display = 'block';
         doneBtn.style.width = '66%';
         doneBtn.style.margin = '12px auto 0';
-        doneBtn.textContent = 'Done';
+        doneBtn.textContent = t('common.done');
         doneBtn.addEventListener('click', () => close());
         body.appendChild(doneBtn);
       },
@@ -5020,7 +5179,7 @@ class App {
         }
       }
 
-      showToast(`Now playing: ${variant.label}`, 'info', 2000);
+      showToast(t('toast.nowPlayingVariant', { label: variant.label }), 'info', 2000);
     } catch (err) {
       console.warn('[Variants] Switch failed:', err.message);
       // Clear the loading state so the user isn't stranded on a paused
@@ -5033,7 +5192,7 @@ class App {
       if (willPauseAny && this.remoteBridge?.connected) {
         this.remoteBridge.sendToPhone({ type: 'script-ready' });
       }
-      showToast('Failed to switch script variant', 'error');
+      showToast(t('toast.variantSwitchFailed'), 'error');
     }
   }
 
@@ -5075,10 +5234,10 @@ class App {
           // Silent skip would leave the user wondering why the next
           // video plays with no device sync — surface it.
           const fsName = item.funscriptPath.split(/[\\/]/).pop();
-          showToast(`Queue item ${item.name}: script ${fsName} couldn't be read — playing without sync`, 'warn', 5000);
+          showToast(t('toast.queueReadFailed', { name: item.name, script: fsName }), 'warn', 5000);
         }
       }).catch((err) => {
-        showToast(`Queue item ${item.name}: script read failed (${err.message}) — playing without sync`, 'warn', 5000);
+        showToast(t('toast.queueReadError', { name: item.name, error: err.message }), 'warn', 5000);
       });
     }
 
@@ -5133,24 +5292,24 @@ class App {
 
   async _quickAddToPlaylist() {
     if (!this._currentVideoPath) {
-      showToast('Cannot add — video has no file path', 'warn');
+      showToast(t('toast.addNoPath'), 'warn');
       return;
     }
     const playlists = this.settings.getPlaylists();
     if (playlists.length === 0) {
-      showToast('No playlists yet — create one from the Playlists view', 'info');
+      showToast(t('toast.noPlaylists'), 'info');
       return;
     }
     const items = playlists.map((p) => ({
       id: p.id,
       label: p.name,
-      subtitle: `${p.videoPaths.length} video${p.videoPaths.length !== 1 ? 's' : ''}`,
+      subtitle: t('library.videoCountSubtitle', { count: p.videoPaths.length }),
     }));
-    const selectedId = await Modal.selectFromList('Add to Playlist', items);
+    const selectedId = await Modal.selectFromList(t('library.addToPlaylistTitle'), items);
     if (selectedId) {
       this.settings.addVideoToPlaylist(selectedId, this._currentVideoPath);
       const pl = this.settings.getPlaylist(selectedId);
-      showToast(`Added to "${pl.name}"`, 'info');
+      showToast(t('toast.addedTo', { name: pl.name }), 'info');
     }
   }
 
@@ -5167,7 +5326,7 @@ class App {
         this.videoPlayer.video.play().catch(() => {});
         // Surface the failure — without this, the user sees the video play
         // but the Handy stays silent and they have no idea why.
-        showToast('Handy script upload timed out — video is playing but the Handy won\'t be in sync. Check your connection and try reloading the video.', 'warn', 8000);
+        showToast(t('toast.handyUploadTimeout'), 'warn', 8000);
       }
     }, 8000);
   }
@@ -5225,16 +5384,16 @@ class App {
     container.className = 'update-toast';
 
     const text = document.createElement('span');
-    text.textContent = `Update v${data.version} available`;
+    text.textContent = t('updater.available', { version: data.version });
     container.appendChild(text);
 
     const btn = document.createElement('button');
     btn.className = 'update-toast__btn';
-    btn.textContent = 'Download';
+    btn.textContent = t('updater.download');
     btn.addEventListener('click', () => {
       window.funsync.updaterDownload();
       btn.disabled = true;
-      btn.textContent = 'Downloading...';
+      btn.textContent = t('updater.downloading');
     });
     container.appendChild(btn);
 
@@ -5251,12 +5410,12 @@ class App {
     container.className = 'update-toast';
 
     const text = document.createElement('span');
-    text.textContent = `v${data.version} ready — restart to update`;
+    text.textContent = t('updater.ready', { version: data.version });
     container.appendChild(text);
 
     const btn = document.createElement('button');
     btn.className = 'update-toast__btn';
-    btn.textContent = 'Restart Now';
+    btn.textContent = t('updater.restartNow');
     btn.addEventListener('click', () => {
       window.funsync.updaterInstall();
     });

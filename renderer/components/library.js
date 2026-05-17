@@ -5,6 +5,8 @@ import { rankFunscriptMatches, fuzzyMatchScore } from '../js/fuzzy-match.js';
 import { computeGridRange, hasRangeChanged } from '../js/virtual-scroll.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
 import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable } from '../js/icons.js';
+import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
 import { fuzzySearch, sortVideos, computeSpeedStats } from '../js/library-search.js';
 import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/multi-axis.js';
@@ -123,6 +125,41 @@ export class Library {
       this._resizeListenerAttached = true;
     }
 
+    // Re-translate dynamic strings on locale change. Most library text is
+    // baked into innerHTML via `t()` at render time (kebab menu items,
+    // empty states, sort/filter pickers, badges, etc.) — `translatePage()`
+    // only catches `data-i18n` attributes, so without this, switching
+    // language leaves the library partially in the old locale until the
+    // user navigates away and back. Subscribed once per Library instance.
+    if (!this._languageListenerAttached) {
+      eventBus.on('language:changed', () => {
+        if (!this._container) return;
+        // Refresh the cached header title — t() captures the active locale
+        // at call time, so the value set in show() is stale once the user
+        // switches. Only refresh the generic "Library" label, not collection
+        // names (those come from user-entered text and stay as-is).
+        if (!this._activeCollectionId) {
+          this._headerTitle = t('nav.library');
+        }
+        // Re-render the header + chip strip (covers Sort/Filters trigger
+        // labels, view-toggle aria, selection-bar buttons, search aria,
+        // and any t()-baked text in `_renderWithHeader`). The grid is
+        // re-emitted by `_applyFilters` so kebab tooltips, badges, and
+        // multi-axis labels pick up the new locale on the next pass.
+        //
+        // `_renderWithHeader` internally wires `_buildSortPicker` and
+        // `_buildFiltersPicker` — don't call them again here, or
+        // `_wirePickerDismissal` attaches duplicate document-level
+        // listeners that fight each other (first closes the popover the
+        // second just opened, making both triggers feel "dead").
+        if (this._videos?.length > 0) {
+          this._renderWithHeader();
+          this._applyFilters();
+        }
+      });
+      this._languageListenerAttached = true;
+    }
+
     // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives).
     // `library.directory` is a legacy singleton setting that app.js migrates into `library.sources` on
     // startup, so there's no need to fall back to it here.
@@ -142,7 +179,7 @@ export class Library {
     if (this._activeCollectionId) {
       const collections = this._settings.get('library.collections') || [];
       const col = collections.find(c => c.id === this._activeCollectionId);
-      this._headerTitle = col ? col.name : 'Library';
+      this._headerTitle = col ? col.name : t('nav.library');
       // Prefer the sync folder for synced collections (more informative
       // than the common ancestor of a possibly-empty additive list).
       // Fall back to common-ancestor of the frozen videoPaths for
@@ -161,7 +198,7 @@ export class Library {
           : `${availableSources.length} source${availableSources.length !== 1 ? 's' : ''}`;
       }
     } else {
-      this._headerTitle = 'Library';
+      this._headerTitle = t('nav.library');
       this._headerPath = availableSources.length > 1
         ? availableSources.map(s => s.name).join(', ')
         : (this._dirPath || '');
@@ -218,7 +255,7 @@ export class Library {
     const scanPaths = activeSources.map(s => s.path);
     if (scanPaths.length === 0) {
       if (btn) btn.classList.remove('library__refresh-btn--spinning');
-      showToast('No source folders to refresh', 'warn', 3000);
+      showToast(t('library.noSourcesToRefresh'), 'warn', 3000);
       return;
     }
 
@@ -229,16 +266,16 @@ export class Library {
       const added = afterPaths.filter(p => !beforePaths.has(p)).length;
       const removed = [...beforePaths].filter(p => !afterPaths.includes(p)).length;
       if (added === 0 && removed === 0) {
-        showToast('Library refreshed — no changes', 'info', 2500);
+        showToast(t('library.refreshedNoChanges'), 'info', 2500);
       } else {
         const parts = [];
-        if (added > 0) parts.push(`${added} new video${added !== 1 ? 's' : ''}`);
-        if (removed > 0) parts.push(`${removed} removed`);
-        showToast(`Library refreshed — ${parts.join(', ')}`, 'info', 3000);
+        if (added > 0) parts.push(t('library.refreshNewVideos', { count: added }));
+        if (removed > 0) parts.push(t('library.refreshRemoved', { count: removed }));
+        showToast(t('library.refreshedSummary', { parts: parts.join(', ') }), 'info', 3000);
       }
     } catch (err) {
       console.error('[Library] refresh failed:', err);
-      showToast(`Refresh failed: ${err?.message || 'unknown error'}`, 'error', 4000);
+      showToast(t('library.refreshFailed', { error: err?.message || 'unknown error' }), 'error', 4000);
     } finally {
       if (btn) btn.classList.remove('library__refresh-btn--spinning');
     }
@@ -277,8 +314,8 @@ export class Library {
     this._container.innerHTML = `
       <div class="library__empty">
         <div class="library__empty-icon"></div>
-        <div class="library__empty-text">Add a source folder to browse your video library</div>
-        <button class="library__empty-btn">+ Add Source Folder</button>
+        <div class="library__empty-text">${this._escapeHtml(t('library.noSourcesEmpty'))}</div>
+        <button class="library__empty-btn">${this._escapeHtml(t('library.addSourceFolder'))}</button>
       </div>
     `;
     this._container.querySelector('.library__empty-icon')
@@ -299,18 +336,18 @@ export class Library {
     // See SCOPE-desktop-redesign.md §4.4.
     this._container.innerHTML = `
       <div class="library__header">
-        <span class="library__title">${this._escapeHtml(this._headerTitle || 'Library')}</span>
+        <span class="library__title">${this._escapeHtml(this._headerTitle || t('nav.library'))}</span>
         <span class="library__dir-path" title="${this._escapeHtml(this._headerPath || '')}">${this._escapeHtml(this._headerPath || '')}</span>
         <span class="library__video-count"></span>
         <div class="library__search">
           <span class="library__search-icon" aria-hidden="true"></span>
-          <input type="text" class="library__search-input" placeholder="Search..." aria-label="Search videos">
+          <input type="text" class="library__search-input" data-i18n-placeholder="library.search" placeholder="${this._escapeHtml(t('library.search'))}" aria-label="${this._escapeHtml(t('library.searchAria'))}">
           <button class="library__search-clear" hidden aria-label="Clear search"></button>
         </div>
         <div class="library__picker library__picker--sort">
           <button class="library__picker-btn" id="library-sort-btn" aria-haspopup="listbox" aria-expanded="false">
             <span class="library__picker-icon" aria-hidden="true"></span>
-            <span class="library__picker-label">Sort</span>
+            <span class="library__picker-label" data-i18n="library.sort">Sort</span>
             <span class="library__sort-hint" hidden></span>
           </button>
           <div class="library__picker-pop" id="library-sort-pop" role="listbox" hidden></div>
@@ -318,18 +355,18 @@ export class Library {
         <div class="library__picker library__picker--filters">
           <button class="library__picker-btn" id="library-filters-btn" aria-haspopup="dialog" aria-expanded="false">
             <span class="library__picker-icon" aria-hidden="true"></span>
-            <span class="library__picker-label">Filters</span>
+            <span class="library__picker-label" data-i18n="library.filters">Filters</span>
             <span class="library__picker-badge" id="library-filters-badge" hidden></span>
           </button>
           <div class="library__picker-pop library__picker-pop--filters" id="library-filters-pop" role="dialog" aria-label="Filters" hidden></div>
         </div>
         <div class="view-toggle-group">
-          <button class="view-toggle view-toggle--grid" aria-label="Grid view" title="Grid view"></button>
-          <button class="view-toggle view-toggle--list" aria-label="List view" title="List view"></button>
+          <button class="view-toggle view-toggle--grid" aria-label="${this._escapeHtml(t('library.gridView'))}" title="${this._escapeHtml(t('library.gridView'))}"></button>
+          <button class="view-toggle view-toggle--list" aria-label="${this._escapeHtml(t('library.listView'))}" title="${this._escapeHtml(t('library.listView'))}"></button>
         </div>
-        <button class="folder-browse-btn view-toggle--folder" aria-label="Folder browse" title="Folder browse"></button>
-        <button class="library__refresh-btn" aria-label="Refresh library" title="Refresh library — pick up new files added to source folders since the app launched"></button>
-        <button class="library__select-mode-btn">Select</button>
+        <button class="folder-browse-btn view-toggle--folder" aria-label="${this._escapeHtml(t('library.folderBrowse'))}" title="${this._escapeHtml(t('library.folderBrowse'))}"></button>
+        <button class="library__refresh-btn" aria-label="${this._escapeHtml(t('library.refresh'))}" title="${this._escapeHtml(t('library.refreshTitle'))}"></button>
+        <button class="library__select-mode-btn">${this._escapeHtml(t('library.select'))}</button>
       </div>
       <!-- Stacking order under the header (top to bottom):
              1. Selection bar (multi-select mode)
@@ -345,12 +382,12 @@ export class Library {
            element uses the hidden attribute when empty so unused
            contexts collapse cleanly. -->
       <div class="library__selection-bar" hidden>
-        <span class="library__selection-count">0 selected</span>
-        <button class="library__selection-action" data-action="playlist">Add to Playlist</button>
-        <button class="library__selection-action" data-action="category">Assign Category</button>
-        <button class="library__selection-action" data-action="collection">Add to Library</button>
-        <button class="library__selection-action" data-action="vrtype">VR Type</button>
-        <button class="library__selection-cancel">Cancel</button>
+        <span class="library__selection-count">${this._escapeHtml(t('library.selectionCount', { count: 0 }))}</span>
+        <button class="library__selection-action" data-action="playlist">${this._escapeHtml(t('library.addToPlaylist'))}</button>
+        <button class="library__selection-action" data-action="category">${this._escapeHtml(t('library.assignCategory'))}</button>
+        <button class="library__selection-action" data-action="collection">${this._escapeHtml(t('library.addToCollection'))}</button>
+        <button class="library__selection-action" data-action="vrtype">${this._escapeHtml(t('library.vrType'))}</button>
+        <button class="library__selection-cancel">${this._escapeHtml(t('library.cancelSelect'))}</button>
       </div>
       <div class="library__breadcrumb" hidden></div>
       <div class="library__search-scope" hidden></div>
@@ -472,7 +509,7 @@ export class Library {
     } catch (err) {
       console.error('[Library] Scan failed:', err);
       const { showToast } = await import('../js/toast.js');
-      showToast(`Library scan failed: ${err.message || err}`, 'error', 6000);
+      showToast(t('library.scanFailed', { error: err.message || err }), 'error', 6000);
     } finally {
       this._scanning = false;
       record(`library scan (${this._videos?.length || 0} videos)`, performance.now() - _scanT0);
@@ -480,7 +517,7 @@ export class Library {
 
     if (!this._videos || this._videos.length === 0) {
       const countEl = this._container?.querySelector('.library__video-count');
-      if (countEl) countEl.textContent = '0 videos';
+      if (countEl) countEl.textContent = t('library.videoCount', { count: 0 });
       const gridWrapper = this._container?.querySelector('.library__grid-wrapper');
       if (gridWrapper) {
         // Empty-source-dir state — adds an icon + actionable hint
@@ -491,8 +528,8 @@ export class Library {
         gridWrapper.innerHTML = `
           <div class="library__empty">
             <div class="library__empty-icon"></div>
-            <div class="library__empty-text">No videos in this source</div>
-            <div class="library__empty-hint">Add video files to the folder, or pick a different source from the Library dropdown.</div>
+            <div class="library__empty-text">${this._escapeHtml(t('library.emptyTitle'))}</div>
+            <div class="library__empty-hint">${this._escapeHtml(t('library.emptyHint'))}</div>
           </div>
         `;
         gridWrapper.querySelector('.library__empty-icon')
@@ -544,7 +581,7 @@ export class Library {
     if (failedPaths.length > 0) {
       const { showToast } = await import('../js/toast.js');
       const names = failedPaths.map(p => p.split(/[\\/]/).pop());
-      showToast(`Source unavailable: ${names.join(', ')}`, 'warn', 5000);
+      showToast(t('library.sourceUnavailable', { names: names.join(', ') }), 'warn', 5000);
     }
 
     this._applyManualAssociations();
@@ -846,7 +883,7 @@ export class Library {
 
   _showLoadingState() {
     const countEl = this._container?.querySelector('.library__video-count');
-    if (countEl) countEl.textContent = 'Loading...';
+    if (countEl) countEl.textContent = t('library.loading');
     const grid = this._container?.querySelector('.library__grid');
     if (grid) {
       grid.innerHTML = `
@@ -976,16 +1013,16 @@ export class Library {
       empty.className = 'library__empty';
       const text = document.createElement('div');
       text.className = 'library__empty-text';
-      text.textContent = filtersActive ? 'No videos match your filters' : 'No videos in this view';
+      text.textContent = filtersActive ? t('library.emptyFilteredTitle') : t('library.emptyTitle');
       empty.appendChild(text);
       if (filtersActive) {
         const hint = document.createElement('div');
         hint.className = 'library__empty-hint';
-        hint.textContent = 'Try a different search term or clear the active filters.';
+        hint.textContent = t('library.emptyFilteredHint');
         empty.appendChild(hint);
         const clearBtn = document.createElement('button');
         clearBtn.className = 'library__empty-btn';
-        clearBtn.textContent = 'Clear filters';
+        clearBtn.textContent = t('library.emptyFilteredCta');
         clearBtn.addEventListener('click', () => this._clearAllFilters());
         empty.appendChild(clearBtn);
       }
@@ -1306,7 +1343,7 @@ export class Library {
 
     const root = document.createElement('button');
     root.className = 'library__breadcrumb-crumb';
-    root.textContent = 'All Sources';
+    root.textContent = t('library.allSources');
     root.addEventListener('click', () => this._navigateToFolder(null));
     crumb.appendChild(root);
 
@@ -1401,17 +1438,19 @@ export class Library {
   // Filter / sort pickers (post-redesign 2026-04-27)
   // ============================================================
 
+  // Translation keys, not literal labels — resolved at render time so a
+  // locale switch updates the picker without rebuilding the option list.
   static _SORT_OPTIONS = [
-    { value: 'name:asc',         label: 'Name A-Z' },
-    { value: 'name:desc',        label: 'Name Z-A' },
-    { value: 'dateAdded:desc',   label: 'Recently Added' },
-    { value: 'dateAdded:asc',    label: 'Oldest First' },
-    { value: 'duration:asc',     label: 'Duration Short-Long' },
-    { value: 'duration:desc',    label: 'Duration Long-Short' },
-    { value: 'avgSpeed:asc',     label: 'Avg Speed Slow-Fast', isSpeed: true },
-    { value: 'avgSpeed:desc',    label: 'Avg Speed Fast-Slow', isSpeed: true },
-    { value: 'maxSpeed:asc',     label: 'Max Speed Slow-Fast', isSpeed: true },
-    { value: 'maxSpeed:desc',    label: 'Max Speed Fast-Slow', isSpeed: true },
+    { value: 'name:asc',         labelKey: 'library.sortNameAsc' },
+    { value: 'name:desc',        labelKey: 'library.sortNameDesc' },
+    { value: 'dateAdded:desc',   labelKey: 'library.sortDateAddedDesc' },
+    { value: 'dateAdded:asc',    labelKey: 'library.sortDateAddedAsc' },
+    { value: 'duration:asc',     labelKey: 'library.sortDurationAsc' },
+    { value: 'duration:desc',    labelKey: 'library.sortDurationDesc' },
+    { value: 'avgSpeed:asc',     labelKey: 'library.sortAvgSpeedAsc', isSpeed: true },
+    { value: 'avgSpeed:desc',    labelKey: 'library.sortAvgSpeedDesc', isSpeed: true },
+    { value: 'maxSpeed:asc',     labelKey: 'library.sortMaxSpeedAsc', isSpeed: true },
+    { value: 'maxSpeed:desc',    labelKey: 'library.sortMaxSpeedDesc', isSpeed: true },
   ];
 
   /**
@@ -1430,7 +1469,7 @@ export class Library {
     const updateButtonLabel = () => {
       const cur = Library._SORT_OPTIONS.find(o => o.value === this._sortKey);
       labelEl.firstChild?.remove?.();
-      labelEl.textContent = cur ? cur.label : 'Sort';
+      labelEl.textContent = cur ? t(cur.labelKey) : t('library.sort');
     };
     updateButtonLabel();
 
@@ -1453,7 +1492,7 @@ export class Library {
         if (!this._scanning) this._applyFilters();
       });
       const txt = document.createElement('span');
-      txt.textContent = opt.label;
+      txt.textContent = t(opt.labelKey);
       item.appendChild(radio);
       item.appendChild(txt);
       pop.appendChild(item);
@@ -1479,10 +1518,10 @@ export class Library {
 
     pop.replaceChildren();
 
-    const tabSection = this._buildPickerSection('Match status', 'tab', [
-      { value: 'all', label: 'All' },
-      { value: 'matched', label: 'Matched' },
-      { value: 'unmatched', label: 'Unmatched' },
+    const tabSection = this._buildPickerSection(t('library.filterMatchStatus'), 'tab', [
+      { value: 'all', label: t('library.filterAll') },
+      { value: 'matched', label: t('library.filterMatched') },
+      { value: 'unmatched', label: t('library.filterUnmatched') },
     ], () => this._activeTab, (val) => {
       // Reuse the existing tab switcher — preserves all downstream
       // behaviour (sort options re-disable on unmatched, etc.).
@@ -1492,10 +1531,10 @@ export class Library {
     });
     pop.appendChild(tabSection);
 
-    const vrSection = this._buildPickerSection('VR', 'vr', [
-      { value: 'all', label: 'All' },
-      { value: 'vr', label: 'VR Only' },
-      { value: 'flat', label: 'Non-VR' },
+    const vrSection = this._buildPickerSection(t('library.filterVR'), 'vr', [
+      { value: 'all', label: t('library.filterAll') },
+      { value: 'vr', label: t('library.filterVROnly') },
+      { value: 'flat', label: t('library.filterNonVR') },
     ], () => this._vrFilter || 'all', (val) => {
       this._vrFilter = val;
       this._renderFilterChips();
@@ -1571,8 +1610,8 @@ export class Library {
       state: { tab: this._activeTab, vr: this._vrFilter || 'all' },
       defaults: { tab: 'all', vr: 'all' },
       labels: {
-        tab: { matched: 'Matched', unmatched: 'Unmatched' },
-        vr:  { vr: 'VR Only', flat: 'Non-VR' },
+        tab: { matched: t('library.filterMatched'), unmatched: t('library.filterUnmatched') },
+        vr:  { vr: t('library.filterVROnly'), flat: t('library.filterNonVR') },
       },
       iconFactory: (_name, size) => icon(X, { width: size, height: size }),
       onRemove: (key) => {
@@ -1665,18 +1704,18 @@ export class Library {
     const label = document.createElement('span');
     label.className = 'library__search-scope-label';
     if (this._searchGlobalOverride) {
-      label.textContent = 'Searching everywhere';
+      label.textContent = t('library.searchEverywhere');
     } else {
       const folderLabel = this._folderIndex?.get(this._currentFolderPath)?.label
         || this._currentFolderPath.split('/').pop()
         || 'current folder';
-      label.textContent = `Searching in: ${folderLabel}`;
+      label.textContent = t('library.searchingIn', { folder: folderLabel });
     }
     pill.appendChild(label);
 
     const toggle = document.createElement('button');
     toggle.className = 'library__search-scope-toggle';
-    toggle.textContent = this._searchGlobalOverride ? 'Limit to this folder' : 'Search everywhere';
+    toggle.textContent = this._searchGlobalOverride ? t('library.limitToFolder') : t('library.searchEverywhere');
     toggle.addEventListener('click', () => {
       this._searchGlobalOverride = !this._searchGlobalOverride;
       this._applyFilters();
@@ -1732,14 +1771,15 @@ export class Library {
     const node = this._folderIndex.get(this._currentFolderPath);
     const label = document.createElement('span');
     label.className = 'library__folder-scope-label';
-    label.textContent = `Showing: ${node?.label || this._currentFolderPath.split('/').pop() || 'current folder'}`;
+    const folder = node?.label || this._currentFolderPath.split('/').pop() || 'current folder';
+    label.textContent = t('library.showingFolder', { folder });
     pill.appendChild(label);
 
     const clear = document.createElement('button');
     clear.className = 'library__folder-scope-clear';
     clear.type = 'button';
-    clear.textContent = 'Show all';
-    clear.title = 'Clear folder scope';
+    clear.textContent = t('library.showAll');
+    clear.title = t('library.clearFolderScope');
     clear.addEventListener('click', () => this._clearFolderScope());
     pill.appendChild(clear);
   }
@@ -1846,7 +1886,7 @@ export class Library {
     if (video.hasFunscript) {
       const fsBadge = document.createElement('span');
       fsBadge.className = `library__funscript-badge--inline ${video._manualAssociation ? 'library__funscript-badge--manual' : 'library__funscript-badge--auto'}`;
-      fsBadge.title = video._manualAssociation ? 'Funscript (manual)' : 'Funscript (auto-detected)';
+      fsBadge.title = video._manualAssociation ? t('library.funscriptManual') : t('library.funscriptAuto');
       fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
       badges.appendChild(fsBadge);
     }
@@ -1854,7 +1894,7 @@ export class Library {
     if (video.hasSubtitle) {
       const subBadge = document.createElement('span');
       subBadge.className = `library__subtitle-badge--inline ${video._manualSubtitle ? 'library__subtitle-badge--manual' : 'library__subtitle-badge--auto'}`;
-      subBadge.title = video._manualSubtitle ? 'Subtitles (manual)' : 'Subtitles (auto-detected)';
+      subBadge.title = video._manualSubtitle ? t('library.subtitlesManual') : t('library.subtitlesAuto');
       subBadge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
       badges.appendChild(subBadge);
     }
@@ -1864,8 +1904,8 @@ export class Library {
     if (vrOverride === 'vr' || vrOverride === 'flat') {
       const vrBadge = document.createElement('span');
       vrBadge.className = `library__vr-badge library__vr-badge--manual library__vr-badge--${vrOverride}`;
-      vrBadge.title = vrOverride === 'vr' ? 'VR (manual)' : 'Flat (manual)';
-      vrBadge.textContent = vrOverride === 'vr' ? 'VR' : 'FLAT';
+      vrBadge.title = vrOverride === 'vr' ? t('library.vrManual') : t('library.flatManual');
+      vrBadge.textContent = vrOverride === 'vr' ? t('library.vrBadge') : t('library.flatBadge');
       badges.appendChild(vrBadge);
     }
 
@@ -1905,7 +1945,7 @@ export class Library {
     const kebab = document.createElement('button');
     kebab.className = 'library__list-kebab';
     kebab.appendChild(icon(EllipsisVertical, { width: 16, height: 16 }));
-    kebab.title = 'Options';
+    kebab.title = t('library.kebabOptions');
     kebab.addEventListener('click', (e) => {
       e.stopPropagation();
       this._showKebabMenu(video, kebab, row);
@@ -1967,7 +2007,7 @@ export class Library {
     const kebab = document.createElement('button');
     kebab.className = isList ? 'library__list-kebab' : 'library__kebab-btn';
     kebab.appendChild(icon(EllipsisVertical, { width: 16, height: 16 }));
-    kebab.title = 'Folder options';
+    kebab.title = t('library.kebabFolderOptions');
     kebab.addEventListener('click', (e) => {
       e.stopPropagation();
       this._showFolderKebabMenu(node, kebab, card);
@@ -2036,7 +2076,7 @@ export class Library {
 
     const pinItem = document.createElement('button');
     pinItem.className = 'library__kebab-menu-item';
-    pinItem.textContent = 'Pin as Collection';
+    pinItem.textContent = t('library.pinAsCollection');
     pinItem.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -2046,7 +2086,7 @@ export class Library {
 
     const selectItem = document.createElement('button');
     selectItem.className = 'library__kebab-menu-item';
-    selectItem.textContent = 'Select all in folder';
+    selectItem.textContent = t('library.selectAllInFolder');
     selectItem.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -2089,10 +2129,10 @@ export class Library {
     const paths = descendantsOf(this._folderIndex, node.path).map(v => v.path);
     if (paths.length === 0) {
       const { showToast } = await import('../js/toast.js');
-      showToast('Folder is empty', 'warn');
+      showToast(t('library.folderEmpty'), 'warn');
       return;
     }
-    const name = await Modal.prompt('Pin Folder as Collection', 'Collection name', node.label);
+    const name = await Modal.prompt(t('library.pinFolderTitle'), t('library.pinFolderLabel'), node.label);
     if (!name) return;
 
     // Auto-enable sync-with-source. Pinning a folder has the same
@@ -2119,7 +2159,7 @@ export class Library {
     this._settings.set('library.collections', collections);
 
     const { showToast } = await import('../js/toast.js');
-    showToast(`Pinned "${name}" — syncing ${paths.length} video${paths.length !== 1 ? 's' : ''} from folder`, 'info');
+    showToast(t('library.pinned', { name, count: paths.length }), 'info');
   }
 
   _createCard(video) {
@@ -2172,7 +2212,7 @@ export class Library {
     const kebab = document.createElement('button');
     kebab.className = 'library__kebab-btn';
     kebab.appendChild(icon(EllipsisVertical, { width: 16, height: 16 }));
-    kebab.title = 'Options';
+    kebab.title = t('library.kebabOptions');
     kebab.addEventListener('click', (e) => {
       e.stopPropagation();
       this._showKebabMenu(video, kebab, card);
@@ -2188,7 +2228,7 @@ export class Library {
     if (video.hasFunscript) {
       const badge = document.createElement('span');
       badge.className = `library__funscript-badge ${video._manualAssociation ? 'library__funscript-badge--manual' : 'library__funscript-badge--auto'}`;
-      badge.title = video._manualAssociation ? 'Funscript (manual)' : 'Funscript (auto-detected)';
+      badge.title = video._manualAssociation ? t('library.funscriptManual') : t('library.funscriptAuto');
       badge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
       this._getOrCreateBadgesContainer(thumbnail).appendChild(badge);
     }
@@ -2196,7 +2236,7 @@ export class Library {
     if (video.hasSubtitle) {
       const subBadge = document.createElement('span');
       subBadge.className = `library__subtitle-badge ${video._manualSubtitle ? 'library__subtitle-badge--manual' : 'library__subtitle-badge--auto'}`;
-      subBadge.title = video._manualSubtitle ? 'Subtitles (manual)' : 'Subtitles (auto-detected)';
+      subBadge.title = video._manualSubtitle ? t('library.subtitlesManual') : t('library.subtitlesAuto');
       subBadge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
       this._getOrCreateBadgesContainer(thumbnail).appendChild(subBadge);
     }
@@ -2208,8 +2248,8 @@ export class Library {
     if (vrOverride === 'vr' || vrOverride === 'flat') {
       const vrBadge = document.createElement('span');
       vrBadge.className = `library__vr-badge library__vr-badge--manual library__vr-badge--${vrOverride}`;
-      vrBadge.title = vrOverride === 'vr' ? 'VR (manual)' : 'Flat (manual)';
-      vrBadge.textContent = vrOverride === 'vr' ? 'VR' : 'FLAT';
+      vrBadge.title = vrOverride === 'vr' ? t('library.vrManual') : t('library.flatManual');
+      vrBadge.textContent = vrOverride === 'vr' ? t('library.vrBadge') : t('library.flatBadge');
       this._getOrCreateBadgesContainer(thumbnail).appendChild(vrBadge);
     }
 
@@ -3056,7 +3096,7 @@ export class Library {
 
     const badge = document.createElement('span');
     badge.className = `library__speed-badge ${colorClass}`;
-    badge.title = `Avg: ${stats.avgSpeed} units/s — Max: ${stats.maxSpeed} units/s`;
+    badge.title = t('library.speedBadgeTitle', { avg: stats.avgSpeed, max: stats.maxSpeed });
     badge.appendChild(icon(Gauge, { width: 12, height: 12, 'stroke-width': 2.5 }));
     containerEl.appendChild(badge);
   }
@@ -3088,14 +3128,14 @@ export class Library {
       const count = this._countMultiAxisScripts(video._multiAxis);
       const badge = document.createElement('span');
       badge.className = inline ? 'library__multi-badge--inline' : 'library__multi-badge';
-      badge.title = count > 0 ? `Multi-axis (${count} scripts)` : 'Multi-axis';
+      badge.title = count > 0 ? t('library.multiAxisCount', { count }) : t('library.multiAxis');
       badge.appendChild(icon(Layers2, { width: 14, height: 14, 'stroke-width': 2.5 }));
       containerEl.appendChild(badge);
     } else if (Array.isArray(video._customRouting) && video._customRouting.length > 0) {
       const n = video._customRouting.length;
       const badge = document.createElement('span');
       badge.className = inline ? 'library__custom-badge--inline' : 'library__custom-badge';
-      badge.title = `Custom routing (${n} ${n === 1 ? 'route' : 'routes'})`;
+      badge.title = t('library.customRoutingTitle', { count: n });
       badge.appendChild(icon(Cable, { width: 14, height: 14, 'stroke-width': 2.5 }));
       containerEl.appendChild(badge);
     }
@@ -3294,11 +3334,11 @@ export class Library {
     const vrItem = document.createElement('button');
     vrItem.className = 'library__kebab-menu-item';
     if (currentVROverride === 'vr') {
-      vrItem.textContent = 'Reset VR (currently: VR)';
+      vrItem.textContent = t('library.kebabResetVRCurrentlyVR');
     } else if (currentVROverride === 'flat') {
-      vrItem.textContent = 'Reset VR (currently: Flat)';
+      vrItem.textContent = t('library.kebabResetVRCurrentlyFlat');
     } else {
-      vrItem.textContent = heuristicVR ? 'Mark as Flat' : 'Mark as VR';
+      vrItem.textContent = heuristicVR ? t('library.kebabMarkFlat') : t('library.kebabMarkVR');
     }
     vrItem.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -3309,7 +3349,7 @@ export class Library {
 
     const assocBtn = document.createElement('button');
     assocBtn.className = 'library__kebab-menu-item';
-    assocBtn.textContent = video.hasFunscript ? 'Change Funscript' : 'Associate Funscript';
+    assocBtn.textContent = video.hasFunscript ? t('library.changeFunscriptBtn') : t('library.associateFunscriptBtn');
     assocBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -3323,7 +3363,7 @@ export class Library {
     if (video._manualAssociation) {
       const removeBtn = document.createElement('button');
       removeBtn.className = 'library__kebab-menu-item library__kebab-menu-item--danger';
-      removeBtn.textContent = 'Remove Funscript';
+      removeBtn.textContent = t('library.kebabRemoveFunscript');
       removeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this._closeMenu();
@@ -3335,7 +3375,7 @@ export class Library {
     // Subtitle association
     const subBtn = document.createElement('button');
     subBtn.className = 'library__kebab-menu-item';
-    subBtn.textContent = video.hasSubtitle ? 'Change Subtitle' : 'Associate Subtitle';
+    subBtn.textContent = video.hasSubtitle ? t('library.kebabChangeSubtitle') : t('library.kebabAssociateSubtitle');
     subBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -3348,7 +3388,7 @@ export class Library {
     if (video._manualSubtitle) {
       const removeSubBtn = document.createElement('button');
       removeSubBtn.className = 'library__kebab-menu-item library__kebab-menu-item--danger';
-      removeSubBtn.textContent = 'Remove Subtitle';
+      removeSubBtn.textContent = t('library.kebabRemoveSubtitle');
       removeSubBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this._closeMenu();
@@ -3360,7 +3400,7 @@ export class Library {
     // Add to Playlist
     const playlistBtn = document.createElement('button');
     playlistBtn.className = 'library__kebab-menu-item';
-    playlistBtn.textContent = 'Add to Playlist';
+    playlistBtn.textContent = t('library.addToPlaylist');
     playlistBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -3371,7 +3411,7 @@ export class Library {
     // Assign Category
     const categoryBtn = document.createElement('button');
     categoryBtn.className = 'library__kebab-menu-item';
-    categoryBtn.textContent = 'Assign Category';
+    categoryBtn.textContent = t('library.assignCategory');
     categoryBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -3384,7 +3424,7 @@ export class Library {
     if (collections.length > 0) {
       const libBtn = document.createElement('button');
       libBtn.className = 'library__kebab-menu-item';
-      libBtn.textContent = 'Add to Library';
+      libBtn.textContent = t('library.addToCollection');
       libBtn.addEventListener('click', async (e) => {
         e.stopPropagation();
         this._closeMenu();
@@ -3396,7 +3436,7 @@ export class Library {
     // Open file location
     const openLocBtn = document.createElement('button');
     openLocBtn.className = 'library__kebab-menu-item';
-    openLocBtn.textContent = 'Open File Location';
+    openLocBtn.textContent = t('library.openFileLocation');
     openLocBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       this._closeMenu();
@@ -3482,7 +3522,7 @@ export class Library {
     const savedCustom = existingEntry.custom || null;
 
     const chosen = await Modal.open({
-      title: 'Associate Funscript',
+      title: t('library.assoc.title'),
       onRender: (body, close) => {
         // --- Mode radio ---
         const modeRow = document.createElement('div');
@@ -3497,7 +3537,7 @@ export class Library {
 
         const labelSingle = document.createElement('label');
         labelSingle.htmlFor = 'assoc-single';
-        labelSingle.textContent = 'Single Axis';
+        labelSingle.textContent = t('library.assoc.modeSingle');
 
         const radioMulti = document.createElement('input');
         radioMulti.type = 'radio';
@@ -3508,7 +3548,7 @@ export class Library {
 
         const labelMulti = document.createElement('label');
         labelMulti.htmlFor = 'assoc-multi';
-        labelMulti.textContent = 'Multi Axis';
+        labelMulti.textContent = t('library.assoc.modeMulti');
 
         const radioCustom = document.createElement('input');
         radioCustom.type = 'radio';
@@ -3519,7 +3559,7 @@ export class Library {
 
         const labelCustom = document.createElement('label');
         labelCustom.htmlFor = 'assoc-custom';
-        labelCustom.textContent = 'Custom Routing';
+        labelCustom.textContent = t('library.assoc.modeCustom');
 
         modeRow.appendChild(radioSingle);
         modeRow.appendChild(labelSingle);
@@ -3548,18 +3588,18 @@ export class Library {
           const currentName = singleCurrentPath.split(/[\\/]/).pop();
           const currentLabel = document.createElement('span');
           currentLabel.className = 'library__assoc-current-label';
-          currentLabel.textContent = 'Current:';
+          currentLabel.textContent = t('library.assoc.current');
           const currentFile = document.createElement('span');
           currentFile.className = 'library__assoc-current-name';
           currentFile.textContent = currentName;
           currentFile.title = singleCurrentPath;
           const currentType = document.createElement('span');
           currentType.className = 'library__assoc-current-type';
-          currentType.textContent = singleCurrentIsManual ? 'manual' : 'auto';
+          currentType.textContent = singleCurrentIsManual ? t('library.assoc.currentManual') : t('library.assoc.currentAuto');
           const clearBtn = document.createElement('button');
           clearBtn.className = 'library__assoc-current-clear';
           clearBtn.textContent = '✕';
-          clearBtn.title = 'Remove association';
+          clearBtn.title = t('library.assoc.removeAssociation');
           clearBtn.addEventListener('click', () => {
             close({ mode: 'remove' });
           });
@@ -3567,7 +3607,7 @@ export class Library {
         } else {
           const noScript = document.createElement('span');
           noScript.className = 'library__assoc-current-none';
-          noScript.textContent = 'No script associated';
+          noScript.textContent = t('library.assoc.noScript');
           currentSection.appendChild(noScript);
         }
         singlePanel.appendChild(currentSection);
@@ -3575,7 +3615,7 @@ export class Library {
         // Change section header
         const changeHeader = document.createElement('div');
         changeHeader.className = 'library__assoc-section-header';
-        changeHeader.textContent = singleCurrentPath ? 'Change to:' : 'Select script:';
+        changeHeader.textContent = singleCurrentPath ? t('library.assoc.changeTo') : t('library.assoc.selectScript');
         singlePanel.appendChild(changeHeader);
 
         // Fuzzy ranked list
@@ -3601,7 +3641,7 @@ export class Library {
         } else {
           const msg = document.createElement('div');
           msg.className = 'modal-message modal-message--muted';
-          msg.textContent = 'No funscripts found in directory. Use Browse.';
+          msg.textContent = t('library.assoc.noFunscripts');
           singlePanel.appendChild(msg);
         }
 
@@ -3611,7 +3651,7 @@ export class Library {
 
         const browseRow = document.createElement('button');
         browseRow.className = 'modal-list-item library__browse-fallback';
-        browseRow.textContent = 'Browse...';
+        browseRow.textContent = t('library.assoc.browse');
         browseRow.addEventListener('click', async () => {
           const result = await window.funsync.selectFunscript();
           if (result) close({ mode: 'single', path: result.path, name: result.name });
@@ -3627,7 +3667,7 @@ export class Library {
         // auto-detected funscript) — user must pick a script first.
         const singleSaveBtn = document.createElement('button');
         singleSaveBtn.className = 'library__assoc-save-btn';
-        singleSaveBtn.textContent = 'Save';
+        singleSaveBtn.textContent = t('library.assoc.save');
         singleSaveBtn.disabled = !singleCurrentPath;
         singleSaveBtn.addEventListener('click', () => {
           if (!singleCurrentPath) return;
@@ -3661,12 +3701,12 @@ export class Library {
         const updateHeader = () => {
           const remainingRows = varSection.querySelectorAll('.library__assoc-variant-row').length;
           varHeader.textContent = remainingRows > 0
-            ? `Variations (${remainingRows})`
-            : 'Variations';
+            ? t('library.assoc.variationsCount', { count: remainingRows })
+            : t('library.assoc.variations');
         };
         varHeader.textContent = variantList.length > 0
-          ? `Variations (${variantList.length})`
-          : 'Variations';
+          ? t('library.assoc.variationsCount', { count: variantList.length })
+          : t('library.assoc.variations');
         varSection.appendChild(varHeader);
 
         for (const v of variantList) {
@@ -3686,7 +3726,7 @@ export class Library {
             removeBtn.type = 'button';
             removeBtn.className = 'library__assoc-variant-remove';
             removeBtn.textContent = '✕';
-            removeBtn.title = 'Remove this variation (file kept on disk)';
+            removeBtn.title = t('library.assoc.removeVariation');
             removeBtn.addEventListener('click', (e) => {
               e.stopPropagation();
               const all = this._settings.get('library.manualVariants') || {};
@@ -3703,8 +3743,8 @@ export class Library {
             // understand why it can't be removed via this UI.
             const autoTag = document.createElement('span');
             autoTag.className = 'library__assoc-variant-tag';
-            autoTag.textContent = 'auto';
-            autoTag.title = 'Auto-detected from a file in the same folder. Rename or remove the file to clear it.';
+            autoTag.textContent = t('library.assoc.autoVariantTag');
+            autoTag.title = t('library.assoc.autoVariantTitle');
             vRow.appendChild(autoTag);
           }
 
@@ -3713,7 +3753,7 @@ export class Library {
 
         const addVarBtn = document.createElement('button');
         addVarBtn.className = 'modal-list-item library__browse-fallback';
-        addVarBtn.textContent = '+ Add Variation...';
+        addVarBtn.textContent = t('library.assoc.addVariation');
         addVarBtn.addEventListener('click', async () => {
           close({ mode: 'addVariantFlow' });
         });
@@ -3742,7 +3782,7 @@ export class Library {
 
         // Main axis row
         const axisRows = [];
-        const mainRow = this._createAxisDropdown('Main (Stroke)', 'main', allScripts, savedMulti?.main || (video.funscriptPath || ''), video.name);
+        const mainRow = this._createAxisDropdown(t('library.assoc.axisMain'), 'main', allScripts, savedMulti?.main || (video.funscriptPath || ''), video.name);
         multiPanel.appendChild(mainRow.row);
         axisRows.push(mainRow);
 
@@ -3768,7 +3808,7 @@ export class Library {
         bpCheck.checked = !!savedMulti?.buttplugVib;
         const bpLabel = document.createElement('label');
         bpLabel.htmlFor = 'assoc-bp-vib';
-        bpLabel.textContent = 'Use Buttplug.io for vibrations';
+        bpLabel.textContent = t('library.assoc.useButtplugVib');
         bpRow.appendChild(bpCheck);
         bpRow.appendChild(bpLabel);
         multiPanel.appendChild(bpRow);
@@ -3776,7 +3816,7 @@ export class Library {
         // Save button
         const saveBtn = document.createElement('button');
         saveBtn.className = 'library__assoc-save-btn';
-        saveBtn.textContent = 'Save';
+        saveBtn.textContent = t('library.assoc.save');
         saveBtn.addEventListener('click', () => {
           const axes = {};
           for (const ar of axisRows) {
@@ -3823,14 +3863,14 @@ export class Library {
             const header = document.createElement('div');
             header.className = 'library__custom-route-header';
             const title = document.createElement('span');
-            title.textContent = isMain ? '★ Main (supports variations)' : `Route ${i + 1}`;
+            title.textContent = isMain ? t('library.assoc.routeMain') : t('library.assoc.routeNumbered', { n: i + 1 });
             title.className = 'library__custom-route-title';
             header.appendChild(title);
             if (!isMain) {
               const delBtn = document.createElement('button');
               delBtn.className = 'library__assoc-current-clear';
               delBtn.textContent = '✕';
-              delBtn.title = 'Remove route';
+              delBtn.title = t('library.assoc.removeRoute');
               delBtn.addEventListener('click', () => { routes.splice(i, 1); renderCustomRoutes(); });
               header.appendChild(delBtn);
             }
@@ -3840,13 +3880,13 @@ export class Library {
             const devRow = document.createElement('div');
             devRow.className = 'library__custom-route-field';
             const devLabel = document.createElement('span');
-            devLabel.textContent = 'Device:';
+            devLabel.textContent = t('library.assoc.device');
             devLabel.className = 'library__assoc-axis-label';
             const devSelect = document.createElement('select');
             devSelect.className = 'connection-panel__device-select';
             const defaultOpt = document.createElement('option');
             defaultOpt.value = '';
-            defaultOpt.textContent = knownDevices.length > 0 ? '-- Select device --' : 'Connect a device first';
+            defaultOpt.textContent = knownDevices.length > 0 ? t('library.assoc.selectDevice') : t('library.assoc.connectDeviceFirst');
             devSelect.appendChild(defaultOpt);
             for (const kd of knownDevices) {
               const opt = document.createElement('option');
@@ -3905,8 +3945,8 @@ export class Library {
               const testBtn = document.createElement('button');
               testBtn.type = 'button';
               testBtn.className = 'library__assoc-test-btn';
-              testBtn.textContent = 'Test';
-              testBtn.title = 'Fire a short pulse so you can confirm the selected device';
+              testBtn.textContent = t('library.assoc.test');
+              testBtn.title = t('library.assoc.testTitle');
               testBtn.addEventListener('click', async () => {
                 if (!route.deviceId) return;
                 testBtn.disabled = true;
@@ -3919,17 +3959,17 @@ export class Library {
                     testBtn.textContent = '✓';
                   } else {
                     testBtn.textContent = '✕';
-                    testBtn.title = result?.reason || 'Test failed';
-                    showToast(`Test failed: ${result?.reason || 'unknown error'}`, 'warn');
+                    testBtn.title = result?.reason || t('library.assoc.testFailed');
+                    showToast(t('library.assoc.testFailedToast', { reason: result?.reason || 'unknown error' }), 'warn');
                   }
                 } catch (err) {
                   testBtn.textContent = '✕';
-                  showToast(`Test error: ${err.message}`, 'error');
+                  showToast(t('library.assoc.testErrorToast', { message: err.message }), 'error');
                 } finally {
                   setTimeout(() => {
                     testBtn.disabled = false;
                     testBtn.textContent = origText;
-                    testBtn.title = 'Fire a short pulse so you can confirm the selected device';
+                    testBtn.title = t('library.assoc.testTitle');
                   }, 1200);
                 }
               });
@@ -3942,16 +3982,16 @@ export class Library {
             const scriptRow = document.createElement('div');
             scriptRow.className = 'library__custom-route-field';
             const scriptLabel = document.createElement('span');
-            scriptLabel.textContent = 'Script:';
+            scriptLabel.textContent = t('library.assoc.script');
             scriptLabel.className = 'library__assoc-axis-label';
             const scriptName = document.createElement('span');
             scriptName.className = 'library__custom-route-script';
-            scriptName.textContent = route.scriptName || route.scriptPath?.split(/[\\/]/).pop() || '(none)';
+            scriptName.textContent = route.scriptName || route.scriptPath?.split(/[\\/]/).pop() || t('library.assoc.scriptNone');
             scriptName.title = route.scriptPath || '';
             const browseBtn = document.createElement('button');
             browseBtn.className = 'connection-panel__btn';
             browseBtn.style.cssText = 'min-width:auto;padding:4px 10px;font-size:11px';
-            browseBtn.textContent = 'Select';
+            browseBtn.textContent = t('library.assoc.selectScriptBtn');
             browseBtn.addEventListener('click', async () => {
               const picked = await this._showVariantSearchModal(video);
               if (picked) {
@@ -3972,7 +4012,7 @@ export class Library {
           // Add Route button
           const addBtn = document.createElement('button');
           addBtn.className = 'modal-list-item library__browse-fallback';
-          addBtn.textContent = '+ Add Route';
+          addBtn.textContent = t('library.assoc.addRoute');
           addBtn.addEventListener('click', () => {
             routes.push({ deviceId: '', scriptPath: '', scriptName: '', role: 'axis' });
             renderCustomRoutes();
@@ -3983,7 +4023,7 @@ export class Library {
           const saveBtn = document.createElement('button');
           saveBtn.className = 'library__assoc-save-btn';
           saveBtn.style.marginTop = '12px';
-          saveBtn.textContent = 'Save';
+          saveBtn.textContent = t('library.assoc.save');
           saveBtn.addEventListener('click', () => {
             const mainRoute = routes.find(r => r.role === 'main');
             if (!mainRoute || !mainRoute.scriptPath) return;
@@ -4074,7 +4114,7 @@ export class Library {
     const ranked = allScripts.length > 0 ? rankFunscriptMatches(video.name, allScripts, 0) : [];
 
     return Modal.open({
-      title: 'Select Script for Variation',
+      title: t('library.assoc.variantSearchTitle'),
       onRender: (body, close) => {
         if (ranked.length > 0) {
           const list = document.createElement('div');
@@ -4109,7 +4149,7 @@ export class Library {
 
         const browseRow = document.createElement('button');
         browseRow.className = 'modal-list-item library__browse-fallback';
-        browseRow.textContent = 'Browse...';
+        browseRow.textContent = t('library.assoc.browse');
         browseRow.addEventListener('click', async () => {
           const result = await window.funsync.selectFunscript();
           if (result) close(result);
@@ -4139,7 +4179,7 @@ export class Library {
     if (!seen.has(nameNoExt.toLowerCase())) suggestions.push(nameNoExt);
 
     const label = await Modal.open({
-      title: 'Name This Variation',
+      title: t('library.variantNamingTitle'),
       onRender: (body, close) => {
         const hint = document.createElement('div');
         hint.className = 'library__collection-count';
@@ -4151,7 +4191,7 @@ export class Library {
           const sugLabel = document.createElement('div');
           sugLabel.className = 'library__collection-count';
           sugLabel.style.marginBottom = '6px';
-          sugLabel.textContent = 'Suggestions:';
+          sugLabel.textContent = t('library.variantSuggestionsLabel');
           body.appendChild(sugLabel);
 
           const sugList = document.createElement('div');
@@ -4175,20 +4215,20 @@ export class Library {
         const customLabel = document.createElement('div');
         customLabel.className = 'library__collection-count';
         customLabel.style.marginBottom = '6px';
-        customLabel.textContent = 'Custom name:';
+        customLabel.textContent = t('library.variantCustomLabel');
         body.appendChild(customLabel);
 
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'modal-input';
-        input.placeholder = 'Enter a name...';
+        input.placeholder = t('library.variantPlaceholder');
         input.style.marginBottom = '12px';
         body.appendChild(input);
 
         const confirmBtn = document.createElement('button');
         confirmBtn.className = 'library__assoc-save-btn';
         confirmBtn.style.cssText = 'display:block;width:66%;margin:0 auto';
-        confirmBtn.textContent = 'OK';
+        confirmBtn.textContent = t('library.variantConfirm');
         confirmBtn.addEventListener('click', () => { const v = input.value.trim(); if (v) close(v); });
         body.appendChild(confirmBtn);
 
@@ -4220,7 +4260,7 @@ export class Library {
     const input = document.createElement('input');
     input.type = 'text';
     input.className = 'library__searchable-select-input';
-    input.placeholder = key === 'main' ? 'Search or select...' : 'None — type to search...';
+    input.placeholder = key === 'main' ? t('library.searchableMainPlaceholder') : t('library.searchableAxisPlaceholder');
 
     // Hidden value holder
     const valueHolder = { value: '' };
@@ -4266,7 +4306,7 @@ export class Library {
       if (items.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'library__searchable-select-empty';
-        empty.textContent = 'No matches';
+        empty.textContent = t('collectionModal.noMatches');
         dropdown.appendChild(empty);
         return;
       }
@@ -4288,7 +4328,7 @@ export class Library {
       // Clear option
       const clearOpt = document.createElement('button');
       clearOpt.className = 'library__searchable-select-option library__searchable-select-clear';
-      clearOpt.textContent = key === 'main' ? '— Clear —' : '— None —';
+      clearOpt.textContent = key === 'main' ? t('library.searchableClear') : t('library.searchableNone');
       clearOpt.addEventListener('mousedown', (e) => {
         e.preventDefault();
         input.value = '';
@@ -4399,7 +4439,7 @@ export class Library {
         this._getOrCreateBadgesContainer(thumbnailContainer).appendChild(badge);
       }
       badge.className = 'library__funscript-badge library__funscript-badge--manual';
-      badge.title = 'Funscript (manual)';
+      badge.title = t('library.funscriptManual');
       if (!badge.querySelector('svg')) {
         badge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
       }
@@ -4456,7 +4496,7 @@ export class Library {
       });
       // Also update the trigger button label.
       const labelEl = this._container.querySelector('#library-sort-btn .library__picker-label');
-      if (labelEl) labelEl.textContent = 'Name A-Z';
+      if (labelEl) labelEl.textContent = t('library.sortNameAsc');
     }
     // Disable speed-sort options when the user has filtered to the
     // unmatched tab (those videos have no funscripts → no speed stats).
@@ -4628,8 +4668,8 @@ export class Library {
       const totalForCount = scoped.length;
       if (countEl) {
         countEl.textContent = this._searchQuery
-          ? `${filtered.length} / ${totalForCount} videos`
-          : `${filtered.length} video${filtered.length !== 1 ? 's' : ''}`;
+          ? t('library.videoCountFiltered', { filtered: filtered.length, total: totalForCount })
+          : t('library.videoCount', { count: filtered.length });
       }
       this._renderGrid(filtered);
       return;
@@ -4753,9 +4793,9 @@ export class Library {
     this._applyFilters();
 
     const { showToast } = await import('../js/toast.js');
-    if (next === 'vr') showToast('Marked as VR', 'info', 1800);
-    else if (next === 'flat') showToast('Marked as Flat', 'info', 1800);
-    else showToast('VR classification reset', 'info', 1800);
+    if (next === 'vr') showToast(t('library.markedAsVR'), 'info', 1800);
+    else if (next === 'flat') showToast(t('library.markedAsFlat'), 'info', 1800);
+    else showToast(t('library.vrReset'), 'info', 1800);
   }
 
   /**
@@ -4779,10 +4819,9 @@ export class Library {
     this._applyFilters();
 
     const { showToast } = await import('../js/toast.js');
-    const noun = paths.length === 1 ? 'video' : 'videos';
-    if (mode === 'vr') showToast(`Marked ${paths.length} ${noun} as VR`, 'info', 2000);
-    else if (mode === 'flat') showToast(`Marked ${paths.length} ${noun} as Flat`, 'info', 2000);
-    else showToast(`Reset ${changed} VR override${changed === 1 ? '' : 's'}`, 'info', 2000);
+    if (mode === 'vr') showToast(t('library.bulkMarkedVR', { count: paths.length }), 'info', 2000);
+    else if (mode === 'flat') showToast(t('library.bulkMarkedFlat', { count: paths.length }), 'info', 2000);
+    else showToast(t('library.bulkVrReset', { count: changed }), 'info', 2000);
   }
 
   /**
@@ -4880,7 +4919,7 @@ export class Library {
       const ranked = rankFunscriptMatches(video.name, this._unmatchedSubtitles);
 
       const chosen = await Modal.open({
-        title: 'Associate Subtitle',
+        title: t('library.associateSubtitleTitle'),
         onRender: (body, close) => {
           if (ranked.length > 0) {
             const list = document.createElement('div');
@@ -4909,7 +4948,7 @@ export class Library {
           } else {
             const msg = document.createElement('div');
             msg.className = 'modal-message modal-message--muted';
-            msg.textContent = 'No good matches found among unmatched subtitles.';
+            msg.textContent = t('library.noSubtitleMatches');
             body.appendChild(msg);
           }
 
@@ -4919,7 +4958,7 @@ export class Library {
 
           const browseRow = document.createElement('button');
           browseRow.className = 'modal-list-item library__browse-fallback';
-          browseRow.textContent = 'Browse...';
+          browseRow.textContent = t('library.assoc.browse');
           browseRow.addEventListener('click', async () => {
             const result = await window.funsync.selectSubtitle();
             close(result);
@@ -4959,7 +4998,7 @@ export class Library {
         this._getOrCreateBadgesContainer(thumbnailContainer).appendChild(badge);
       }
       badge.className = 'library__subtitle-badge library__subtitle-badge--manual';
-      badge.title = 'Subtitles (manual)';
+      badge.title = t('library.subtitleManualTitle');
       if (!badge.querySelector('svg')) {
         badge.appendChild(icon(Captions, { width: 14, height: 14, 'stroke-width': 2.5 }));
       }
@@ -5129,16 +5168,16 @@ export class Library {
       .map(c => ({
         id: c.id,
         label: c.name,
-        subtitle: `${c.videoPaths.length} video${c.videoPaths.length !== 1 ? 's' : ''}`,
+        subtitle: t('library.videoCountSubtitle', { count: c.videoPaths.length }),
       }));
 
     if (items.length === 0) {
       const { showToast } = await import('../js/toast.js');
-      showToast('Video is already in all libraries', 'info');
+      showToast(t('library.videoAlreadyInAll'), 'info');
       return;
     }
 
-    const selectedId = await Modal.selectFromList('Add to Library', items);
+    const selectedId = await Modal.selectFromList(t('library.addToCollectionTitle'), items);
     if (selectedId) {
       // Re-fetch in case collections changed while modal was open
       const freshCollections = this._settings.get('library.collections') || [];
@@ -5158,7 +5197,7 @@ export class Library {
         }
       } else {
         const { showToast } = await import('../js/toast.js');
-        showToast('Library was deleted', 'warn');
+        showToast(t('library.libraryDeleted'), 'warn');
       }
     }
   }
@@ -5166,7 +5205,7 @@ export class Library {
   async _addToPlaylist(videoPath) {
     const playlists = this._settings.getPlaylists();
     if (playlists.length === 0) {
-      const name = await Modal.prompt('Create a Playlist First', 'Playlist name');
+      const name = await Modal.prompt(t('library.createPlaylistFirstTitle'), t('library.createPlaylistFirstLabel'));
       if (!name) return;
       const pl = await this._settings.addPlaylist(name);
       this._settings.addVideoToPlaylist(pl.id, videoPath);
@@ -5175,9 +5214,9 @@ export class Library {
     const items = playlists.map((p) => ({
       id: p.id,
       label: p.name,
-      subtitle: `${p.videoPaths.length} video${p.videoPaths.length !== 1 ? 's' : ''}`,
+      subtitle: t('library.videoCountSubtitle', { count: p.videoPaths.length }),
     }));
-    const selectedId = await Modal.selectFromList('Add to Playlist', items);
+    const selectedId = await Modal.selectFromList(t('library.addToPlaylistTitle'), items);
     if (selectedId) {
       this._settings.addVideoToPlaylist(selectedId, videoPath);
     }
@@ -5195,13 +5234,13 @@ export class Library {
     // create one — fall through to selectFromList's empty-state with the
     // + New affordance.
     if (categories.length > 0 && items.length === 0) {
-      await Modal.confirm('All Assigned', 'This video already has all categories assigned.');
+      await Modal.confirm(t('library.allAssignedTitle'), t('library.allAssignedBody'));
       return;
     }
 
     const { promptCreateCategory } = await import('../js/category-create-modal.js');
-    const selectedId = await Modal.selectFromList('Assign Category', items, {
-      createLabel: '+ New category',
+    const selectedId = await Modal.selectFromList(t('library.assignCategoryTitle'), items, {
+      createLabel: t('library.newCategoryInlineLabel'),
       onCreateNew: () => promptCreateCategory({ settings: this._settings }),
     });
     if (selectedId) {
@@ -5255,7 +5294,7 @@ export class Library {
     this._selectedPaths = new Set();
 
     const btn = this._container.querySelector('.library__select-mode-btn');
-    if (btn) btn.textContent = 'Cancel';
+    if (btn) btn.textContent = t('library.selectModeCancel');
 
     const bar = this._container.querySelector('.library__selection-bar');
     if (bar) bar.hidden = false;
@@ -5274,7 +5313,7 @@ export class Library {
     if (!this._container) return;
 
     const btn = this._container.querySelector('.library__select-mode-btn');
-    if (btn) btn.textContent = 'Select';
+    if (btn) btn.textContent = t('library.selectModeEnter');
 
     const bar = this._container.querySelector('.library__selection-bar');
     if (bar) bar.hidden = true;
@@ -5308,7 +5347,7 @@ export class Library {
     const countEl = this._container?.querySelector('.library__selection-count');
     if (countEl) {
       const n = this._selectedPaths.size;
-      countEl.textContent = `${n} selected`;
+      countEl.textContent = t('library.selectionCount', { count: n });
     }
   }
 
@@ -5316,7 +5355,7 @@ export class Library {
     if (this._selectedPaths.size === 0) return;
     const playlists = this._settings.getPlaylists();
     if (playlists.length === 0) {
-      const name = await Modal.prompt('Create a Playlist First', 'Playlist name');
+      const name = await Modal.prompt(t('library.createPlaylistFirstTitle'), t('library.createPlaylistFirstLabel'));
       if (!name) return;
       const pl = await this._settings.addPlaylist(name);
       for (const path of this._selectedPaths) {
@@ -5328,9 +5367,9 @@ export class Library {
     const items = playlists.map((p) => ({
       id: p.id,
       label: p.name,
-      subtitle: `${p.videoPaths.length} video${p.videoPaths.length !== 1 ? 's' : ''}`,
+      subtitle: t('library.videoCountSubtitle', { count: p.videoPaths.length }),
     }));
-    const selectedId = await Modal.selectFromList('Add to Playlist', items);
+    const selectedId = await Modal.selectFromList(t('library.addToPlaylistTitle'), items);
     if (selectedId) {
       for (const path of this._selectedPaths) {
         this._settings.addVideoToPlaylist(selectedId, path);
@@ -5344,8 +5383,8 @@ export class Library {
     const categories = this._settings.getCategories();
     const items = categories.map((c) => ({ id: c.id, label: c.name }));
     const { promptCreateCategory } = await import('../js/category-create-modal.js');
-    const selectedId = await Modal.selectFromList('Assign Category', items, {
-      createLabel: '+ New category',
+    const selectedId = await Modal.selectFromList(t('library.assignCategoryTitle'), items, {
+      createLabel: t('library.newCategoryInlineLabel'),
       onCreateNew: () => promptCreateCategory({ settings: this._settings }),
     });
     if (selectedId) {
@@ -5362,11 +5401,11 @@ export class Library {
   async _bulkPromptVRType() {
     if (this._selectedPaths.size === 0) return;
     const items = [
-      { id: 'vr', label: 'Mark as VR', subtitle: 'Override heuristic — treat as VR' },
-      { id: 'flat', label: 'Mark as Flat', subtitle: 'Override heuristic — treat as flat' },
-      { id: 'reset', label: 'Reset to auto', subtitle: 'Clear override; use filename heuristic' },
+      { id: 'vr', label: t('library.vrOptionMark'), subtitle: t('library.vrOptionMarkSub') },
+      { id: 'flat', label: t('library.vrOptionFlat'), subtitle: t('library.vrOptionFlatSub') },
+      { id: 'reset', label: t('library.vrOptionReset'), subtitle: t('library.vrOptionResetSub') },
     ];
-    const choice = await Modal.selectFromList('Set VR Classification', items);
+    const choice = await Modal.selectFromList(t('library.setVRTitle'), items);
     if (!choice) return;
     const paths = Array.from(this._selectedPaths);
     await this._bulkSetVRType(paths, choice);
@@ -5378,7 +5417,7 @@ export class Library {
     const collections = this._settings.get('library.collections') || [];
     if (collections.length === 0) {
       const { showToast } = await import('../js/toast.js');
-      showToast('Create a library first using the Library dropdown in the nav bar', 'info');
+      showToast(t('library.noLibrariesYet'), 'info');
       return;
     }
     const items = collections.map(c => ({
@@ -5386,7 +5425,7 @@ export class Library {
       label: c.name,
       subtitle: `${c.videoPaths.length} video${c.videoPaths.length !== 1 ? 's' : ''}`,
     }));
-    const selectedId = await Modal.selectFromList('Add to Library', items);
+    const selectedId = await Modal.selectFromList(t('library.addToCollectionTitle'), items);
     if (selectedId) {
       const idx = collections.findIndex(c => c.id === selectedId);
       if (idx >= 0) {

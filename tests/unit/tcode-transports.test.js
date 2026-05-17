@@ -270,8 +270,14 @@ describe('WebsocketTransport — send', () => {
 });
 
 describe('WebsocketTransport — disconnect / errors', () => {
-  it('fires onDisconnect when the socket closes after opening', async () => {
-    const t = new WebsocketTransport({ log: { info: () => {} }, WebSocketImpl: MockWebSocket });
+  it('fires onDisconnect when the socket closes after opening (reconnect off)', async () => {
+    // Disable the auto-reconnect path so the close handler routes to the
+    // onDisconnect callback directly. The reconnect-on behaviour is
+    // covered by `tcode-mfp-compat.test.js`.
+    const t = new WebsocketTransport({
+      log: { info: () => {} }, WebSocketImpl: MockWebSocket,
+      reconnect: false,
+    });
     const onDisc = vi.fn();
     t.onDisconnect(onDisc);
     const p = t.connect({ url: 'ws://x' });

@@ -1,5 +1,7 @@
 // HandyManager — Wrapper around @ohdoki/handy-sdk for device connection and control
 
+import { t } from './i18n.js';
+
 // SDK module reference — loaded dynamically via relative path to the ESM bundle
 // (bare specifier '@ohdoki/handy-sdk' fails in Electron renderer with contextIsolation)
 let HandySDK = null;
@@ -97,7 +99,7 @@ export class HandyManager {
         this._startHealthCheck();
         return true;
       } else {
-        this._emitError('Connection failed — check your connection key');
+        this._emitError(t('error.handyConnectionFailed'));
         return false;
       }
     } catch (err) {

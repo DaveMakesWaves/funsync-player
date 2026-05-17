@@ -19,6 +19,7 @@
 //   ]
 
 import { Modal } from '../components/modal.js';
+import { t } from './i18n.js';
 
 /**
  * Open the keyboard-help overlay with the given groups.
@@ -67,7 +68,7 @@ export function openKeyboardHelp(title, groups) {
       actions.className = 'modal-actions';
       const ok = document.createElement('button');
       ok.className = 'modal-btn modal-btn--primary';
-      ok.textContent = 'Got it';
+      ok.textContent = t('common.gotIt');
       ok.addEventListener('click', () => close());
       actions.appendChild(ok);
       body.appendChild(actions);
@@ -80,136 +81,140 @@ export function openKeyboardHelp(title, groups) {
  * shortcut documentation stays in one place — anyone updating a
  * binding (in app.js, video-player.js) updates this list too.
  */
-export const PLAYER_SHORTCUT_GROUPS = [
-  {
-    title: 'Navigation',
-    rows: [
-      ['Alt+1',         'Library'],
-      ['Alt+2',         'Playlists'],
-      ['Alt+3',         'Categories'],
-    ],
-  },
-  {
-    title: 'Playback',
-    rows: [
-      ['Space / K',     'Play / Pause'],
-      ['J / L',         'Seek backward / forward 10s'],
-      ['Left / Right',  'Seek backward / forward 5s'],
-      ['Shift+Left / Right', 'Seek backward / forward 1 frame'],
-      ['Home / End',    'Jump to start / end'],
-      ['G',             'Skip to next action (gap skip)'],
-      ['Shift+G',       'Skip to previous action'],
-    ],
-  },
-  {
-    title: 'Volume',
-    rows: [
-      ['Up / Down',     'Volume ±5%'],
-      ['M',             'Mute / Unmute'],
-    ],
-  },
-  {
-    title: 'View',
-    rows: [
-      ['F / F11',       'Fullscreen'],
-      ['R',             'Cycle aspect ratio'],
-      ['I',             'Toggle info overlay'],
-      ['S',             'Screenshot'],
-    ],
-  },
-  {
-    title: 'A / B loop',
-    rows: [
-      ['A',             'Set loop point A'],
-      ['B',             'Set loop point B'],
-      ['Esc',           'Clear loop / close panels'],
-    ],
-  },
-  {
-    title: 'Devices & sync',
-    rows: [
-      ['H',             'Toggle Devices panel'],
-      ['D',             'Toggle device simulator'],
-    ],
-  },
-  {
-    title: 'Script',
-    rows: [
-      ['E',             'Toggle script editor'],
-      ['V',             'Cycle to next variant'],
-      ['Shift+V',       'Cycle to previous variant'],
-    ],
-  },
-  {
-    title: 'Library',
-    rows: [
-      ['O',             'Open file (native dialog)'],
-      ['Esc',           'Back from player to library'],
-    ],
-  },
-  {
-    title: 'Help',
-    rows: [
-      ['?',             'Show this help'],
-    ],
-  },
-];
+// Group sets are exported as builder functions so each `t()` call resolves
+// against the active locale at modal-open time. Keyboard combos stay literal
+// (they're the same in every language); only the row descriptions and group
+// titles route through i18n.
+export function getPlayerShortcutGroups() {
+  return [
+    {
+      title: t('kbd.navigation'),
+      rows: [
+        ['Alt+1',         t('kbd.library')],
+        ['Alt+2',         t('kbd.playlists')],
+        ['Alt+3',         t('kbd.categories')],
+      ],
+    },
+    {
+      title: t('kbd.playback'),
+      rows: [
+        ['Space / K',     t('kbd.playPause')],
+        ['J / L',         t('kbd.seek10s')],
+        ['Left / Right',  t('kbd.seek5s')],
+        ['Shift+Left / Right', t('kbd.seekFrame')],
+        ['Home / End',    t('kbd.jumpStartEnd')],
+        ['G',             t('kbd.skipNextAction')],
+        ['Shift+G',       t('kbd.skipPrevAction')],
+      ],
+    },
+    {
+      title: t('kbd.volume'),
+      rows: [
+        ['Up / Down',     t('kbd.volume5')],
+        ['M',             t('kbd.muteToggle')],
+      ],
+    },
+    {
+      title: t('kbd.view'),
+      rows: [
+        ['F / F11',       t('kbd.fullscreen')],
+        ['R',             t('kbd.cycleAspect')],
+        ['I',             t('kbd.toggleInfo')],
+        ['S',             t('kbd.screenshot')],
+      ],
+    },
+    {
+      title: t('kbd.abLoop'),
+      rows: [
+        ['A',             t('kbd.loopA')],
+        ['B',             t('kbd.loopB')],
+        ['Esc',           t('kbd.clearLoop')],
+      ],
+    },
+    {
+      title: t('kbd.devicesSync'),
+      rows: [
+        ['H',             t('kbd.devicesPanel')],
+        ['D',             t('kbd.deviceSimulator')],
+      ],
+    },
+    {
+      title: t('kbd.script'),
+      rows: [
+        ['E',             t('kbd.scriptEditor')],
+        ['V',             t('kbd.nextVariant')],
+        ['Shift+V',       t('kbd.prevVariant')],
+      ],
+    },
+    {
+      title: t('kbd.libraryGroup'),
+      rows: [
+        ['O',             t('kbd.openFile')],
+        ['Esc',           t('kbd.backToLibrary')],
+      ],
+    },
+    {
+      title: t('kbd.help'),
+      rows: [
+        ['?',             t('kbd.showHelp')],
+      ],
+    },
+  ];
+}
 
-/**
- * Pre-built group set for the editor view. Mirrors what was previously
- * inline in script-editor.js::_openKeyboardHelp.
- */
-export const EDITOR_SHORTCUT_GROUPS = [
-  {
-    title: 'Selection & navigation',
-    rows: [
-      ['Up / Down',           'Prev / next action (with seek)'],
-      ['Ctrl+Up / Ctrl+Down', 'Same, across all loaded scripts'],
-      ['Left / Right',        'Step one video frame'],
-      ['Ctrl+Left / Right',   'Fast frame step (configurable; default 6)'],
-      ['Ctrl+A',              'Select all'],
-      ['Ctrl+1 / 2 / 3',      'Select top / middle / bottom third'],
-      ['Esc',                 'Clear selection / close editor'],
-    ],
-  },
-  {
-    title: 'Edit selected',
-    rows: [
-      ['Shift+Up / Down',     'Nudge position ±5 (coarse)'],
-      ['Ctrl+Shift+Up / Down','Nudge position ±1 (fine)'],
-      ['Shift+Left / Right',  'Move action(s) ±1 frame in time'],
-      ['Ctrl+Shift+Left / Right', 'Move action(s) ±N frames'],
-      ['Del / Backspace',     'Delete selected'],
-      ['Ctrl+I',              'Invert positions'],
-    ],
-  },
-  {
-    title: 'Place / edit actions',
-    rows: [
-      ['0 – 9 (or Numpad)',   'Place action at 0 / 11 / 22 / … / 100'],
-      ['Alt+Click',           'Insert action at click position'],
-      ['Shift+Drag dot',      'Move selected actions'],
-      ['B',                   'Add bookmark at playhead'],
-      ['R',                   'Toggle recording mode'],
-      ['W',                   'Toggle waveform'],
-    ],
-  },
-  {
-    title: 'History & I/O',
-    rows: [
-      ['Ctrl+Z',                'Undo'],
-      ['Ctrl+Y / Ctrl+Shift+Z', 'Redo'],
-      ['Ctrl+C / Ctrl+X',       'Copy / cut selected'],
-      ['Ctrl+V',                'Paste at playhead'],
-      ['Ctrl+Shift+V',          'Paste at original times'],
-      ['Ctrl+S',                'Save'],
-    ],
-  },
-  {
-    title: 'View',
-    rows: [
-      ['+ / -',               'Zoom in / out'],
-      ['?',                   'Show this help'],
-    ],
-  },
-];
+export function getEditorShortcutGroups() {
+  return [
+    {
+      title: t('kbd.editorSelection'),
+      rows: [
+        ['Up / Down',           t('kbd.editorPrevNextAction')],
+        ['Ctrl+Up / Ctrl+Down', t('kbd.editorPrevNextAcrossScripts')],
+        ['Left / Right',        t('kbd.editorStepFrame')],
+        ['Ctrl+Left / Right',   t('kbd.editorFastFrame')],
+        ['Ctrl+A',              t('kbd.editorSelectAll')],
+        ['Ctrl+1 / 2 / 3',      t('kbd.editorSelectThird')],
+        ['Esc',                 t('kbd.editorClearSelection')],
+      ],
+    },
+    {
+      title: t('kbd.editorEdit'),
+      rows: [
+        ['Shift+Up / Down',     t('kbd.editorNudgeCoarse')],
+        ['Ctrl+Shift+Up / Down',t('kbd.editorNudgeFine')],
+        ['Shift+Left / Right',  t('kbd.editorMoveFrame')],
+        ['Ctrl+Shift+Left / Right', t('kbd.editorMoveFrames')],
+        ['Del / Backspace',     t('kbd.editorDelete')],
+        ['Ctrl+I',              t('kbd.editorInvert')],
+      ],
+    },
+    {
+      title: t('kbd.editorPlace'),
+      rows: [
+        ['0 – 9 (or Numpad)',   t('kbd.editorPlaceNumpad')],
+        ['Alt+Click',           t('kbd.editorInsertAtClick')],
+        ['Shift+Drag dot',      t('kbd.editorMoveSelected')],
+        ['B',                   t('kbd.editorBookmark')],
+        ['R',                   t('kbd.editorRecording')],
+        ['W',                   t('kbd.editorWaveform')],
+      ],
+    },
+    {
+      title: t('kbd.editorHistory'),
+      rows: [
+        ['Ctrl+Z',                t('kbd.editorUndo')],
+        ['Ctrl+Y / Ctrl+Shift+Z', t('kbd.editorRedo')],
+        ['Ctrl+C / Ctrl+X',       t('kbd.editorCopyCut')],
+        ['Ctrl+V',                t('kbd.editorPaste')],
+        ['Ctrl+Shift+V',          t('kbd.editorPasteOriginal')],
+        ['Ctrl+S',                t('kbd.editorSave')],
+      ],
+    },
+    {
+      title: t('kbd.view'),
+      rows: [
+        ['+ / -',               t('kbd.editorZoom')],
+        ['?',                   t('kbd.showHelp')],
+      ],
+    },
+  ];
+}

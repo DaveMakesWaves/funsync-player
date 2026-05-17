@@ -17,14 +17,16 @@ import { detectGaps, fillGaps } from '../js/gap-filler.js';
 import { extractPeaks, getCachedPeaks, clearCacheFor } from '../js/waveform.js';
 import { detectBeats, beatsToActions, getCachedBeats, clearBeatCacheFor } from '../js/beat-detector.js';
 import { dataService } from '../js/data-service.js';
-import { openKeyboardHelp, EDITOR_SHORTCUT_GROUPS } from '../js/keyboard-help.js';
+import { openKeyboardHelp, getEditorShortcutGroups } from '../js/keyboard-help.js';
+import { t } from '../js/i18n.js';
 
 export class ScriptEditor {
-  constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyManager, settings }) {
+  constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyHdspSync, handyManager, settings }) {
     this.videoPlayer = videoPlayer;
     this.funscriptEngine = funscriptEngine;
     this.progressBar = progressBar;
     this.syncEngine = syncEngine;
+    this.handyHdspSync = handyHdspSync || null;
     this.handyManager = handyManager;
     this.settings = settings;
 
@@ -96,7 +98,7 @@ export class ScriptEditor {
     const toolbar = document.createElement('div');
     toolbar.className = 'editor__toolbar';
     toolbar.setAttribute('role', 'toolbar');
-    toolbar.setAttribute('aria-label', 'Script editor tools');
+    toolbar.setAttribute('aria-label', t('editor.toolbarAria'));
     toolbar.addEventListener('keydown', (e) => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
       // Only buttons participate in arrow-key roving — selects keep
@@ -115,31 +117,31 @@ export class ScriptEditor {
       }
     });
 
-    this._btnUndo = this._makeBtn(Undo2, 'Undo (Ctrl+Z)', () => this.editableScript.undo());
-    this._btnRedo = this._makeBtn(Redo2, 'Redo (Ctrl+Y)', () => this.editableScript.redo());
-    const btnDelete = this._makeBtn(Trash2, 'Delete Selected (Del)', () => this._deleteSelected());
+    this._btnUndo = this._makeBtn(Undo2, t('editor.btn.undo'), () => this.editableScript.undo());
+    this._btnRedo = this._makeBtn(Redo2, t('editor.btn.redo'), () => this.editableScript.redo());
+    const btnDelete = this._makeBtn(Trash2, t('editor.btn.delete'), () => this._deleteSelected());
     const sep1 = this._makeSeparator();
 
     // OFS operations
-    const btnInvert = this._makeBtn(FlipVertical2, 'Invert Selected (Ctrl+I)', () => this._invertSelected());
-    const btnSimplify = this._makeBtn(Spline, 'Simplify Selected', () => this._simplifySelected());
-    const btnCut = this._makeBtn(Scissors, 'Cut Selected (Ctrl+X)', () => this._cutSelected());
+    const btnInvert = this._makeBtn(FlipVertical2, t('editor.btn.invert'), () => this._invertSelected());
+    const btnSimplify = this._makeBtn(Spline, t('editor.btn.simplify'), () => this._simplifySelected());
+    const btnCut = this._makeBtn(Scissors, t('editor.btn.cut'), () => this._cutSelected());
     const sep1b = this._makeSeparator();
 
     // Modify dropdown
     this._modifySelect = document.createElement('select');
     this._modifySelect.className = 'editor__speed-select';
-    this._modifySelect.title = 'Modify script';
+    this._modifySelect.title = t('editor.modify.title');
     const modOpts = [
-      { value: '', label: 'Modify\u2026' },
-      { value: 'halfSpeed', label: 'Half Speed' },
-      { value: 'doubleSpeed', label: 'Double Speed' },
-      { value: 'reverse', label: 'Reverse' },
-      { value: 'remapRange', label: 'Remap Range\u2026' },
-      { value: 'offsetTime', label: 'Offset Time\u2026' },
-      { value: 'removePauses', label: 'Remove Pauses\u2026' },
-      { value: 'rangeExtend', label: 'Range Extend/Compress\u2026' },
-      { value: 'generatePattern', label: 'Generate Pattern\u2026' },
+      { value: '', label: t('editor.modify.placeholder') },
+      { value: 'halfSpeed', label: t('editor.modify.halfSpeed') },
+      { value: 'doubleSpeed', label: t('editor.modify.doubleSpeed') },
+      { value: 'reverse', label: t('editor.modify.reverse') },
+      { value: 'remapRange', label: t('editor.modify.remapRange') },
+      { value: 'offsetTime', label: t('editor.modify.offsetTime') },
+      { value: 'removePauses', label: t('editor.modify.removePauses') },
+      { value: 'rangeExtend', label: t('editor.modify.rangeExtend') },
+      { value: 'generatePattern', label: t('editor.modify.generatePattern') },
     ];
     for (const o of modOpts) {
       const opt = document.createElement('option');
@@ -154,23 +156,23 @@ export class ScriptEditor {
     const sep1c = this._makeSeparator();
 
     // Metadata, Bookmark, Fill Gaps buttons
-    const btnMetadata = this._makeBtn(FileText, 'Edit Metadata', () => this._openMetadataModal());
-    const btnBookmark = this._makeBtn(BookmarkPlus, 'Add Bookmark (B)', () => this._addBookmarkAtCursor());
-    const btnFillGaps = this._makeBtn(Rows3, 'Fill Gaps', () => this._openFillGapsModal());
-    this._btnWaveform = this._makeBtn(AudioWaveform, 'Toggle Waveform (W)', () => this._toggleWaveform());
-    const btnBeats = this._makeBtn(Music, 'Generate from Beats', () => this._openBeatModal());
+    const btnMetadata = this._makeBtn(FileText, t('editor.btn.metadata'), () => this._openMetadataModal());
+    const btnBookmark = this._makeBtn(BookmarkPlus, t('editor.btn.bookmark'), () => this._addBookmarkAtCursor());
+    const btnFillGaps = this._makeBtn(Rows3, t('editor.btn.fillGaps'), () => this._openFillGapsModal());
+    this._btnWaveform = this._makeBtn(AudioWaveform, t('editor.btn.waveform'), () => this._toggleWaveform());
+    const btnBeats = this._makeBtn(Music, t('editor.btn.beats'), () => this._openBeatModal());
 
     const sep1d = this._makeSeparator();
 
-    const btnZoomIn = this._makeBtn(ZoomIn, 'Zoom In (+)', () => this._zoomIn());
-    const btnZoomOut = this._makeBtn(ZoomOut, 'Zoom Out (-)', () => this._zoomOut());
-    const btnFitAll = this._makeBtn(Magnet, 'Fit All', () => this.graph?.fitAll());
+    const btnZoomIn = this._makeBtn(ZoomIn, t('editor.btn.zoomIn'), () => this._zoomIn());
+    const btnZoomOut = this._makeBtn(ZoomOut, t('editor.btn.zoomOut'), () => this._zoomOut());
+    const btnFitAll = this._makeBtn(Magnet, t('editor.btn.fitAll'), () => this.graph?.fitAll());
     const sep2 = this._makeSeparator();
 
     // Speed select
     const speedLabel = document.createElement('span');
     speedLabel.className = 'editor__speed-label';
-    speedLabel.textContent = 'Speed:';
+    speedLabel.textContent = t('editor.speedLabel');
 
     this._speedSelect = document.createElement('select');
     this._speedSelect.className = 'editor__speed-select';
@@ -184,7 +186,7 @@ export class ScriptEditor {
     this._speedSelect.addEventListener('change', () => this._onSpeedChange());
 
     const sep3 = this._makeSeparator();
-    const btnSave = this._makeBtn(Save, 'Save (Ctrl+S)', () => this._save());
+    const btnSave = this._makeBtn(Save, t('editor.btn.save'), () => this._save());
 
     // Autosave checkbox + status
     const autosaveGroup = document.createElement('span');
@@ -205,7 +207,7 @@ export class ScriptEditor {
     const autosaveLabel = document.createElement('label');
     autosaveLabel.htmlFor = 'editor-autosave';
     autosaveLabel.className = 'editor__autosave-label';
-    autosaveLabel.textContent = 'Autosave';
+    autosaveLabel.textContent = t('editor.autosaveLabel');
 
     this._autosaveStatusEl = document.createElement('span');
     this._autosaveStatusEl.className = 'editor__autosave-status';
@@ -218,7 +220,7 @@ export class ScriptEditor {
     // Script selector (multi-axis / custom routing)
     this._scriptSelect = document.createElement('select');
     this._scriptSelect.className = 'editor__script-select';
-    this._scriptSelect.title = 'Select which script to edit';
+    this._scriptSelect.title = t('editor.scriptSelectTitle');
     this._scriptSelect.hidden = true; // shown when multiple scripts available
     this._scriptSelect.addEventListener('change', () => this._onScriptSelectChange());
 
@@ -234,8 +236,8 @@ export class ScriptEditor {
     snapCheck.checked = this._snapToFrame;
     snapCheck.addEventListener('change', () => { this._snapToFrame = snapCheck.checked; });
     snapLabel.appendChild(snapCheck);
-    snapLabel.appendChild(document.createTextNode(' Snap'));
-    snapLabel.title = 'Snap action timestamps to video frame boundaries';
+    snapLabel.appendChild(document.createTextNode(' ' + t('editor.snapLabel')));
+    snapLabel.title = t('editor.snapTitle');
 
     // Spline/Linear toggle
     const splineLabel = document.createElement('label');
@@ -252,13 +254,13 @@ export class ScriptEditor {
       }
     });
     splineLabel.appendChild(splineCheck);
-    splineLabel.appendChild(document.createTextNode(' Curves'));
-    splineLabel.title = 'Toggle between curved (Hermite) and linear connection lines';
+    splineLabel.appendChild(document.createTextNode(' ' + t('editor.curvesLabel')));
+    splineLabel.title = t('editor.curvesTitle');
 
     // Recording mode indicator
     this._recordingIndicator = document.createElement('span');
     this._recordingIndicator.className = 'editor__recording-indicator';
-    this._recordingIndicator.textContent = 'REC';
+    this._recordingIndicator.textContent = t('editor.recording');
     this._recordingIndicator.hidden = true;
     this._recordingIndicator.style.cssText = 'color:#ff4444;font-weight:700;font-size:11px;margin-left:6px;animation:blink 1s step-end infinite';
 
@@ -732,7 +734,7 @@ export class ScriptEditor {
           e.preventDefault();
           e.stopPropagation();
           this.editableScript.copy();
-          showToast(`Copied ${this.editableScript.selectedIndices.size} action(s)`, 'info');
+          showToast(t('editor.toast.copied', { count: this.editableScript.selectedIndices.size }), 'info');
         }
         break;
 
@@ -886,16 +888,16 @@ export class ScriptEditor {
 
   _invertSelected() {
     if (this.editableScript.selectedIndices.size === 0) {
-      showToast('Select actions to invert', 'info');
+      showToast(t('editor.toast.selectToInvert'), 'info');
       return;
     }
     this.editableScript.invertSelection();
-    showToast(`Inverted ${this.editableScript.selectedIndices.size} action(s)`, 'info');
+    showToast(t('editor.toast.inverted', { count: this.editableScript.selectedIndices.size }), 'info');
   }
 
   _simplifySelected() {
     if (this.editableScript.selectedIndices.size < 3) {
-      showToast('Select at least 3 actions to simplify', 'info');
+      showToast(t('editor.toast.selectToSimplify'), 'info');
       return;
     }
     const before = this.editableScript.selectedIndices.size;
@@ -903,9 +905,9 @@ export class ScriptEditor {
     const after = this.editableScript.selectedIndices.size;
     const removed = before - after;
     if (removed > 0) {
-      showToast(`Simplified: removed ${removed} point(s)`, 'info');
+      showToast(t('editor.toast.simplified', { count: removed }), 'info');
     } else {
-      showToast('No points removed (all significant)', 'info');
+      showToast(t('editor.toast.noPointsRemoved'), 'info');
     }
   }
 
@@ -913,7 +915,7 @@ export class ScriptEditor {
     if (this.editableScript.selectedIndices.size === 0) return;
     const count = this.editableScript.selectedIndices.size;
     this.editableScript.cut();
-    showToast(`Cut ${count} action(s)`, 'info');
+    showToast(t('editor.toast.cut', { count }), 'info');
   }
 
   _zoomIn() {
@@ -1104,12 +1106,22 @@ export class ScriptEditor {
     this.videoPlayer.video.playbackRate = rate;
     this._speedSelect.value = String(rate);
 
-    // Warn if Handy connected and rate != 1
-    if (rate !== 1 && this.handyManager?.connected) {
+    // Native Handy path can't follow rate changes via HSSP (cloud
+    // schedules at 1.0× regardless). Switch to HDSP-polled mode at
+    // non-1.0× — the client reads `video.currentTime` per tick, which
+    // naturally scales with the rate. Return to HSSP at 1.0× for the
+    // smoother onboard-interpolation feel. Other sync engines (Buttplug,
+    // TCode, Autoblow) already handle rate via per-tick scheduling and
+    // don't need any mode switch.
+    if (!this.handyManager?.connected) return;
+    if (rate === 1) {
+      if (this.handyHdspSync?.active) this.handyHdspSync.stop();
+      if (this.syncEngine) this.syncEngine.start();
+    } else {
       if (this.syncEngine) this.syncEngine.stop();
-      showToast('Sync paused — playback speed changed', 'warn');
-    } else if (rate === 1 && this.handyManager?.connected && this.syncEngine) {
-      this.syncEngine.start();
+      if (this.handyHdspSync && !this.handyHdspSync.active) {
+        this.handyHdspSync.start();
+      }
     }
   }
 
@@ -1122,15 +1134,15 @@ export class ScriptEditor {
     switch (value) {
       case 'halfSpeed':
         this.editableScript.applyModifier(halfSpeed);
-        showToast('Applied: Half Speed', 'info');
+        showToast(t('editor.toast.appliedHalfSpeed'), 'info');
         break;
       case 'doubleSpeed':
         this.editableScript.applyModifier(doubleSpeed);
-        showToast('Applied: Double Speed', 'info');
+        showToast(t('editor.toast.appliedDoubleSpeed'), 'info');
         break;
       case 'reverse':
         this.editableScript.applyModifier(reverseActions);
-        showToast('Applied: Reverse', 'info');
+        showToast(t('editor.toast.appliedReverse'), 'info');
         break;
       case 'remapRange':
         await this._openRemapRangeModal();
@@ -1154,16 +1166,16 @@ export class ScriptEditor {
 
   async _openRemapRangeModal() {
     const result = await Modal.open({
-      title: 'Remap Range',
+      title: t('editor.remapTitle'),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">New Min Position<input type="number" id="remap-min" min="0" max="100" value="0" class="modal-input"></label>
-            <label class="modal-label">New Max Position<input type="number" id="remap-max" min="0" max="100" value="100" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.remapMin'))}<input type="number" id="remap-min" min="0" max="100" value="0" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.remapMax'))}<input type="number" id="remap-max" min="0" max="100" value="100" class="modal-input"></label>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="remap-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="remap-ok">Apply</button>
+            <button class="modal-btn modal-btn--secondary" id="remap-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="remap-ok">${_esc(t('connection.btn.apply'))}</button>
           </div>`;
         body.querySelector('#remap-cancel').addEventListener('click', () => close(null));
         body.querySelector('#remap-ok').addEventListener('click', () => {
@@ -1176,22 +1188,22 @@ export class ScriptEditor {
     });
     if (result) {
       this.editableScript.applyModifier(remapRange, result.min, result.max);
-      showToast(`Remapped to ${result.min}–${result.max}`, 'info');
+      showToast(t('editor.toast.remapped', { min: result.min, max: result.max }), 'info');
     }
   }
 
   async _openOffsetTimeModal() {
     const result = await Modal.open({
-      title: 'Offset Time',
+      title: t('editor.offsetTitle'),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">Offset (ms)<input type="number" id="offset-ms" value="0" class="modal-input" step="100"></label>
-            <div class="modal-hint">Positive = shift later, negative = shift earlier</div>
+            <label class="modal-label">${_esc(t('editor.offsetMs'))}<input type="number" id="offset-ms" value="0" class="modal-input" step="100"></label>
+            <div class="modal-hint">${_esc(t('editor.offsetHint'))}</div>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="offset-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="offset-ok">Apply</button>
+            <button class="modal-btn modal-btn--secondary" id="offset-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="offset-ok">${_esc(t('connection.btn.apply'))}</button>
           </div>`;
         body.querySelector('#offset-cancel').addEventListener('click', () => close(null));
         body.querySelector('#offset-ok').addEventListener('click', () => {
@@ -1201,22 +1213,22 @@ export class ScriptEditor {
     });
     if (result && result.deltaMs !== 0) {
       this.editableScript.applyModifier(offsetTime, result.deltaMs);
-      showToast(`Offset by ${result.deltaMs}ms`, 'info');
+      showToast(t('editor.toast.offsetBy', { ms: result.deltaMs }), 'info');
     }
   }
 
   async _openRemovePausesModal() {
     const result = await Modal.open({
-      title: 'Remove Pauses',
+      title: t('editor.pausesTitle'),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">Max gap threshold (ms)<input type="number" id="pause-gap" min="100" value="5000" class="modal-input" step="500"></label>
-            <div class="modal-hint">Gaps longer than this will be collapsed</div>
+            <label class="modal-label">${_esc(t('editor.pausesMax'))}<input type="number" id="pause-gap" min="100" value="5000" class="modal-input" step="500"></label>
+            <div class="modal-hint">${_esc(t('editor.pausesHint'))}</div>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="pause-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="pause-ok">Apply</button>
+            <button class="modal-btn modal-btn--secondary" id="pause-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="pause-ok">${_esc(t('connection.btn.apply'))}</button>
           </div>`;
         body.querySelector('#pause-cancel').addEventListener('click', () => close(null));
         body.querySelector('#pause-ok').addEventListener('click', () => {
@@ -1226,27 +1238,27 @@ export class ScriptEditor {
     });
     if (result) {
       this.editableScript.applyModifier(removePauses, result.maxGapMs);
-      showToast('Pauses removed', 'info');
+      showToast(t('editor.toast.pausesRemoved'), 'info');
     }
   }
 
   async _openRangeExtendModal() {
     const sel = this.editableScript.selectedIndices;
     if (sel.size < 2) {
-      showToast('Select 2+ actions to extend/compress', 'warn');
+      showToast(t('editor.toast.selectToExtend'), 'warn');
       return;
     }
     const result = await Modal.open({
-      title: 'Range Extend / Compress',
+      title: t('editor.extendTitle'),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">Time Scale Factor<input type="number" id="extend-factor" value="1.0" step="0.1" min="0.1" max="10" class="modal-input"></label>
-            <div class="modal-hint">1.0 = no change, 2.0 = double duration, 0.5 = half duration</div>
+            <label class="modal-label">${_esc(t('editor.extendFactor'))}<input type="number" id="extend-factor" value="1.0" step="0.1" min="0.1" max="10" class="modal-input"></label>
+            <div class="modal-hint">${_esc(t('editor.extendHint'))}</div>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="extend-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="extend-ok">Apply</button>
+            <button class="modal-btn modal-btn--secondary" id="extend-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="extend-ok">${_esc(t('connection.btn.apply'))}</button>
           </div>`;
         body.querySelector('#extend-cancel').addEventListener('click', () => close(null));
         body.querySelector('#extend-ok').addEventListener('click', () => {
@@ -1266,7 +1278,7 @@ export class ScriptEditor {
         this.editableScript.updateAction(i, { at: newAt });
       }
       this.editableScript.endBatch();
-      showToast(`Time scaled by ${result.factor}x`, 'info');
+      showToast(t('editor.toast.timeScaled', { factor: result.factor }), 'info');
     }
   }
 
@@ -1275,13 +1287,13 @@ export class ScriptEditor {
     this._recordingIndicator.hidden = !this._recordingMode;
 
     if (this._recordingMode) {
-      showToast('Recording mode ON — numpad keys insert at live playhead', 'info');
+      showToast(t('editor.toast.recordingOn'), 'info');
       // In recording mode, start video if paused
       if (this.videoPlayer.video.paused) {
         this.videoPlayer.video.play();
       }
     } else {
-      showToast('Recording mode OFF', 'info');
+      showToast(t('editor.toast.recordingOff'), 'info');
     }
   }
 
@@ -1299,29 +1311,29 @@ export class ScriptEditor {
     }
 
     const result = await Modal.open({
-      title: 'Generate Pattern',
+      title: t('editor.patternTitle'),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">Pattern
+            <label class="modal-label">${_esc(t('editor.patternStyle'))}
               <select id="pat-type" class="modal-input">
-                <option value="sine">Sine</option>
-                <option value="sawtooth">Sawtooth</option>
-                <option value="square">Square</option>
-                <option value="triangle">Triangle</option>
-                <option value="escalating">Escalating</option>
-                <option value="random">Random</option>
+                <option value="sine">${_esc(t('editor.patternSine'))}</option>
+                <option value="sawtooth">${_esc(t('editor.patternSawtooth'))}</option>
+                <option value="square">${_esc(t('editor.patternSquare'))}</option>
+                <option value="triangle">${_esc(t('editor.patternTriangle'))}</option>
+                <option value="escalating">${_esc(t('editor.patternEscalating'))}</option>
+                <option value="random">${_esc(t('editor.patternRandom'))}</option>
               </select>
             </label>
-            <label class="modal-label">BPM<input type="number" id="pat-bpm" min="10" max="600" value="120" class="modal-input"></label>
-            <label class="modal-label">Min Position<input type="number" id="pat-min" min="0" max="100" value="0" class="modal-input"></label>
-            <label class="modal-label">Max Position<input type="number" id="pat-max" min="0" max="100" value="100" class="modal-input"></label>
-            <label class="modal-label">Start (ms)<input type="number" id="pat-start" min="0" value="${defaultStart}" class="modal-input"></label>
-            <label class="modal-label">End (ms)<input type="number" id="pat-end" min="0" value="${defaultEnd}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.patternBpm'))}<input type="number" id="pat-bpm" min="10" max="600" value="120" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.patternMin'))}<input type="number" id="pat-min" min="0" max="100" value="0" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.patternMax'))}<input type="number" id="pat-max" min="0" max="100" value="100" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.patternStart'))}<input type="number" id="pat-start" min="0" value="${defaultStart}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.patternEnd'))}<input type="number" id="pat-end" min="0" value="${defaultEnd}" class="modal-input"></label>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="pat-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="pat-ok">Generate</button>
+            <button class="modal-btn modal-btn--secondary" id="pat-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="pat-ok">${_esc(t('editor.generate'))}</button>
           </div>`;
         body.querySelector('#pat-cancel').addEventListener('click', () => close(null));
         body.querySelector('#pat-ok').addEventListener('click', () => {
@@ -1340,9 +1352,9 @@ export class ScriptEditor {
       const pattern = generatePattern(result.type, result.start, result.end, result.bpm, result.min, result.max);
       if (pattern.length > 0) {
         this.editableScript.insertActions(pattern);
-        showToast(`Inserted ${pattern.length} actions (${result.type})`, 'info');
+        showToast(t('editor.toast.patternInserted', { count: pattern.length, type: result.type }), 'info');
       } else {
-        showToast('No actions generated — check parameters', 'warn');
+        showToast(t('editor.toast.patternNone'), 'warn');
       }
     }
   }
@@ -1360,7 +1372,7 @@ export class ScriptEditor {
     // 2026-04-27 into renderer/js/keyboard-help.js so both surfaces
     // share the layout). Editor's group set lives in EDITOR_SHORTCUT_GROUPS
     // — anyone updating a binding in this file should update that list too.
-    openKeyboardHelp('Editor keyboard shortcuts', EDITOR_SHORTCUT_GROUPS);
+    openKeyboardHelp(t('editor.keyboardHelpTitle'), getEditorShortcutGroups());
   }
 
   // --- Metadata Modal ---
@@ -1371,21 +1383,21 @@ export class ScriptEditor {
     const defaultCreator = dataService.get('editor.defaultCreator') || '';
 
     const result = await Modal.open({
-      title: 'Script Metadata',
+      title: t('editor.metaTitle'),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">Title<input type="text" id="meta-title" value="${_esc(md.title || '')}" class="modal-input"></label>
-            <label class="modal-label">Creator<input type="text" id="meta-creator" value="${_esc(md.creator || defaultCreator)}" class="modal-input"></label>
-            <label class="modal-label">Description<textarea id="meta-desc" class="modal-input modal-textarea" rows="2">${_esc(md.description || '')}</textarea></label>
-            <label class="modal-label">Tags (comma-separated)<input type="text" id="meta-tags" value="${_esc((md.tags || []).join(', '))}" class="modal-input"></label>
-            <label class="modal-label">Performers (comma-separated)<input type="text" id="meta-performers" value="${_esc((md.performers || []).join(', '))}" class="modal-input"></label>
-            <label class="modal-label">License<input type="text" id="meta-license" value="${_esc(md.license || '')}" class="modal-input"></label>
-            <label class="modal-label">Notes<textarea id="meta-notes" class="modal-input modal-textarea" rows="2">${_esc(md.notes || '')}</textarea></label>
+            <label class="modal-label">${_esc(t('editor.metaName'))}<input type="text" id="meta-title" value="${_esc(md.title || '')}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.metaCreator'))}<input type="text" id="meta-creator" value="${_esc(md.creator || defaultCreator)}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.metaDescription'))}<textarea id="meta-desc" class="modal-input modal-textarea" rows="2">${_esc(md.description || '')}</textarea></label>
+            <label class="modal-label">${_esc(t('editor.metaTags'))}<input type="text" id="meta-tags" value="${_esc((md.tags || []).join(', '))}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.metaPerformers'))}<input type="text" id="meta-performers" value="${_esc((md.performers || []).join(', '))}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.metaLicense'))}<input type="text" id="meta-license" value="${_esc(md.license || '')}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.metaNotes'))}<textarea id="meta-notes" class="modal-input modal-textarea" rows="2">${_esc(md.notes || '')}</textarea></label>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="meta-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="meta-ok">Save</button>
+            <button class="modal-btn modal-btn--secondary" id="meta-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="meta-ok">${_esc(t('common.save'))}</button>
           </div>`;
         body.querySelector('#meta-cancel').addEventListener('click', () => close(null));
         body.querySelector('#meta-ok').addEventListener('click', () => {
@@ -1418,7 +1430,7 @@ export class ScriptEditor {
       if (result.creator) {
         dataService.set('editor.defaultCreator', result.creator);
       }
-      showToast('Metadata updated', 'info');
+      showToast(t('editor.toast.metaUpdated'), 'info');
     }
   }
 
@@ -1426,10 +1438,10 @@ export class ScriptEditor {
 
   async _addBookmarkAtCursor() {
     const timeMs = this.videoPlayer.currentTime * 1000;
-    const name = await Modal.prompt('Bookmark name', 'e.g. Scene start');
+    const name = await Modal.prompt(t('editor.bookmarkPrompt'), t('editor.bookmarkPlaceholder'));
     if (name !== null) {
       this.editableScript.addBookmark(timeMs, name || '');
-      showToast(`Bookmark added at ${this._formatTimeForToast(timeMs)}`, 'info');
+      showToast(t('editor.toast.bookmarkAdded', { time: this._formatTimeForToast(timeMs) }), 'info');
     }
   }
 
@@ -1448,7 +1460,7 @@ export class ScriptEditor {
     // Check cache first
     const videoSrc = this.videoPlayer.video.src;
     if (!videoSrc) {
-      showToast('No video loaded', 'warn');
+      showToast(t('editor.toast.noVideo'), 'warn');
       this._waveformEnabled = false;
       this._btnWaveform.classList.remove('editor__btn--active');
       return;
@@ -1464,19 +1476,19 @@ export class ScriptEditor {
 
     // Extract peaks — show progress in status bar
     const origStatus = this._statusEl.textContent;
-    this._statusEl.textContent = 'Extracting waveform\u2026';
+    this._statusEl.textContent = t('editor.extractingWaveform');
 
     const data = await extractPeaks(videoSrc, 100, (pct) => {
-      this._statusEl.textContent = `Extracting waveform\u2026 ${Math.round(pct * 100)}%`;
+      this._statusEl.textContent = t('editor.extractingWaveformPct', { pct: Math.round(pct * 100) });
     });
 
     if (data && this._waveformEnabled) {
       this.graph.setWaveformData(data);
       this.graph.setShowWaveform(true);
       if (!this.graph._animating) this.graph.draw();
-      showToast('Waveform loaded', 'info');
+      showToast(t('editor.toast.waveformLoaded'), 'info');
     } else if (!data) {
-      showToast('Could not extract waveform', 'warn');
+      showToast(t('editor.toast.waveformFailed'), 'warn');
       this._waveformEnabled = false;
       this._btnWaveform.classList.remove('editor__btn--active');
     }
@@ -1501,7 +1513,7 @@ export class ScriptEditor {
   async _openBeatModal() {
     const videoSrc = this.videoPlayer.video.src;
     if (!videoSrc) {
-      showToast('No video loaded', 'warn');
+      showToast(t('editor.toast.noVideo'), 'warn');
       return;
     }
 
@@ -1509,16 +1521,16 @@ export class ScriptEditor {
     let beatData = getCachedBeats(videoSrc);
     if (!beatData) {
       const origStatus = this._statusEl.textContent;
-      this._statusEl.textContent = 'Detecting beats\u2026';
+      this._statusEl.textContent = t('editor.detectingBeats');
 
       beatData = await detectBeats(videoSrc, {}, (pct) => {
-        this._statusEl.textContent = `Detecting beats\u2026 ${Math.round(pct * 100)}%`;
+        this._statusEl.textContent = t('editor.detectingBeatsPct', { pct: Math.round(pct * 100) });
       });
 
       this._updateStatus();
 
       if (!beatData || beatData.count === 0) {
-        showToast('No beats detected', 'warn');
+        showToast(t('editor.toast.noBeats'), 'warn');
         return;
       }
     }
@@ -1541,25 +1553,25 @@ export class ScriptEditor {
     }
 
     const result = await Modal.open({
-      title: `Generate from Beats (${beatData.count} detected, ~${beatData.averageBPM} BPM)`,
+      title: t('editor.beatTitle', { count: beatData.count, bpm: beatData.averageBPM }),
       onRender(body, close) {
         body.innerHTML = `
           <div class="modal-form">
-            <label class="modal-label">Mapping Style
+            <label class="modal-label">${_esc(t('editor.beatStyle'))}
               <select id="beat-style" class="modal-input">
-                <option value="alternating">Alternating (0/100)</option>
-                <option value="sine">Sine Wave</option>
-                <option value="energy">Energy-mapped</option>
+                <option value="alternating">${_esc(t('editor.beatStyleAlternating'))}</option>
+                <option value="sine">${_esc(t('editor.beatStyleSine'))}</option>
+                <option value="energy">${_esc(t('editor.beatStyleEnergy'))}</option>
               </select>
             </label>
-            <label class="modal-label">Min Position<input type="number" id="beat-min" min="0" max="100" value="0" class="modal-input"></label>
-            <label class="modal-label">Max Position<input type="number" id="beat-max" min="0" max="100" value="100" class="modal-input"></label>
-            <label class="modal-label">Start (ms)<input type="number" id="beat-start" min="0" value="${defaultStart}" class="modal-input"></label>
-            <label class="modal-label">End (ms)<input type="number" id="beat-end" min="0" value="${defaultEnd}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.beatMin'))}<input type="number" id="beat-min" min="0" max="100" value="0" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.beatMax'))}<input type="number" id="beat-max" min="0" max="100" value="100" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.beatStart'))}<input type="number" id="beat-start" min="0" value="${defaultStart}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.beatEnd'))}<input type="number" id="beat-end" min="0" value="${defaultEnd}" class="modal-input"></label>
           </div>
           <div class="modal-actions">
-            <button class="modal-btn modal-btn--secondary" id="beat-cancel">Cancel</button>
-            <button class="modal-btn modal-btn--primary" id="beat-ok">Generate</button>
+            <button class="modal-btn modal-btn--secondary" id="beat-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="beat-ok">${_esc(t('editor.generate'))}</button>
           </div>`;
         body.querySelector('#beat-cancel').addEventListener('click', () => close(null));
         body.querySelector('#beat-ok').addEventListener('click', () => {
@@ -1578,7 +1590,7 @@ export class ScriptEditor {
       // Filter beats to the selected time range
       const filteredBeats = beatData.beats.filter(t => t >= result.start && t <= result.end);
       if (filteredBeats.length === 0) {
-        showToast('No beats in selected range', 'warn');
+        showToast(t('editor.toast.noBeatsInRange'), 'warn');
         return;
       }
 
@@ -1590,7 +1602,7 @@ export class ScriptEditor {
       );
       if (newActions.length > 0) {
         this.editableScript.insertActions(newActions);
-        showToast(`Inserted ${newActions.length} actions from beats`, 'info');
+        showToast(t('editor.toast.beatsInserted', { count: newActions.length }), 'info');
       }
     }
   }
@@ -1615,19 +1627,19 @@ export class ScriptEditor {
   async _openFillGapsModal() {
     const actions = this.editableScript.actions;
     if (actions.length < 2) {
-      showToast('Need at least 2 actions to detect gaps', 'info');
+      showToast(t('editor.toast.gapsNeedActions'), 'info');
       return;
     }
 
     const videoDurationMs = (this.videoPlayer.duration || 0) * 1000;
     const gaps = detectGaps(actions, 3000, videoDurationMs);
     if (gaps.length === 0) {
-      showToast('No gaps detected (threshold: 3s)', 'info');
+      showToast(t('editor.toast.gapsNone'), 'info');
       return;
     }
 
     const result = await Modal.open({
-      title: `Fill Gaps (${gaps.length} found)`,
+      title: t('editor.fillTitle', { count: gaps.length }),
       onRender(body, close) {
         let html = '<div class="modal-form">';
         html += '<div class="modal-gap-list" style="max-height:200px;overflow-y:auto;margin-bottom:8px;">';
@@ -1643,22 +1655,22 @@ export class ScriptEditor {
         }
         html += '</div>';
         html += `
-          <label class="modal-label">Pattern
+          <label class="modal-label">${_esc(t('editor.fillPattern'))}
             <select id="fill-type" class="modal-input">
-              <option value="sine">Sine</option>
-              <option value="sawtooth">Sawtooth</option>
-              <option value="square">Square</option>
-              <option value="triangle">Triangle</option>
-              <option value="random">Random</option>
+              <option value="sine">${_esc(t('editor.patternSine'))}</option>
+              <option value="sawtooth">${_esc(t('editor.patternSawtooth'))}</option>
+              <option value="square">${_esc(t('editor.patternSquare'))}</option>
+              <option value="triangle">${_esc(t('editor.patternTriangle'))}</option>
+              <option value="random">${_esc(t('editor.patternRandom'))}</option>
             </select>
           </label>
-          <label class="modal-label">BPM<input type="number" id="fill-bpm" min="10" max="600" value="120" class="modal-input"></label>
-          <label class="modal-label">Min Position<input type="number" id="fill-min" min="0" max="100" value="0" class="modal-input"></label>
-          <label class="modal-label">Max Position<input type="number" id="fill-max" min="0" max="100" value="100" class="modal-input"></label>
+          <label class="modal-label">${_esc(t('editor.fillBpm'))}<input type="number" id="fill-bpm" min="10" max="600" value="120" class="modal-input"></label>
+          <label class="modal-label">${_esc(t('editor.fillMin'))}<input type="number" id="fill-min" min="0" max="100" value="0" class="modal-input"></label>
+          <label class="modal-label">${_esc(t('editor.fillMax'))}<input type="number" id="fill-max" min="0" max="100" value="100" class="modal-input"></label>
         </div>
         <div class="modal-actions">
-          <button class="modal-btn modal-btn--secondary" id="fill-cancel">Cancel</button>
-          <button class="modal-btn modal-btn--primary" id="fill-ok">Fill Selected</button>
+          <button class="modal-btn modal-btn--secondary" id="fill-cancel">${_esc(t('common.cancel'))}</button>
+          <button class="modal-btn modal-btn--primary" id="fill-ok">${_esc(t('editor.fillSelected'))}</button>
         </div>`;
         body.innerHTML = html;
         body.querySelector('#fill-cancel').addEventListener('click', () => close(null));
@@ -1679,7 +1691,7 @@ export class ScriptEditor {
       const filled = fillGaps(selectedGaps, result.type, result.bpm, result.min, result.max);
       if (filled.length > 0) {
         this.editableScript.insertActions(filled);
-        showToast(`Filled ${result.gapIndices.length} gap(s) with ${filled.length} actions`, 'info');
+        showToast(t('editor.toast.gapsFilled', { gaps: result.gapIndices.length, actions: filled.length }), 'info');
       }
     }
   }
@@ -1696,11 +1708,11 @@ export class ScriptEditor {
         if (savedPath) {
           this.editableScript.markSaved();
           this._updateStatus();
-          showToast('Funscript saved', 'info');
+          showToast(t('editor.toast.saved'), 'info');
           this._reloadIntoEngineAndSync();
         }
       } catch (err) {
-        showToast('Save failed: ' + err.message, 'error');
+        showToast(t('editor.toast.saveFailed', { error: err.message }), 'error');
       }
       return;
     }
@@ -1718,11 +1730,11 @@ export class ScriptEditor {
         this._funscriptPath = savedPath;
         this.editableScript.markSaved();
         this._updateStatus();
-        showToast('Funscript saved', 'info');
+        showToast(t('editor.toast.saved'), 'info');
         this._reloadIntoEngineAndSync();
       }
     } catch (err) {
-      showToast('Save failed: ' + err.message, 'error');
+      showToast(t('editor.toast.saveFailed', { error: err.message }), 'error');
     }
   }
 
@@ -1738,7 +1750,7 @@ export class ScriptEditor {
     if (!this._funscriptPath || !this.editableScript.dirty) return;
 
     if (this._autosaveStatusEl) {
-      this._autosaveStatusEl.textContent = 'Saving...';
+      this._autosaveStatusEl.textContent = t('editor.autosaveSaving');
       this._autosaveStatusEl.classList.add('editor__autosave-status--saving');
     }
 
@@ -1754,14 +1766,14 @@ export class ScriptEditor {
         if (this._autosaveStatusEl) {
           const now = new Date();
           const time = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-          this._autosaveStatusEl.textContent = `Saved ${time}`;
+          this._autosaveStatusEl.textContent = t('editor.autosaveSavedAt', { time });
           this._autosaveStatusEl.classList.remove('editor__autosave-status--saving');
         }
       }
     } catch (err) {
       console.warn('[Editor] Autosave failed:', err.message);
       if (this._autosaveStatusEl) {
-        this._autosaveStatusEl.textContent = 'Save failed';
+        this._autosaveStatusEl.textContent = t('editor.autosaveFailed');
         this._autosaveStatusEl.classList.remove('editor__autosave-status--saving');
       }
     }
@@ -1838,8 +1850,9 @@ export class ScriptEditor {
     const selected = this.editableScript.selectedIndices.size;
     const dirty = this.editableScript.dirty;
 
-    let text = `${count} action${count !== 1 ? 's' : ''}`;
-    if (selected > 0) text += ` (${selected} selected)`;
+    let text = selected > 0
+      ? t('editor.statusSelected', { count, selected })
+      : t('editor.status', { count });
     if (dirty) text += ' *';
 
     this._statusEl.textContent = text;
@@ -2016,7 +2029,7 @@ export class ScriptEditor {
       this._updateStatus();
 
       const name = funscriptPath.split(/[\\/]/).pop();
-      showToast(`Created ${name}`, 'info');
+      showToast(t('editor.toast.created', { name }), 'info');
 
       // Show funscript badge
       const badge = document.getElementById('funscript-badge');

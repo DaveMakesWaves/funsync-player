@@ -94,6 +94,9 @@ contextBridge.exposeInMainWorld('funsync', {
   // Shell
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
+  // i18n — read once at boot to drive the first-launch language-offer
+  // toast (see notes/features/IMPL-multi-language.md §3).
+  getSystemLocale: () => ipcRenderer.invoke('get-system-locale'),
 
   // TCode Serial
   tcodeListPorts: () => ipcRenderer.invoke('tcode-list-ports'),

@@ -1,3 +1,5 @@
+import { t } from './i18n.js';
+
 // hevc-detect — HEVC support probe + platform-aware install guidance.
 //
 // Why this exists:
@@ -79,17 +81,12 @@ export function osHasHevcSupport() {
 function _buildWindowsBody() {
   const body = document.createElement('div');
   body.style.cssText = 'font-size:12px;line-height:1.4;color:#e0e0e0';
-  body.innerHTML = (
-    'Your Windows is missing the HEVC codec, so HEVC files use slow '
-    + 'software decode. Installing Microsoft\'s HEVC Video Extension lets '
-    + 'your GPU decode them — fixes 4K HEVC. <em>Note: 8K HEVC is beyond '
-    + 'most GPUs even with the codec.</em>'
-  );
+  body.innerHTML = t('hevc.windowsBody');
 
   const links = document.createElement('div');
   links.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;font-size:11px;margin-top:6px';
-  links.appendChild(_makeLink('Install free version (OEM Windows)', STORE_URL_FREE));
-  links.appendChild(_makeLink('Paid ($0.99)', STORE_URL_PAID));
+  links.appendChild(_makeLink(t('hevc.installFree'), STORE_URL_FREE));
+  links.appendChild(_makeLink(t('hevc.installPaid'), STORE_URL_PAID));
 
   body.appendChild(links);
   return body;
@@ -98,29 +95,11 @@ function _buildWindowsBody() {
 function _buildLinuxBody() {
   const body = document.createElement('div');
   body.style.cssText = 'font-size:12px;line-height:1.4;color:#e0e0e0';
-  body.innerHTML = (
-    'Your Linux Chromium is using software HEVC decode, which stutters '
-    + 'on 4K+ files. To enable hardware decode, install your distro\'s '
-    + 'VA-API drivers and restart FunSync:'
-    + '<pre style="background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;'
-    + 'margin-top:6px;font-size:11px;line-height:1.3;white-space:pre-wrap">'
-    + '# Ubuntu / Debian (Intel iGPU)\n'
-    + 'sudo apt install intel-media-va-driver mesa-va-drivers\n\n'
-    + '# Ubuntu / Debian (AMD GPU)\n'
-    + 'sudo apt install mesa-va-drivers\n\n'
-    + '# Ubuntu / Debian (NVIDIA, recent drivers)\n'
-    + 'sudo apt install nvidia-vaapi-driver\n\n'
-    + '# Fedora\n'
-    + 'sudo dnf install libva-utils mesa-va-drivers-freeworld\n\n'
-    + '# Arch\n'
-    + 'sudo pacman -S libva-utils intel-media-driver libva-mesa-driver'
-    + '</pre>'
-    + '<em>Note: 8K HEVC is beyond most GPUs even with hardware decode.</em>'
-  );
+  body.innerHTML = t('hevc.linuxBody');
 
   const links = document.createElement('div');
   links.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;font-size:11px;margin-top:6px';
-  links.appendChild(_makeLink('Hardware video acceleration guide', LINUX_VAAPI_DOCS_URL));
+  links.appendChild(_makeLink(t('hevc.vaapiGuide'), LINUX_VAAPI_DOCS_URL));
   body.appendChild(links);
   return body;
 }
@@ -128,23 +107,14 @@ function _buildLinuxBody() {
 function _buildMacosBody() {
   const body = document.createElement('div');
   body.style.cssText = 'font-size:12px;line-height:1.4;color:#e0e0e0';
-  body.innerHTML = (
-    'Your macOS Chromium can\'t use VideoToolbox HEVC — this usually means '
-    + 'you\'re on macOS 10.12 or older (HEVC requires 10.13+). Update macOS '
-    + 'to enable hardware HEVC decode. <em>Note: even on supported macOS, '
-    + '8K HEVC needs an Apple Silicon Mac (M1/M2/M3) — older Intel Macs '
-    + 'top out around 4K HEVC.</em>'
-  );
+  body.innerHTML = t('hevc.macosBody');
   return body;
 }
 
 function _buildGenericBody() {
   const body = document.createElement('div');
   body.style.cssText = 'font-size:12px;line-height:1.4;color:#e0e0e0';
-  body.textContent = (
-    'HEVC files in your library will use slow software decode on this '
-    + 'platform and may stutter, especially at 4K and above.'
-  );
+  body.textContent = t('hevc.genericBody');
   return body;
 }
 
@@ -167,7 +137,7 @@ function _buildToastBody(onDismissForever) {
 
   const title = document.createElement('div');
   title.style.cssText = 'font-weight:600;color:#ffd166';
-  title.textContent = 'HEVC playback may stutter';
+  title.textContent = t('hevc.warningTitle');
   wrap.appendChild(title);
 
   const platform = getPlatform();
@@ -180,7 +150,7 @@ function _buildToastBody(onDismissForever) {
 
   const dismiss = document.createElement('a');
   dismiss.href = '#';
-  dismiss.textContent = 'Don\'t show again';
+  dismiss.textContent = t('hevc.dontShowAgain');
   dismiss.style.cssText = 'font-size:11px;color:#888;text-decoration:underline;align-self:flex-start;margin-top:4px';
   dismiss.addEventListener('click', (e) => {
     e.preventDefault();

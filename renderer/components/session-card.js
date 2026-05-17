@@ -11,18 +11,20 @@
 // Auto-minimises when the script editor opens; restores to the previous
 // state when the editor closes.
 
-const STATE_LABEL = {
-  idle:       'Connected, idle',
-  preparing:  'Preparing devices…',
-  playing:    'Playing',
-  paused:     'Paused',
-  'no-script':'No script for this video',
-  error:      'Error',
+import { t } from '../js/i18n.js';
+
+const STATE_KEYS = {
+  idle:       'session.state.idle',
+  preparing:  'session.state.preparing',
+  playing:    'session.state.playing',
+  paused:     'session.state.paused',
+  'no-script':'session.state.no-script',
+  error:      'session.state.error',
 };
 
-const SOURCE_LABEL = {
-  'web-remote': 'Web Remote',
-  'vr':         'VR Companion',
+const SOURCE_KEYS = {
+  'web-remote': 'session.source.web-remote',
+  'vr':         'session.source.vr',
 };
 
 export class SessionCard {
@@ -90,7 +92,7 @@ export class SessionCard {
   _renderMinimised(session) {
     const dot = dotClass(session.state);
     this._el.innerHTML = `
-      <button class="session-card__tab" type="button" aria-label="Show session card">
+      <button class="session-card__tab" type="button" aria-label="${t('session.card.showAria')}">
         <span class="session-card__dot ${dot}"></span>
         <span class="session-card__tab-arrow">‹</span>
       </button>
@@ -104,13 +106,13 @@ export class SessionCard {
 
   _renderOpen(session) {
     const dot = dotClass(session.state);
-    const stateLabel = STATE_LABEL[session.state] || session.state;
-    const source = SOURCE_LABEL[session.source] || session.source;
+    const stateLabel = STATE_KEYS[session.state] ? t(STATE_KEYS[session.state]) : session.state;
+    const source = SOURCE_KEYS[session.source] ? t(SOURCE_KEYS[session.source]) : session.source;
     const pct = session.duration > 0
       ? Math.max(0, Math.min(1, session.currentTime / session.duration)) * 100
       : 0;
     const curTime = formatTime(session.currentTime);
-    const total = session.duration > 0 ? formatTime(session.duration) : '—:—';
+    const total = session.duration > 0 ? formatTime(session.duration) : t('session.card.noTime');
 
     const devices = session.devices || {};
     const deviceRow = [
@@ -127,8 +129,8 @@ export class SessionCard {
         <span class="session-card__dot ${dot}"></span>
         <span class="session-card__source">${escapeHtml(source)}</span>
         <span class="session-card__id">${escapeHtml(session.identifier || '')}</span>
-        <button class="session-card__btn session-card__btn--history" type="button" title="Session history" aria-label="Session history">⏱</button>
-        <button class="session-card__btn session-card__btn--min" type="button" title="Minimise" aria-label="Minimise">›</button>
+        <button class="session-card__btn session-card__btn--history" type="button" title="${t('session.card.history')}" aria-label="${t('session.card.history')}">⏱</button>
+        <button class="session-card__btn session-card__btn--min" type="button" title="${t('session.card.minimise')}" aria-label="${t('session.card.minimise')}">›</button>
       </div>
       <div class="session-card__state">${escapeHtml(stateLabel)}</div>
       ${session.videoName ? `<div class="session-card__video" title="${escapeHtml(session.videoName)}">${escapeHtml(session.videoName)}</div>` : ''}
@@ -137,7 +139,7 @@ export class SessionCard {
       </div>
       <div class="session-card__meta">
         <span>${curTime} / ${total}</span>
-        ${session.actionCount ? `<span>${session.actionCount} actions</span>` : ''}
+        ${session.actionCount ? `<span>${escapeHtml(t('session.card.actions', { count: session.actionCount }))}</span>` : ''}
       </div>
       ${deviceRow ? `<div class="session-card__devices">${deviceRow}</div>` : ''}
     `;

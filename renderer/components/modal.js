@@ -1,6 +1,7 @@
 // Modal — Promise-based reusable modal dialogs
 
 import { icon, X } from '../js/icons.js';
+import { t } from '../js/i18n.js';
 
 export class Modal {
   /**
@@ -40,9 +41,9 @@ export class Modal {
       titleEl.textContent = opts.title || '';
       const closeBtn = document.createElement('button');
       closeBtn.className = 'modal-close-btn';
-      closeBtn.setAttribute('aria-label', `Close ${opts.title || 'dialog'}`);
+      closeBtn.setAttribute('aria-label', t('modal.closeAria', { title: opts.title || t('modal.dialogFallback') }));
       closeBtn.appendChild(icon(X, { width: 18, height: 18 }));
-      closeBtn.title = 'Close';
+      closeBtn.title = t('common.close');
       header.appendChild(titleEl);
       header.appendChild(closeBtn);
       panel.appendChild(header);
@@ -160,12 +161,12 @@ export class Modal {
 
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'modal-btn modal-btn--secondary';
-        cancelBtn.textContent = 'Cancel';
+        cancelBtn.textContent = t('common.cancel');
         cancelBtn.addEventListener('click', () => close(null));
 
         const okBtn = document.createElement('button');
         okBtn.className = 'modal-btn modal-btn--primary';
-        okBtn.textContent = 'OK';
+        okBtn.textContent = t('common.ok');
         okBtn.addEventListener('click', () => {
           const val = input.value.trim();
           close(val || null);
@@ -205,12 +206,12 @@ export class Modal {
 
         const cancelBtn = document.createElement('button');
         cancelBtn.className = 'modal-btn modal-btn--secondary';
-        cancelBtn.textContent = 'Cancel';
+        cancelBtn.textContent = t('common.cancel');
         cancelBtn.addEventListener('click', () => close(false));
 
         const confirmBtn = document.createElement('button');
         confirmBtn.className = 'modal-btn modal-btn--danger';
-        confirmBtn.textContent = 'Delete';
+        confirmBtn.textContent = t('common.delete');
         confirmBtn.addEventListener('click', () => close(true));
 
         actions.appendChild(cancelBtn);
@@ -274,14 +275,14 @@ export class Modal {
           }
           const empty = document.createElement('div');
           empty.className = 'modal-message modal-message--muted';
-          empty.textContent = 'No items available';
+          empty.textContent = t('modal.noItemsAvailable');
           body.appendChild(empty);
 
           const actions = document.createElement('div');
           actions.className = 'modal-actions';
           const closeBtn = document.createElement('button');
           closeBtn.className = 'modal-btn modal-btn--secondary';
-          closeBtn.textContent = 'Close';
+          closeBtn.textContent = t('common.close');
           closeBtn.addEventListener('click', () => close(null));
           actions.appendChild(closeBtn);
           body.appendChild(actions);
