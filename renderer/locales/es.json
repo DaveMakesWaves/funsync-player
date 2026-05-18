@@ -137,6 +137,8 @@
     "title": "Biblioteca",
     "search": "Buscar…",
     "searchAria": "Buscar vídeos",
+    "clearSearchAria": "Borrar búsqueda",
+    "filtersPopAria": "Filtros",
     "sort": "Ordenar",
     "sortNameAsc": "Nombre A-Z",
     "sortNameDesc": "Nombre Z-A",
@@ -538,6 +540,7 @@
     "tabPlayback": "Reproducción",
     "tabAppearance": "Apariencia",
     "tabData": "Datos",
+    "tabHelp": "Ayuda",
     "done": "Listo",
     "sources": {
       "empty": "No se han añadido carpetas de origen",
@@ -689,6 +692,19 @@
       "relHoursAgo": "{count, plural, one {hace # hora} other {hace # horas}}",
       "relYesterday": "Ayer",
       "relDaysAgo": "{count, plural, one {hace # día} other {hace # días}}"
+    },
+    "help": {
+      "logsHeader": "Registros de diagnóstico",
+      "logsBlurb": "Abre la carpeta que contiene el archivo de registro de la aplicación. Útil al enviar un informe de error.",
+      "openLogFolder": "Abrir carpeta de registros",
+      "openLogFolderFailed": "No se pudo abrir la carpeta de registros.",
+      "shortcutsHeader": "Atajos de teclado",
+      "shortcutsBlurb": "Ver la lista de atajos de teclado del reproductor y del editor.",
+      "showShortcuts": "Mostrar atajos",
+      "aboutHeader": "Acerca de",
+      "aboutVersion": "Versión {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "Licencia"
     }
   },
   "feedback": {

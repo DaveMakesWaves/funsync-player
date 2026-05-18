@@ -363,6 +363,16 @@ ipcMain.handle('open-log-file', async () => {
   return err ? { success: false, error: err } : { success: true, path: logPath };
 });
 
+// Reveal the log file in OS file explorer — useful when filing a bug
+// report so the user can copy / zip / drag the log into the issue.
+ipcMain.handle('open-log-folder', async () => {
+  const { shell } = require('electron');
+  const logPath = log.transports?.file?.getFile?.()?.path;
+  if (!logPath) return { success: false, error: 'Log file path not available' };
+  shell.showItemInFolder(logPath);
+  return { success: true, path: logPath };
+});
+
 ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });

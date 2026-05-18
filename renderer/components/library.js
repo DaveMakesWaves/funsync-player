@@ -342,7 +342,7 @@ export class Library {
         <div class="library__search">
           <span class="library__search-icon" aria-hidden="true"></span>
           <input type="text" class="library__search-input" data-i18n-placeholder="library.search" placeholder="${this._escapeHtml(t('library.search'))}" aria-label="${this._escapeHtml(t('library.searchAria'))}">
-          <button class="library__search-clear" hidden aria-label="Clear search"></button>
+          <button class="library__search-clear" hidden aria-label="${this._escapeHtml(t('library.clearSearchAria'))}"></button>
         </div>
         <div class="library__picker library__picker--sort">
           <button class="library__picker-btn" id="library-sort-btn" aria-haspopup="listbox" aria-expanded="false">
@@ -358,7 +358,7 @@ export class Library {
             <span class="library__picker-label" data-i18n="library.filters">Filters</span>
             <span class="library__picker-badge" id="library-filters-badge" hidden></span>
           </button>
-          <div class="library__picker-pop library__picker-pop--filters" id="library-filters-pop" role="dialog" aria-label="Filters" hidden></div>
+          <div class="library__picker-pop library__picker-pop--filters" id="library-filters-pop" role="dialog" aria-label="${this._escapeHtml(t('library.filtersPopAria'))}" hidden></div>
         </div>
         <div class="view-toggle-group">
           <button class="view-toggle view-toggle--grid" aria-label="${this._escapeHtml(t('library.gridView'))}" title="${this._escapeHtml(t('library.gridView'))}"></button>

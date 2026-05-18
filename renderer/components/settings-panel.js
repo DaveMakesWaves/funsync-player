@@ -160,6 +160,7 @@ export class SettingsPanel {
       { id: 'playback', label: t('settingsPanel.tabPlayback') },
       { id: 'appearance', label: t('settingsPanel.tabAppearance') },
       { id: 'data', label: t('settingsPanel.tabData') },
+      { id: 'help', label: t('settingsPanel.tabHelp') },
     ];
 
     const panels = {};
@@ -230,6 +231,10 @@ export class SettingsPanel {
     // --- Data Tab ---
     panels.data = this._buildDataTab();
     body.appendChild(wirePanel('data'));
+
+    // --- Help Tab ---
+    panels.help = this._buildHelpTab();
+    body.appendChild(wirePanel('help'));
 
     // Activate the requested initial tab (defaults to 'sources' on first
     // render, but is preserved across locale-change rebuilds).
@@ -991,7 +996,26 @@ export class SettingsPanel {
     `;
     panel.appendChild(exportSection);
 
-    // --- Section 3: Report a Problem ------------------------------------
+    setTimeout(() => {
+      this._wireDataTab(panel);
+      this._refreshBackupStatus(panel);
+    }, 0);
+
+    return panel;
+  }
+
+  // Help tab — support / diagnostics / about. Lives separate from Data
+  // (which is about managing app config) because reporting a problem,
+  // opening logs, and looking up shortcuts are help/communication
+  // actions, not data management (Norman: conceptual model — match
+  // surface category to user's mental model). Mirrors Discord and
+  // VS Code's Help-section pattern; peer-app survey in
+  // notes/features/SCOPE-feedback-reporting.md.
+  _buildHelpTab() {
+    const panel = document.createElement('div');
+    panel.className = 'settings-panel__tab-content';
+
+    // --- Section 1: Report a Problem ------------------------------------
     // Manual bug-report path. Opens a dialog that bundles app version,
     // OS, and the last ~80 log lines into a payload the user can edit
     // before submitting via GitHub / clipboard / file (Nielsen #1
@@ -1008,12 +1032,86 @@ export class SettingsPanel {
     `;
     panel.appendChild(feedbackSection);
 
-    setTimeout(() => {
-      this._wireDataTab(panel);
-      this._refreshBackupStatus(panel);
-    }, 0);
+    // --- Section 2: Diagnostic Logs -------------------------------------
+    // Reveal the app log in OS file explorer so the user can attach it
+    // to a bug report. Different from the "Report a problem" log-tail
+    // path (which is auto-bundled into the GitHub URL) — this gives
+    // them the FULL log file when 80 lines isn't enough.
+    const logsSection = document.createElement('div');
+    logsSection.className = 'settings-panel__section';
+    logsSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.help.logsHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.logsBlurb')}</div>
+      <div style="display:flex;gap:8px">
+        <button id="sp-open-log-folder" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.openLogFolder')}</button>
+      </div>
+    `;
+    panel.appendChild(logsSection);
 
+    // --- Section 3: Keyboard Shortcuts ----------------------------------
+    // Discoverability path for the `?`-overlay. Power users press `?`;
+    // novices find this section. Nielsen #10 (help / documentation) +
+    // Shneiderman #2 (universal usability — both paths work).
+    const shortcutsSection = document.createElement('div');
+    shortcutsSection.className = 'settings-panel__section';
+    shortcutsSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.help.shortcutsHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.shortcutsBlurb')}</div>
+      <div style="display:flex;gap:8px">
+        <button id="sp-show-shortcuts" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.showShortcuts')}</button>
+      </div>
+    `;
+    panel.appendChild(shortcutsSection);
+
+    // --- Section 4: About -----------------------------------------------
+    // Version + project links. Read-only — purely informational
+    // (Nielsen #1 visibility of system status). External links open in
+    // the user's default browser via shell.openExternal.
+    const aboutSection = document.createElement('div');
+    aboutSection.className = 'settings-panel__section';
+    aboutSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.help.aboutHeader')}</h2>
+      <div id="sp-about-version" class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.aboutVersion', { version: '…' })}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="sp-about-github" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.aboutGithub')}</button>
+        <button id="sp-about-license" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.aboutLicense')}</button>
+      </div>
+    `;
+    panel.appendChild(aboutSection);
+    // Resolve the version asynchronously (IPC). Placeholder shows '…'
+    // until the response lands — usually a single tick.
+    window.funsync.getAppVersion?.().then((version) => {
+      const el = panel.querySelector('#sp-about-version');
+      if (el) el.textContent = t('settingsPanel.help.aboutVersion', { version: version || '?' });
+    }).catch(() => { /* leave placeholder */ });
+
+    setTimeout(() => this._wireHelpTab(panel), 0);
     return panel;
+  }
+
+  _wireHelpTab(panel) {
+    panel.querySelector('#sp-feedback')?.addEventListener('click', () => {
+      openFeedbackModal({ getConnectionState: this.getConnectionState });
+    });
+    panel.querySelector('#sp-open-log-folder')?.addEventListener('click', async () => {
+      try {
+        const result = await window.funsync.openLogFolder();
+        if (!result?.success) showToast(t('settingsPanel.help.openLogFolderFailed'), 'error');
+      } catch {
+        showToast(t('settingsPanel.help.openLogFolderFailed'), 'error');
+      }
+    });
+    panel.querySelector('#sp-show-shortcuts')?.addEventListener('click', async () => {
+      // Lazy-import — keyboard-help loads its own large groups arrays.
+      const { openKeyboardHelp, getPlayerShortcutGroups } = await import('../js/keyboard-help.js');
+      openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
+    });
+    panel.querySelector('#sp-about-github')?.addEventListener('click', () => {
+      window.funsync.openExternal('https://github.com/DaveMakesWaves/funsync-player');
+    });
+    panel.querySelector('#sp-about-license')?.addEventListener('click', () => {
+      window.funsync.openExternal('https://github.com/DaveMakesWaves/funsync-player/blob/main/LICENSE');
+    });
   }
 
   // Format a snapshot's age relative to now in a recognition-first style
@@ -1187,11 +1285,6 @@ export class SettingsPanel {
         else showToast(t('settingsPanel.data.importCancelled'), 'info');
       } catch { showToast(t('settingsPanel.data.importFailed'), 'error'); }
       btn.disabled = false; btn.textContent = t('settingsPanel.data.import');
-    });
-
-    // --- Report a Problem -----------------------------------------------
-    panel.querySelector('#sp-feedback')?.addEventListener('click', () => {
-      openFeedbackModal({ getConnectionState: this.getConnectionState });
     });
   }
 }

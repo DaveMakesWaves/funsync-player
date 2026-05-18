@@ -137,6 +137,8 @@
     "title": "Bibliothèque",
     "search": "Rechercher…",
     "searchAria": "Rechercher des vidéos",
+    "clearSearchAria": "Effacer la recherche",
+    "filtersPopAria": "Filtres",
     "sort": "Trier",
     "sortNameAsc": "Nom A-Z",
     "sortNameDesc": "Nom Z-A",
@@ -538,6 +540,7 @@
     "tabPlayback": "Lecture",
     "tabAppearance": "Apparence",
     "tabData": "Données",
+    "tabHelp": "Aide",
     "done": "Terminé",
     "sources": {
       "empty": "Aucun dossier source ajouté",
@@ -689,6 +692,19 @@
       "relHoursAgo": "{count, plural, one {il y a # heure} other {il y a # heures}}",
       "relYesterday": "Hier",
       "relDaysAgo": "{count, plural, one {il y a # jour} other {il y a # jours}}"
+    },
+    "help": {
+      "logsHeader": "Journaux de diagnostic",
+      "logsBlurb": "Ouvre le dossier contenant le fichier journal de l'application. Utile pour soumettre un rapport de bug.",
+      "openLogFolder": "Ouvrir le dossier des journaux",
+      "openLogFolderFailed": "Impossible d'ouvrir le dossier des journaux.",
+      "shortcutsHeader": "Raccourcis clavier",
+      "shortcutsBlurb": "Voir la liste des raccourcis clavier du lecteur et de l'éditeur.",
+      "showShortcuts": "Afficher les raccourcis",
+      "aboutHeader": "À propos",
+      "aboutVersion": "Version {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "Licence"
     }
   },
   "feedback": {

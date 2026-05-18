@@ -137,6 +137,8 @@
     "title": "媒体库",
     "search": "搜索…",
     "searchAria": "搜索视频",
+    "clearSearchAria": "清除搜索",
+    "filtersPopAria": "筛选器",
     "sort": "排序",
     "sortNameAsc": "名称 A-Z",
     "sortNameDesc": "名称 Z-A",
@@ -537,6 +539,7 @@
     "tabPlayback": "播放",
     "tabAppearance": "外观",
     "tabData": "数据",
+    "tabHelp": "帮助",
     "done": "完成",
     "sources": {
       "empty": "尚未添加来源文件夹",
@@ -688,6 +691,19 @@
       "relHoursAgo": "{count, plural, other {# 小时前}}",
       "relYesterday": "昨天",
       "relDaysAgo": "{count, plural, other {# 天前}}"
+    },
+    "help": {
+      "logsHeader": "诊断日志",
+      "logsBlurb": "打开包含应用程序日志文件的文件夹。提交错误报告时很有用。",
+      "openLogFolder": "打开日志文件夹",
+      "openLogFolderFailed": "无法打开日志文件夹。",
+      "shortcutsHeader": "键盘快捷键",
+      "shortcutsBlurb": "查看播放器和编辑器的键盘快捷键列表。",
+      "showShortcuts": "显示快捷键",
+      "aboutHeader": "关于",
+      "aboutVersion": "版本 {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "许可证"
     }
   },
   "feedback": {

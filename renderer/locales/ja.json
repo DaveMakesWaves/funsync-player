@@ -137,6 +137,8 @@
     "title": "ライブラリ",
     "search": "検索…",
     "searchAria": "動画を検索",
+    "clearSearchAria": "検索をクリア",
+    "filtersPopAria": "フィルター",
     "sort": "並び替え",
     "sortNameAsc": "名前 A-Z",
     "sortNameDesc": "名前 Z-A",
@@ -538,6 +540,7 @@
     "tabPlayback": "再生",
     "tabAppearance": "外観",
     "tabData": "データ",
+    "tabHelp": "ヘルプ",
     "done": "完了",
     "sources": {
       "empty": "ソースフォルダが追加されていません",
@@ -689,6 +692,19 @@
       "relHoursAgo": "{count, plural, other {# 時間前}}",
       "relYesterday": "昨日",
       "relDaysAgo": "{count, plural, other {# 日前}}"
+    },
+    "help": {
+      "logsHeader": "診断ログ",
+      "logsBlurb": "アプリケーションログファイルを含むフォルダーを開きます。バグレポートを提出する際に便利です。",
+      "openLogFolder": "ログフォルダーを開く",
+      "openLogFolderFailed": "ログフォルダーを開けませんでした。",
+      "shortcutsHeader": "キーボードショートカット",
+      "shortcutsBlurb": "プレイヤーとエディターのキーボードショートカット一覧を表示します。",
+      "showShortcuts": "ショートカットを表示",
+      "aboutHeader": "情報",
+      "aboutVersion": "バージョン {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "ライセンス"
     }
   },
   "feedback": {

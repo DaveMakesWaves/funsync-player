@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld('funsync', {
   // live there.
   collectDiagnostics: (rendererState) => ipcRenderer.invoke('collect-diagnostics', rendererState),
   saveFile: (opts) => ipcRenderer.invoke('save-text-file', opts),
+  openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
   // i18n — read once at boot to drive the first-launch language-offer
   // toast (see notes/features/IMPL-multi-language.md §3).
   getSystemLocale: () => ipcRenderer.invoke('get-system-locale'),

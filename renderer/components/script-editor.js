@@ -18,7 +18,8 @@ import { extractPeaks, getCachedPeaks, clearCacheFor } from '../js/waveform.js';
 import { detectBeats, beatsToActions, getCachedBeats, clearBeatCacheFor } from '../js/beat-detector.js';
 import { dataService } from '../js/data-service.js';
 import { openKeyboardHelp, getEditorShortcutGroups } from '../js/keyboard-help.js';
-import { t } from '../js/i18n.js';
+import { t, translatePage } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 
 export class ScriptEditor {
   constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyHdspSync, handyManager, settings }) {
@@ -82,6 +83,16 @@ export class ScriptEditor {
 
     // Wire onChange
     this.editableScript.onChange = () => this._onScriptChanged();
+
+    // Re-translate the static toolbar surface on locale change. Every
+    // toolbar string is tagged with data-i18n / data-i18n-title /
+    // data-i18n-aria-label, so translatePage() walks the panel and
+    // refreshes them in one call. Dynamic strings (autosave status,
+    // beat-detection progress, status line counts) are set fresh via
+    // t() each time they're written and don't need handling here.
+    this._unsubscribeLanguage = eventBus.on('language:changed', () => {
+      if (this._panel) translatePage(this._panel);
+    });
   }
 
   // --- Panel Construction ---
@@ -99,6 +110,7 @@ export class ScriptEditor {
     toolbar.className = 'editor__toolbar';
     toolbar.setAttribute('role', 'toolbar');
     toolbar.setAttribute('aria-label', t('editor.toolbarAria'));
+    toolbar.setAttribute('data-i18n-aria-label', 'editor.toolbarAria');
     toolbar.addEventListener('keydown', (e) => {
       if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
       // Only buttons participate in arrow-key roving — selects keep
@@ -117,36 +129,38 @@ export class ScriptEditor {
       }
     });
 
-    this._btnUndo = this._makeBtn(Undo2, t('editor.btn.undo'), () => this.editableScript.undo());
-    this._btnRedo = this._makeBtn(Redo2, t('editor.btn.redo'), () => this.editableScript.redo());
-    const btnDelete = this._makeBtn(Trash2, t('editor.btn.delete'), () => this._deleteSelected());
+    this._btnUndo = this._makeBtn(Undo2, 'editor.btn.undo', () => this.editableScript.undo());
+    this._btnRedo = this._makeBtn(Redo2, 'editor.btn.redo', () => this.editableScript.redo());
+    const btnDelete = this._makeBtn(Trash2, 'editor.btn.delete', () => this._deleteSelected());
     const sep1 = this._makeSeparator();
 
     // OFS operations
-    const btnInvert = this._makeBtn(FlipVertical2, t('editor.btn.invert'), () => this._invertSelected());
-    const btnSimplify = this._makeBtn(Spline, t('editor.btn.simplify'), () => this._simplifySelected());
-    const btnCut = this._makeBtn(Scissors, t('editor.btn.cut'), () => this._cutSelected());
+    const btnInvert = this._makeBtn(FlipVertical2, 'editor.btn.invert', () => this._invertSelected());
+    const btnSimplify = this._makeBtn(Spline, 'editor.btn.simplify', () => this._simplifySelected());
+    const btnCut = this._makeBtn(Scissors, 'editor.btn.cut', () => this._cutSelected());
     const sep1b = this._makeSeparator();
 
     // Modify dropdown
     this._modifySelect = document.createElement('select');
     this._modifySelect.className = 'editor__speed-select';
     this._modifySelect.title = t('editor.modify.title');
+    this._modifySelect.setAttribute('data-i18n-title', 'editor.modify.title');
     const modOpts = [
-      { value: '', label: t('editor.modify.placeholder') },
-      { value: 'halfSpeed', label: t('editor.modify.halfSpeed') },
-      { value: 'doubleSpeed', label: t('editor.modify.doubleSpeed') },
-      { value: 'reverse', label: t('editor.modify.reverse') },
-      { value: 'remapRange', label: t('editor.modify.remapRange') },
-      { value: 'offsetTime', label: t('editor.modify.offsetTime') },
-      { value: 'removePauses', label: t('editor.modify.removePauses') },
-      { value: 'rangeExtend', label: t('editor.modify.rangeExtend') },
-      { value: 'generatePattern', label: t('editor.modify.generatePattern') },
+      { value: '', key: 'editor.modify.placeholder' },
+      { value: 'halfSpeed', key: 'editor.modify.halfSpeed' },
+      { value: 'doubleSpeed', key: 'editor.modify.doubleSpeed' },
+      { value: 'reverse', key: 'editor.modify.reverse' },
+      { value: 'remapRange', key: 'editor.modify.remapRange' },
+      { value: 'offsetTime', key: 'editor.modify.offsetTime' },
+      { value: 'removePauses', key: 'editor.modify.removePauses' },
+      { value: 'rangeExtend', key: 'editor.modify.rangeExtend' },
+      { value: 'generatePattern', key: 'editor.modify.generatePattern' },
     ];
     for (const o of modOpts) {
       const opt = document.createElement('option');
       opt.value = o.value;
-      opt.textContent = o.label;
+      opt.textContent = t(o.key);
+      opt.setAttribute('data-i18n', o.key);
       if (o.value === '') opt.disabled = true;
       this._modifySelect.appendChild(opt);
     }
@@ -156,23 +170,24 @@ export class ScriptEditor {
     const sep1c = this._makeSeparator();
 
     // Metadata, Bookmark, Fill Gaps buttons
-    const btnMetadata = this._makeBtn(FileText, t('editor.btn.metadata'), () => this._openMetadataModal());
-    const btnBookmark = this._makeBtn(BookmarkPlus, t('editor.btn.bookmark'), () => this._addBookmarkAtCursor());
-    const btnFillGaps = this._makeBtn(Rows3, t('editor.btn.fillGaps'), () => this._openFillGapsModal());
-    this._btnWaveform = this._makeBtn(AudioWaveform, t('editor.btn.waveform'), () => this._toggleWaveform());
-    const btnBeats = this._makeBtn(Music, t('editor.btn.beats'), () => this._openBeatModal());
+    const btnMetadata = this._makeBtn(FileText, 'editor.btn.metadata', () => this._openMetadataModal());
+    const btnBookmark = this._makeBtn(BookmarkPlus, 'editor.btn.bookmark', () => this._addBookmarkAtCursor());
+    const btnFillGaps = this._makeBtn(Rows3, 'editor.btn.fillGaps', () => this._openFillGapsModal());
+    this._btnWaveform = this._makeBtn(AudioWaveform, 'editor.btn.waveform', () => this._toggleWaveform());
+    const btnBeats = this._makeBtn(Music, 'editor.btn.beats', () => this._openBeatModal());
 
     const sep1d = this._makeSeparator();
 
-    const btnZoomIn = this._makeBtn(ZoomIn, t('editor.btn.zoomIn'), () => this._zoomIn());
-    const btnZoomOut = this._makeBtn(ZoomOut, t('editor.btn.zoomOut'), () => this._zoomOut());
-    const btnFitAll = this._makeBtn(Magnet, t('editor.btn.fitAll'), () => this.graph?.fitAll());
+    const btnZoomIn = this._makeBtn(ZoomIn, 'editor.btn.zoomIn', () => this._zoomIn());
+    const btnZoomOut = this._makeBtn(ZoomOut, 'editor.btn.zoomOut', () => this._zoomOut());
+    const btnFitAll = this._makeBtn(Magnet, 'editor.btn.fitAll', () => this.graph?.fitAll());
     const sep2 = this._makeSeparator();
 
     // Speed select
     const speedLabel = document.createElement('span');
     speedLabel.className = 'editor__speed-label';
     speedLabel.textContent = t('editor.speedLabel');
+    speedLabel.setAttribute('data-i18n', 'editor.speedLabel');
 
     this._speedSelect = document.createElement('select');
     this._speedSelect.className = 'editor__speed-select';
@@ -186,7 +201,7 @@ export class ScriptEditor {
     this._speedSelect.addEventListener('change', () => this._onSpeedChange());
 
     const sep3 = this._makeSeparator();
-    const btnSave = this._makeBtn(Save, t('editor.btn.save'), () => this._save());
+    const btnSave = this._makeBtn(Save, 'editor.btn.save', () => this._save());
 
     // Autosave checkbox + status
     const autosaveGroup = document.createElement('span');
@@ -208,6 +223,7 @@ export class ScriptEditor {
     autosaveLabel.htmlFor = 'editor-autosave';
     autosaveLabel.className = 'editor__autosave-label';
     autosaveLabel.textContent = t('editor.autosaveLabel');
+    autosaveLabel.setAttribute('data-i18n', 'editor.autosaveLabel');
 
     this._autosaveStatusEl = document.createElement('span');
     this._autosaveStatusEl.className = 'editor__autosave-status';
@@ -221,6 +237,7 @@ export class ScriptEditor {
     this._scriptSelect = document.createElement('select');
     this._scriptSelect.className = 'editor__script-select';
     this._scriptSelect.title = t('editor.scriptSelectTitle');
+    this._scriptSelect.setAttribute('data-i18n-title', 'editor.scriptSelectTitle');
     this._scriptSelect.hidden = true; // shown when multiple scripts available
     this._scriptSelect.addEventListener('change', () => this._onScriptSelectChange());
 
@@ -236,8 +253,13 @@ export class ScriptEditor {
     snapCheck.checked = this._snapToFrame;
     snapCheck.addEventListener('change', () => { this._snapToFrame = snapCheck.checked; });
     snapLabel.appendChild(snapCheck);
-    snapLabel.appendChild(document.createTextNode(' ' + t('editor.snapLabel')));
+    const snapText = document.createElement('span');
+    snapText.style.marginLeft = '4px';
+    snapText.textContent = t('editor.snapLabel');
+    snapText.setAttribute('data-i18n', 'editor.snapLabel');
+    snapLabel.appendChild(snapText);
     snapLabel.title = t('editor.snapTitle');
+    snapLabel.setAttribute('data-i18n-title', 'editor.snapTitle');
 
     // Spline/Linear toggle
     const splineLabel = document.createElement('label');
@@ -254,13 +276,19 @@ export class ScriptEditor {
       }
     });
     splineLabel.appendChild(splineCheck);
-    splineLabel.appendChild(document.createTextNode(' ' + t('editor.curvesLabel')));
+    const splineText = document.createElement('span');
+    splineText.style.marginLeft = '4px';
+    splineText.textContent = t('editor.curvesLabel');
+    splineText.setAttribute('data-i18n', 'editor.curvesLabel');
+    splineLabel.appendChild(splineText);
     splineLabel.title = t('editor.curvesTitle');
+    splineLabel.setAttribute('data-i18n-title', 'editor.curvesTitle');
 
     // Recording mode indicator
     this._recordingIndicator = document.createElement('span');
     this._recordingIndicator.className = 'editor__recording-indicator';
     this._recordingIndicator.textContent = t('editor.recording');
+    this._recordingIndicator.setAttribute('data-i18n', 'editor.recording');
     this._recordingIndicator.hidden = true;
     this._recordingIndicator.style.cssText = 'color:#ff4444;font-weight:700;font-size:11px;margin-left:6px;animation:blink 1s step-end infinite';
 
@@ -312,10 +340,15 @@ export class ScriptEditor {
     this.graph = new ActionGraph(this._canvas, this.editableScript);
   }
 
-  _makeBtn(iconNode, title, onClick) {
+  // `titleKey` is an i18n key (e.g. 'editor.btn.undo'). We stamp it as
+  // `data-i18n-title` so the eventBus 'language:changed' listener can
+  // re-run translatePage(this._panel) and refresh every tooltip without
+  // a separate retranslate method.
+  _makeBtn(iconNode, titleKey, onClick) {
     const btn = document.createElement('button');
     btn.className = 'editor__btn';
-    btn.title = title;
+    btn.title = t(titleKey);
+    btn.setAttribute('data-i18n-title', titleKey);
     btn.appendChild(icon(iconNode, { width: 16, height: 16, 'stroke-width': 2 }));
     btn.addEventListener('click', onClick);
     return btn;

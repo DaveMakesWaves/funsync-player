@@ -137,6 +137,8 @@
     "title": "Library",
     "search": "Search…",
     "searchAria": "Search videos",
+    "clearSearchAria": "Clear search",
+    "filtersPopAria": "Filters",
     "sort": "Sort",
     "sortNameAsc": "Name A-Z",
     "sortNameDesc": "Name Z-A",
@@ -633,6 +635,7 @@
     "tabPlayback": "Playback",
     "tabAppearance": "Appearance",
     "tabData": "Data",
+    "tabHelp": "Help",
     "done": "Done",
     "sources": {
       "empty": "No source folders added",
@@ -784,6 +787,19 @@
       "relHoursAgo": "{count, plural, one {# hour ago} other {# hours ago}}",
       "relYesterday": "Yesterday",
       "relDaysAgo": "{count, plural, one {# day ago} other {# days ago}}"
+    },
+    "help": {
+      "logsHeader": "Diagnostic Logs",
+      "logsBlurb": "Open the folder containing the application log file. Useful when filing a bug report.",
+      "openLogFolder": "Open log folder",
+      "openLogFolderFailed": "Couldn't open log folder.",
+      "shortcutsHeader": "Keyboard Shortcuts",
+      "shortcutsBlurb": "View the list of keyboard shortcuts for the player and editor.",
+      "showShortcuts": "Show shortcuts",
+      "aboutHeader": "About",
+      "aboutVersion": "Version {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "License"
     }
   },
   "feedback": {

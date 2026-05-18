@@ -137,6 +137,8 @@
     "title": "Bibliothek",
     "search": "Suchen…",
     "searchAria": "Videos suchen",
+    "clearSearchAria": "Suche löschen",
+    "filtersPopAria": "Filter",
     "sort": "Sortieren",
     "sortNameAsc": "Name A-Z",
     "sortNameDesc": "Name Z-A",
@@ -538,6 +540,7 @@
     "tabPlayback": "Wiedergabe",
     "tabAppearance": "Erscheinungsbild",
     "tabData": "Daten",
+    "tabHelp": "Hilfe",
     "done": "Fertig",
     "sources": {
       "empty": "Keine Quellordner hinzugefügt",
@@ -689,6 +692,19 @@
       "relHoursAgo": "{count, plural, one {vor # Stunde} other {vor # Stunden}}",
       "relYesterday": "Gestern",
       "relDaysAgo": "{count, plural, one {vor # Tag} other {vor # Tagen}}"
+    },
+    "help": {
+      "logsHeader": "Diagnoseprotokolle",
+      "logsBlurb": "Öffne den Ordner mit der Anwendungs-Logdatei. Nützlich beim Einreichen eines Fehlerberichts.",
+      "openLogFolder": "Log-Ordner öffnen",
+      "openLogFolderFailed": "Log-Ordner konnte nicht geöffnet werden.",
+      "shortcutsHeader": "Tastaturkürzel",
+      "shortcutsBlurb": "Liste der Tastaturkürzel für den Player und Editor anzeigen.",
+      "showShortcuts": "Kürzel anzeigen",
+      "aboutHeader": "Über",
+      "aboutVersion": "Version {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "Lizenz"
     }
   },
   "feedback": {

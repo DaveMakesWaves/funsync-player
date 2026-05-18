@@ -242,7 +242,7 @@ class App {
       getConnectionState: () => ({
         handyConnected: !!this.handyManager?._connected,
         buttplugConnected: !!this.buttplugManager?._connected,
-        vrConnected: !!this.vrBridge?.isConnected?.(),
+        vrConnected: !!this.vrBridge?.connected,
         deviceCount: this.buttplugManager?._devices?.length || 0,
       }),
     });

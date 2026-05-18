@@ -137,6 +137,8 @@
     "title": "라이브러리",
     "search": "검색…",
     "searchAria": "동영상 검색",
+    "clearSearchAria": "검색 지우기",
+    "filtersPopAria": "필터",
     "sort": "정렬",
     "sortNameAsc": "이름 A-Z",
     "sortNameDesc": "이름 Z-A",
@@ -538,6 +540,7 @@
     "tabPlayback": "재생",
     "tabAppearance": "모양",
     "tabData": "데이터",
+    "tabHelp": "도움말",
     "done": "완료",
     "sources": {
       "empty": "추가된 소스 폴더가 없습니다",
@@ -689,6 +692,19 @@
       "relHoursAgo": "{count, plural, other {#시간 전}}",
       "relYesterday": "어제",
       "relDaysAgo": "{count, plural, other {#일 전}}"
+    },
+    "help": {
+      "logsHeader": "진단 로그",
+      "logsBlurb": "애플리케이션 로그 파일이 들어 있는 폴더를 엽니다. 버그 보고 시 유용합니다.",
+      "openLogFolder": "로그 폴더 열기",
+      "openLogFolderFailed": "로그 폴더를 열 수 없습니다.",
+      "shortcutsHeader": "키보드 단축키",
+      "shortcutsBlurb": "플레이어와 에디터의 키보드 단축키 목록을 봅니다.",
+      "showShortcuts": "단축키 표시",
+      "aboutHeader": "정보",
+      "aboutVersion": "버전 {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "라이선스"
     }
   },
   "feedback": {

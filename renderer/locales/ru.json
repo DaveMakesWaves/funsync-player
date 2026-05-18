@@ -137,6 +137,8 @@
     "title": "Библиотека",
     "search": "Поиск…",
     "searchAria": "Поиск видео",
+    "clearSearchAria": "Очистить поиск",
+    "filtersPopAria": "Фильтры",
     "sort": "Сортировка",
     "sortNameAsc": "Название А-Я",
     "sortNameDesc": "Название Я-А",
@@ -537,6 +539,7 @@
     "tabPlayback": "Воспроизведение",
     "tabAppearance": "Внешний вид",
     "tabData": "Данные",
+    "tabHelp": "Справка",
     "done": "Готово",
     "sources": {
       "empty": "Не добавлено ни одной папки-источника",
@@ -688,6 +691,19 @@
       "relHoursAgo": "{count, plural, one {# час назад} few {# часа назад} many {# часов назад} other {# часов назад}}",
       "relYesterday": "Вчера",
       "relDaysAgo": "{count, plural, one {# день назад} few {# дня назад} many {# дней назад} other {# дней назад}}"
+    },
+    "help": {
+      "logsHeader": "Диагностические журналы",
+      "logsBlurb": "Открыть папку с файлом журнала приложения. Полезно при отправке отчёта об ошибке.",
+      "openLogFolder": "Открыть папку журналов",
+      "openLogFolderFailed": "Не удалось открыть папку журналов.",
+      "shortcutsHeader": "Сочетания клавиш",
+      "shortcutsBlurb": "Просмотреть список сочетаний клавиш для плеера и редактора.",
+      "showShortcuts": "Показать сочетания",
+      "aboutHeader": "О программе",
+      "aboutVersion": "Версия {version}",
+      "aboutGithub": "GitHub",
+      "aboutLicense": "Лицензия"
     }
   },
   "feedback": {

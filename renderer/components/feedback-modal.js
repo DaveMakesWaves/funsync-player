@@ -163,6 +163,11 @@ export async function openFeedbackModal({ getConnectionState }) {
         const panel = body.closest('.modal-panel');
         const titleEl = panel?.querySelector('.modal-title');
         if (titleEl) titleEl.textContent = t('feedback.title');
+        const closeBtn = panel?.querySelector('.modal-close-btn');
+        if (closeBtn) {
+          closeBtn.setAttribute('aria-label', t('modal.closeAria', { title: t('feedback.title') }));
+          closeBtn.title = t('common.close');
+        }
         renderInto(body, close, state, getConnectionState);
       });
     },
