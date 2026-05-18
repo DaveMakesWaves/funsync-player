@@ -5,6 +5,8 @@ import { icon, Trash2, Pencil, GripVertical } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { classifyOverlap } from '../js/path-utils.js';
 import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale, translatePage } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
+import { openFeedbackModal } from './feedback-modal.js';
 
 // Canonical default values for each tunable Playback field. Used by the
 // per-field reset-to-default `↻` button (Shneiderman #6 reversibility)
@@ -37,6 +39,7 @@ export class SettingsPanel {
     onLinearStrategyChanged,
     onLinearLookaheadChanged,
     onMinStrokeChanged,
+    getConnectionState,
   }) {
     this._settings = settings;
     this._onSourcesChanged = onSourcesChanged;
@@ -49,6 +52,10 @@ export class SettingsPanel {
     this.onLinearStrategyChanged = onLinearStrategyChanged || null;
     this.onLinearLookaheadChanged = onLinearLookaheadChanged || null;
     this.onMinStrokeChanged = onMinStrokeChanged || null;
+    // Optional — returns a snapshot of device connection state for the
+    // "Report a problem" dialog. Caller (app.js) owns the device managers
+    // so it's the natural place to read this from.
+    this.getConnectionState = getConnectionState || (() => ({}));
   }
 
   /**
@@ -103,108 +110,148 @@ export class SettingsPanel {
   }
 
   async show() {
+    let unsubscribeLang = null;
     await Modal.open({
       title: t('settingsPanel.modalTitle'),
       onRender: (body, close) => {
-        // Tab bar
-        const tabBar = document.createElement('div');
-        tabBar.className = 'settings-panel__tabs';
-        tabBar.setAttribute('role', 'tablist');
-        tabBar.setAttribute('aria-label', t('settingsPanel.tabsAria'));
+        this._renderBody(body, close, 'sources');
 
-        const tabs = [
-          { id: 'sources', label: t('settingsPanel.tabSources') },
-          { id: 'playback', label: t('settingsPanel.tabPlayback') },
-          { id: 'appearance', label: t('settingsPanel.tabAppearance') },
-          { id: 'data', label: t('settingsPanel.tabData') },
-        ];
-
-        const panels = {};
-
-        for (const tab of tabs) {
-          const btn = document.createElement('button');
-          btn.className = 'settings-panel__tab';
-          btn.dataset.tab = tab.id;
-          btn.textContent = tab.label;
-          btn.id = `settings-tab-${tab.id}`;
-          btn.setAttribute('role', 'tab');
-          btn.setAttribute('aria-selected', 'false');
-          btn.setAttribute('aria-controls', `settings-tabpanel-${tab.id}`);
-          btn.tabIndex = -1;
-          btn.addEventListener('click', () => {
-            tabBar.querySelectorAll('.settings-panel__tab').forEach(t => {
-              const isActive = t.dataset.tab === tab.id;
-              t.classList.toggle('settings-panel__tab--active', isActive);
-              t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-              t.tabIndex = isActive ? 0 : -1;
-            });
-            Object.values(panels).forEach(p => p.hidden = true);
-            panels[tab.id].hidden = false;
-            btn.focus();
-          });
-          tabBar.appendChild(btn);
-        }
-        // Wire arrow-key navigation between tabs (Nielsen #4 standards —
-        // canonical tablist keyboard pattern).
-        tabBar.addEventListener('keydown', (e) => {
-          const tabBtns = [...tabBar.querySelectorAll('.settings-panel__tab')];
-          const idx = tabBtns.indexOf(document.activeElement);
-          if (idx < 0) return;
-          let next = -1;
-          if (e.key === 'ArrowRight') next = (idx + 1) % tabBtns.length;
-          else if (e.key === 'ArrowLeft') next = (idx - 1 + tabBtns.length) % tabBtns.length;
-          else if (e.key === 'Home') next = 0;
-          else if (e.key === 'End') next = tabBtns.length - 1;
-          if (next >= 0) {
-            e.preventDefault();
-            tabBtns[next].click();
+        // Re-render on locale change — strings are baked via t() into the
+        // tab labels, section headers, hints, etc. at render time, so
+        // translatePage() alone doesn't catch them. Preserve the active
+        // tab so the user stays where they were when they picked the
+        // language (otherwise they'd get bounced back to Sources).
+        unsubscribeLang = eventBus.on('language:changed', () => {
+          const activeTab = body.querySelector('.settings-panel__tab--active')?.dataset.tab || 'sources';
+          // Update the modal chrome (title + close button) that lives in
+          // the parent panel, outside our body.
+          const panel = body.closest('.modal-panel');
+          const titleEl = panel?.querySelector('.modal-title');
+          if (titleEl) titleEl.textContent = t('settingsPanel.modalTitle');
+          const closeBtn = panel?.querySelector('.modal-close-btn');
+          if (closeBtn) {
+            closeBtn.setAttribute('aria-label', t('modal.closeAria', { title: t('settingsPanel.modalTitle') }));
+            closeBtn.title = t('common.close');
+          }
+          this._renderBody(body, close, activeTab);
+          // Re-focus the language picker so keyboard users keep their
+          // place after the rebuild wipes the DOM they were on.
+          if (activeTab === 'appearance') {
+            const langSelect = body.querySelector('[data-setting="player.language"]');
+            if (langSelect) langSelect.focus();
           }
         });
-        const initialTab = tabBar.querySelector('[data-tab="sources"]');
-        initialTab.classList.add('settings-panel__tab--active');
-        initialTab.setAttribute('aria-selected', 'true');
-        initialTab.tabIndex = 0;
-        body.appendChild(tabBar);
-
-        // Helper — wire the per-tab panel ARIA + id pairing so the
-        // tab→panel relationship is screen-reader-traversable.
-        const wirePanel = (id) => {
-          const p = panels[id];
-          p.id = `settings-tabpanel-${id}`;
-          p.setAttribute('role', 'tabpanel');
-          p.setAttribute('aria-labelledby', `settings-tab-${id}`);
-          return p;
-        };
-
-        // --- Sources Tab ---
-        panels.sources = this._buildSourcesTab();
-        body.appendChild(wirePanel('sources'));
-
-        // --- Playback Tab ---
-        panels.playback = this._buildPlaybackTab();
-        panels.playback.hidden = true;
-        body.appendChild(wirePanel('playback'));
-
-        // --- Appearance Tab (theme toggle) ---
-        panels.appearance = this._buildAppearanceTab();
-        panels.appearance.hidden = true;
-        body.appendChild(wirePanel('appearance'));
-
-        // --- Data Tab ---
-        panels.data = this._buildDataTab();
-        panels.data.hidden = true;
-        body.appendChild(wirePanel('data'));
-
-        // Done button — dedicated class (was borrowing
-        // `.library__assoc-save-btn` from the library multi-select flow,
-        // a semantic class mismatch flagged by the design audit).
-        const doneBtn = document.createElement('button');
-        doneBtn.className = 'settings-panel__done-btn';
-        doneBtn.textContent = t('settingsPanel.done');
-        doneBtn.addEventListener('click', () => close());
-        body.appendChild(doneBtn);
       },
     });
+    if (unsubscribeLang) unsubscribeLang();
+  }
+
+  _renderBody(body, close, initialTabId) {
+    body.innerHTML = '';
+
+    // Tab bar
+    const tabBar = document.createElement('div');
+    tabBar.className = 'settings-panel__tabs';
+    tabBar.setAttribute('role', 'tablist');
+    tabBar.setAttribute('aria-label', t('settingsPanel.tabsAria'));
+
+    const tabs = [
+      { id: 'sources', label: t('settingsPanel.tabSources') },
+      { id: 'playback', label: t('settingsPanel.tabPlayback') },
+      { id: 'appearance', label: t('settingsPanel.tabAppearance') },
+      { id: 'data', label: t('settingsPanel.tabData') },
+    ];
+
+    const panels = {};
+
+    for (const tab of tabs) {
+      const btn = document.createElement('button');
+      btn.className = 'settings-panel__tab';
+      btn.dataset.tab = tab.id;
+      btn.textContent = tab.label;
+      btn.id = `settings-tab-${tab.id}`;
+      btn.setAttribute('role', 'tab');
+      btn.setAttribute('aria-selected', 'false');
+      btn.setAttribute('aria-controls', `settings-tabpanel-${tab.id}`);
+      btn.tabIndex = -1;
+      btn.addEventListener('click', () => {
+        tabBar.querySelectorAll('.settings-panel__tab').forEach(t => {
+          const isActive = t.dataset.tab === tab.id;
+          t.classList.toggle('settings-panel__tab--active', isActive);
+          t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+          t.tabIndex = isActive ? 0 : -1;
+        });
+        Object.values(panels).forEach(p => p.hidden = true);
+        panels[tab.id].hidden = false;
+        btn.focus();
+      });
+      tabBar.appendChild(btn);
+    }
+    // Wire arrow-key navigation between tabs (Nielsen #4 standards —
+    // canonical tablist keyboard pattern).
+    tabBar.addEventListener('keydown', (e) => {
+      const tabBtns = [...tabBar.querySelectorAll('.settings-panel__tab')];
+      const idx = tabBtns.indexOf(document.activeElement);
+      if (idx < 0) return;
+      let next = -1;
+      if (e.key === 'ArrowRight') next = (idx + 1) % tabBtns.length;
+      else if (e.key === 'ArrowLeft') next = (idx - 1 + tabBtns.length) % tabBtns.length;
+      else if (e.key === 'Home') next = 0;
+      else if (e.key === 'End') next = tabBtns.length - 1;
+      if (next >= 0) {
+        e.preventDefault();
+        tabBtns[next].click();
+      }
+    });
+    body.appendChild(tabBar);
+
+    // Helper — wire the per-tab panel ARIA + id pairing so the
+    // tab→panel relationship is screen-reader-traversable.
+    const wirePanel = (id) => {
+      const p = panels[id];
+      p.id = `settings-tabpanel-${id}`;
+      p.setAttribute('role', 'tabpanel');
+      p.setAttribute('aria-labelledby', `settings-tab-${id}`);
+      return p;
+    };
+
+    // --- Sources Tab ---
+    panels.sources = this._buildSourcesTab();
+    body.appendChild(wirePanel('sources'));
+
+    // --- Playback Tab ---
+    panels.playback = this._buildPlaybackTab();
+    body.appendChild(wirePanel('playback'));
+
+    // --- Appearance Tab (theme toggle) ---
+    panels.appearance = this._buildAppearanceTab();
+    body.appendChild(wirePanel('appearance'));
+
+    // --- Data Tab ---
+    panels.data = this._buildDataTab();
+    body.appendChild(wirePanel('data'));
+
+    // Activate the requested initial tab (defaults to 'sources' on first
+    // render, but is preserved across locale-change rebuilds).
+    const activeId = panels[initialTabId] ? initialTabId : 'sources';
+    const initialBtn = tabBar.querySelector(`[data-tab="${activeId}"]`);
+    if (initialBtn) {
+      initialBtn.classList.add('settings-panel__tab--active');
+      initialBtn.setAttribute('aria-selected', 'true');
+      initialBtn.tabIndex = 0;
+    }
+    for (const id of Object.keys(panels)) {
+      panels[id].hidden = id !== activeId;
+    }
+
+    // Done button — dedicated class (was borrowing
+    // `.library__assoc-save-btn` from the library multi-select flow,
+    // a semantic class mismatch flagged by the design audit).
+    const doneBtn = document.createElement('button');
+    doneBtn.className = 'settings-panel__done-btn';
+    doneBtn.textContent = t('settingsPanel.done');
+    doneBtn.addEventListener('click', () => close());
+    body.appendChild(doneBtn);
   }
 
   _buildSourcesTab() {
@@ -944,6 +991,23 @@ export class SettingsPanel {
     `;
     panel.appendChild(exportSection);
 
+    // --- Section 3: Report a Problem ------------------------------------
+    // Manual bug-report path. Opens a dialog that bundles app version,
+    // OS, and the last ~80 log lines into a payload the user can edit
+    // before submitting via GitHub / clipboard / file (Nielsen #1
+    // visibility — user sees exactly what gets sent; Shneiderman #6
+    // reversibility — every field is editable until they click send).
+    const feedbackSection = document.createElement('div');
+    feedbackSection.className = 'settings-panel__section';
+    feedbackSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('feedback.sectionHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">${t('feedback.sectionBlurb')}</div>
+      <div style="display:flex;gap:8px">
+        <button id="sp-feedback" class="settings-panel__add-btn" style="border-style:solid">${t('feedback.sectionButton')}</button>
+      </div>
+    `;
+    panel.appendChild(feedbackSection);
+
     setTimeout(() => {
       this._wireDataTab(panel);
       this._refreshBackupStatus(panel);
@@ -1123,6 +1187,11 @@ export class SettingsPanel {
         else showToast(t('settingsPanel.data.importCancelled'), 'info');
       } catch { showToast(t('settingsPanel.data.importFailed'), 'error'); }
       btn.disabled = false; btn.textContent = t('settingsPanel.data.import');
+    });
+
+    // --- Report a Problem -----------------------------------------------
+    panel.querySelector('#sp-feedback')?.addEventListener('click', () => {
+      openFeedbackModal({ getConnectionState: this.getConnectionState });
     });
   }
 }

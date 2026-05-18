@@ -1,0 +1,30 @@
+name: Bug report
+description: Report a bug — usually filed via FunSync's in-app "Report a problem" dialog.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting an issue. If you started this from the in-app **Settings → Data → Report a problem** dialog the fields below are already filled in for you. Feel free to edit anything before submitting.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you try to do and what went wrong?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce (optional)
+      description: If you can reproduce the issue, the exact sequence helps a lot.
+      placeholder: |
+        1.
+        2.
+        3.
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Auto-collected by the in-app dialog (app version, OS, recent log lines). Review and edit before submitting if anything looks too revealing.
+      render: shell

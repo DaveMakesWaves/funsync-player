@@ -94,6 +94,11 @@ contextBridge.exposeInMainWorld('funsync', {
   // Shell
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   showInFolder: (filePath) => ipcRenderer.invoke('show-in-folder', filePath),
+  // Diagnostics bundle for the "Report a problem" dialog. Renderer
+  // passes its own connection-state snapshot since the device managers
+  // live there.
+  collectDiagnostics: (rendererState) => ipcRenderer.invoke('collect-diagnostics', rendererState),
+  saveFile: (opts) => ipcRenderer.invoke('save-text-file', opts),
   // i18n — read once at boot to drive the first-launch language-offer
   // toast (see notes/features/IMPL-multi-language.md §3).
   getSystemLocale: () => ipcRenderer.invoke('get-system-locale'),

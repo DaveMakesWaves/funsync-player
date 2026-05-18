@@ -367,6 +367,82 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
+// Collect a privacy-scrubbed diagnostics bundle for the in-app
+// "Report a problem" dialog. Connection flags are passed in by the
+// renderer (where the device-manager state actually lives). Log path
+// is read defensively — failure here must not block the report path.
+//
+// Privacy contract (see notes/DESIGN.md and memory/feedback_*):
+//   - Never include file paths, user-supplied names, or device keys.
+//   - Log tail is best-effort; if a user wants a longer log they can
+//     attach the file via "Save to file" → drag into the issue.
+ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
+  const os = require('os');
+  const logPath = log.transports?.file?.getFile?.()?.path;
+  let logTail = '(log unavailable)';
+  if (logPath) {
+    try {
+      const raw = await fs.promises.readFile(logPath, 'utf8');
+      const lines = raw.trim().split('\n');
+      logTail = lines.slice(-80).join('\n');
+    } catch (err) {
+      logTail = `(log read failed: ${err.message})`;
+    }
+  }
+  const health = getHealthState?.() || {};
+  return {
+    app: {
+      name: 'FunSync Player',
+      version: app.getVersion(),
+    },
+    platform: {
+      os: process.platform,
+      release: os.release(),
+      arch: os.arch(),
+    },
+    runtime: {
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+    },
+    backend: {
+      running: !!health.healthy,
+      port: 5123,
+    },
+    devices: {
+      handy: !!rendererState?.handyConnected,
+      buttplug: !!rendererState?.buttplugConnected,
+      vr: !!rendererState?.vrConnected,
+      deviceCount: Number(rendererState?.deviceCount || 0),
+    },
+    logTail,
+  };
+});
+
+// Save a text payload to a user-chosen file. Used by the "Report a
+// problem" dialog for users who want to attach the report to an issue
+// manually (e.g. when logs exceed the GitHub URL budget). Returns
+// { success, path } | { cancelled: true } | { success: false, error }.
+ipcMain.handle('save-text-file', async (_event, opts) => {
+  const { defaultPath = 'report.txt', title = 'Save file', content = '' } = opts || {};
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title,
+      defaultPath,
+      filters: [
+        { name: 'Text', extensions: ['txt'] },
+        { name: 'All files', extensions: ['*'] },
+      ],
+    });
+    if (result.canceled || !result.filePath) return { cancelled: true };
+    await fs.promises.writeFile(result.filePath, String(content), 'utf8');
+    return { success: true, path: result.filePath };
+  } catch (err) {
+    log.error('[save-text-file] failed:', err?.message);
+    return { success: false, error: err?.message || 'unknown error' };
+  }
+});
+
 // Renderer → main log forwarding for the startup-timer (and any other
 // callers that need a guaranteed-write path that doesn't depend on the
 // console.log forwarding transport, which can break if stdout is closed

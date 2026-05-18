@@ -236,6 +236,15 @@ class App {
       onMinStrokeChanged: (ms) => {
         if (this.buttplugSync) this.buttplugSync.setMinStrokeMs(ms);
       },
+      // Snapshot device-connection flags for the "Report a problem"
+      // diagnostics bundle. Read defensively — managers may be null
+      // (Handy SDK can fail to import; Buttplug isn't always inited).
+      getConnectionState: () => ({
+        handyConnected: !!this.handyManager?._connected,
+        buttplugConnected: !!this.buttplugManager?._connected,
+        vrConnected: !!this.vrBridge?.isConnected?.(),
+        deviceCount: this.buttplugManager?._devices?.length || 0,
+      }),
     });
 
     this.navBar = new NavBar({

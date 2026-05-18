@@ -1101,3 +1101,98 @@
   line-height: 1.4;
   opacity: 0.85;
 }
+
+/* === Feedback (Report a Problem) modal ===
+ *
+ * Form panel — uses the per-field label/input/hint pattern (DESIGN §2.3
+ * "form panels keep the section-border pattern"). Section borders aren't
+ * needed here because the dialog is a single flow rather than tab-split
+ * sections. Semantic tokens throughout so light/dark mode swap is free
+ * (DESIGN §2.1).
+ *
+ * The diagnostics textarea is monospaced and tall so users can scroll
+ * and inspect/edit log lines before sending — Nielsen #1 visibility
+ * applied to the payload itself.
+ */
+
+.feedback-modal {
+  min-width: min(600px, 90vw);
+  max-width: 720px;
+}
+
+.feedback-modal__intro {
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0 0 16px;
+}
+
+.feedback-modal__field {
+  margin-bottom: 14px;
+}
+
+.feedback-modal__label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.feedback-modal__input {
+  width: 100%;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+  outline: none;
+  resize: vertical;
+  line-height: 1.45;
+  box-sizing: border-box;
+}
+
+.feedback-modal__input:focus {
+  border-color: var(--accent);
+}
+
+.feedback-modal__input--mono {
+  font-family: var(--font-mono, ui-monospace, "SF Mono", Consolas, "Liberation Mono", monospace);
+  font-size: 11.5px;
+  line-height: 1.4;
+  white-space: pre;
+  background: var(--surface-card);
+}
+
+.feedback-modal__hint {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.feedback-modal__privacy {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 4px 0 16px;
+  padding: 8px 10px;
+  background: var(--surface-overlay);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  line-height: 1.4;
+}
+
+.feedback-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Buttons in the action row use the existing .modal-btn--{primary,secondary}
+ * shape so Shneiderman #1 consistency holds across all modals. The
+ * primary action (Open GitHub Issue) lands at the right edge — the
+ * commit position users expect. */
+
