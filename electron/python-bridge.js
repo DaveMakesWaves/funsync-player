@@ -105,17 +105,24 @@ async function startBackend() {
     const backendDir = path.join(__dirname, '..', 'backend');
 
     // In packaged app, look for the bundled executable in resources/backend
-    const isPackaged = require('electron').app.isPackaged;
+    const electronApp = require('electron').app;
+    const isPackaged = electronApp.isPackaged;
     const bundledBackend = isPackaged
       ? path.join(process.resourcesPath, 'backend', 'funsync-backend' + (process.platform === 'win32' ? '.exe' : ''))
       : null;
+
+    // userData dir holds config.json — the web-remote locale endpoint
+    // reads this file to mirror the desktop's chosen language onto the
+    // phone without an extra picker. Optional — backend falls back to
+    // 'en' if not provided.
+    const userDataDir = electronApp.getPath('userData');
 
     let cmd, args, cwd;
 
     if (bundledBackend && fs.existsSync(bundledBackend)) {
       // Production: use PyInstaller-bundled executable
       cmd = bundledBackend;
-      args = ['--port', String(backendPort)];
+      args = ['--port', String(backendPort), '--user-data-dir', userDataDir];
       cwd = path.dirname(bundledBackend);
     } else {
       // Development: use venv Python or system Python
@@ -126,7 +133,7 @@ async function startBackend() {
       cmd = fs.existsSync(venvPython)
         ? venvPython
         : (process.platform === 'win32' ? 'python' : 'python3');
-      args = ['main.py', '--port', String(backendPort)];
+      args = ['main.py', '--port', String(backendPort), '--user-data-dir', userDataDir];
       cwd = backendDir;
     }
 

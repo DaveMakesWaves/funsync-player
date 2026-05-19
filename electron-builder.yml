@@ -32,6 +32,12 @@ win:
 linux:
   icon: assets/icons/icon.png
   category: Video
+  # Override the binary name so the AppImage doesn't carry a space (the
+  # default derives from `productName` -> "FunSync Player.AppImage",
+  # which is awkward to launch from a shell without quoting). The
+  # in-app productName "FunSync Player" is preserved for the desktop
+  # entry / menu label.
+  executableName: funsync-player
   target:
     - target: AppImage
       arch: x64

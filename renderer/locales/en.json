@@ -833,6 +833,126 @@
     "saveDialogTitle": "Save diagnostic report",
     "saveDialogDefaultName": "funsync-report.txt"
   },
+  "webRemote": {
+    "header": {
+      "back": "Back",
+      "locationAria": "Location",
+      "refresh": "Refresh library"
+    },
+    "search": {
+      "library": "Search library",
+      "collections": "Search collections",
+      "playlists": "Search playlists",
+      "categories": "Search categories",
+      "sources": "Search sources",
+      "short": "Search",
+      "aria": "Search",
+      "clear": "Clear search"
+    },
+    "filterChips": {
+      "aria": "Active filters"
+    },
+    "actions": {
+      "sort": "Sort",
+      "viewToggleAria": "Toggle grid or list view",
+      "viewToggleTitle": "Toggle grid / list",
+      "folderAria": "Browse by folder",
+      "folderTitle": "Browse by folder",
+      "filters": "Filters"
+    },
+    "nav": {
+      "modesAria": "Modes",
+      "library": "Library",
+      "collections": "Collections",
+      "playlists": "Playlists",
+      "categories": "Categories",
+      "folders": "Folders"
+    },
+    "filterSheet": {
+      "title": "Filters",
+      "close": "Close filters",
+      "matchHeader": "Match status",
+      "matchAria": "Match status",
+      "matchAll": "All",
+      "matchMatched": "Matched",
+      "matchUnmatched": "Unmatched",
+      "vrHeader": "VR",
+      "vrAria": "VR filter",
+      "vrAll": "All",
+      "vrOnly": "VR only",
+      "vrFlat": "Non-VR"
+    },
+    "sortSheet": {
+      "title": "Sort by",
+      "close": "Close sort",
+      "aria": "Sort",
+      "nameAsc": "Name A-Z",
+      "nameDesc": "Name Z-A",
+      "dateAddedDesc": "Recently Added",
+      "dateAddedAsc": "Oldest First",
+      "durationAsc": "Duration Short-Long",
+      "durationDesc": "Duration Long-Short",
+      "avgSpeedAsc": "Avg Speed Slow-Fast",
+      "avgSpeedDesc": "Avg Speed Fast-Slow",
+      "maxSpeedAsc": "Max Speed Slow-Fast",
+      "maxSpeedDesc": "Max Speed Fast-Slow"
+    },
+    "badge": {
+      "script": "Script",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "All sources",
+      "folders": "Folders",
+      "notFound": "(not found)",
+      "unnamed": "(unnamed)"
+    },
+    "folderJump": {
+      "label": "In folder: <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "Loading library…",
+      "loadFailedTitle": "Couldn't load library",
+      "noVideosTitle": "No videos yet",
+      "noVideosBody": "Add a source folder in FunSync on your desktop.",
+      "noMatchesTitle": "No matches",
+      "noMatchesBody": "Try a different search or filter.",
+      "noMatchesBodyShort": "Try a different search.",
+      "noSourcesTitle": "No sources",
+      "noSourcesBody": "Add a source folder in FunSync on your desktop.",
+      "noSourcesFilteredBody": "No sources contain videos that match the current filter.",
+      "loadFoldersFailedTitle": "Couldn't load folders",
+      "folderNotFoundTitle": "Folder not found",
+      "folderNotFoundBody": "This folder is no longer on the desktop.",
+      "emptyFolderTitle": "Empty folder",
+      "emptyFolderBody": "No subfolders or videos here.",
+      "videoNotFoundTitle": "Video not found",
+      "videoNotFoundBody": "Go back and try again.",
+      "loadGroupingFailedTitle": "{kind, select, collections {Couldn't load collections} playlists {Couldn't load playlists} categories {Couldn't load categories} other {Couldn't load items}}",
+      "noGroupingTitle": "{kind, select, collections {No collections yet} playlists {No playlists yet} categories {No categories yet} other {Nothing yet}}",
+      "noGroupingBody": "{kind, select, collections {Create collections in FunSync on your desktop — they'll show up here.} playlists {Create playlists in FunSync on your desktop — they'll show up here.} categories {Create categories in FunSync on your desktop — they'll show up here.} other {Create items in FunSync on your desktop.}}",
+      "groupingNotFoundTitle": "Not found",
+      "groupingNotFoundBody": "{kind, select, collections {This collection no longer exists on the desktop.} playlists {This playlist no longer exists on the desktop.} categories {This category no longer exists on the desktop.} other {This item no longer exists on the desktop.}}",
+      "groupingEmptyTitle": "Empty",
+      "groupingEmptyBody": "{kind, select, collections {No videos in this collection are currently available.} playlists {No videos in this playlist are currently available.} categories {No videos in this category are currently available.} other {No videos in this item are currently available.}}"
+    },
+    "player": {
+      "switching": "Switching script…",
+      "connecting": "Connecting to devices…",
+      "preparing": "Preparing devices…",
+      "ready": "Devices ready",
+      "noScript": "No funscript — playing video only",
+      "noScriptMatch": "Desktop couldn't find a matching script",
+      "connected": "Connected: {devices}",
+      "noDevices": "No devices connected on desktop",
+      "connectedCount": "{count, plural, one {Connected device · #} other {Connected devices · #}}",
+      "intensity": "Funscript intensity",
+      "avg": "Avg",
+      "max": "Max",
+      "speedUnit": "units/s",
+      "speedTooltip": "Avg {avg} units/s • Max {max} units/s"
+    }
+  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "Close EroScripts",

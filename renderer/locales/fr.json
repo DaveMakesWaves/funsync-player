@@ -738,6 +738,126 @@
     "saveDialogTitle": "Enregistrer le rapport de diagnostic",
     "saveDialogDefaultName": "rapport-funsync.txt"
   },
+  "webRemote": {
+    "header": {
+      "back": "Retour",
+      "locationAria": "Emplacement",
+      "refresh": "Actualiser la bibliothèque"
+    },
+    "search": {
+      "library": "Rechercher dans la bibliothèque",
+      "collections": "Rechercher des collections",
+      "playlists": "Rechercher des listes",
+      "categories": "Rechercher des catégories",
+      "sources": "Rechercher des sources",
+      "short": "Rechercher",
+      "aria": "Rechercher",
+      "clear": "Effacer la recherche"
+    },
+    "filterChips": {
+      "aria": "Filtres actifs"
+    },
+    "actions": {
+      "sort": "Trier",
+      "viewToggleAria": "Basculer entre vue grille et vue liste",
+      "viewToggleTitle": "Grille / liste",
+      "folderAria": "Parcourir par dossier",
+      "folderTitle": "Parcourir par dossier",
+      "filters": "Filtres"
+    },
+    "nav": {
+      "modesAria": "Modes",
+      "library": "Bibliothèque",
+      "collections": "Collections",
+      "playlists": "Listes",
+      "categories": "Catégories",
+      "folders": "Dossiers"
+    },
+    "filterSheet": {
+      "title": "Filtres",
+      "close": "Fermer les filtres",
+      "matchHeader": "Statut de correspondance",
+      "matchAria": "Statut de correspondance",
+      "matchAll": "Tous",
+      "matchMatched": "Associés",
+      "matchUnmatched": "Sans association",
+      "vrHeader": "VR",
+      "vrAria": "Filtre VR",
+      "vrAll": "Tous",
+      "vrOnly": "VR uniquement",
+      "vrFlat": "Non VR"
+    },
+    "sortSheet": {
+      "title": "Trier par",
+      "close": "Fermer le tri",
+      "aria": "Trier",
+      "nameAsc": "Nom A-Z",
+      "nameDesc": "Nom Z-A",
+      "dateAddedDesc": "Récemment ajoutés",
+      "dateAddedAsc": "Les plus anciens d'abord",
+      "durationAsc": "Durée courte-longue",
+      "durationDesc": "Durée longue-courte",
+      "avgSpeedAsc": "Vitesse moy. lente-rapide",
+      "avgSpeedDesc": "Vitesse moy. rapide-lente",
+      "maxSpeedAsc": "Vitesse max. lente-rapide",
+      "maxSpeedDesc": "Vitesse max. rapide-lente"
+    },
+    "badge": {
+      "script": "Script",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "Toutes les sources",
+      "folders": "Dossiers",
+      "notFound": "(introuvable)",
+      "unnamed": "(sans nom)"
+    },
+    "folderJump": {
+      "label": "Dans le dossier : <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "Chargement de la bibliothèque…",
+      "loadFailedTitle": "Impossible de charger la bibliothèque",
+      "noVideosTitle": "Aucune vidéo pour l'instant",
+      "noVideosBody": "Ajoutez un dossier source dans FunSync sur votre ordinateur.",
+      "noMatchesTitle": "Aucune correspondance",
+      "noMatchesBody": "Essayez une autre recherche ou un autre filtre.",
+      "noMatchesBodyShort": "Essayez une autre recherche.",
+      "noSourcesTitle": "Aucune source",
+      "noSourcesBody": "Ajoutez un dossier source dans FunSync sur votre ordinateur.",
+      "noSourcesFilteredBody": "Aucune source ne contient de vidéos correspondant au filtre actuel.",
+      "loadFoldersFailedTitle": "Impossible de charger les dossiers",
+      "folderNotFoundTitle": "Dossier introuvable",
+      "folderNotFoundBody": "Ce dossier n'existe plus sur l'ordinateur.",
+      "emptyFolderTitle": "Dossier vide",
+      "emptyFolderBody": "Aucun sous-dossier ni vidéo ici.",
+      "videoNotFoundTitle": "Vidéo introuvable",
+      "videoNotFoundBody": "Revenez en arrière et réessayez.",
+      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} other {Impossible de charger les éléments}}",
+      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} other {Rien pour l'instant}}",
+      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
+      "groupingNotFoundTitle": "Introuvable",
+      "groupingNotFoundBody": "{kind, select, collections {Cette collection n'existe plus sur l'ordinateur.} playlists {Cette liste n'existe plus sur l'ordinateur.} categories {Cette catégorie n'existe plus sur l'ordinateur.} other {Cet élément n'existe plus sur l'ordinateur.}}",
+      "groupingEmptyTitle": "Vide",
+      "groupingEmptyBody": "{kind, select, collections {Aucune vidéo disponible dans cette collection.} playlists {Aucune vidéo disponible dans cette liste.} categories {Aucune vidéo disponible dans cette catégorie.} other {Aucune vidéo disponible dans cet élément.}}"
+    },
+    "player": {
+      "switching": "Changement de script…",
+      "connecting": "Connexion aux appareils…",
+      "preparing": "Préparation des appareils…",
+      "ready": "Appareils prêts",
+      "noScript": "Pas de funscript — lecture vidéo uniquement",
+      "noScriptMatch": "L'ordinateur n'a trouvé aucun script correspondant",
+      "connected": "Connecté : {devices}",
+      "noDevices": "Aucun appareil connecté sur l'ordinateur",
+      "connectedCount": "{count, plural, one {Appareil connecté · #} other {Appareils connectés · #}}",
+      "intensity": "Intensité du funscript",
+      "avg": "Moy",
+      "max": "Max",
+      "speedUnit": "u/s",
+      "speedTooltip": "Moy {avg} u/s • Max {max} u/s"
+    }
+  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "Fermer EroScripts",

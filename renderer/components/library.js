@@ -2667,7 +2667,12 @@ export class Library {
       renderQueued = true;
       Promise.resolve().then(() => {
         renderQueued = false;
-        if (!this._scanning) this._applyFilters();
+        if (this._scanning) return;
+        // Don't rebuild the grid while the user has an open kebab menu
+        // — same reasoning as the duration poll above. Next poll cycle
+        // (2s) will retry once the menu closes.
+        if (this._openMenu) return;
+        this._applyFilters();
       });
     };
 
@@ -2750,7 +2755,15 @@ export class Library {
       renderQueued = true;
       Promise.resolve().then(() => {
         renderQueued = false;
-        if (!this._scanning) this._applyFilters();
+        if (this._scanning) return;
+        // Don't rebuild the grid while the user has an open kebab menu
+        // — `_renderGrid` does `grid.innerHTML = ''` which destroys the
+        // menu mid-interaction. The next poll iteration (2s later) will
+        // call queueRender again; by then the menu is usually closed.
+        // The underlying duration cache is already populated, so worst
+        // case the next user-driven _applyFilters surfaces the data.
+        if (this._openMenu) return;
+        this._applyFilters();
       });
     };
 

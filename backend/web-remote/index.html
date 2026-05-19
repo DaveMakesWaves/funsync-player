@@ -21,13 +21,13 @@
          single emergency-exit (refresh) lives here. Frequent actions
          live in the content-action bar / bottom nav. -->
     <header class="header">
-      <button class="header__back icon-btn" id="backBtn" aria-label="Back" hidden></button>
+      <button class="header__back icon-btn" id="backBtn" aria-label="Back" data-i18n-aria-label="webRemote.header.back" hidden></button>
       <div class="header__titleblock">
         <h1 class="header__title" id="title"><span class="brand-accent">Fun</span>Sync</h1>
-        <nav class="breadcrumb" id="breadcrumb" aria-label="Location" hidden></nav>
+        <nav class="breadcrumb" id="breadcrumb" aria-label="Location" data-i18n-aria-label="webRemote.header.locationAria" hidden></nav>
       </div>
       <span class="header__count" id="count" aria-live="polite"></span>
-      <button class="header__action icon-btn" id="refreshBtn" aria-label="Refresh library" title="Refresh library"></button>
+      <button class="header__action icon-btn" id="refreshBtn" aria-label="Refresh library" data-i18n-aria-label="webRemote.header.refresh" title="Refresh library" data-i18n-title="webRemote.header.refresh"></button>
     </header>
 
     <!-- Main scroll area. The toolbar lives INSIDE this container as
@@ -49,17 +49,17 @@
         <div class="search-bar">
           <span class="search-bar__icon" id="searchIconSlot"></span>
           <input type="search" id="searchInput" class="search-bar__input"
-                 placeholder="Search library"
+                 placeholder="Search library" data-i18n-placeholder="webRemote.search.library"
                  autocomplete="off" autocapitalize="none" autocorrect="off"
                  inputmode="search" enterkeyhint="search" spellcheck="false"
-                 aria-label="Search">
-          <button class="search-bar__clear icon-btn" id="searchClear" aria-label="Clear search" hidden></button>
+                 aria-label="Search" data-i18n-aria-label="webRemote.search.aria">
+          <button class="search-bar__clear icon-btn" id="searchClear" aria-label="Clear search" data-i18n-aria-label="webRemote.search.clear" hidden></button>
         </div>
 
         <!-- Active-filter chips (Nielsen #6 recognition; Shneiderman #6
              reversibility). Hidden when no filters are active so the
              toolbar collapses cleanly. -->
-        <div class="filter-chips" id="filterChips" role="region" aria-label="Active filters" hidden></div>
+        <div class="filter-chips" id="filterChips" role="region" aria-label="Active filters" data-i18n-aria-label="webRemote.filterChips.aria" hidden></div>
 
         <!-- Content-action bar: sort / view / folder / filters.
              Below the search to keep the search at the top of the
@@ -70,17 +70,17 @@
         <div class="content-actions" id="contentActions">
           <button class="content-actions__btn" id="sortBtn" aria-haspopup="dialog">
             <span class="content-actions__icon" id="sortIconSlot"></span>
-            <span class="content-actions__label">Sort</span>
+            <span class="content-actions__label" data-i18n="webRemote.actions.sort">Sort</span>
           </button>
-          <button class="content-actions__btn" id="viewToggle" aria-label="Toggle grid or list view" title="Toggle grid / list" aria-pressed="false">
+          <button class="content-actions__btn" id="viewToggle" aria-label="Toggle grid or list view" data-i18n-aria-label="webRemote.actions.viewToggleAria" title="Toggle grid / list" data-i18n-title="webRemote.actions.viewToggleTitle" aria-pressed="false">
             <span class="content-actions__icon" id="viewIconSlot"></span>
           </button>
-          <button class="content-actions__btn" id="folderToggle" aria-label="Browse by folder" title="Browse by folder" aria-pressed="false">
+          <button class="content-actions__btn" id="folderToggle" aria-label="Browse by folder" data-i18n-aria-label="webRemote.actions.folderAria" title="Browse by folder" data-i18n-title="webRemote.actions.folderTitle" aria-pressed="false">
             <span class="content-actions__icon" id="folderIconSlot"></span>
           </button>
           <button class="content-actions__btn content-actions__btn--filters" id="filtersBtn" aria-haspopup="dialog">
             <span class="content-actions__icon" id="filtersIconSlot"></span>
-            <span class="content-actions__label">Filters</span>
+            <span class="content-actions__label" data-i18n="webRemote.actions.filters">Filters</span>
             <span class="content-actions__badge" id="filtersBadge" aria-hidden="true" hidden></span>
           </button>
         </div>
@@ -95,22 +95,22 @@
          Mode-switching is the most frequent navigation and lives in
          the easy-reach green zone (Hoober). Always-labelled (Nielsen #6
          recognition over recall). -->
-    <nav class="nav-tabs" id="navTabs" role="tablist" aria-label="Modes">
+    <nav class="nav-tabs" id="navTabs" role="tablist" aria-label="Modes" data-i18n-aria-label="webRemote.nav.modesAria">
       <button class="nav-tabs__tab" data-mode="library" role="tab" aria-selected="true">
         <span class="nav-tabs__icon" id="navLibraryIcon"></span>
-        <span class="nav-tabs__label">Library</span>
+        <span class="nav-tabs__label" data-i18n="webRemote.nav.library">Library</span>
       </button>
       <button class="nav-tabs__tab" data-mode="collections" role="tab" aria-selected="false">
         <span class="nav-tabs__icon" id="navCollectionsIcon"></span>
-        <span class="nav-tabs__label">Collections</span>
+        <span class="nav-tabs__label" data-i18n="webRemote.nav.collections">Collections</span>
       </button>
       <button class="nav-tabs__tab" data-mode="playlists" role="tab" aria-selected="false">
         <span class="nav-tabs__icon" id="navPlaylistsIcon"></span>
-        <span class="nav-tabs__label">Playlists</span>
+        <span class="nav-tabs__label" data-i18n="webRemote.nav.playlists">Playlists</span>
       </button>
       <button class="nav-tabs__tab" data-mode="categories" role="tab" aria-selected="false">
         <span class="nav-tabs__icon" id="navCategoriesIcon"></span>
-        <span class="nav-tabs__label">Categories</span>
+        <span class="nav-tabs__label" data-i18n="webRemote.nav.categories">Categories</span>
       </button>
     </nav>
 
@@ -122,24 +122,24 @@
       <div class="sheet__panel" role="document">
         <div class="sheet__handle" aria-hidden="true"></div>
         <header class="sheet__header">
-          <h2 class="sheet__title" id="filterSheetTitle">Filters</h2>
-          <button class="sheet__close icon-btn" data-close-sheet aria-label="Close filters"></button>
+          <h2 class="sheet__title" id="filterSheetTitle" data-i18n="webRemote.filterSheet.title">Filters</h2>
+          <button class="sheet__close icon-btn" data-close-sheet aria-label="Close filters" data-i18n-aria-label="webRemote.filterSheet.close"></button>
         </header>
         <div class="sheet__body">
           <section class="sheet__group">
-            <h3 class="sheet__group-title">Match status</h3>
-            <div class="sheet__options" role="radiogroup" aria-label="Match status" data-filter="tab">
-              <label class="sheet__option"><input type="radio" name="tab" value="all"><span>All</span></label>
-              <label class="sheet__option"><input type="radio" name="tab" value="matched"><span>Matched</span></label>
-              <label class="sheet__option"><input type="radio" name="tab" value="unmatched"><span>Unmatched</span></label>
+            <h3 class="sheet__group-title" data-i18n="webRemote.filterSheet.matchHeader">Match status</h3>
+            <div class="sheet__options" role="radiogroup" aria-label="Match status" data-i18n-aria-label="webRemote.filterSheet.matchAria" data-filter="tab">
+              <label class="sheet__option"><input type="radio" name="tab" value="all"><span data-i18n="webRemote.filterSheet.matchAll">All</span></label>
+              <label class="sheet__option"><input type="radio" name="tab" value="matched"><span data-i18n="webRemote.filterSheet.matchMatched">Matched</span></label>
+              <label class="sheet__option"><input type="radio" name="tab" value="unmatched"><span data-i18n="webRemote.filterSheet.matchUnmatched">Unmatched</span></label>
             </div>
           </section>
           <section class="sheet__group">
-            <h3 class="sheet__group-title">VR</h3>
-            <div class="sheet__options" role="radiogroup" aria-label="VR filter" data-filter="vr">
-              <label class="sheet__option"><input type="radio" name="vr" value="all"><span>All</span></label>
-              <label class="sheet__option"><input type="radio" name="vr" value="vr"><span>VR only</span></label>
-              <label class="sheet__option"><input type="radio" name="vr" value="flat"><span>Non-VR</span></label>
+            <h3 class="sheet__group-title" data-i18n="webRemote.filterSheet.vrHeader">VR</h3>
+            <div class="sheet__options" role="radiogroup" aria-label="VR filter" data-i18n-aria-label="webRemote.filterSheet.vrAria" data-filter="vr">
+              <label class="sheet__option"><input type="radio" name="vr" value="all"><span data-i18n="webRemote.filterSheet.vrAll">All</span></label>
+              <label class="sheet__option"><input type="radio" name="vr" value="vr"><span data-i18n="webRemote.filterSheet.vrOnly">VR only</span></label>
+              <label class="sheet__option"><input type="radio" name="vr" value="flat"><span data-i18n="webRemote.filterSheet.vrFlat">Non-VR</span></label>
             </div>
           </section>
         </div>
@@ -154,21 +154,21 @@
       <div class="sheet__panel" role="document">
         <div class="sheet__handle" aria-hidden="true"></div>
         <header class="sheet__header">
-          <h2 class="sheet__title" id="sortSheetTitle">Sort by</h2>
-          <button class="sheet__close icon-btn" data-close-sheet aria-label="Close sort"></button>
+          <h2 class="sheet__title" id="sortSheetTitle" data-i18n="webRemote.sortSheet.title">Sort by</h2>
+          <button class="sheet__close icon-btn" data-close-sheet aria-label="Close sort" data-i18n-aria-label="webRemote.sortSheet.close"></button>
         </header>
         <div class="sheet__body">
-          <div class="sheet__options sheet__options--single" role="radiogroup" aria-label="Sort" data-filter="sort">
-            <label class="sheet__option"><input type="radio" name="sort" value="name:asc"><span>Name A-Z</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="name:desc"><span>Name Z-A</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="dateAdded:desc"><span>Recently Added</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="dateAdded:asc"><span>Oldest First</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="duration:asc"><span>Duration Short-Long</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="duration:desc"><span>Duration Long-Short</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="avgSpeed:asc"><span>Avg Speed Slow-Fast</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="avgSpeed:desc"><span>Avg Speed Fast-Slow</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="maxSpeed:asc"><span>Max Speed Slow-Fast</span></label>
-            <label class="sheet__option"><input type="radio" name="sort" value="maxSpeed:desc"><span>Max Speed Fast-Slow</span></label>
+          <div class="sheet__options sheet__options--single" role="radiogroup" aria-label="Sort" data-i18n-aria-label="webRemote.sortSheet.aria" data-filter="sort">
+            <label class="sheet__option"><input type="radio" name="sort" value="name:asc"><span data-i18n="webRemote.sortSheet.nameAsc">Name A-Z</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="name:desc"><span data-i18n="webRemote.sortSheet.nameDesc">Name Z-A</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="dateAdded:desc"><span data-i18n="webRemote.sortSheet.dateAddedDesc">Recently Added</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="dateAdded:asc"><span data-i18n="webRemote.sortSheet.dateAddedAsc">Oldest First</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="duration:asc"><span data-i18n="webRemote.sortSheet.durationAsc">Duration Short-Long</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="duration:desc"><span data-i18n="webRemote.sortSheet.durationDesc">Duration Long-Short</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="avgSpeed:asc"><span data-i18n="webRemote.sortSheet.avgSpeedAsc">Avg Speed Slow-Fast</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="avgSpeed:desc"><span data-i18n="webRemote.sortSheet.avgSpeedDesc">Avg Speed Fast-Slow</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="maxSpeed:asc"><span data-i18n="webRemote.sortSheet.maxSpeedAsc">Max Speed Slow-Fast</span></label>
+            <label class="sheet__option"><input type="radio" name="sort" value="maxSpeed:desc"><span data-i18n="webRemote.sortSheet.maxSpeedDesc">Max Speed Fast-Slow</span></label>
           </div>
         </div>
       </div>

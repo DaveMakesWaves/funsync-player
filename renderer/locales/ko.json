@@ -738,6 +738,126 @@
     "saveDialogTitle": "진단 보고서 저장",
     "saveDialogDefaultName": "funsync-report.txt"
   },
+  "webRemote": {
+    "header": {
+      "back": "뒤로",
+      "locationAria": "위치",
+      "refresh": "라이브러리 새로 고침"
+    },
+    "search": {
+      "library": "라이브러리 검색",
+      "collections": "컬렉션 검색",
+      "playlists": "재생 목록 검색",
+      "categories": "카테고리 검색",
+      "sources": "소스 검색",
+      "short": "검색",
+      "aria": "검색",
+      "clear": "검색 지우기"
+    },
+    "filterChips": {
+      "aria": "활성 필터"
+    },
+    "actions": {
+      "sort": "정렬",
+      "viewToggleAria": "그리드 또는 목록 보기 전환",
+      "viewToggleTitle": "그리드 / 목록",
+      "folderAria": "폴더로 탐색",
+      "folderTitle": "폴더로 탐색",
+      "filters": "필터"
+    },
+    "nav": {
+      "modesAria": "모드",
+      "library": "라이브러리",
+      "collections": "컬렉션",
+      "playlists": "재생 목록",
+      "categories": "카테고리",
+      "folders": "폴더"
+    },
+    "filterSheet": {
+      "title": "필터",
+      "close": "필터 닫기",
+      "matchHeader": "매칭 상태",
+      "matchAria": "매칭 상태",
+      "matchAll": "전체",
+      "matchMatched": "매칭됨",
+      "matchUnmatched": "매칭 안 됨",
+      "vrHeader": "VR",
+      "vrAria": "VR 필터",
+      "vrAll": "전체",
+      "vrOnly": "VR만",
+      "vrFlat": "VR 아님"
+    },
+    "sortSheet": {
+      "title": "정렬 기준",
+      "close": "정렬 닫기",
+      "aria": "정렬",
+      "nameAsc": "이름 A-Z",
+      "nameDesc": "이름 Z-A",
+      "dateAddedDesc": "최근 추가",
+      "dateAddedAsc": "오래된 순",
+      "durationAsc": "길이 짧은-긴",
+      "durationDesc": "길이 긴-짧은",
+      "avgSpeedAsc": "평균 속도 느린-빠른",
+      "avgSpeedDesc": "평균 속도 빠른-느린",
+      "maxSpeedAsc": "최대 속도 느린-빠른",
+      "maxSpeedDesc": "최대 속도 빠른-느린"
+    },
+    "badge": {
+      "script": "스크립트",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "모든 소스",
+      "folders": "폴더",
+      "notFound": "(찾을 수 없음)",
+      "unnamed": "(이름 없음)"
+    },
+    "folderJump": {
+      "label": "폴더: <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "라이브러리 로드 중…",
+      "loadFailedTitle": "라이브러리를 로드할 수 없습니다",
+      "noVideosTitle": "아직 동영상이 없습니다",
+      "noVideosBody": "데스크톱의 FunSync에서 소스 폴더를 추가하세요.",
+      "noMatchesTitle": "일치 항목 없음",
+      "noMatchesBody": "다른 검색어나 필터를 시도해 보세요.",
+      "noMatchesBodyShort": "다른 검색어를 시도해 보세요.",
+      "noSourcesTitle": "소스 없음",
+      "noSourcesBody": "데스크톱의 FunSync에서 소스 폴더를 추가하세요.",
+      "noSourcesFilteredBody": "현재 필터와 일치하는 동영상이 있는 소스가 없습니다.",
+      "loadFoldersFailedTitle": "폴더를 로드할 수 없습니다",
+      "folderNotFoundTitle": "폴더를 찾을 수 없습니다",
+      "folderNotFoundBody": "이 폴더는 더 이상 데스크톱에 존재하지 않습니다.",
+      "emptyFolderTitle": "빈 폴더",
+      "emptyFolderBody": "여기에는 하위 폴더나 동영상이 없습니다.",
+      "videoNotFoundTitle": "동영상을 찾을 수 없습니다",
+      "videoNotFoundBody": "돌아가서 다시 시도하세요.",
+      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} other {항목을 로드할 수 없습니다}}",
+      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} other {아직 항목이 없습니다}}",
+      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
+      "groupingNotFoundTitle": "찾을 수 없음",
+      "groupingNotFoundBody": "{kind, select, collections {이 컬렉션은 더 이상 데스크톱에 존재하지 않습니다.} playlists {이 재생 목록은 더 이상 데스크톱에 존재하지 않습니다.} categories {이 카테고리는 더 이상 데스크톱에 존재하지 않습니다.} other {이 항목은 더 이상 데스크톱에 존재하지 않습니다.}}",
+      "groupingEmptyTitle": "비어 있음",
+      "groupingEmptyBody": "{kind, select, collections {이 컬렉션에는 현재 사용 가능한 동영상이 없습니다.} playlists {이 재생 목록에는 현재 사용 가능한 동영상이 없습니다.} categories {이 카테고리에는 현재 사용 가능한 동영상이 없습니다.} other {이 항목에는 현재 사용 가능한 동영상이 없습니다.}}"
+    },
+    "player": {
+      "switching": "스크립트 전환 중…",
+      "connecting": "장치에 연결 중…",
+      "preparing": "장치 준비 중…",
+      "ready": "장치 준비 완료",
+      "noScript": "funscript 없음 — 동영상만 재생",
+      "noScriptMatch": "데스크톱에서 일치하는 스크립트를 찾을 수 없습니다",
+      "connected": "연결됨: {devices}",
+      "noDevices": "데스크톱에 연결된 장치 없음",
+      "connectedCount": "{count, plural, other {연결된 장치 · #}}",
+      "intensity": "Funscript 강도",
+      "avg": "평균",
+      "max": "최대",
+      "speedUnit": "유닛/초",
+      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초"
+    }
+  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "EroScripts 닫기",

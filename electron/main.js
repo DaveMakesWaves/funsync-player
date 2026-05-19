@@ -363,14 +363,22 @@ ipcMain.handle('open-log-file', async () => {
   return err ? { success: false, error: err } : { success: true, path: logPath };
 });
 
-// Reveal the log file in OS file explorer — useful when filing a bug
-// report so the user can copy / zip / drag the log into the issue.
+// Reveal the log folder in the OS file manager — useful when filing a
+// bug report so the user can copy / zip / drag the log file into the
+// issue. Uses `openPath(dirname)` rather than `showItemInFolder(file)`
+// because the latter is fire-and-forget on Linux (returns void, no way
+// to detect xdg-utils missing). `openPath` returns an error string when
+// the launch fails, so we can surface a toast on Linux when the user's
+// system doesn't have a file manager wired up to xdg-open. Slight UX
+// trade-off: on Win/Mac, the log file is no longer highlighted; the
+// folder just opens.
 ipcMain.handle('open-log-folder', async () => {
   const { shell } = require('electron');
   const logPath = log.transports?.file?.getFile?.()?.path;
   if (!logPath) return { success: false, error: 'Log file path not available' };
-  shell.showItemInFolder(logPath);
-  return { success: true, path: logPath };
+  const folderPath = path.dirname(logPath);
+  const err = await shell.openPath(folderPath);
+  return err ? { success: false, error: err, path: folderPath } : { success: true, path: folderPath };
 });
 
 ipcMain.handle('get-app-version', () => {
@@ -393,7 +401,10 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
   if (logPath) {
     try {
       const raw = await fs.promises.readFile(logPath, 'utf8');
-      const lines = raw.trim().split('\n');
+      // Tolerate CRLF (Windows) and LF (Linux/Mac). Without the regex,
+      // Windows log lines would carry a trailing \r into the GitHub
+      // issue body — cosmetic, but worth fixing.
+      const lines = raw.trim().split(/\r?\n/);
       logTail = lines.slice(-80).join('\n');
     } catch (err) {
       logTail = `(log read failed: ${err.message})`;

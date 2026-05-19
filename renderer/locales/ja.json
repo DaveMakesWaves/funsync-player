@@ -738,6 +738,126 @@
     "saveDialogTitle": "診断レポートを保存",
     "saveDialogDefaultName": "funsync-report.txt"
   },
+  "webRemote": {
+    "header": {
+      "back": "戻る",
+      "locationAria": "位置",
+      "refresh": "ライブラリを更新"
+    },
+    "search": {
+      "library": "ライブラリを検索",
+      "collections": "コレクションを検索",
+      "playlists": "プレイリストを検索",
+      "categories": "カテゴリーを検索",
+      "sources": "ソースを検索",
+      "short": "検索",
+      "aria": "検索",
+      "clear": "検索をクリア"
+    },
+    "filterChips": {
+      "aria": "適用中のフィルター"
+    },
+    "actions": {
+      "sort": "並べ替え",
+      "viewToggleAria": "グリッド/リスト表示を切り替え",
+      "viewToggleTitle": "グリッド / リスト",
+      "folderAria": "フォルダーで参照",
+      "folderTitle": "フォルダーで参照",
+      "filters": "フィルター"
+    },
+    "nav": {
+      "modesAria": "モード",
+      "library": "ライブラリ",
+      "collections": "コレクション",
+      "playlists": "プレイリスト",
+      "categories": "カテゴリー",
+      "folders": "フォルダー"
+    },
+    "filterSheet": {
+      "title": "フィルター",
+      "close": "フィルターを閉じる",
+      "matchHeader": "マッチ状態",
+      "matchAria": "マッチ状態",
+      "matchAll": "すべて",
+      "matchMatched": "マッチ済み",
+      "matchUnmatched": "未マッチ",
+      "vrHeader": "VR",
+      "vrAria": "VR フィルター",
+      "vrAll": "すべて",
+      "vrOnly": "VR のみ",
+      "vrFlat": "非 VR"
+    },
+    "sortSheet": {
+      "title": "並べ替え",
+      "close": "並べ替えを閉じる",
+      "aria": "並べ替え",
+      "nameAsc": "名前 A-Z",
+      "nameDesc": "名前 Z-A",
+      "dateAddedDesc": "最近追加",
+      "dateAddedAsc": "古い順",
+      "durationAsc": "再生時間 短→長",
+      "durationDesc": "再生時間 長→短",
+      "avgSpeedAsc": "平均速度 遅→速",
+      "avgSpeedDesc": "平均速度 速→遅",
+      "maxSpeedAsc": "最大速度 遅→速",
+      "maxSpeedDesc": "最大速度 速→遅"
+    },
+    "badge": {
+      "script": "スクリプト",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "すべてのソース",
+      "folders": "フォルダー",
+      "notFound": "（見つかりません）",
+      "unnamed": "（名称未設定）"
+    },
+    "folderJump": {
+      "label": "フォルダー内：<strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "ライブラリを読み込み中…",
+      "loadFailedTitle": "ライブラリを読み込めませんでした",
+      "noVideosTitle": "まだ動画がありません",
+      "noVideosBody": "デスクトップの FunSync でソースフォルダーを追加してください。",
+      "noMatchesTitle": "一致する項目がありません",
+      "noMatchesBody": "別の検索語またはフィルターをお試しください。",
+      "noMatchesBodyShort": "別の検索語をお試しください。",
+      "noSourcesTitle": "ソースがありません",
+      "noSourcesBody": "デスクトップの FunSync でソースフォルダーを追加してください。",
+      "noSourcesFilteredBody": "現在のフィルター条件に一致する動画を含むソースがありません。",
+      "loadFoldersFailedTitle": "フォルダーを読み込めませんでした",
+      "folderNotFoundTitle": "フォルダーが見つかりません",
+      "folderNotFoundBody": "このフォルダーはもうデスクトップに存在しません。",
+      "emptyFolderTitle": "空のフォルダー",
+      "emptyFolderBody": "ここにはサブフォルダーや動画がありません。",
+      "videoNotFoundTitle": "動画が見つかりません",
+      "videoNotFoundBody": "戻ってもう一度お試しください。",
+      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} other {読み込めませんでした}}",
+      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} other {まだ項目がありません}}",
+      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} other {デスクトップの FunSync で項目を作成してください。}}",
+      "groupingNotFoundTitle": "見つかりません",
+      "groupingNotFoundBody": "{kind, select, collections {このコレクションはもうデスクトップに存在しません。} playlists {このプレイリストはもうデスクトップに存在しません。} categories {このカテゴリーはもうデスクトップに存在しません。} other {この項目はもうデスクトップに存在しません。}}",
+      "groupingEmptyTitle": "空",
+      "groupingEmptyBody": "{kind, select, collections {このコレクションには現在利用可能な動画がありません。} playlists {このプレイリストには現在利用可能な動画がありません。} categories {このカテゴリーには現在利用可能な動画がありません。} other {この項目には現在利用可能な動画がありません。}}"
+    },
+    "player": {
+      "switching": "スクリプトを切り替え中…",
+      "connecting": "デバイスに接続中…",
+      "preparing": "デバイスを準備中…",
+      "ready": "デバイスの準備完了",
+      "noScript": "funscript なし — 動画のみ再生",
+      "noScriptMatch": "デスクトップで一致するスクリプトが見つかりません",
+      "connected": "接続済み：{devices}",
+      "noDevices": "デスクトップに接続されたデバイスはありません",
+      "connectedCount": "{count, plural, other {接続中のデバイス · #}}",
+      "intensity": "Funscript の強さ",
+      "avg": "平均",
+      "max": "最大",
+      "speedUnit": "ユニット/秒",
+      "speedTooltip": "平均 {avg} ユニット/秒 • 最大 {max} ユニット/秒"
+    }
+  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "EroScripts を閉じる",

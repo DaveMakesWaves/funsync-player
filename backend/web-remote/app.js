@@ -11,6 +11,7 @@ import { buildContextMapFromGroupings } from './search-context.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from './vr-detect.js';
 import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
+import { t, initWebRemoteI18n, translatePage } from './i18n.js';
 
 // === Mobile viewport-height sync ===
 //
@@ -179,7 +180,20 @@ async function navigateAndRestoreScroll(event) {
 }
 
 window.addEventListener('hashchange', navigateAndRestoreScroll);
-window.addEventListener('load', navigateAndRestoreScroll);
+// Async-load bootstrap: ask the backend which locale the desktop is on,
+// activate that bundle, translate the static index.html, THEN kick off
+// the first router pass. Until i18n init returns, t() returns raw key
+// strings — fail-loud — but the initial markup carries English defaults
+// so users see English in the worst case, never raw keys.
+window.addEventListener('load', async () => {
+  try {
+    await initWebRemoteI18n();
+    translatePage(document);
+  } catch (err) {
+    console.warn('[i18n] init failed; falling back to English defaults', err);
+  }
+  navigateAndRestoreScroll();
+});
 
 /**
  * Fetch the library once, then cache. Subsequent navigations reuse it.
@@ -196,7 +210,7 @@ async function loadLibrary() {
   // skeletons (e.g. renderPlayer's lookup before video loads).
   if (!mainEl.firstElementChild?.classList?.contains('skeleton')
       && !mainEl.querySelector('.skeleton')) {
-    mainEl.innerHTML = '<div class="loading">Loading library…</div>';
+    mainEl.innerHTML = `<div class="loading">${escapeHtml(t('webRemote.empty.loadingLibrary'))}</div>`;
   }
   try {
     const resp = await fetch('/api/remote/videos');
@@ -206,7 +220,7 @@ async function loadLibrary() {
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Couldn't load library</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.loadFailedTitle'))}</div>
         <div>${escapeHtml(err.message)}</div>
       </div>`;
     throw err;
@@ -421,7 +435,7 @@ function setBrandTitle() {
   titleEl.replaceChildren();
   const fun = document.createElement('span');
   fun.className = 'brand-accent';
-  fun.textContent = 'Fun';
+  fun.textContent = 'Fun'; // brand name — intentionally not translated
   titleEl.appendChild(fun);
   titleEl.appendChild(document.createTextNode('Sync'));
 }
@@ -459,16 +473,16 @@ async function renderList() {
   if (videos.length === 0) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">No videos yet</div>
-        <div>Add a source folder in FunSync on your desktop.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.noVideosTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.noVideosBody'))}</div>
       </div>`;
     return;
   }
   if (filtered.length === 0) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">No matches</div>
-        <div>Try a different search or filter.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.noMatchesTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.noMatchesBody'))}</div>
       </div>`;
     return;
   }
@@ -534,7 +548,7 @@ async function renderGroupingsList(kind) {
   // syncControlsUI updates placeholder via currentMode, so the per-mode
   // text ("Search collections" etc.) lands automatically.
   syncControlsUI();
-  renderBreadcrumb([{ label: MODE_TITLES[kind] || kind }]);
+  renderBreadcrumb([{ label: getModeTitle(kind) }]);
   // Grouping rows take a different skeleton shape (badge + name + meta)
   renderSkeletons('grouping', 5);
 
@@ -544,7 +558,7 @@ async function renderGroupingsList(kind) {
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Couldn't load ${kind}</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.loadGroupingFailedTitle', { kind }))}</div>
         <div>${escapeHtml(err.message)}</div>
       </div>`;
     return;
@@ -567,16 +581,16 @@ async function renderGroupingsList(kind) {
   if (items.length === 0) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">No ${kind} yet</div>
-        <div>Create ${kind} in FunSync on your desktop — they'll show up here.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.noGroupingTitle', { kind }))}</div>
+        <div>${escapeHtml(t('webRemote.empty.noGroupingBody', { kind }))}</div>
       </div>`;
     return;
   }
   if (filtered.length === 0) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">No matches</div>
-        <div>Try a different search.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.noMatchesTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.noMatchesBodyShort'))}</div>
       </div>`;
     return;
   }
@@ -649,9 +663,9 @@ async function renderFolderRoot() {
   // applies to source folders) — the bar is shown unchanged for
   // simplicity. User taps the chip to remove a filter if needed.
   contentActionsEl.classList.remove('content-actions--hidden');
-  searchInput.placeholder = 'Search sources';
+  searchInput.placeholder = t('webRemote.search.sources');
   syncControlsUI();
-  renderBreadcrumb([{ label: 'Folders' }]);
+  renderBreadcrumb([{ label: t('webRemote.breadcrumb.folders') }]);
   // Source list = grouping-row shape (badge + label + sub).
   renderSkeletons('grouping', 3);
 
@@ -661,7 +675,7 @@ async function renderFolderRoot() {
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Couldn't load folders</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.loadFoldersFailedTitle'))}</div>
         <div>${escapeHtml(err.message)}</div>
       </div>`;
     return;
@@ -700,10 +714,10 @@ async function renderFolderRoot() {
   countEl.textContent = items.length ? `${items.length}` : '';
 
   if (items.length === 0) {
-    const title = filtersActive ? 'No matches' : 'No sources';
+    const title = filtersActive ? t('webRemote.empty.noMatchesTitle') : t('webRemote.empty.noSourcesTitle');
     const hint = filtersActive
-      ? 'No sources contain videos that match the current filter.'
-      : 'Add a source folder in FunSync on your desktop.';
+      ? t('webRemote.empty.noSourcesFilteredBody')
+      : t('webRemote.empty.noSourcesBody');
     mainEl.innerHTML = `
       <div class="empty">
         <div class="empty__title">${escapeHtml(title)}</div>
@@ -740,11 +754,11 @@ async function renderFolderAt(canonicalFolderPath) {
   const node = index.get(canonicalFolderPath);
   if (!node) {
     titleEl.replaceChildren();
-    titleEl.textContent = '(not found)';
+    titleEl.textContent = t('webRemote.breadcrumb.notFound');
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Folder not found</div>
-        <div>This folder is no longer on the desktop.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.folderNotFoundTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.folderNotFoundBody'))}</div>
       </div>`;
     return;
   }
@@ -764,7 +778,7 @@ async function renderFolderAt(canonicalFolderPath) {
   const rootCrumb = document.createElement('button');
   rootCrumb.type = 'button';
   rootCrumb.className = 'folder-breadcrumb__item';
-  rootCrumb.textContent = 'All sources';
+  rootCrumb.textContent = t('webRemote.breadcrumb.allSources');
   rootCrumb.addEventListener('click', () => { location.hash = 'folder'; });
   folderCrumbEl.appendChild(rootCrumb);
   for (let i = 0; i < crumbs.length; i++) {
@@ -792,7 +806,7 @@ async function renderFolderAt(canonicalFolderPath) {
   }
   // Mirror the same trail into the top breadcrumb.
   renderBreadcrumb([
-    { label: 'Folders', hash: 'folder' },
+    { label: t('webRemote.breadcrumb.folders'), hash: 'folder' },
     ...crumbs.map((c, i) => ({
       label: c.label,
       hash: i < crumbs.length - 1
@@ -835,8 +849,8 @@ async function renderFolderAt(canonicalFolderPath) {
     const empty = document.createElement('div');
     empty.className = 'empty';
     empty.innerHTML = `
-      <div class="empty__title">Empty folder</div>
-      <div>No subfolders or videos here.</div>`;
+      <div class="empty__title">${escapeHtml(t('webRemote.empty.emptyFolderTitle'))}</div>
+      <div>${escapeHtml(t('webRemote.empty.emptyFolderBody'))}</div>`;
     mainEl.appendChild(empty);
     return;
   }
@@ -895,7 +909,7 @@ async function renderGroupingDetail(kind, id) {
   contentActionsEl.classList.remove('content-actions--hidden');
   // Placeholder hint is "Search" inside a grouping (the user is filtering
   // to a single grouping's video set, so a generic placeholder fits).
-  searchInput.placeholder = 'Search';
+  searchInput.placeholder = t('webRemote.search.short');
   syncControlsUI();
   renderSkeletons(uiState.view === 'grid' ? 'card' : 'row',
                   uiState.view === 'grid' ? 6 : 8);
@@ -916,24 +930,24 @@ async function renderGroupingDetail(kind, id) {
   if (!item) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Not found</div>
-        <div>This ${kind.slice(0, -1)} no longer exists on the desktop.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.groupingNotFoundTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.groupingNotFoundBody', { kind }))}</div>
       </div>`;
     // Put the title in the header anyway
     titleEl.replaceChildren();
-    titleEl.textContent = '(not found)';
+    titleEl.textContent = t('webRemote.breadcrumb.notFound');
     return;
   }
 
   // Show the grouping's name in the header — no brand-accent for these
   titleEl.replaceChildren();
-  titleEl.textContent = item.name || '(unnamed)';
+  titleEl.textContent = item.name || t('webRemote.breadcrumb.unnamed');
   // Breadcrumb: parent grouping list → current grouping name. Tapping
   // the parent returns to the index view (Nielsen #3 user control,
   // Shneiderman #4 closure of the drill-down dialog).
   renderBreadcrumb([
-    { label: MODE_TITLES[kind] || kind, hash: kind },
-    { label: item.name || '(unnamed)' },
+    { label: getModeTitle(kind), hash: kind },
+    { label: item.name || t('webRemote.breadcrumb.unnamed') },
   ]);
 
   // Filter the library down to this grouping's video IDs
@@ -945,16 +959,16 @@ async function renderGroupingDetail(kind, id) {
   if (videos.length === 0) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Empty</div>
-        <div>No videos in this ${kind.slice(0, -1)} are currently available.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.groupingEmptyTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.groupingEmptyBody', { kind }))}</div>
       </div>`;
     return;
   }
   if (filtered.length === 0) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">No matches</div>
-        <div>Try a different search or filter.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.noMatchesTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.noMatchesBody'))}</div>
       </div>`;
     return;
   }
@@ -1015,7 +1029,7 @@ function _buildFolderJumpLink(videos) {
 
   const label = document.createElement('span');
   label.className = 'folder-jump__label';
-  label.innerHTML = `In folder: <strong>${escapeHtml(trail)}</strong>`;
+  label.innerHTML = t('webRemote.folderJump.label', { path: escapeHtml(trail) });
   link.appendChild(label);
 
   const chev = document.createElement('span');
@@ -1084,13 +1098,13 @@ function createCard(v) {
   if (v.hasFunscript) {
     const b = document.createElement('span');
     b.className = 'card__badge';
-    b.textContent = 'Script';
+    b.textContent = t('webRemote.badge.script');
     meta.appendChild(b);
   }
   if (isVRVideo(v.name)) {
     const b = document.createElement('span');
     b.className = 'card__badge card__badge--vr';
-    b.textContent = 'VR';
+    b.textContent = t('webRemote.badge.vr');
     meta.appendChild(b);
   }
   // Speed badge (grid/card view only — matches desktop library)
@@ -1127,7 +1141,7 @@ function createSpeedBadge(v, { withText = false } = {}) {
 
   const b = document.createElement('span');
   b.className = `card__badge card__badge--speed-${tone}`;
-  b.title = `Avg ${avg} units/s • Max ${max} units/s`;
+  b.title = t('webRemote.player.speedTooltip', { avg, max });
   b.appendChild(svgIcon('gauge', 11));
   if (withText) {
     const txt = document.createElement('span');
@@ -1173,13 +1187,13 @@ function createRow(v) {
   if (v.hasFunscript) {
     const b = document.createElement('span');
     b.className = 'list__badge';
-    b.textContent = 'Script';
+    b.textContent = t('webRemote.badge.script');
     sub.appendChild(b);
   }
   if (isVRVideo(v.name)) {
     const b = document.createElement('span');
     b.className = 'list__badge';
-    b.textContent = 'VR';
+    b.textContent = t('webRemote.badge.vr');
     sub.appendChild(b);
   }
   info.appendChild(sub);
@@ -1535,14 +1549,13 @@ function updateFiltersBadge() {
 // ============================================================
 // Search placeholder — mode-aware (Norman signifier 3.3.2).
 // ============================================================
-const SEARCH_PLACEHOLDERS = {
-  library: 'Search library',
-  collections: 'Search collections',
-  playlists: 'Search playlists',
-  categories: 'Search categories',
-};
+// Resolved at call time so a locale switch / future picker reflects
+// immediately. Falls back to the generic 'Search' label if the current
+// mode isn't one of the four known modes.
 function updateSearchPlaceholder() {
-  searchInput.placeholder = SEARCH_PLACEHOLDERS[currentMode] || 'Search';
+  const key = `webRemote.search.${currentMode}`;
+  const value = t(key);
+  searchInput.placeholder = (value && value !== key) ? value : t('webRemote.search.short');
 }
 
 // ============================================================
@@ -1551,12 +1564,13 @@ function updateSearchPlaceholder() {
 // Empty / single-segment paths hide the breadcrumb so a top-level
 // view doesn't carry visual noise.
 // ============================================================
-const MODE_TITLES = {
-  library: 'Library',
-  collections: 'Collections',
-  playlists: 'Playlists',
-  categories: 'Categories',
-};
+// Resolved at call time — same pattern as updateSearchPlaceholder so
+// breadcrumb labels track the active locale.
+function getModeTitle(kind) {
+  const key = `webRemote.nav.${kind}`;
+  const value = t(key);
+  return (value && value !== key) ? value : kind;
+}
 function renderBreadcrumb(segments) {
   // segments: array of { label, hash } — hash null for current
   if (!segments || segments.length <= 1) {
@@ -1715,8 +1729,8 @@ async function renderPlayer(id) {
   if (!video) {
     mainEl.innerHTML = `
       <div class="empty">
-        <div class="empty__title">Video not found</div>
-        <div>Go back and try again.</div>
+        <div class="empty__title">${escapeHtml(t('webRemote.empty.videoNotFoundTitle'))}</div>
+        <div>${escapeHtml(t('webRemote.empty.videoNotFoundBody'))}</div>
       </div>`;
     return;
   }
@@ -1757,7 +1771,7 @@ async function renderPlayer(id) {
   spinner.className = 'player__loading-spinner';
   const loadingText = document.createElement('div');
   loadingText.className = 'player__loading-text';
-  loadingText.textContent = 'Switching script…';
+  loadingText.textContent = t('webRemote.player.switching');
   loadingOverlay.appendChild(spinner);
   loadingOverlay.appendChild(loadingText);
   videoWrap.appendChild(loadingOverlay);
@@ -1766,7 +1780,7 @@ async function renderPlayer(id) {
   // Device-sync status pill above the video. Populated by server messages.
   const pill = document.createElement('div');
   pill.className = 'player__sync-pill';
-  pill.textContent = 'Connecting to devices…';
+  pill.textContent = t('webRemote.player.connecting');
   pill.dataset.state = 'connecting';
   wrap.appendChild(pill);
 
@@ -1824,7 +1838,7 @@ async function renderPlayer(id) {
     activeSyncClient.start();
   } else {
     pill.dataset.state = 'noscript';
-    pill.textContent = 'No funscript — playing video only';
+    pill.textContent = t('webRemote.player.noScript');
   }
 
   let heatmapCanvas = null;
@@ -1843,7 +1857,7 @@ async function renderPlayer(id) {
     header.className = 'player__heatmap-header';
     const label = document.createElement('div');
     label.className = 'player__heatmap-label';
-    label.textContent = 'Funscript intensity';
+    label.textContent = t('webRemote.player.intensity');
     header.appendChild(label);
 
     const variants = Array.isArray(video.variants) ? video.variants : [];
@@ -2089,11 +2103,11 @@ async function renderPlayer(id) {
     avg.className = 'player__speed-stat';
     // Coerce to Number so a poisoned registry entry (string with HTML) can't
     // become an XSS sink here. Real speeds are always numeric; NaN → 0.
-    avg.innerHTML = `Avg <strong>${Number(video.avgSpeed) || 0}</strong> <span class="player__speed-unit">units/s</span>`;
+    avg.innerHTML = `${escapeHtml(t('webRemote.player.avg'))} <strong>${Number(video.avgSpeed) || 0}</strong> <span class="player__speed-unit">${escapeHtml(t('webRemote.player.speedUnit'))}</span>`;
     speedRow.appendChild(avg);
     const max = document.createElement('span');
     max.className = 'player__speed-stat';
-    max.innerHTML = `Max <strong>${Number(video.maxSpeed) || 0}</strong> <span class="player__speed-unit">units/s</span>`;
+    max.innerHTML = `${escapeHtml(t('webRemote.player.max'))} <strong>${Number(video.maxSpeed) || 0}</strong> <span class="player__speed-unit">${escapeHtml(t('webRemote.player.speedUnit'))}</span>`;
     speedRow.appendChild(max);
     wrap.appendChild(speedRow);
   }
@@ -2111,16 +2125,16 @@ function renderSyncPill(pill, msg) {
   switch (msg.type) {
     case 'script-loading':
       pill.dataset.state = 'preparing';
-      pill.textContent = 'Preparing devices…';
+      pill.textContent = t('webRemote.player.preparing');
       break;
     case 'script-ready': {
       pill.dataset.state = 'ready';
-      pill.textContent = 'Devices ready';
+      pill.textContent = t('webRemote.player.ready');
       break;
     }
     case 'script-missing':
       pill.dataset.state = 'nomatch';
-      pill.textContent = 'Desktop couldn’t find a matching script';
+      pill.textContent = t('webRemote.player.noScriptMatch');
       break;
     case 'device-status': {
       // Prefer the detailed device list when the desktop sends one;
@@ -2136,10 +2150,10 @@ function renderSyncPill(pill, msg) {
         }
         if (parts.length > 0) {
           pill.dataset.state = 'connected';
-          pill.textContent = `Connected: ${parts.join(', ')}`;
+          pill.textContent = t('webRemote.player.connected', { devices: parts.join(', ') });
         } else {
           pill.dataset.state = 'nodevice';
-          pill.textContent = 'No devices connected on desktop';
+          pill.textContent = t('webRemote.player.noDevices');
         }
       }
       break;
@@ -2160,7 +2174,7 @@ function renderDevicePill(pill, devices) {
 
   if (!devices || devices.length === 0) {
     pill.dataset.state = 'nodevice';
-    pill.textContent = 'No devices connected on desktop';
+    pill.textContent = t('webRemote.player.noDevices');
     pill.onclick = null;
     return;
   }
@@ -2170,7 +2184,7 @@ function renderDevicePill(pill, devices) {
 
   const summary = document.createElement('div');
   summary.className = 'player__sync-pill-summary';
-  summary.textContent = `Connected devices · ${devices.length}`;
+  summary.textContent = t('webRemote.player.connectedCount', { count: devices.length });
   const chev = document.createElement('span');
   chev.className = 'player__sync-pill-chev';
   chev.textContent = '▾';

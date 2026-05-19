@@ -737,6 +737,126 @@
     "saveDialogTitle": "Сохранить диагностический отчёт",
     "saveDialogDefaultName": "funsync-otchet.txt"
   },
+  "webRemote": {
+    "header": {
+      "back": "Назад",
+      "locationAria": "Местоположение",
+      "refresh": "Обновить библиотеку"
+    },
+    "search": {
+      "library": "Поиск в библиотеке",
+      "collections": "Поиск коллекций",
+      "playlists": "Поиск плейлистов",
+      "categories": "Поиск категорий",
+      "sources": "Поиск источников",
+      "short": "Поиск",
+      "aria": "Поиск",
+      "clear": "Очистить поиск"
+    },
+    "filterChips": {
+      "aria": "Активные фильтры"
+    },
+    "actions": {
+      "sort": "Сортировка",
+      "viewToggleAria": "Переключить сетку или список",
+      "viewToggleTitle": "Сетка / список",
+      "folderAria": "Просмотр по папкам",
+      "folderTitle": "Просмотр по папкам",
+      "filters": "Фильтры"
+    },
+    "nav": {
+      "modesAria": "Режимы",
+      "library": "Библиотека",
+      "collections": "Коллекции",
+      "playlists": "Плейлисты",
+      "categories": "Категории",
+      "folders": "Папки"
+    },
+    "filterSheet": {
+      "title": "Фильтры",
+      "close": "Закрыть фильтры",
+      "matchHeader": "Статус соответствия",
+      "matchAria": "Статус соответствия",
+      "matchAll": "Все",
+      "matchMatched": "Сопоставлены",
+      "matchUnmatched": "Не сопоставлены",
+      "vrHeader": "VR",
+      "vrAria": "VR-фильтр",
+      "vrAll": "Все",
+      "vrOnly": "Только VR",
+      "vrFlat": "Не VR"
+    },
+    "sortSheet": {
+      "title": "Сортировать по",
+      "close": "Закрыть сортировку",
+      "aria": "Сортировка",
+      "nameAsc": "Имя А-Я",
+      "nameDesc": "Имя Я-А",
+      "dateAddedDesc": "Недавно добавленные",
+      "dateAddedAsc": "Сначала старые",
+      "durationAsc": "Длительность короткие-длинные",
+      "durationDesc": "Длительность длинные-короткие",
+      "avgSpeedAsc": "Ср. скорость медл.-быстр.",
+      "avgSpeedDesc": "Ср. скорость быстр.-медл.",
+      "maxSpeedAsc": "Макс. скорость медл.-быстр.",
+      "maxSpeedDesc": "Макс. скорость быстр.-медл."
+    },
+    "badge": {
+      "script": "Скрипт",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "Все источники",
+      "folders": "Папки",
+      "notFound": "(не найдено)",
+      "unnamed": "(без названия)"
+    },
+    "folderJump": {
+      "label": "В папке: <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "Загрузка библиотеки…",
+      "loadFailedTitle": "Не удалось загрузить библиотеку",
+      "noVideosTitle": "Пока нет видео",
+      "noVideosBody": "Добавьте папку-источник в FunSync на компьютере.",
+      "noMatchesTitle": "Ничего не найдено",
+      "noMatchesBody": "Попробуйте другой запрос или фильтр.",
+      "noMatchesBodyShort": "Попробуйте другой запрос.",
+      "noSourcesTitle": "Нет источников",
+      "noSourcesBody": "Добавьте папку-источник в FunSync на компьютере.",
+      "noSourcesFilteredBody": "Ни один источник не содержит видео, соответствующих текущему фильтру.",
+      "loadFoldersFailedTitle": "Не удалось загрузить папки",
+      "folderNotFoundTitle": "Папка не найдена",
+      "folderNotFoundBody": "Этой папки больше нет на компьютере.",
+      "emptyFolderTitle": "Пустая папка",
+      "emptyFolderBody": "Здесь нет ни подпапок, ни видео.",
+      "videoNotFoundTitle": "Видео не найдено",
+      "videoNotFoundBody": "Вернитесь и попробуйте снова.",
+      "loadGroupingFailedTitle": "{kind, select, collections {Не удалось загрузить коллекции} playlists {Не удалось загрузить плейлисты} categories {Не удалось загрузить категории} other {Не удалось загрузить элементы}}",
+      "noGroupingTitle": "{kind, select, collections {Пока нет коллекций} playlists {Пока нет плейлистов} categories {Пока нет категорий} other {Пока ничего нет}}",
+      "noGroupingBody": "{kind, select, collections {Создайте коллекции в FunSync на компьютере — они появятся здесь.} playlists {Создайте плейлисты в FunSync на компьютере — они появятся здесь.} categories {Создайте категории в FunSync на компьютере — они появятся здесь.} other {Создайте элементы в FunSync на компьютере.}}",
+      "groupingNotFoundTitle": "Не найдено",
+      "groupingNotFoundBody": "{kind, select, collections {Этой коллекции больше нет на компьютере.} playlists {Этого плейлиста больше нет на компьютере.} categories {Этой категории больше нет на компьютере.} other {Этого элемента больше нет на компьютере.}}",
+      "groupingEmptyTitle": "Пусто",
+      "groupingEmptyBody": "{kind, select, collections {В этой коллекции сейчас нет доступных видео.} playlists {В этом плейлисте сейчас нет доступных видео.} categories {В этой категории сейчас нет доступных видео.} other {В этом элементе сейчас нет доступных видео.}}"
+    },
+    "player": {
+      "switching": "Переключение скрипта…",
+      "connecting": "Подключение к устройствам…",
+      "preparing": "Подготовка устройств…",
+      "ready": "Устройства готовы",
+      "noScript": "Нет funscript — воспроизводится только видео",
+      "noScriptMatch": "На компьютере не найден подходящий скрипт",
+      "connected": "Подключено: {devices}",
+      "noDevices": "На компьютере нет подключённых устройств",
+      "connectedCount": "{count, plural, one {Подключённое устройство · #} few {Подключённых устройства · #} many {Подключённых устройств · #} other {Подключённых устройств · #}}",
+      "intensity": "Интенсивность funscript",
+      "avg": "Ср.",
+      "max": "Макс.",
+      "speedUnit": "ед/с",
+      "speedTooltip": "Ср. {avg} ед/с • Макс. {max} ед/с"
+    }
+  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "Закрыть EroScripts",

@@ -8,7 +8,15 @@ a = Analysis(
     # Bundle the web remote SPA alongside the backend exe so the StaticFiles
     # mount at /remote/ works in the packaged app. `sys._MEIPASS` resolution
     # in main.py picks this up automatically at runtime.
-    datas=[('web-remote', 'web-remote')],
+    #
+    # Also bundle renderer/locales/ as <_MEIPASS>/locales/ so the web-remote
+    # i18n module can fetch /locales/<lang>.json. Source is two dirs up
+    # from this spec (../renderer/locales) since we run PyInstaller from
+    # backend/.
+    datas=[
+        ('web-remote', 'web-remote'),
+        ('../renderer/locales', 'locales'),
+    ],
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',
