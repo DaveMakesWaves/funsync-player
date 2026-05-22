@@ -137,14 +137,14 @@ describe('VideoPlayer.setVRFlatten + cycleVRFlatten', () => {
     player.setVRFlatten('sbs-half', 1);
     expect(videoEl.classList.contains('player__video--flat-sbs-half')).toBe(true);
     expect(videoEl.classList.contains('player__video--flat-eye-2')).toBe(false);
-    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 1 });
+    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 1, zoom: 1 });
   });
 
   it('applies the sbs-half right-eye class', () => {
     player.setVRFlatten('sbs-half', 2);
     expect(videoEl.classList.contains('player__video--flat-sbs-half')).toBe(true);
     expect(videoEl.classList.contains('player__video--flat-eye-2')).toBe(true);
-    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 2 });
+    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 2, zoom: 1 });
   });
 
   it('applies tb-full / tb-half + eye-2 cleanly', () => {
@@ -158,7 +158,7 @@ describe('VideoPlayer.setVRFlatten + cycleVRFlatten', () => {
     player.setVRFlatten('off');
     expect(videoEl.classList.contains('player__video--flat-sbs-half')).toBe(false);
     expect(videoEl.classList.contains('player__video--flat-eye-2')).toBe(false);
-    expect(player.vrFlattenState).toEqual({ format: null, eye: 1 });
+    expect(player.vrFlattenState).toEqual({ format: null, eye: 1, zoom: 1 });
   });
 
   it('switching format clears the previous format class', () => {
@@ -173,7 +173,7 @@ describe('VideoPlayer.setVRFlatten + cycleVRFlatten', () => {
     player.setVRFlatten('sbs-half', 1);
     player.setVRFlatten('weird-projection', 1);
     expect(videoEl.classList.contains('player__video--flat-sbs-half')).toBe(false);
-    expect(player.vrFlattenState).toEqual({ format: null, eye: 1 });
+    expect(player.vrFlattenState).toEqual({ format: null, eye: 1, zoom: 1 });
   });
 
   it('cycleVRFlatten(null) is a no-op (stays Off)', () => {
@@ -183,13 +183,13 @@ describe('VideoPlayer.setVRFlatten + cycleVRFlatten', () => {
 
   it('cycleVRFlatten progresses Off → Left → Right → Off', () => {
     expect(player.cycleVRFlatten('sbs-half')).toBe('sbs-half (left)');
-    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 1 });
+    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 1, zoom: 1 });
 
     expect(player.cycleVRFlatten('sbs-half')).toBe('sbs-half (right)');
-    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 2 });
+    expect(player.vrFlattenState).toEqual({ format: 'sbs-half', eye: 2, zoom: 1 });
 
     expect(player.cycleVRFlatten('sbs-half')).toBe('off');
-    expect(player.vrFlattenState).toEqual({ format: null, eye: 1 });
+    expect(player.vrFlattenState).toEqual({ format: null, eye: 1, zoom: 1 });
   });
 
   it('cycleVRFlatten switching format mid-cycle starts at Left', () => {

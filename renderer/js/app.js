@@ -1,6 +1,7 @@
 // FunSync Player — App Entry Point
 
-import { VideoPlayer } from './video-player.js';
+import { VideoPlayer, PLAYBACK_RATE_PRESETS } from './video-player.js';
+import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch } from './funscript-engine.js';
 import { HandyManager } from './handy-manager.js';
@@ -42,13 +43,13 @@ import { UpNextCard } from '../components/up-next-card.js';
 import { EroScriptsPanel } from '../components/eroscripts-panel.js';
 import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
-  EllipsisVertical, Keyboard,
+  EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles,
   Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
   Pencil, FileCheck, Captions, RotateCcw,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
-import { classifyStereoFormat, isFlattenableStereo } from './vr-detect.js';
+import { classifyStereoFormat, isFlattenableStereo, isVRVideo } from './vr-detect.js';
 import { HandyHdspSync } from './handy-hdsp-sync.js';
 import { initI18n, setLocale, translatePage, t, LOCALE_LABELS } from './i18n.js';
 
@@ -131,6 +132,12 @@ class App {
         // ships it as `keyboard.js`. Resolved by createIcons via
         // data-lucide attribute lookup at the placeholder site.
         Keyboard,
+        // 'gauge' for the overflow menu's playback-speed item. 'chevron-down'
+        // replaces the raw `▾` glyph on the variant-selector button so the
+        // toolbar reads consistently as proper SVG iconography.
+        // 'rectangle-goggles' (exported as `Goggles`) for the overflow
+        // menu's VR Format item — only shown for VR-detected videos.
+        Gauge, ChevronDown, Goggles,
       },
       attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
     });
@@ -285,6 +292,7 @@ class App {
       onBack: () => this._navigateBack(),
       onAddSource: () => this._addSource(),
       onTestDevice: (deviceId, buttplugIndex) => this._testDevice(deviceId, buttplugIndex),
+      onOpenVRFormat: (path) => this._openVRFormatPanel(path),
       settings: this.settings,
     });
 
@@ -365,6 +373,23 @@ class App {
       });
     });
 
+    // VR Format item — only present when the current video is detected
+    // (or manually flagged) as VR. Single discovery surface inside the
+    // player view; users who don't know Ctrl+Shift+R can still reach
+    // the panel.
+    document.getElementById('btn-vr-format-menu')?.addEventListener('click', () => {
+      if (this._currentVideoPath) this._openVRFormatPanel(this._currentVideoPath);
+    });
+    // Defensive refresh on every overflow open — covers the case where
+    // the user toggles VR/flat via the library kebab and then navigates
+    // back to the player.
+    document.getElementById('btn-overflow')?.addEventListener('click', () => {
+      this._refreshVRFormatMenuVisibility();
+    });
+    eventBus.on('vrFormat:changed', () => this._refreshVRFormatMenuVisibility());
+
+    this._wireSpeedControl();
+
     // Wire thumbnail preview on progress hover
     this.videoPlayer.onProgressHover = (time) => {
       this.progressBar.updateThumbnailPreview(time);
@@ -429,6 +454,15 @@ class App {
       this.handyHdspSync = new HandyHdspSync({
         handyManager: this.handyManager,
         player: this.videoPlayer.video,
+      });
+
+      // Give the player the refs it needs to manage HSSP↔HDSP on rate
+      // changes triggered from any surface (player button, keyboard,
+      // editor, web-remote). Single source of truth.
+      this.videoPlayer.setHandySyncRefs({
+        handyManager: this.handyManager,
+        handySyncEngine: this.syncEngine,
+        handyHdspSync: this.handyHdspSync,
       });
     } catch (err) {
       console.warn('Handy integration unavailable:', err.message);
@@ -874,6 +908,12 @@ class App {
       this._keyboard.onCycleVRFlatten = () => {
         const label = this._cycleVRFlatten();
         if (label) showToast(t('toast.vrFlattenLabel', { label }), 'info', 1500);
+      };
+      this._keyboard.onOpenVRFormat = () => {
+        this._openVRFormatPanel(this._currentVideoPath);
+      };
+      this._keyboard.onVRPan = (yawDelta, pitchDelta) => {
+        this._stepVRPan(yawDelta, pitchDelta);
       };
     }
 
@@ -3525,22 +3565,255 @@ class App {
     if (!this.videoPlayer) return;
     const path = this._currentVideoPath;
     const name = this._currentVideoName;
-    const format = classifyStereoFormat(path || name || '');
-    this._currentStereoFormat = isFlattenableStereo(format) ? format : null;
-    if (!this._currentStereoFormat) {
-      this.videoPlayer.setVRFlatten('off');
-      return;
+    const detected = classifyStereoFormat(path || name || '');
+
+    // Lazy migration: legacy `library.vrFlatten[path] = 'left'|'right'`
+    // upgrades to the richer `library.vrFormat` shape on first read. We
+    // keep the old key untouched indefinitely for downgrade safety.
+    this._maybeMigrateVRFlattenEntry(path, detected);
+
+    const entry = path
+      ? (this.settings?.get?.('library.vrFormat') || {})[path] || null
+      : null;
+
+    // Cycle target — Shift+R cycles through this projection. Manual
+    // entry's projection wins over filename detection; 'flat' means the
+    // user explicitly flagged the file as not VR.
+    // Both planar and Phase-2a spherical projections are supported here.
+    const SUPPORTED = new Set([
+      'sbs-half', 'sbs-full', 'tb-half', 'tb-full',
+      'equirect-180', 'fisheye-180',
+    ]);
+    if (entry?.projection === 'flat') {
+      this._currentStereoFormat = null;
+    } else if (entry?.projection && SUPPORTED.has(entry.projection)) {
+      this._currentStereoFormat = entry.projection;
+    } else {
+      this._currentStereoFormat = isFlattenableStereo(detected) ? detected : null;
     }
-    const saved = (this.dataService?.get?.('library.vrFlatten') || {})[path] || null;
-    if (saved === 'left') this.videoPlayer.setVRFlatten(this._currentStereoFormat, 1);
-    else if (saved === 'right') this.videoPlayer.setVRFlatten(this._currentStereoFormat, 2);
-    else this.videoPlayer.setVRFlatten('off');
+
+    // Apply the saved state. If no manual eye is set the user starts at
+    // Off so Shift+R cycles to Left first (matches the existing UX).
+    if (entry?.eye && this._currentStereoFormat) {
+      const eye = entry.eye === 'right' ? 2 : 1;
+      const zoom = Number.isFinite(entry.zoom) ? entry.zoom : 1;
+      const fov = Number.isFinite(entry.fov) ? entry.fov : 90;
+      const yaw = Number.isFinite(entry.yaw) ? entry.yaw : 0;
+      const pitch = Number.isFinite(entry.pitch) ? entry.pitch : 0;
+      this.videoPlayer.setVRFlatten(this._currentStereoFormat, eye, { zoom, fov, yaw, pitch });
+    } else {
+      this.videoPlayer.setVRFlatten('off');
+    }
+
+    // Hint toast — checked once metadata loads so we can read the
+    // aspect ratio. One-shot listener; cleared when the video element
+    // is replaced.
+    this._scheduleVRHintCheck(path, detected, entry);
+
+    // Drag-to-pan + dblclick recenter — only meaningful while a
+    // spherical projection is active.
+    if (this.videoPlayer.isVRProjecting) {
+      this._wireVRPanForCurrent(path);
+    } else {
+      this._unwireVRPan();
+    }
+
+    // Player overflow menu's "VR Format…" item — visible only for
+    // videos detected (or manually flagged) as VR.
+    this._refreshVRFormatMenuVisibility();
+  }
+
+  /**
+   * Show / hide the "VR Format…" item in the player overflow menu
+   * based on whether the current video is VR. Uses `isVRVideo` which
+   * already layers vrFormat → manualVRType → filename heuristic, so
+   * this is the single source of truth for "is this a VR video?".
+   */
+  _refreshVRFormatMenuVisibility() {
+    const item = document.getElementById('btn-vr-format-menu');
+    if (!item) return;
+    const path = this._currentVideoPath;
+    const isVR = path ? isVRVideo({ path }) : false;
+    item.hidden = !isVR;
+  }
+
+  /**
+   * Attach pointer + dblclick handlers to the WebGL canvas so the user
+   * can drag-to-pan and double-click to recenter. Click-vs-drag
+   * disambiguation uses a 6px movement threshold; below that, the
+   * click is forwarded to videoPlayer.togglePlay (matching the video
+   * element's existing click-to-pause behaviour).
+   */
+  _wireVRPanForCurrent(path) {
+    const canvas = this.videoPlayer.vrProjectionCanvas;
+    if (!canvas) return;
+    // Idempotent — if we already wired the same canvas, don't double-bind.
+    if (this._vrPanState?.canvas === canvas) return;
+    this._unwireVRPan();
+
+    const state = {
+      canvas,
+      path,
+      dragging: false,
+      startX: 0, startY: 0,
+      startYaw: 0, startPitch: 0,
+      totalMovement: 0,
+      yaw: 0, pitch: 0,
+    };
+    this._vrPanState = state;
+
+    // Read initial yaw/pitch from the current entry so the gesture
+    // accumulates from where the user left off.
+    const entry = (this.settings?.get?.('library.vrFormat') || {})[path] || {};
+    state.yaw = Number.isFinite(entry.yaw) ? entry.yaw : 0;
+    state.pitch = Number.isFinite(entry.pitch) ? entry.pitch : 0;
+
+    const onDown = (e) => {
+      if (e.button !== 0) return;
+      state.dragging = true;
+      state.startX = e.clientX;
+      state.startY = e.clientY;
+      state.startYaw = state.yaw;
+      state.startPitch = state.pitch;
+      state.totalMovement = 0;
+      canvas.setPointerCapture(e.pointerId);
+    };
+
+    const onMove = (e) => {
+      if (!state.dragging) return;
+      const dx = e.clientX - state.startX;
+      const dy = e.clientY - state.startY;
+      state.totalMovement = Math.max(state.totalMovement, Math.hypot(dx, dy));
+      // 1 pixel of drag = ~0.2° pan — feels natural at default FOV
+      // and matches DeoVR convention. Pitch is inverted: drag down →
+      // pitch up (looking up).
+      state.yaw = state.startYaw - dx * 0.2;
+      state.pitch = state.startPitch + dy * 0.2;
+      // Clamp pitch to ±85° (renderer also clamps; this keeps the
+      // accumulated drag from running away).
+      state.pitch = Math.max(-85, Math.min(85, state.pitch));
+      this.videoPlayer.updateVRProjection({ yaw: state.yaw, pitch: state.pitch });
+      // Keep controls visible while the user is actively dragging.
+      this.videoPlayer._showControls?.();
+    };
+
+    const onUp = (e) => {
+      if (!state.dragging) return;
+      state.dragging = false;
+      try { canvas.releasePointerCapture(e.pointerId); } catch { /* swallow */ }
+      // Click vs drag — below threshold, forward to video toggle.
+      if (state.totalMovement < 6) {
+        this.videoPlayer.togglePlay();
+        return;
+      }
+      this._persistVRPan(state.path, state.yaw, state.pitch);
+    };
+
+    const onDblClick = () => {
+      state.yaw = 0;
+      state.pitch = 0;
+      this.videoPlayer.updateVRProjection({ yaw: 0, pitch: 0 });
+      this._persistVRPan(state.path, 0, 0);
+    };
+
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
+    canvas.addEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onUp);
+    canvas.addEventListener('dblclick', onDblClick);
+
+    state._teardown = () => {
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onUp);
+      canvas.removeEventListener('dblclick', onDblClick);
+    };
+  }
+
+  _unwireVRPan() {
+    if (!this._vrPanState) return;
+    try { this._vrPanState._teardown?.(); } catch { /* swallow */ }
+    this._vrPanState = null;
+  }
+
+  /** Step yaw/pitch by a delta — called by keyboard Shift+Arrow. */
+  _stepVRPan(yawDelta, pitchDelta) {
+    if (!this.videoPlayer.isVRProjecting || !this._vrPanState) return;
+    const s = this._vrPanState;
+    s.yaw += yawDelta;
+    s.pitch = Math.max(-85, Math.min(85, s.pitch + pitchDelta));
+    this.videoPlayer.updateVRProjection({ yaw: s.yaw, pitch: s.pitch });
+    this._persistVRPan(s.path, s.yaw, s.pitch);
+  }
+
+  _persistVRPan(path, yaw, pitch) {
+    if (!path || !this.settings) return;
+    const map = { ...(this.settings.get('library.vrFormat') || {}) };
+    const existing = map[path];
+    if (!existing || existing.projection === 'flat') return;
+    map[path] = { ...existing, yaw, pitch, source: 'manual' };
+    this.settings.set('library.vrFormat', map);
+  }
+
+  /**
+   * Lazily upgrade legacy `library.vrFlatten[path] = 'left'|'right'`
+   * entries into the richer `library.vrFormat` schema. Old key is left
+   * in place so a user reverting to <0.7.x still sees their preference.
+   */
+  _maybeMigrateVRFlattenEntry(path, detected) {
+    if (!path || !this.settings) return;
+    const formatMap = this.settings.get('library.vrFormat') || {};
+    if (formatMap[path]) return;
+    const old = (this.settings.get('library.vrFlatten') || {})[path];
+    if (old !== 'left' && old !== 'right') return;
+    const projection = isFlattenableStereo(detected) ? detected : 'sbs-half';
+    const next = { ...formatMap, [path]: {
+      projection,
+      eye: old,
+      zoom: 1,
+      source: 'auto',
+    } };
+    this.settings.set('library.vrFormat', next);
+  }
+
+  /**
+   * Schedule the first-time hint toast. Fires once per session per path,
+   * only when no override exists, detection failed, and the video
+   * aspect-ratio suggests VR (≥1.9:1 mono or ≥3.5:1 SBS).
+   */
+  _scheduleVRHintCheck(path, detected, entry) {
+    if (!this.videoPlayer?.video || !path) return;
+    if (entry || detected) return;
+    this._vrHintShown = this._vrHintShown || new Set();
+    if (this._vrHintShown.has(path)) return;
+    const video = this.videoPlayer.video;
+    const check = () => {
+      const w = video.videoWidth || 0;
+      const h = video.videoHeight || 0;
+      if (!w || !h) return;
+      const aspect = w / h;
+      const looksVR = aspect >= 3.5 || aspect >= 1.9;
+      if (!looksVR) return;
+      this._vrHintShown.add(path);
+      showToast(t('toast.vrLooksLikeVR'), 'info', 6000);
+    };
+    if (video.readyState >= 1) {
+      check();
+    } else {
+      const once = () => {
+        video.removeEventListener('loadedmetadata', once);
+        check();
+      };
+      video.addEventListener('loadedmetadata', once);
+    }
   }
 
   /**
    * Cycle the VR-flatten state for the current video and persist the new
-   * setting. Called by the keyboard (Shift+R) and the library kebab.
-   * Returns the new state label (for the toast).
+   * setting. Called by the keyboard (Shift+R). Writes to the new
+   * `library.vrFormat` schema; the old `library.vrFlatten` key is no
+   * longer touched (kept indefinitely as a downgrade fallback).
    */
   _cycleVRFlatten() {
     if (!this.videoPlayer) return null;
@@ -3549,17 +3822,51 @@ class App {
       return null;
     }
     const label = this.videoPlayer.cycleVRFlatten(this._currentStereoFormat);
-    // Persist per-video. 'off' clears the entry so the next load defaults
-    // back to un-flattened.
     const path = this._currentVideoPath;
-    if (path && this.dataService) {
-      const map = { ...(this.dataService.get('library.vrFlatten') || {}) };
+    if (path && this.settings) {
+      const map = { ...(this.settings.get('library.vrFormat') || {}) };
       const next = this.videoPlayer.vrFlattenState;
-      if (!next.format) delete map[path];
-      else map[path] = next.eye === 2 ? 'right' : 'left';
-      this.dataService.set('library.vrFlatten', map);
+      if (!next.format) {
+        delete map[path];
+      } else {
+        const existing = map[path] || {};
+        map[path] = {
+          projection: this._currentStereoFormat,
+          eye: next.eye === 2 ? 'right' : 'left',
+          zoom: Number.isFinite(existing.zoom) ? existing.zoom : 1,
+          source: existing.source || 'auto',
+        };
+      }
+      this.settings.set('library.vrFormat', map);
     }
     return label;
+  }
+
+  /**
+   * Open the VR Format panel for the given video path. Lazy-imports the
+   * component to keep startup tree small. Re-applies the rendered state
+   * on every change so the user sees the effect live.
+   */
+  async _openVRFormatPanel(path) {
+    if (!path) {
+      showToast(t('toast.noVideoLoaded'), 'info');
+      return;
+    }
+    const { openVRFormatPanel } = await import('../components/vr-format-panel.js');
+    await openVRFormatPanel({
+      path,
+      dataService: this.settings,
+      enumerateFolderVideos: (dir) => window.funsync.enumerateFolderVideos(dir),
+      onApply: (affectedPath, _entry) => {
+        // Re-apply the current video's state so the user sees the new
+        // projection / eye / zoom take effect immediately. Affected
+        // path can be null for bulk apply-to-folder writes; in that
+        // case we always re-apply (it might be the current video).
+        if (affectedPath === null || affectedPath === this._currentVideoPath) {
+          this._applyVRFlattenForCurrent();
+        }
+      },
+    });
   }
 
   // --- View Actions ---
@@ -3763,6 +4070,121 @@ class App {
     const m = Math.floor(totalSec / 60);
     const s = totalSec % 60;
     return `${m}:${String(s).padStart(2, '0')}`;
+  }
+
+  _wireSpeedControl() {
+    const chip = document.getElementById('speed-chip');
+    const chipLabel = document.getElementById('speed-chip-label');
+    const overflowItem = document.getElementById('btn-speed-menu');
+    const overflowCurrent = document.getElementById('speed-menu-current');
+    const popover = document.getElementById('speed-popover');
+    const overflowBtn = document.getElementById('btn-overflow');
+    const overflowMenu = document.getElementById('controls-overflow-menu');
+    if (!chip || !chipLabel || !overflowItem || !popover) return;
+
+    let popoverAnchor = null;
+
+    // Build popover items from the canonical preset list.
+    const renderPopover = (currentRate) => {
+      popover.innerHTML = '';
+      for (const rate of PLAYBACK_RATE_PRESETS) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'speed-popover__item';
+        item.setAttribute('role', 'menuitem');
+        item.dataset.rate = String(rate);
+        item.textContent = `${rate}×`;
+        if (rate === currentRate) item.classList.add('speed-popover__item--current');
+        item.addEventListener('click', (e) => {
+          e.stopPropagation();
+          this.videoPlayer.setPlaybackRate(rate);
+          closePopover();
+        });
+        popover.appendChild(item);
+      }
+    };
+
+    const openPopover = (anchorEl) => {
+      popoverAnchor = anchorEl;
+      renderPopover(this.videoPlayer.video.playbackRate || 1);
+      popover.hidden = false;
+      anchorEl?.setAttribute('aria-expanded', 'true');
+    };
+    const closePopover = () => {
+      popover.hidden = true;
+      popoverAnchor?.setAttribute('aria-expanded', 'false');
+      popoverAnchor = null;
+    };
+
+    const closeOverflowMenu = () => {
+      if (overflowMenu && !overflowMenu.hidden) {
+        overflowMenu.hidden = true;
+        overflowBtn?.setAttribute('aria-expanded', 'false');
+      }
+    };
+
+    // Chip — only present in DOM when rate ≠ 1. Click opens popover
+    // anchored to itself. If the overflow menu is open, close it first
+    // so we don't end up with two menus on screen at once.
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeOverflowMenu();
+      popover.hidden ? openPopover(chip) : closePopover();
+    });
+
+    // Overflow menu entry — close the overflow menu, then open the
+    // popover anchored to the ⋮ trigger so the popover visually
+    // replaces the overflow menu in roughly the same spot.
+    overflowItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      closeOverflowMenu();
+      openPopover(overflowBtn || overflowItem);
+    });
+
+    // Outside-click dismissal — registered in the CAPTURE phase so we
+    // see clicks before other handlers can stopPropagation them. The
+    // existing overflow-button handler calls stopPropagation in bubble
+    // phase, which used to hide ⋮ clicks from a bubble-phase dismissal
+    // listener entirely. Capture phase fires first regardless.
+    //
+    // Three precedence rules, in order:
+    //   1. Click inside the popover → keep it open (item-click handlers
+    //      manage the rest).
+    //   2. Click on the ⋮ button → always close the popover, even when
+    //      ⋮ is the current anchor. Without this, opening the popover
+    //      from the overflow menu would trap the user — clicking ⋮ to
+    //      "go back" would re-open the overflow menu on top of the
+    //      still-visible popover.
+    //   3. Click on the current anchor (chip, when applicable) → ignore.
+    //      The anchor's own handler is responsible for the toggle.
+    //   4. Anything else → close.
+    document.addEventListener('click', (e) => {
+      if (popover.hidden) return;
+      if (popover.contains(e.target)) return;
+      if (overflowBtn?.contains(e.target)) {
+        closePopover();
+        return;
+      }
+      if (popoverAnchor?.contains(e.target)) return;
+      closePopover();
+    }, true);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && !popover.hidden) closePopover();
+    }, true);
+
+    // Keep chip + overflow-menu label in sync with rate changes from
+    // any surface (keyboard, editor, web-remote later).
+    const updateLabels = (rate) => {
+      const text = `${rate}×`;
+      chipLabel.textContent = text;
+      if (overflowCurrent) overflowCurrent.textContent = text;
+      chip.hidden = (rate === 1);
+      if (!popover.hidden) renderPopover(rate); // refresh checkmark if open
+    };
+    eventBus.on('playback:rate-changed', updateLabels);
+
+    // Initialise — covers the path where a video is already loaded.
+    updateLabels(this.videoPlayer.video.playbackRate || 1);
   }
 
   _wireGapSkipUI() {
@@ -4676,7 +5098,12 @@ class App {
     if (allVariants.length > 1 || this._currentVideoPath) {
       selector.hidden = false;
       const active = allVariants[this._activeVariantIndex];
-      btn.textContent = active ? active.label : t('variants.defaultLabel');
+      // Target the label span — don't touch button.textContent or
+      // we'd wipe the chevron SVG inserted by createIcons().
+      const labelEl = document.getElementById('variant-btn-label');
+      if (labelEl) {
+        labelEl.textContent = active ? active.label : t('variants.defaultLabel');
+      }
     } else {
       selector.hidden = true;
     }

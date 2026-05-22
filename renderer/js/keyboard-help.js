@@ -119,6 +119,11 @@ export function getPlayerShortcutGroups() {
       rows: [
         ['F / F11',       t('kbd.fullscreen')],
         ['R',             t('kbd.cycleAspect')],
+        ['Shift+R',       t('kbd.vrFlatten')],
+        ['Ctrl+Shift+R',  t('kbd.vrFormat')],
+        ['Shift+Arrows',  t('kbd.vrPan')],
+        ['<',             t('kbd.speedDown')],
+        ['>',             t('kbd.speedUp')],
         ['I',             t('kbd.toggleInfo')],
         ['S',             t('kbd.screenshot')],
       ],

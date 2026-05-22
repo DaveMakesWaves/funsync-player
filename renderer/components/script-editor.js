@@ -42,7 +42,6 @@ export class ScriptEditor {
     this._speedSelect = null;
     this._btnUndo = null;
     this._btnRedo = null;
-    this._previousPlaybackRate = 1;
 
     // Drag state
     this._dragMode = null; // 'move' | 'rubber' | 'pan'
@@ -92,6 +91,16 @@ export class ScriptEditor {
     // t() each time they're written and don't need handling here.
     this._unsubscribeLanguage = eventBus.on('language:changed', () => {
       if (this._panel) translatePage(this._panel);
+    });
+
+    // Mirror external rate changes (player-controls speed button,
+    // keyboard <  /  > , later web-remote) back into the toolbar
+    // dropdown so the editor stays consistent with whatever the user
+    // did outside it.
+    this._unsubscribeRateChange = eventBus.on('playback:rate-changed', (rate) => {
+      if (this._speedSelect && this._speedSelect.value !== String(rate)) {
+        this._speedSelect.value = String(rate);
+      }
     });
   }
 
@@ -191,7 +200,10 @@ export class ScriptEditor {
 
     this._speedSelect = document.createElement('select');
     this._speedSelect.className = 'editor__speed-select';
-    for (const rate of [0.25, 0.5, 0.75, 1, 1.5, 2]) {
+    // Mirror the player-controls preset list (PLAYBACK_RATE_PRESETS in
+    // video-player.js). Kept duplicated here to avoid an import cycle —
+    // a parity test could catch drift but the list is small and stable.
+    for (const rate of [0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]) {
       const opt = document.createElement('option');
       opt.value = String(rate);
       opt.textContent = `${rate}x`;
@@ -1135,27 +1147,15 @@ export class ScriptEditor {
     this._setSpeed(rate);
   }
 
+  /**
+   * Thin wrapper — videoPlayer owns the rate state plus the HSSP↔HDSP
+   * mode switch (single source of truth across editor / player button /
+   * keyboard / web-remote). The eventBus `playback:rate-changed`
+   * subscription set up in `show()` echoes external changes back into
+   * the dropdown.
+   */
   _setSpeed(rate) {
-    this.videoPlayer.video.playbackRate = rate;
-    this._speedSelect.value = String(rate);
-
-    // Native Handy path can't follow rate changes via HSSP (cloud
-    // schedules at 1.0× regardless). Switch to HDSP-polled mode at
-    // non-1.0× — the client reads `video.currentTime` per tick, which
-    // naturally scales with the rate. Return to HSSP at 1.0× for the
-    // smoother onboard-interpolation feel. Other sync engines (Buttplug,
-    // TCode, Autoblow) already handle rate via per-tick scheduling and
-    // don't need any mode switch.
-    if (!this.handyManager?.connected) return;
-    if (rate === 1) {
-      if (this.handyHdspSync?.active) this.handyHdspSync.stop();
-      if (this.syncEngine) this.syncEngine.start();
-    } else {
-      if (this.syncEngine) this.syncEngine.stop();
-      if (this.handyHdspSync && !this.handyHdspSync.active) {
-        this.handyHdspSync.start();
-      }
-    }
+    this.videoPlayer.setPlaybackRate(rate);
   }
 
   // --- Modify Dropdown ---
@@ -1991,7 +1991,6 @@ export class ScriptEditor {
     }
 
     this._canvas.focus();
-    this._previousPlaybackRate = this.videoPlayer.video.playbackRate;
   }
 
   hide() {
@@ -2013,15 +2012,10 @@ export class ScriptEditor {
 
     this.graph.stopAnimation();
 
-    // Restore playback speed to 1x
-    if (this.videoPlayer.video.playbackRate !== 1) {
-      this.videoPlayer.video.playbackRate = 1;
-      this._speedSelect.value = '1';
-      // Re-enable sync if it was paused
-      if (this.handyManager?.connected && this.syncEngine) {
-        this.syncEngine.start();
-      }
-    }
+    // Note: playback rate is intentionally NOT reset here. Rate is
+    // player-owned now (see video-player.js::setPlaybackRate) and
+    // resets on new video load instead. Closing the editor preserves
+    // whatever rate the user is watching at.
   }
 
   get isOpen() {

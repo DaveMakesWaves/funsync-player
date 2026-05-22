@@ -52,7 +52,14 @@ exe = EXE(
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
-    upx=True,
+    # UPX compression OFF. Windows Defender's ML model
+    # (Program:Win32/Wacapew.A!ml) treats UPX-compressed PyInstaller
+    # binaries as suspicious — UPX is a hallmark of obfuscated malware
+    # in the training data. Turning it off costs ~30MB of binary size
+    # but eliminates the most common false-positive vector. Reported
+    # via community board 2026-05-21. Code-signing is the actual fix;
+    # this is the no-cost mitigation while we wait on that.
+    upx=False,
     upx_exclude=[],
     runtime_tmpdir=None,
     console=False,

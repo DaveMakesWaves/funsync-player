@@ -38,11 +38,12 @@ import { record, mark } from '../js/startup-timer.js';
 const MAX_CONCURRENT_THUMBNAILS = 4;
 
 export class Library {
-  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, settings }) {
+  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, settings }) {
     this._onPlayVideo = onPlayVideo;
     this._onBack = onBack;
     this._onAddSource = onAddSource || null;
     this._onTestDevice = onTestDevice || null;
+    this._onOpenVRFormat = onOpenVRFormat || null;
     this._settings = settings;
 
     // Wire the manual VR override store. Per-call closure over `_settings`
@@ -50,7 +51,19 @@ export class Library {
     // no re-registration needed on writes. Settings layer caches reads
     // so this stays cheap even when called from filter passes that hit
     // every video in the library.
+    //
+    // Layering (Phase 1 of VR-flatten expansion, 2026-05-21):
+    //   1. `library.vrFormat[path].projection === 'flat'` → 'flat' wins
+    //      (user explicitly flagged as not VR via the new panel).
+    //   2. Any other vrFormat projection → 'vr' wins (a manual VR
+    //      projection implies the file IS VR — keeps the filter agreement).
+    //   3. No vrFormat entry → fall back to the lightweight
+    //      `library.manualVRType` toggle (existing kebab item).
     setVRTypeOverrideStore((path) => {
+      const fmt = this._settings.get('library.vrFormat') || {};
+      const entry = fmt[path];
+      if (entry?.projection === 'flat') return 'flat';
+      if (entry?.projection && entry.projection !== 'flat') return 'vr';
       const map = this._settings.get('library.manualVRType') || {};
       return map[path] || null;
     });
@@ -3359,6 +3372,19 @@ export class Library {
       this._toggleVRType(video);
     });
     menu.appendChild(vrItem);
+
+    // VR Format... — opens the per-video projection / eye / zoom override
+    // panel. Sits between the lightweight VR-yes/no toggle above and the
+    // funscript association below (similar shape: per-video override).
+    const fmtItem = document.createElement('button');
+    fmtItem.className = 'library__kebab-menu-item';
+    fmtItem.textContent = t('library.kebabVRFormat');
+    fmtItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeMenu();
+      if (this._onOpenVRFormat) this._onOpenVRFormat(video.path);
+    });
+    menu.appendChild(fmtItem);
 
     const assocBtn = document.createElement('button');
     assocBtn.className = 'library__kebab-menu-item';

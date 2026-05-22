@@ -15,6 +15,7 @@
   <link rel="stylesheet" href="styles/eroscripts.css">
   <link rel="stylesheet" href="styles/session-card.css">
   <link rel="stylesheet" href="styles/up-next.css">
+  <link rel="stylesheet" href="styles/vr-format-panel.css">
 </head>
 <body>
   <div id="app">
@@ -121,10 +122,31 @@
           <div class="controls__right">
             <span id="funscript-badge" class="funscript-badge" hidden data-i18n-title="player.funscriptLoaded" title="Funscript loaded"></span>
             <div id="variant-selector" class="variant-selector" hidden>
-              <button id="variant-btn" class="variant-selector__btn" data-i18n-title="player.scriptVariants" title="Script variants (V)"></button>
+              <button id="variant-btn" class="variant-selector__btn" data-i18n-title="player.scriptVariants" title="Script variants (V)">
+                <span id="variant-btn-label" class="variant-selector__label"></span>
+                <i data-lucide="chevron-down" class="variant-selector__chevron"></i>
+              </button>
               <div id="variant-dropdown" class="variant-selector__dropdown" hidden></div>
             </div>
             <span id="subtitle-badge" class="subtitle-badge" hidden data-i18n-title="player.subtitlesLoaded" title="Subtitles loaded"></span>
+
+            <!-- Playback-speed chip — follows the funscript/subtitle/
+                 variant badge pattern (hidden at default, visible at
+                 non-default state). Only appears at non-1× rates so the
+                 bar stays clean for the 95% of users at normal speed.
+                 Clickable to open the preset popover; discovery for 1×
+                 users happens via the ⋮ menu "Playback speed" item or
+                 the < / > keyboard shortcuts. Nielsen #1 visibility of
+                 system status (applied where it matters: non-default
+                 state), #8 minimalist, Shneiderman #8 memory load. -->
+            <button id="speed-chip" class="speed-chip" hidden
+                    data-i18n-aria-label="player.speed.aria"
+                    data-i18n-title="player.speed.title"
+                    aria-label="Playback speed"
+                    title="Playback speed (&lt; / &gt;)"
+                    aria-haspopup="menu" aria-expanded="false">
+              <span class="speed-chip__label" id="speed-chip-label">1&times;</span>
+            </button>
 
             <!-- Editor / Devices / Fullscreen carry persistent text
                  labels at ≥1024px so first-time users don't have to
@@ -166,6 +188,24 @@
                 <i data-lucide="ellipsis-vertical"></i>
               </button>
               <div id="controls-overflow-menu" class="controls-overflow__menu" role="menu" hidden>
+                <!-- Playback speed — the main discovery surface. Shows
+                     current rate inline so users see system status
+                     without opening the submenu. Activates a popover
+                     anchored to the ⋮ button with the preset list. -->
+                <button id="btn-speed-menu" class="controls-overflow__item" role="menuitem" aria-haspopup="menu" data-i18n-aria-label="player.speed.aria" aria-label="Playback speed">
+                  <i data-lucide="gauge"></i>
+                  <span data-i18n="player.speed.menuLabel">Playback speed</span>
+                  <span class="controls-overflow__item-value" id="speed-menu-current">1&times;</span>
+                </button>
+                <!-- VR Format — surfaced here only for videos detected
+                     (or manually flagged) as VR. Gives users a way to
+                     fix mis-detected projection without leaving the
+                     player view. Hidden by default; app.js toggles
+                     visibility based on isVRVideo(currentPath). -->
+                <button id="btn-vr-format-menu" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.vrFormatMenu" aria-label="VR Format" hidden>
+                  <i data-lucide="rectangle-goggles"></i>
+                  <span data-i18n="player.vrFormatMenu">VR Format…</span>
+                </button>
                 <button id="btn-pip" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.pictureInPicture" aria-label="Picture in Picture">
                   <i data-lucide="picture-in-picture-2"></i>
                   <span data-i18n="player.pictureInPicture">Picture-in-Picture</span>
@@ -175,6 +215,9 @@
                   <span data-i18n="player.keyboardShortcuts">Keyboard shortcuts</span>
                 </button>
               </div>
+              <!-- Shared preset popover — anchored to whichever trigger
+                   opens it (the chip or the ⋮ menu item). -->
+              <div id="speed-popover" class="speed-popover" role="menu" hidden></div>
             </div>
 
             <button id="btn-fullscreen" class="control-btn control-btn--labelled" data-i18n-aria-label="player.fullscreen" data-i18n-title="player.fullscreen" aria-label="Fullscreen" title="Fullscreen (F)">

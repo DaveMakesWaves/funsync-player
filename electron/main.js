@@ -440,6 +440,36 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
   };
 });
 
+// Enumerate video files in a directory. Used by the VR Format panel's
+// "Apply to all videos in this folder" button. Non-recursive — only
+// direct children of `dirPath`. Skips symlinks pointing outside the
+// directory (matches the existing library-scan convention; avoids the
+// user accidentally bulk-overwriting a parent symlink target's
+// settings). Returns `string[]` of absolute paths.
+ipcMain.handle('enumerate-folder-videos', async (_event, dirPath) => {
+  if (!dirPath || typeof dirPath !== 'string') return [];
+  const VIDEO_EXT_SET = new Set(['.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v']);
+  try {
+    const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
+    const out = [];
+    for (const dent of entries) {
+      // Skip directories and symlinks pointing outside this folder.
+      if (dent.isDirectory()) continue;
+      if (dent.isSymbolicLink()) continue;
+      const name = dent.name;
+      const dotAt = name.lastIndexOf('.');
+      if (dotAt < 0) continue;
+      const ext = name.slice(dotAt).toLowerCase();
+      if (!VIDEO_EXT_SET.has(ext)) continue;
+      out.push(path.join(dirPath, name));
+    }
+    return out;
+  } catch (err) {
+    log.warn(`[enumerate-folder-videos] ${dirPath}: ${err?.message}`);
+    return [];
+  }
+});
+
 // Save a text payload to a user-chosen file. Used by the "Report a
 // problem" dialog for users who want to attach the report to an issue
 // manually (e.g. when logs exceed the GitHub URL budget). Returns
@@ -1359,6 +1389,12 @@ ipcMain.handle('backup:restore', async (_event, { subdir, filename }) => {
       _unsubscribeFromStore = null;
     }
     dataBackup.cancelScheduled();
+    // Kill the backend BEFORE app.exit(0). app.exit skips both will-quit
+    // and before-quit, so the standard stopBackend() hooks don't fire —
+    // leaving an orphan backend racing the relaunched instance for port
+    // 5123. The next-startup port sweep would eventually catch it, but
+    // killing it here means the relaunch hits a clean port immediately.
+    stopBackend();
     app.relaunch();
     app.exit(0);
     return { success: true };

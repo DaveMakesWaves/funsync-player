@@ -2,6 +2,15 @@
 
 import { showToast } from './toast.js';
 import { t } from './i18n.js';
+import { eventBus } from './event-bus.js';
+import { VRProjectionRenderer } from './vr-projection-renderer.js';
+
+export const PLAYBACK_RATE_PRESETS = Object.freeze([0.25, 0.5, 0.75, 1, 1.25, 1.5, 1.75, 2]);
+
+// Non-planar projections — dispatched to the WebGL renderer instead of
+// the CSS transform path. Phase 2a ships equirect-180 + fisheye-180;
+// Phase 2b adds equirect-360, fisheye-190/200, MKX200, RF52, EAC.
+const NONPLANAR_FORMATS = new Set(['equirect-180', 'fisheye-180']);
 
 /**
  * Format seconds into human-readable time string.
@@ -426,6 +435,14 @@ export class VideoPlayer {
   _onMetadataLoaded() {
     this.timeDuration.textContent = this._formatTime(this.video.duration);
 
+    // Reset playback rate to 1× on every new video load. Matches YouTube
+    // / VLC convention — avoids "why is this video at 2×?" surprise the
+    // next morning. Replaces the editor-close reset (removed from
+    // script-editor.js since rate is now player-owned).
+    if (this.video.playbackRate !== 1) {
+      this.setPlaybackRate(1);
+    }
+
     // Resolution badge
     const h = this.video.videoHeight;
     let label = '';
@@ -619,28 +636,121 @@ export class VideoPlayer {
 
   // --- VR Flatten ---
   //
-  // Apply / clear a VR-as-flat playback transform. The format is one of
-  // `'sbs-half'`, `'sbs-full'`, `'tb-half'`, `'tb-full'`, `'off'`, or
-  // null/undefined (= 'off'). `eye` is 1 (left/top, default) or 2
-  // (right/bottom). Pure CSS state — no impact on the video element's
-  // intrinsic dimensions or playback rate.
+  // Two render paths share this single entry point:
+  //   - PLANAR (sbs-half/full, tb-half/full): CSS `transform: scaleX/Y(2)`
+  //     on the <video> element. Zero shader cost; covers the most common
+  //     SBS/TB VR rips.
+  //   - NON-PLANAR (equirect-180, fisheye-180): hands off to the
+  //     VRProjectionRenderer (WebGL2 canvas overlay). Mount/unmount
+  //     happens lazily here so non-VR sessions never pay the cost.
   //
-  // Idempotent: applying the same format+eye twice is a no-op.
-  setVRFlatten(format, eye = 1) {
-    const VALID = ['sbs-half', 'sbs-full', 'tb-half', 'tb-full'];
-    // Clear prior flat-* classes regardless of next state — cheap and
+  // Eye is 1 (left/top, default) or 2 (right/bottom).
+  // `opts.zoom`  (1.0-2.0) — planar only; multiplies the base crop.
+  // `opts.fov`   (deg)     — spherical only; viewport FOV.
+  // `opts.yaw`   (deg)     — spherical only; pan horizontal.
+  // `opts.pitch` (deg)     — spherical only; pan vertical (clamped ±85°).
+  //
+  // Idempotent: applying the same format+eye+zoom twice is a no-op.
+  setVRFlatten(format, eye = 1, opts = {}) {
+    const PLANAR = ['sbs-half', 'sbs-full', 'tb-half', 'tb-full'];
+
+    // Clear prior planar classes regardless of next state — cheap and
     // avoids the trap where switching SBS → TB leaves both on.
-    for (const v of VALID) {
+    for (const v of PLANAR) {
       this.video.classList.remove(`player__video--flat-${v}`);
     }
     this.video.classList.remove('player__video--flat-eye-2');
+    if (this.video.style?.removeProperty) {
+      this.video.style.removeProperty('--vr-flatten-zoom');
+    }
     this._vrFlattenFormat = null;
     this._vrFlattenEye = 1;
-    if (!format || format === 'off' || !VALID.includes(format)) return;
+    this._vrFlattenZoom = 1;
+
+    // Non-planar — mount renderer, configure, show the canvas.
+    if (format && NONPLANAR_FORMATS.has(format)) {
+      this._mountVRRendererIfNeeded();
+      if (!this._vrRenderer) return; // mount failed (no WebGL2); silently fall through to off
+      this._vrRenderer.setProjection(format);
+      this._vrRenderer.setEye(eye === 2 ? 'right' : 'left');
+      // Phase 2a assumes SBS-half for equirect-180 / fisheye-180 (the
+      // overwhelming majority of VR180 rips). When mono support is
+      // added the panel can expose stereoMode explicitly.
+      this._vrRenderer.setStereoMode(1);
+      this._vrRenderer.setFov(Number.isFinite(opts.fov) ? opts.fov : 90);
+      this._vrRenderer.setYawPitch(
+        Number.isFinite(opts.yaw) ? opts.yaw : 0,
+        Number.isFinite(opts.pitch) ? opts.pitch : 0,
+      );
+      this._setVRProjectingState(true);
+      this._vrFlattenFormat = format;
+      this._vrFlattenEye = eye;
+      this._vrFlattenZoom = 1;
+      return;
+    }
+
+    // Planar (or off / null) — unmount the renderer if it's up.
+    if (this._vrRenderer?.mounted) {
+      this._vrRenderer.unmount();
+      this._setVRProjectingState(false);
+    }
+
+    if (!format || format === 'off' || !PLANAR.includes(format)) return;
     this.video.classList.add(`player__video--flat-${format}`);
     if (eye === 2) this.video.classList.add('player__video--flat-eye-2');
+    const zoom = Number.isFinite(opts.zoom) ? Math.max(1, Math.min(2, opts.zoom)) : 1;
+    if (zoom !== 1 && this.video.style?.setProperty) {
+      this.video.style.setProperty('--vr-flatten-zoom', String(zoom));
+    }
     this._vrFlattenFormat = format;
     this._vrFlattenEye = eye;
+    this._vrFlattenZoom = zoom;
+  }
+
+  /** Update the pan/zoom of an already-active spherical projection
+   *  without remounting. Caller (drag-to-pan, FOV slider) uses this
+   *  on every input event. No-op when not projecting. */
+  updateVRProjection({ fov, yaw, pitch } = {}) {
+    if (!this._vrRenderer?.mounted) return;
+    if (Number.isFinite(fov))   this._vrRenderer.setFov(fov);
+    if (Number.isFinite(yaw) || Number.isFinite(pitch)) {
+      this._vrRenderer.setYawPitch(
+        Number.isFinite(yaw)   ? yaw   : 0,
+        Number.isFinite(pitch) ? pitch : 0,
+      );
+    }
+  }
+
+  /** Whether a non-planar VR projection is currently being rendered.
+   *  Used by drag/keyboard handlers to gate gestures. */
+  get isVRProjecting() {
+    return !!this._vrRenderer?.mounted;
+  }
+
+  /** Returns the WebGL canvas element if mounted (null otherwise).
+   *  Lets callers (panel) wire pointer events directly. */
+  get vrProjectionCanvas() {
+    return this._vrRenderer?.canvas || null;
+  }
+
+  _mountVRRendererIfNeeded() {
+    if (this._vrRenderer?.mounted) return;
+    if (!this._vrRenderer) this._vrRenderer = new VRProjectionRenderer();
+    const container = this.video.parentElement;
+    if (!container) return;
+    try {
+      this._vrRenderer.mount(this.video, container);
+    } catch (err) {
+      console.warn('[VR projection] mount failed:', err?.message || err);
+      showToast(t('vrFormat.webglUnavailable'), 'warn', 4000);
+      this._vrRenderer = null;
+    }
+  }
+
+  _setVRProjectingState(active) {
+    const wrap = this.video?.parentElement;
+    if (!wrap?.classList) return;
+    wrap.classList.toggle('player__video-wrapper--vr-projecting', !!active);
   }
 
   /**
@@ -666,7 +776,73 @@ export class VideoPlayer {
   }
 
   get vrFlattenState() {
-    return { format: this._vrFlattenFormat || null, eye: this._vrFlattenEye || 1 };
+    return {
+      format: this._vrFlattenFormat || null,
+      eye: this._vrFlattenEye || 1,
+      zoom: this._vrFlattenZoom || 1,
+    };
+  }
+
+  // --- Playback Speed ---
+  //
+  // Single source of truth for playback rate. Editor dropdown, player
+  // controls button, keyboard shortcuts, and (Phase 2) web-remote all
+  // route through here so the Handy HSSP↔HDSP mode switch fires in
+  // exactly one place.
+  //
+  // HSSP can't follow rate changes (cloud schedules at 1.0× regardless),
+  // so at non-1× we switch to HDSP-polled mode — the polled engine reads
+  // `video.currentTime` per tick, which naturally scales with the rate.
+  // Buttplug / TCode / Autoblow already handle rate via per-tick reads.
+
+  setPlaybackRate(rate) {
+    if (!PLAYBACK_RATE_PRESETS.includes(rate)) return;
+    this.video.playbackRate = rate;
+    this._currentRate = rate;
+
+    if (this._handyManager?.connected) {
+      if (rate === 1) {
+        if (this._handyHdspSync?.active) this._handyHdspSync.stop();
+        if (this._handySyncEngine) this._handySyncEngine.start();
+      } else {
+        if (this._handySyncEngine) this._handySyncEngine.stop();
+        if (this._handyHdspSync && !this._handyHdspSync.active) {
+          this._handyHdspSync.start();
+        }
+      }
+    }
+
+    eventBus.emit('playback:rate-changed', rate);
+  }
+
+  cyclePlaybackRate(dir) {
+    const current = this.video.playbackRate || 1;
+    const idx = PLAYBACK_RATE_PRESETS.indexOf(current);
+    let next;
+    if (idx === -1) {
+      next = 1;
+    } else {
+      const target = idx + (dir > 0 ? 1 : -1);
+      if (target < 0 || target >= PLAYBACK_RATE_PRESETS.length) return current;
+      next = PLAYBACK_RATE_PRESETS[target];
+    }
+    this.setPlaybackRate(next);
+    return next;
+  }
+
+  get playbackRate() {
+    return this.video.playbackRate;
+  }
+
+  /**
+   * Wire the Handy sync references so setPlaybackRate can manage the
+   * HSSP↔HDSP mode switch. Called by app.js once the managers are
+   * constructed. Idempotent — passing nullish keeps existing refs.
+   */
+  setHandySyncRefs({ handyManager, handySyncEngine, handyHdspSync }) {
+    if (handyManager !== undefined) this._handyManager = handyManager;
+    if (handySyncEngine !== undefined) this._handySyncEngine = handySyncEngine;
+    if (handyHdspSync !== undefined) this._handyHdspSync = handyHdspSync;
   }
 
   // --- Subtitles ---

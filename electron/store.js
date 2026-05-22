@@ -50,12 +50,22 @@ const DEFAULTS = {
       // Tri-state covers both flipping a missed VR file → VR and
       // clearing a false-positive on a flat file with a VR-like token.
       manualVRType: {},
-      // Per-path VR-as-flat playback override. Value is `'left'` or
-      // `'right'`; absent / null means show the full SBS / TB frame as
-      // shipped. Community feature ask 2026-05-17 — desktop users on
-      // 2D monitors want one eye cropped + scaled so VR content isn't
-      // squished. Format auto-detected via classifyStereoFormat().
+      // Per-path VR-as-flat playback override. Legacy two-string shape
+      // — value was `'left'` or `'right'`. Kept indefinitely as a read
+      // fallback for downgrade safety (a user reverting to <0.7.x still
+      // sees their saved eye preference). New writes go to vrFormat
+      // below; this key is not updated post-migration.
       vrFlatten: {},
+      // Phase 1 of VR-flatten expansion (2026-05-21). Per-path richer
+      // schema:
+      //   { projection: 'sbs-half'|'sbs-full'|'tb-half'|'tb-full'|'flat',
+      //     eye: 'left'|'right'|null,
+      //     zoom: 1.0,
+      //     source: 'auto'|'manual' }
+      // Old vrFlatten entries lazy-migrate on read; no batch migration.
+      // Non-planar projections (fisheye/equirect/MKX/RF52/EAC) reserved
+      // for Phase 2a/2b — they appear disabled in the panel dropdown.
+      vrFormat: {},
       collections: [],
       activeCollectionId: null,
     },

@@ -100,6 +100,9 @@ contextBridge.exposeInMainWorld('funsync', {
   collectDiagnostics: (rendererState) => ipcRenderer.invoke('collect-diagnostics', rendererState),
   saveFile: (opts) => ipcRenderer.invoke('save-text-file', opts),
   openLogFolder: () => ipcRenderer.invoke('open-log-folder'),
+  // Non-recursive listing of video files in a directory. Used by the
+  // VR Format panel's "Apply to all videos in this folder" button.
+  enumerateFolderVideos: (dirPath) => ipcRenderer.invoke('enumerate-folder-videos', dirPath),
   // i18n — read once at boot to drive the first-launch language-offer
   // toast (see notes/features/IMPL-multi-language.md §3).
   getSystemLocale: () => ipcRenderer.invoke('get-system-locale'),

@@ -340,6 +340,38 @@ html, body {
   overflow: hidden;
 }
 
+/* Phase 2a — WebGL canvas overlay for non-planar VR projections
+ * (equirect / fisheye). Created lazily by VRProjectionRenderer.mount.
+ * Sits on top of the <video> element; the video is hidden via the
+ * `vr-projecting` class on the wrapper while a non-planar projection
+ * is active. Cursor changes to grab/grabbing during drag-to-pan.
+ *
+ * IMPORTANT — no `z-index` here. The canvas needs to paint above the
+ * <video> sibling (it does, naturally, because it's appended after the
+ * video in DOM order) but NOT above the `.player__controls` and
+ * `.player__top-bar` siblings of the wrapper. Setting z-index on the
+ * canvas would elevate it past those bars in the player-container's
+ * stacking context (since the wrapper has no z-index of its own to
+ * scope the child stacking), leaving the controls invisible under the
+ * opaque black canvas background. Fixed 2026-05-22. */
+.vr-projection-canvas {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  cursor: grab;
+  background: #000;
+}
+.vr-projection-canvas:active {
+  cursor: grabbing;
+}
+.player__video-wrapper--vr-projecting .player__video {
+  /* Video frame is still decoding behind the canvas; hide it so the
+     un-projected source doesn't show through during transitions. */
+  visibility: hidden;
+}
+
 .player__video {
   width: 100%;
   height: 100%;
@@ -364,28 +396,40 @@ html, body {
      - Crop = top-or-left 50%
      - No scale — eye is already at the correct aspect
    See classifyStereoFormat() in renderer/js/vr-detect.js. */
-.player__video--flat-sbs-half {
-  transform: scaleX(2);
-}
+/* `--vr-flatten-zoom` defaults to 1 unless setVRFlatten writes the
+   custom property inline; multiplied into the base 2× crop. Lets users
+   zoom in past the natural half-frame view for non-standard packings
+   (Phase 1 of SCOPE-vr-flatten-full.md).
+
+   `object-fit: fill` (instead of the default `contain`) is critical
+   here. A side-by-side VR source is 32:9 aspect; with `contain` the
+   browser letterboxes it top+bottom inside a 16:9 wrapper, so
+   `scaleX(2)` ends up doubling a letterboxed render — you see one eye
+   at full wrapper width but only half wrapper height, with black bands.
+   `fill` squashes the 32:9 source into the 16:9 element box (each eye
+   becomes horizontally compressed), then `scaleX(2)` un-squashes it,
+   so one eye fills the wrapper at correct aspect with no letterboxing.
+   Same logic for TB (16:18 → vertical squash → scaleY(2) un-squashes). */
+.player__video--flat-sbs-half,
 .player__video--flat-sbs-full {
-  transform: scaleX(2);
+  object-fit: fill;
+  transform: scaleX(calc(2 * var(--vr-flatten-zoom, 1)));
 }
-.player__video--flat-tb-half {
-  transform: scaleY(2);
-}
+.player__video--flat-tb-half,
 .player__video--flat-tb-full {
-  transform: scaleY(2);
+  object-fit: fill;
+  transform: scaleY(calc(2 * var(--vr-flatten-zoom, 1)));
 }
 /* Right-eye / bottom-eye variants — same scale, opposite translate.
    Combined with the wrapper's `overflow: hidden`, the un-displayed eye
    simply paints off-canvas and is clipped. */
 .player__video--flat-sbs-half.player__video--flat-eye-2,
 .player__video--flat-sbs-full.player__video--flat-eye-2 {
-  transform: scaleX(2) translateX(-50%);
+  transform: scaleX(calc(2 * var(--vr-flatten-zoom, 1))) translateX(-50%);
 }
 .player__video--flat-tb-half.player__video--flat-eye-2,
 .player__video--flat-tb-full.player__video--flat-eye-2 {
-  transform: scaleY(2) translateY(-50%);
+  transform: scaleY(calc(2 * var(--vr-flatten-zoom, 1))) translateY(-50%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -886,6 +930,110 @@ html, body {
   flex-shrink: 0;
 }
 
+/* === Playback speed =================================================
+ * Two surfaces share one preset popover:
+ *   1. `.speed-chip` — badge-cluster sibling of funscript / subtitle
+ *      badges. Hidden at 1× (default), visible at non-1× as a state
+ *      indicator. Clickable to open the popover.
+ *   2. `#btn-speed-menu` — entry inside the overflow ⋮ menu (the main
+ *      discovery surface; reachable at any rate). Uses the existing
+ *      .controls-overflow__item visuals plus the trailing
+ *      .controls-overflow__item-value for the current rate.
+ *
+ * Norman signifier — chip styling mirrors the existing badges so users
+ * recognise "this is a status indicator that also clicks." Nielsen #8
+ * minimalist — at 1× the chip is hidden entirely, no chrome.
+ */
+.speed-chip {
+  display: inline-flex;
+  align-items: center;
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-family);
+  cursor: pointer;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  line-height: 1.4;
+}
+.speed-chip[hidden] { display: none; }
+.speed-chip:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.speed-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Trailing value on an overflow-menu item (e.g. "Playback speed — 1×").
+   Right-aligned, dimmer than the label so it reads as secondary
+   information (Nielsen #8 — visual hierarchy via weight, not size). */
+.controls-overflow__item-value {
+  margin-left: auto;
+  color: var(--video-overlay-text-dim, rgba(255, 255, 255, 0.6));
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+/* Shared preset popover — anchored at render time to whichever
+   trigger opened it. */
+.speed-popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  right: 0;
+  min-width: 100px;
+  background: var(--video-overlay-bg);
+  border: 1px solid var(--video-overlay-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  padding: 4px;
+  z-index: 31;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.speed-popover[hidden] { display: none; }
+.speed-popover__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--video-overlay-text);
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: var(--font-family);
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  text-align: left;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+  min-height: 32px;
+}
+.speed-popover__item:hover {
+  background: var(--video-overlay-control-hover);
+}
+.speed-popover__item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.speed-popover__item--current {
+  color: var(--accent);
+  font-weight: 600;
+}
+.speed-popover__item--current::after {
+  content: '✓';
+  font-weight: 700;
+}
+
 /* Persistent text labels on key buttons (Editor / Devices / Fullscreen).
    Hidden by default — only revealed at desktop widths (≥1024px) where
    horizontal room allows. Below that breakpoint the buttons collapse
@@ -1070,10 +1218,14 @@ html, body {
   outline-offset: 2px;
 }
 
-.variant-selector__btn::after {
-  content: '\25BE';
-  font-size: 10px;
+.variant-selector__chevron {
+  display: inline-flex;
+  align-items: center;
   opacity: 0.6;
+}
+.variant-selector__chevron svg {
+  width: 14px;
+  height: 14px;
 }
 
 /* Variant dropdown floats above the player overlay — uses theme-aware

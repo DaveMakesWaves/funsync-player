@@ -49,12 +49,22 @@ export class KeyboardHandler {
 
       case 'ArrowLeft':
         e.preventDefault();
-        this.player.skip(-5);
+        // Shift+Arrow pans the VR projection ±10° when a spherical
+        // projection is active; otherwise the arrow seeks 5s.
+        if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
+          this.onVRPan(-10, 0);
+        } else {
+          this.player.skip(-5);
+        }
         break;
 
       case 'ArrowRight':
         e.preventDefault();
-        this.player.skip(5);
+        if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
+          this.onVRPan(10, 0);
+        } else {
+          this.player.skip(5);
+        }
         break;
 
       case 'j':
@@ -71,12 +81,20 @@ export class KeyboardHandler {
 
       case 'ArrowUp':
         e.preventDefault();
-        this.player.setVolume(this.player.video.volume + 0.05);
+        if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
+          this.onVRPan(0, -10); // pitch up (look up)
+        } else {
+          this.player.setVolume(this.player.video.volume + 0.05);
+        }
         break;
 
       case 'ArrowDown':
         e.preventDefault();
-        this.player.setVolume(this.player.video.volume - 0.05);
+        if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
+          this.onVRPan(0, 10); // pitch down (look down)
+        } else {
+          this.player.setVolume(this.player.video.volume - 0.05);
+        }
         break;
 
       case 'm':
@@ -135,13 +153,37 @@ export class KeyboardHandler {
 
       case 'R':
         // Shift+R cycles the VR-as-flat playback mode (Off → Left → Right → Off).
-        // The format is taken from the current video's stereo classification
+        // Ctrl+Shift+R opens the VR Format panel for the current video
+        // — manual projection / eye / zoom / apply-to-folder overrides.
+        // Format is taken from the current video's stereo classification
         // — fed in by app.js after loadVideo runs. No-op if no format set.
         e.preventDefault();
-        if (this.onCycleVRFlatten) {
+        if (e.ctrlKey) {
+          if (this.onOpenVRFormat) this.onOpenVRFormat();
+        } else if (this.onCycleVRFlatten) {
           this.onCycleVRFlatten();
         } else {
           this.player.cycleAspectRatio();
+        }
+        break;
+
+      case '<':
+      case ',':
+        // Shift+, decrements playback speed (YouTube convention).
+        // `,` arrives without Shift on US/UK layouts; `<` is what
+        // some browsers report with Shift held. Accept both.
+        if (e.shiftKey || e.key === '<') {
+          e.preventDefault();
+          this.player.cyclePlaybackRate(-1);
+        }
+        break;
+
+      case '>':
+      case '.':
+        // Shift+. increments playback speed.
+        if (e.shiftKey || e.key === '>') {
+          e.preventDefault();
+          this.player.cyclePlaybackRate(+1);
         }
         break;
 
