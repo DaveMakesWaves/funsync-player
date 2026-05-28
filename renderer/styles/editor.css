@@ -42,11 +42,14 @@
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   background: rgba(0, 0, 0, 0.3);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  min-height: 36px;
+  /* 36px button + 6px top/bottom padding = 48px row. Matches the
+   * Fitts floor used in nav-bar / connection-panel / settings-panel
+   * polish passes. */
+  min-height: 48px;
 }
 
 .editor__toolbar-separator {
@@ -54,6 +57,14 @@
   height: 20px;
   background: var(--surface-overlay);
   margin: 0 4px;
+}
+
+/* Cluster separator — wider margin at the strongest semantic group
+ * boundaries (script → edit, edit → view, playback → save). Norman
+ * grouping principle: related controls visually paired, dissimilar
+ * groups visually separated. */
+.editor__toolbar-separator--cluster {
+  margin: 0 10px;
 }
 
 .editor__btn {
@@ -69,8 +80,16 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  min-width: 28px;
-  min-height: 28px;
+  /* Fitts floor — 36×36 minimum. Was 28×28 pre-editor-v2; matches
+   * the floor used everywhere else and keeps adjacent icon buttons
+   * from being mis-tapped on touch displays. */
+  min-width: 36px;
+  min-height: 36px;
+}
+
+.editor__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .editor__btn svg {
@@ -92,9 +111,137 @@
   background: none;
 }
 
-.editor__btn--active {
+/* Toggle-state rule — fires on either the legacy `--active` class or
+ * the `aria-pressed="true"` attribute so the migration to ARIA-only
+ * state tracking is invisible to existing callsites. */
+.editor__btn--active,
+.editor__btn[aria-pressed="true"] {
   background: rgba(233, 69, 96, 0.2);
   color: var(--accent);
+}
+
+/* === Stacked multi-axis lane view (§3) ============================= */
+
+.editor__stacked-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 4px 4px 0 4px;
+  background: rgba(0, 0, 0, 0.2);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+}
+
+.editor__lane {
+  position: relative;
+  height: 64px;
+  background: var(--surface-overlay);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.editor__lane--inactive {
+  cursor: pointer;
+  opacity: 0.75;
+  transition: opacity var(--transition-fast), border-color var(--transition-fast);
+}
+
+.editor__lane--inactive:hover {
+  opacity: 1;
+  border-color: var(--accent);
+}
+
+.editor__lane-label {
+  position: absolute;
+  top: 4px;
+  left: 6px;
+  z-index: 1;
+  font: 11px/1 ui-monospace, Menlo, Consolas, monospace;
+  color: var(--accent);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  pointer-events: none;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+
+.editor__lane-canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* When pop-out is open, hide the docked editor body entirely. Per
+ * locked decision §4.3 α, pop-out takes full ownership — the main
+ * window shows only the video while editing happens in the separate
+ * window. The panel itself uses .hidden via the JS path, but this
+ * rule covers the case where the panel stays mounted but visually
+ * collapsed. */
+.script-editor--popout-active .editor__toolbar,
+.script-editor--popout-active .editor__canvas-container,
+.script-editor--popout-active .editor__stacked-lanes,
+.script-editor--popout-active .editor__scrubber {
+  display: none;
+}
+
+/* === Pop-out window variant ===========================================
+ *
+ * The pop-out renderer loads `editor-popout.html` and tags its host
+ * with `.script-editor.script-editor--popout-window`. The existing
+ * `.script-editor` rule positions the panel absolutely with a slide-in
+ * transform — for the pop-out we override that to fill the window
+ * statically, since there's no host player container behind us.
+ *
+ * Everything else (toolbar, button shape, separators, canvas, scrubber,
+ * focus rings, aria-pressed treatment, design tokens) inherits from the
+ * docked editor's existing rules. The pop-out IS the docked editor in
+ * its own window.
+ */
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+}
+body:has(.script-editor--popout-window),
+html:has(.script-editor--popout-window) {
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: var(--font-family, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif);
+  overflow: hidden;
+}
+
+.script-editor--popout-window {
+  position: static;
+  width: 100%;
+  height: 100%;
+  bottom: auto;
+  left: auto;
+  right: auto;
+  transform: none;
+  pointer-events: auto;
+  opacity: 1;
+  transition: none;
+  background: var(--surface-base);
+}
+
+/* Pop-out's Dock button reuses `.editor__btn` for visual parity but
+ * needs to render its text label. Override the icon-button geometry
+ * so text fits without distorting the toolbar row height. */
+.script-editor--popout-window .editor__btn[aria-label^="Dock"] {
+  width: auto;
+  min-width: 52px;
+  padding: 0 12px;
+  font-weight: 600;
+}
+
+/* Recording-mode blink animation. Docked editor declares this inline
+ * via the indicator's cssText; the pop-out reuses the same indicator
+ * markup so we define the keyframes once in editor.css. */
+@keyframes blink {
+  0%, 50% { opacity: 1; }
+  51%, 100% { opacity: 0; }
 }
 
 /* Speed select */

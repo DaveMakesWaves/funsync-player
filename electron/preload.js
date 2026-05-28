@@ -38,6 +38,7 @@ contextBridge.exposeInMainWorld('funsync', {
   getPlaylist: (id) => ipcRenderer.invoke('get-playlist', id),
   addPlaylist: (name) => ipcRenderer.invoke('add-playlist', name),
   renamePlaylist: (id, name) => ipcRenderer.invoke('rename-playlist', id, name),
+  setPlaylistLoop: (id, loop) => ipcRenderer.invoke('set-playlist-loop', id, loop),
   deletePlaylist: (id) => ipcRenderer.invoke('delete-playlist', id),
   addVideoToPlaylist: (id, videoPath) => ipcRenderer.invoke('add-video-to-playlist', id, videoPath),
   removeVideoFromPlaylist: (id, videoPath) => ipcRenderer.invoke('remove-video-from-playlist', id, videoPath),
@@ -152,6 +153,17 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
   eroscriptsDownload: (url, savePath) => ipcRenderer.invoke('eroscripts-download', url, savePath),
+
+  // Editor pop-out window
+  editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),
+  editorPopoutClose: () => ipcRenderer.invoke('editor-popout:close'),
+  editorPopoutStatus: () => ipcRenderer.invoke('editor-popout:status'),
+  editorPopoutRelay: (direction, payload) => ipcRenderer.invoke('editor-popout:relay', direction, payload),
+  onEditorPopoutEvent: (callback) => {
+    const handler = (_event, evt) => callback(evt);
+    ipcRenderer.on('editor-popout:event', handler);
+    return () => ipcRenderer.removeListener('editor-popout:event', handler);
+  },
 
   // Auto-updater
   updaterCheck: () => ipcRenderer.invoke('updater-check'),

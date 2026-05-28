@@ -166,12 +166,21 @@ export class UpNextEngine {
   _nextPath() {
     if (!this._playContext) return null;
     const list = this._playContext.list;
+    if (!list || list.length === 0) return null;
     const next = (this._playContext.index ?? -1) + 1;
-    return (list && next < list.length) ? list[next] : null;
+    if (next < list.length) return list[next];
+    // Loop mode: after the last item, "next" wraps to index 0. Used by
+    // playlists that have their per-playlist loop toggle on.
+    if (this._playContext.loop) return list[0];
+    return null;
   }
 
   _isLastInList() {
     if (!this._playContext?.list) return false;
+    // When loop is on, there's no "last" — the queue wraps. Always
+    // show the next-up card with the looped-around item, never the
+    // end-of-list state.
+    if (this._playContext.loop) return false;
     return this._playContext.index >= this._playContext.list.length - 1;
   }
 

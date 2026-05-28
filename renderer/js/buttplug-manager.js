@@ -366,6 +366,13 @@ export class ButtplugManager {
         this._reconnectAttempts = 0;
         // Re-scan for devices
         try { await this.startScanning(); } catch {}
+      } else {
+        // Community report (NylonBorg, via TODO.md backlog): the
+        // original setTimeout did NOT recurse on failure, so
+        // `_maxReconnectAttempts = 3` was effectively dead — only
+        // one attempt ever ran. Now we chain through the full
+        // backoff series until the configured max.
+        this._attemptReconnect();
       }
     }, delay);
   }

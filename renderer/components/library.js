@@ -38,12 +38,15 @@ import { record, mark } from '../js/startup-timer.js';
 const MAX_CONCURRENT_THUMBNAILS = 4;
 
 export class Library {
-  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, settings }) {
+  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, getEmbeddedAxes, detectEmbeddedAxesForPath, onExtractEmbeddedAxes, settings }) {
     this._onPlayVideo = onPlayVideo;
     this._onBack = onBack;
     this._onAddSource = onAddSource || null;
     this._onTestDevice = onTestDevice || null;
     this._onOpenVRFormat = onOpenVRFormat || null;
+    this._getEmbeddedAxes = getEmbeddedAxes || null;
+    this._detectEmbeddedAxesForPath = detectEmbeddedAxesForPath || null;
+    this._onExtractEmbeddedAxes = onExtractEmbeddedAxes || null;
     this._settings = settings;
 
     // Wire the manual VR override store. Per-call closure over `_settings`
@@ -3164,6 +3167,25 @@ export class Library {
       badge.title = t('library.customRoutingTitle', { count: n });
       badge.appendChild(icon(Cable, { width: 14, height: 14, 'stroke-width': 2.5 }));
       containerEl.appendChild(badge);
+    } else {
+      // Embedded multi-axis fallback. Combined funscripts (HereSphere
+      // `additional_axes`, OFS-extended `raw`, sibling-key, inline
+      // TCode) carry pitch/roll/twist inside the main file. The app
+      // detects them at playback time and caches via
+      // `app.getEmbeddedAxes(funscriptPath)`. Show the multi badge so
+      // the user knows the file is multi-axis even though no companion
+      // files exist on disk. The cache populates after the first play
+      // of each video, so this badge appears progressively (not at
+      // initial scan — that would need an async pre-scan).
+      const embedded = this._getEmbeddedAxes?.(video.funscriptPath);
+      if (embedded && embedded.suffixes && embedded.suffixes.length > 0) {
+        const n = embedded.suffixes.length;
+        const badge = document.createElement('span');
+        badge.className = inline ? 'library__multi-badge--inline' : 'library__multi-badge';
+        badge.title = `Embedded multi-axis (${n}): ${embedded.suffixes.join(', ')}`;
+        badge.appendChild(icon(Layers2, { width: 14, height: 14, 'stroke-width': 2.5 }));
+        containerEl.appendChild(badge);
+      }
     }
   }
 
@@ -3411,6 +3433,29 @@ export class Library {
       menu.appendChild(removeBtn);
     }
 
+    // "Extract embedded axes…" — only visible when the app has
+    // detected embedded multi-axis data in this video's main funscript
+    // (cached via `_feedEmbeddedMultiAxis` at first play, or populated
+    // by the modal-open on-demand path). Materialises each detected
+    // axis as a proper `<stem>.<suffix>.funscript` companion file on
+    // disk so the file becomes portable to other players AND so
+    // FunSync's existing companion-file pipeline picks them up on the
+    // next scan (multi-axis badge, Stacked Lane View, modal axis
+    // dropdowns all work after extraction).
+    const embedded = this._getEmbeddedAxes?.(video.funscriptPath);
+    if (embedded && embedded.suffixes && embedded.suffixes.length > 0) {
+      const extractBtn = document.createElement('button');
+      extractBtn.className = 'library__kebab-menu-item';
+      extractBtn.textContent = `Extract embedded axes (${embedded.suffixes.length})…`;
+      extractBtn.title = `Save ${embedded.suffixes.join(', ')} as companion .funscript files`;
+      extractBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closeMenu();
+        if (this._onExtractEmbeddedAxes) this._onExtractEmbeddedAxes(video);
+      });
+      menu.appendChild(extractBtn);
+    }
+
     // Subtitle association
     const subBtn = document.createElement('button');
     subBtn.className = 'library__kebab-menu-item';
@@ -3547,6 +3592,20 @@ export class Library {
     const mainFsPath = video.funscriptPath || '';
     const allPaths = allScripts.map(f => f.name);
     const detected = mainFsPath ? detectCompanionFiles(mainFsPath.split(/[\\/]/).pop(), allPaths) : [];
+
+    // Embedded multi-axis detection — files that bundle pitch/roll/twist
+    // INSIDE the main funscript instead of distributing as companions.
+    // Probe on-demand if the user hasn't played the file yet so the
+    // Multi-Axis tab can show "embedded in main" indicators for axes
+    // that aren't on disk as separate files.
+    let embeddedInfo = null;
+    if (mainFsPath) {
+      embeddedInfo = this._getEmbeddedAxes?.(mainFsPath);
+      if (!embeddedInfo && this._detectEmbeddedAxesForPath) {
+        embeddedInfo = await this._detectEmbeddedAxesForPath(mainFsPath);
+      }
+    }
+    const embeddedSuffixes = new Set((embeddedInfo?.suffixes) || []);
 
     // Load existing config — normalize to the parallel-slot shape so the
     // modal can preselect the last-active mode and also pre-populate the
@@ -3834,8 +3893,45 @@ export class Library {
           const defaultVal = preValue || (detectedPath ? this._findScriptByName(allScripts, detectedPath) : '');
 
           const axisRow = this._createAxisDropdown(`${axisDef.label} (${axisDef.tcode})`, axisDef.suffix, allScripts, defaultVal, video.name);
+
+          // Embedded indicator — when the main funscript bundles this
+          // axis internally AND no companion file is available, the
+          // dropdown has nothing to point at. Show an "✓ Embedded in
+          // main" note so the user knows the axis IS active (driven
+          // by the in-memory feed at playback time) and can choose to
+          // extract it to a proper companion file.
+          if (embeddedSuffixes.has(axisDef.suffix) && !defaultVal) {
+            const note = document.createElement('span');
+            note.className = 'library__assoc-embedded-note';
+            note.textContent = '✓ Embedded in main';
+            note.title = 'This axis lives inside the main funscript file. Pop the kebab and click "Extract embedded axes…" to save it as a separate companion file.';
+            note.style.cssText = 'margin-left:8px; font-size:11px; color:var(--badge-multi); font-weight:500;';
+            axisRow.row.appendChild(note);
+          }
+
           multiPanel.appendChild(axisRow.row);
           axisRows.push(axisRow);
+        }
+
+        // If any embedded axes were detected, surface a single
+        // "Extract all to companion files" button at the top of the
+        // multi panel so the user has one-click access from inside the
+        // modal too (mirrors the kebab item).
+        if (embeddedSuffixes.size > 0 && this._onExtractEmbeddedAxes) {
+          const extractRow = document.createElement('div');
+          extractRow.className = 'library__assoc-axis-row';
+          const btn = document.createElement('button');
+          btn.className = 'library__assoc-save-btn';
+          btn.textContent = `Extract ${embeddedSuffixes.size} embedded ${embeddedSuffixes.size === 1 ? 'axis' : 'axes'} to companion files`;
+          btn.title = `Save ${[...embeddedSuffixes].join(', ')} as separate .funscript files alongside this video.`;
+          btn.addEventListener('click', () => {
+            this._onExtractEmbeddedAxes(video);
+            close(null);
+          });
+          extractRow.appendChild(btn);
+          // Insert ABOVE the per-axis rows so the user sees the option
+          // before scrolling through dropdowns.
+          multiPanel.insertBefore(extractRow, mainRow.row.nextSibling);
         }
 
         // Buttplug.io vibration checkbox
@@ -5088,6 +5184,10 @@ export class Library {
           index: ctxIndex,
         };
       }
+    }
+    if (video._autoPlayOnNextLoad) {
+      fileData._autoPlayOnLoad = true;
+      delete video._autoPlayOnNextLoad;
     }
 
     // If funscript is available, read it and build a funscript file-like object

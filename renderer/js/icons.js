@@ -32,6 +32,8 @@ export { default as Trash2 } from '../../node_modules/lucide/dist/esm/icons/tras
 export { default as X } from '../../node_modules/lucide/dist/esm/icons/x.js';
 export { default as Clapperboard } from '../../node_modules/lucide/dist/esm/icons/clapperboard.js';
 export { default as PictureInPicture2 } from '../../node_modules/lucide/dist/esm/icons/picture-in-picture-2.js';
+export { default as Repeat } from '../../node_modules/lucide/dist/esm/icons/repeat.js';
+export { default as Repeat1 } from '../../node_modules/lucide/dist/esm/icons/repeat-1.js';
 export { default as SkipBack } from '../../node_modules/lucide/dist/esm/icons/skip-back.js';
 export { default as SkipForward } from '../../node_modules/lucide/dist/esm/icons/skip-forward.js';
 export { default as Undo2 } from '../../node_modules/lucide/dist/esm/icons/undo-2.js';
@@ -88,6 +90,10 @@ export { default as Layers2 } from '../../node_modules/lucide/dist/esm/icons/lay
 // Languages — first-launch language-prompt modal header glyph. Read as
 // "choose your language" by non-English speakers via the icon alone.
 export { default as Languages } from '../../node_modules/lucide/dist/esm/icons/languages.js';
+// ExternalLink — editor toolbar's "pop out to second window" affordance.
+// Standard convention for "this opens elsewhere"; matches the docked vs
+// popped-out mental model better than Maximize (which implies fullscreen).
+export { default as ExternalLink } from '../../node_modules/lucide/dist/esm/icons/external-link.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

@@ -8,6 +8,7 @@ const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
+const editorPopout = require('./editor-popout-window');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -537,6 +538,10 @@ ipcMain.handle('add-playlist', (_event, name) => {
 
 ipcMain.handle('rename-playlist', (_event, id, name) => {
   store.renamePlaylist(id, name);
+});
+
+ipcMain.handle('set-playlist-loop', (_event, id, loop) => {
+  store.setPlaylistLoop(id, loop);
 });
 
 ipcMain.handle('delete-playlist', async (_event, id) => {
@@ -1433,6 +1438,37 @@ ipcMain.handle('backup:pre-action', async (_event, label) => {
     log.warn(`[Backup] Pre-action snapshot failed (${label}):`, err.message);
     return { success: false, error: err.message };
   }
+});
+
+// === Editor pop-out window ===========================================
+// Per SCOPE-editor-v2.md §5: pop-out takes full ownership (main shows
+// only video while pop-out is open), state-sync is IPC-through-main, no
+// auto-reopen on app restart. The window module owns the BrowserWindow
+// lifecycle; these handlers expose it to the renderer.
+ipcMain.handle('editor-popout:open', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { success: false, error: 'Main window unavailable' };
+  }
+  editorPopout.open(mainWindow, store);
+  return { success: true };
+});
+
+ipcMain.handle('editor-popout:close', () => {
+  editorPopout.close();
+  return { success: true };
+});
+
+ipcMain.handle('editor-popout:status', () => {
+  return { open: editorPopout.isOpen() };
+});
+
+// State-sync relay. The sender side passes a `direction` so we know
+// whether to forward to the parent or to the pop-out — the main process
+// is the broker. Single channel keeps the protocol observable in one
+// place rather than forking into N typed channels.
+ipcMain.handle('editor-popout:relay', (_event, direction, payload) => {
+  editorPopout.relay(direction, payload);
+  return { success: true };
 });
 
 ipcMain.handle('backup:open-folder', async () => {

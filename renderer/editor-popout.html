@@ -1,0 +1,19 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>FunSync — Script Editor</title>
+  <link rel="stylesheet" href="styles/player.css">
+  <link rel="stylesheet" href="styles/modal.css">
+  <link rel="stylesheet" href="styles/editor.css">
+</head>
+<body>
+  <!-- The host becomes a `.script-editor.script-editor--popout-window`
+       in editor-popout.js so all the existing editor.css rules apply
+       unchanged. CSS handles full-window layout. -->
+  <div id="editor-popout-host"></div>
+  <script src="editor-popout.js" type="module"></script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { computeSpeedStats } from '../js/library-search.js';
@@ -213,6 +213,34 @@ export class Playlists {
       playAllBtn.appendChild(document.createTextNode(' ' + t('playlists.playAll')));
       playAllBtn.addEventListener('click', () => this._playAll(pl));
       header.appendChild(playAllBtn);
+
+      // Loop toggle — adjacent to Play All because it's a "play
+      // behaviour modifier" (Norman conceptual model: a control next
+      // to the thing it modifies). Pressed state = aria-pressed AND
+      // the .is-on class for the visual checkmark glow. State persists
+      // to the playlist itself (per-playlist preference) so users can
+      // mark certain playlists as marathon loops without affecting
+      // every other Play All they ever run.
+      const loopBtn = document.createElement('button');
+      loopBtn.type = 'button';
+      loopBtn.className = 'playlists__loop-btn';
+      loopBtn.appendChild(icon(Repeat, { width: 14, height: 14 }));
+      const setLoopVisualState = (on) => {
+        loopBtn.classList.toggle('is-on', !!on);
+        loopBtn.setAttribute('aria-pressed', String(!!on));
+        loopBtn.title = on
+          ? t('playlists.loopOnTitle')
+          : t('playlists.loopOffTitle');
+        loopBtn.setAttribute('aria-label', loopBtn.title);
+      };
+      setLoopVisualState(!!pl.loop);
+      loopBtn.addEventListener('click', () => {
+        const next = !pl.loop;
+        pl.loop = next;
+        this._settings.setPlaylistLoop(pl.id, next);
+        setLoopVisualState(next);
+      });
+      header.appendChild(loopBtn);
     }
 
     this._addViewToggle(header);
@@ -617,7 +645,11 @@ export class Playlists {
       const funscriptPath = this._getFunscriptPath(p);
       return { name, path: p, funscriptPath };
     });
-    this._onPlayAll(videoList);
+    this._onPlayAll(videoList, {
+      sourceLabel: pl.name,
+      sourceContext: { kind: 'playlist', id: pl.id },
+      loop: !!pl.loop,
+    });
   }
 
   // --- View toggle ---

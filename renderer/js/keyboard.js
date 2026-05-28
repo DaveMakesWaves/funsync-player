@@ -4,7 +4,7 @@ import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
@@ -12,6 +12,7 @@ export class KeyboardHandler {
     this.deviceSimulator = deviceSimulator || null;
     this.gapSkipEngine = gapSkipEngine || null;
     this.onNavigate = onNavigate || null;
+    this.onToggleLoop = onToggleLoop || null;
     this._bindEvents();
   }
 
@@ -76,7 +77,15 @@ export class KeyboardHandler {
       case 'l':
       case 'L':
         e.preventDefault();
-        this.player.skip(10);
+        // Shift+L toggles video loop; plain l/L seeks forward 10s.
+        // The case catches both shifted-and-unshifted because some
+        // keyboard layouts emit either depending on caps-lock; the
+        // shiftKey check is the source of truth.
+        if (e.shiftKey && this.onToggleLoop) {
+          this.onToggleLoop();
+        } else {
+          this.player.skip(10);
+        }
         break;
 
       case 'ArrowUp':

@@ -101,6 +101,14 @@
       "title": "Скорость воспроизведения (< / >)",
       "menuLabel": "Скорость воспроизведения"
     },
+    "loopVideo": {
+      "menuLabel": "Повтор видео",
+      "aria": "Переключить повтор видео",
+      "stateOn": "Вкл",
+      "stateOff": "Выкл",
+      "chipAria": "Повтор видео включён",
+      "chipTitle": "Повтор видео (Shift+L)"
+    },
     "vrFormatMenu": "VR-формат…",
     "preparingScript": "Подготовка скрипта…",
     "skipToNextAction": "Перейти к следующему действию",
@@ -328,6 +336,8 @@
     "emptyCta": "Создайте свой первый плейлист",
     "videoCount": "{count, plural, one {# видео} few {# видео} many {# видео} other {# видео}}",
     "playAll": "Воспроизвести всё",
+    "loopOnTitle": "Повтор включён — начать заново с элемента 1 после последнего видео",
+    "loopOffTitle": "Повтор выключен — остановиться после последнего видео",
     "renamePlaylist": "Переименовать плейлист",
     "deletePlaylist": "Удалить плейлист",
     "confirmDelete": "Удалить этот плейлист?",
@@ -488,18 +498,124 @@
     "dialogFallback": "диалог"
   },
   "webRemote": {
-    "title": "Веб-пульт",
-    "experimental": "ЭКСПЕРИМЕНТАЛЬНОЕ",
-    "experimentalDetail": "Веб-пульт ещё дорабатывается — возможны шероховатости с синхронизацией устройств на стороне телефона и переподключением.",
-    "intro": "Откройте библиотеку на телефоне или планшете в браузере в той же сети Wi-Fi. Отсканируйте QR-код камерой устройства или введите URL.",
-    "urlLabel": "URL",
-    "detecting": "(определение…)",
-    "feature1": "Просматривайте и воспроизводите видео на телефоне",
-    "feature2": "Подключённые устройства следуют за воспроизведением на телефоне",
-    "feature3": "Только один телефон или VR-гарнитура управляет устройствами одновременно",
-    "qrTitle": "Отсканируйте камерой телефона",
-    "backendNotRunning": "Бэкенд не запущен",
-    "qrUnavailable": "QR недоступен"
+    "header": {
+      "back": "Назад",
+      "locationAria": "Местоположение",
+      "refresh": "Обновить библиотеку"
+    },
+    "search": {
+      "library": "Поиск в библиотеке",
+      "collections": "Поиск коллекций",
+      "playlists": "Поиск плейлистов",
+      "categories": "Поиск категорий",
+      "sources": "Поиск источников",
+      "short": "Поиск",
+      "aria": "Поиск",
+      "clear": "Очистить поиск"
+    },
+    "filterChips": {
+      "aria": "Активные фильтры"
+    },
+    "actions": {
+      "sort": "Сортировка",
+      "viewToggleAria": "Переключить сетку или список",
+      "viewToggleTitle": "Сетка / список",
+      "folderAria": "Просмотр по папкам",
+      "folderTitle": "Просмотр по папкам",
+      "filters": "Фильтры"
+    },
+    "nav": {
+      "modesAria": "Режимы",
+      "library": "Библиотека",
+      "collections": "Коллекции",
+      "playlists": "Плейлисты",
+      "categories": "Категории",
+      "folders": "Папки"
+    },
+    "filterSheet": {
+      "title": "Фильтры",
+      "close": "Закрыть фильтры",
+      "matchHeader": "Статус соответствия",
+      "matchAria": "Статус соответствия",
+      "matchAll": "Все",
+      "matchMatched": "Сопоставлены",
+      "matchUnmatched": "Не сопоставлены",
+      "vrHeader": "VR",
+      "vrAria": "VR-фильтр",
+      "vrAll": "Все",
+      "vrOnly": "Только VR",
+      "vrFlat": "Не VR"
+    },
+    "sortSheet": {
+      "title": "Сортировать по",
+      "close": "Закрыть сортировку",
+      "aria": "Сортировка",
+      "nameAsc": "Имя А-Я",
+      "nameDesc": "Имя Я-А",
+      "dateAddedDesc": "Недавно добавленные",
+      "dateAddedAsc": "Сначала старые",
+      "durationAsc": "Длительность короткие-длинные",
+      "durationDesc": "Длительность длинные-короткие",
+      "avgSpeedAsc": "Ср. скорость медл.-быстр.",
+      "avgSpeedDesc": "Ср. скорость быстр.-медл.",
+      "maxSpeedAsc": "Макс. скорость медл.-быстр.",
+      "maxSpeedDesc": "Макс. скорость быстр.-медл."
+    },
+    "badge": {
+      "script": "Скрипт",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "Все источники",
+      "folders": "Папки",
+      "notFound": "(не найдено)",
+      "unnamed": "(без названия)"
+    },
+    "folderJump": {
+      "label": "В папке: <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "Загрузка библиотеки…",
+      "loadFailedTitle": "Не удалось загрузить библиотеку",
+      "noVideosTitle": "Пока нет видео",
+      "noVideosBody": "Добавьте папку-источник в FunSync на компьютере.",
+      "noMatchesTitle": "Ничего не найдено",
+      "noMatchesBody": "Попробуйте другой запрос или фильтр.",
+      "noMatchesBodyShort": "Попробуйте другой запрос.",
+      "noSourcesTitle": "Нет источников",
+      "noSourcesBody": "Добавьте папку-источник в FunSync на компьютере.",
+      "noSourcesFilteredBody": "Ни один источник не содержит видео, соответствующих текущему фильтру.",
+      "loadFoldersFailedTitle": "Не удалось загрузить папки",
+      "folderNotFoundTitle": "Папка не найдена",
+      "folderNotFoundBody": "Этой папки больше нет на компьютере.",
+      "emptyFolderTitle": "Пустая папка",
+      "emptyFolderBody": "Здесь нет ни подпапок, ни видео.",
+      "videoNotFoundTitle": "Видео не найдено",
+      "videoNotFoundBody": "Вернитесь и попробуйте снова.",
+      "loadGroupingFailedTitle": "{kind, select, collections {Не удалось загрузить коллекции} playlists {Не удалось загрузить плейлисты} categories {Не удалось загрузить категории} other {Не удалось загрузить элементы}}",
+      "noGroupingTitle": "{kind, select, collections {Пока нет коллекций} playlists {Пока нет плейлистов} categories {Пока нет категорий} other {Пока ничего нет}}",
+      "noGroupingBody": "{kind, select, collections {Создайте коллекции в FunSync на компьютере — они появятся здесь.} playlists {Создайте плейлисты в FunSync на компьютере — они появятся здесь.} categories {Создайте категории в FunSync на компьютере — они появятся здесь.} other {Создайте элементы в FunSync на компьютере.}}",
+      "groupingNotFoundTitle": "Не найдено",
+      "groupingNotFoundBody": "{kind, select, collections {Этой коллекции больше нет на компьютере.} playlists {Этого плейлиста больше нет на компьютере.} categories {Этой категории больше нет на компьютере.} other {Этого элемента больше нет на компьютере.}}",
+      "groupingEmptyTitle": "Пусто",
+      "groupingEmptyBody": "{kind, select, collections {В этой коллекции сейчас нет доступных видео.} playlists {В этом плейлисте сейчас нет доступных видео.} categories {В этой категории сейчас нет доступных видео.} other {В этом элементе сейчас нет доступных видео.}}"
+    },
+    "player": {
+      "switching": "Переключение скрипта…",
+      "connecting": "Подключение к устройствам…",
+      "preparing": "Подготовка устройств…",
+      "ready": "Устройства готовы",
+      "noScript": "Нет funscript — воспроизводится только видео",
+      "noScriptMatch": "На компьютере не найден подходящий скрипт",
+      "connected": "Подключено: {devices}",
+      "noDevices": "На компьютере нет подключённых устройств",
+      "connectedCount": "{count, plural, one {Подключённое устройство · #} few {Подключённых устройства · #} many {Подключённых устройств · #} other {Подключённых устройств · #}}",
+      "intensity": "Интенсивность funscript",
+      "avg": "Ср.",
+      "max": "Макс.",
+      "speedUnit": "ед/с",
+      "speedTooltip": "Ср. {avg} ед/с • Макс. {max} ед/с"
+    }
   },
   "hevc": {
     "warningTitle": "Воспроизведение HEVC может тормозить",
@@ -658,6 +774,9 @@
       "upNextResetCountdown": "Сбросить на значение по умолчанию (10с)",
       "upNextResetCountdownAria": "Сбросить обратный отсчёт на значение по умолчанию",
       "upNextHint": "В конце видео показывает следующий элемент из текущей библиотеки / плейлиста / категории с обратным отсчётом автовоспроизведения. Наведите курсор на карточку, чтобы приостановить отсчёт; нажмите × или Esc для закрытия.",
+      "autoplayOnAdvanceLabel": "Автоматически воспроизводить следующее видео",
+      "autoplayOnAdvanceResetTitle": "Сбросить на значение по умолчанию (выкл.)",
+      "autoplayOnAdvanceResetAria": "Сбросить автовоспроизведение на значение по умолчанию",
       "multiHeader": "Многоосевой",
       "fieldDefaultPlayback": "Воспроизведение по умолчанию",
       "preferSingle": "Одна ось (по умолчанию)",
@@ -801,126 +920,6 @@
     "saveDialogTitle": "Сохранить диагностический отчёт",
     "saveDialogDefaultName": "funsync-otchet.txt"
   },
-  "webRemote": {
-    "header": {
-      "back": "Назад",
-      "locationAria": "Местоположение",
-      "refresh": "Обновить библиотеку"
-    },
-    "search": {
-      "library": "Поиск в библиотеке",
-      "collections": "Поиск коллекций",
-      "playlists": "Поиск плейлистов",
-      "categories": "Поиск категорий",
-      "sources": "Поиск источников",
-      "short": "Поиск",
-      "aria": "Поиск",
-      "clear": "Очистить поиск"
-    },
-    "filterChips": {
-      "aria": "Активные фильтры"
-    },
-    "actions": {
-      "sort": "Сортировка",
-      "viewToggleAria": "Переключить сетку или список",
-      "viewToggleTitle": "Сетка / список",
-      "folderAria": "Просмотр по папкам",
-      "folderTitle": "Просмотр по папкам",
-      "filters": "Фильтры"
-    },
-    "nav": {
-      "modesAria": "Режимы",
-      "library": "Библиотека",
-      "collections": "Коллекции",
-      "playlists": "Плейлисты",
-      "categories": "Категории",
-      "folders": "Папки"
-    },
-    "filterSheet": {
-      "title": "Фильтры",
-      "close": "Закрыть фильтры",
-      "matchHeader": "Статус соответствия",
-      "matchAria": "Статус соответствия",
-      "matchAll": "Все",
-      "matchMatched": "Сопоставлены",
-      "matchUnmatched": "Не сопоставлены",
-      "vrHeader": "VR",
-      "vrAria": "VR-фильтр",
-      "vrAll": "Все",
-      "vrOnly": "Только VR",
-      "vrFlat": "Не VR"
-    },
-    "sortSheet": {
-      "title": "Сортировать по",
-      "close": "Закрыть сортировку",
-      "aria": "Сортировка",
-      "nameAsc": "Имя А-Я",
-      "nameDesc": "Имя Я-А",
-      "dateAddedDesc": "Недавно добавленные",
-      "dateAddedAsc": "Сначала старые",
-      "durationAsc": "Длительность короткие-длинные",
-      "durationDesc": "Длительность длинные-короткие",
-      "avgSpeedAsc": "Ср. скорость медл.-быстр.",
-      "avgSpeedDesc": "Ср. скорость быстр.-медл.",
-      "maxSpeedAsc": "Макс. скорость медл.-быстр.",
-      "maxSpeedDesc": "Макс. скорость быстр.-медл."
-    },
-    "badge": {
-      "script": "Скрипт",
-      "vr": "VR"
-    },
-    "breadcrumb": {
-      "allSources": "Все источники",
-      "folders": "Папки",
-      "notFound": "(не найдено)",
-      "unnamed": "(без названия)"
-    },
-    "folderJump": {
-      "label": "В папке: <strong>{path}</strong>"
-    },
-    "empty": {
-      "loadingLibrary": "Загрузка библиотеки…",
-      "loadFailedTitle": "Не удалось загрузить библиотеку",
-      "noVideosTitle": "Пока нет видео",
-      "noVideosBody": "Добавьте папку-источник в FunSync на компьютере.",
-      "noMatchesTitle": "Ничего не найдено",
-      "noMatchesBody": "Попробуйте другой запрос или фильтр.",
-      "noMatchesBodyShort": "Попробуйте другой запрос.",
-      "noSourcesTitle": "Нет источников",
-      "noSourcesBody": "Добавьте папку-источник в FunSync на компьютере.",
-      "noSourcesFilteredBody": "Ни один источник не содержит видео, соответствующих текущему фильтру.",
-      "loadFoldersFailedTitle": "Не удалось загрузить папки",
-      "folderNotFoundTitle": "Папка не найдена",
-      "folderNotFoundBody": "Этой папки больше нет на компьютере.",
-      "emptyFolderTitle": "Пустая папка",
-      "emptyFolderBody": "Здесь нет ни подпапок, ни видео.",
-      "videoNotFoundTitle": "Видео не найдено",
-      "videoNotFoundBody": "Вернитесь и попробуйте снова.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Не удалось загрузить коллекции} playlists {Не удалось загрузить плейлисты} categories {Не удалось загрузить категории} other {Не удалось загрузить элементы}}",
-      "noGroupingTitle": "{kind, select, collections {Пока нет коллекций} playlists {Пока нет плейлистов} categories {Пока нет категорий} other {Пока ничего нет}}",
-      "noGroupingBody": "{kind, select, collections {Создайте коллекции в FunSync на компьютере — они появятся здесь.} playlists {Создайте плейлисты в FunSync на компьютере — они появятся здесь.} categories {Создайте категории в FunSync на компьютере — они появятся здесь.} other {Создайте элементы в FunSync на компьютере.}}",
-      "groupingNotFoundTitle": "Не найдено",
-      "groupingNotFoundBody": "{kind, select, collections {Этой коллекции больше нет на компьютере.} playlists {Этого плейлиста больше нет на компьютере.} categories {Этой категории больше нет на компьютере.} other {Этого элемента больше нет на компьютере.}}",
-      "groupingEmptyTitle": "Пусто",
-      "groupingEmptyBody": "{kind, select, collections {В этой коллекции сейчас нет доступных видео.} playlists {В этом плейлисте сейчас нет доступных видео.} categories {В этой категории сейчас нет доступных видео.} other {В этом элементе сейчас нет доступных видео.}}"
-    },
-    "player": {
-      "switching": "Переключение скрипта…",
-      "connecting": "Подключение к устройствам…",
-      "preparing": "Подготовка устройств…",
-      "ready": "Устройства готовы",
-      "noScript": "Нет funscript — воспроизводится только видео",
-      "noScriptMatch": "На компьютере не найден подходящий скрипт",
-      "connected": "Подключено: {devices}",
-      "noDevices": "На компьютере нет подключённых устройств",
-      "connectedCount": "{count, plural, one {Подключённое устройство · #} few {Подключённых устройства · #} many {Подключённых устройств · #} other {Подключённых устройств · #}}",
-      "intensity": "Интенсивность funscript",
-      "avg": "Ср.",
-      "max": "Макс.",
-      "speedUnit": "ед/с",
-      "speedTooltip": "Ср. {avg} ед/с • Макс. {max} ед/с"
-    }
-  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "Закрыть EroScripts",
@@ -960,7 +959,8 @@
     "endDismissAria": "Закрыть",
     "endText": "В этом {source} больше нет видео.",
     "endCta": "Вернуться к {source}",
-    "endSourceFallback": "списку"
+    "endSourceFallback": "списку",
+    "sourcePlaylist": "плейлисту"
   },
   "session": {
     "state": {
@@ -1063,7 +1063,9 @@
       "zoomIn": "Увеличить (+)",
       "zoomOut": "Уменьшить (-)",
       "fitAll": "Подогнать всё",
-      "save": "Сохранить (Ctrl+S)"
+      "save": "Сохранить (Ctrl+S)",
+      "stacked": "Стек — показать все оси",
+      "popout": "Открыть редактор в отдельном окне"
     },
     "modify": {
       "title": "Изменить скрипт",
@@ -1075,7 +1077,8 @@
       "offsetTime": "Сдвиг времени…",
       "removePauses": "Удалить паузы…",
       "rangeExtend": "Растянуть/сжать диапазон…",
-      "generatePattern": "Сгенерировать узор…"
+      "generatePattern": "Сгенерировать узор…",
+      "exportHeatmap": "Экспорт PNG тепловой карты…"
     },
     "speedLabel": "Скорость:",
     "autosaveLabel": "Автосохранение",
@@ -1394,6 +1397,7 @@
     "screenshot": "Скриншот",
     "loopA": "Установить точку петли A",
     "loopB": "Установить точку петли B",
+    "toggleVideoLoop": "Переключить повтор видео",
     "clearLoop": "Очистить петлю / закрыть панели",
     "devicesPanel": "Переключить панель устройств",
     "deviceSimulator": "Переключить симулятор устройства",
@@ -1420,7 +1424,7 @@
     "editorMoveFrames": "Сдвинуть действие(я) на ±N кадров",
     "editorDelete": "Удалить выбранное",
     "editorInvert": "Инвертировать позиции",
-    "editorPlaceNumpad": "Поставить действие на 0 / 11 / 22 / … / 100",
+    "editorPlaceNumpad": "Поместить действие на 0 / 10 / 20 / … / 90",
     "editorInsertAtClick": "Вставить действие в точке клика",
     "editorMoveSelected": "Сдвинуть выбранные действия",
     "editorBookmark": "Добавить закладку на маркере",
@@ -1432,6 +1436,15 @@
     "editorPaste": "Вставить на маркер",
     "editorPasteOriginal": "Вставить с исходным временем",
     "editorSave": "Сохранить",
-    "editorZoom": "Увеличить / уменьшить"
+    "editorZoom": "Увеличить / уменьшить",
+    "editorAlternatingInsert": "Чередующаяся вставка (инверсия предыдущей)",
+    "editorRepeatLastStroke": "Повторить последний штрих из двух действий",
+    "editorBookmarkNav": "Перейти к след./пред. закладке",
+    "editorMultiBand": "Переключить многополосную форму (низ/сред/верх)",
+    "editorVAD": "Переключить дорожку голосовой активности",
+    "editorSpeedStep": "Уменьшить/увеличить скорость воспроизведения",
+    "editorSelectLeftRightOfCursor": "Выделить всё до/после курсора",
+    "editorEqualize": "Выровнять — равномерно распределить промежуточные действия",
+    "editorMoveToPlayhead": "Переместить единственное выделенное действие к курсору"
   }
 }

@@ -147,6 +147,19 @@
                     aria-haspopup="menu" aria-expanded="false">
               <span class="speed-chip__label" id="speed-chip-label">1&times;</span>
             </button>
+            <!-- Loop chip — mirrors the speed-chip pattern: hidden by
+                 default, visible only when loop is on. Click opens the
+                 same overflow ⋮ menu so the user has a single canonical
+                 control surface. Reads-as-status when present, action
+                 when clicked. -->
+            <button id="loop-chip" class="speed-chip" hidden
+                    data-i18n-aria-label="player.loopVideo.chipAria"
+                    data-i18n-title="player.loopVideo.chipTitle"
+                    aria-label="Loop video on"
+                    title="Loop video (Shift+L)"
+                    aria-pressed="true">
+              <i data-lucide="repeat-1"></i>
+            </button>
 
             <!-- Editor / Devices / Fullscreen carry persistent text
                  labels at ≥1024px so first-time users don't have to
@@ -205,6 +218,17 @@
                 <button id="btn-vr-format-menu" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.vrFormatMenu" aria-label="VR Format" hidden>
                   <i data-lucide="rectangle-goggles"></i>
                   <span data-i18n="player.vrFormatMenu">VR Format…</span>
+                </button>
+                <!-- Loop video — toggle that sets video.loop on the active
+                     <video>. Browser handles the seek-to-0, no `ended`
+                     fires, Up Next gets suppressed automatically (already
+                     handled by `_syncUpNextSuppression`). Session-scoped:
+                     resets to off whenever a new video loads, same shape
+                     as Playback Speed. Shift+L keyboard shortcut. -->
+                <button id="btn-loop-video" class="controls-overflow__item" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.loopVideo.aria" aria-label="Loop video">
+                  <i data-lucide="repeat-1"></i>
+                  <span data-i18n="player.loopVideo.menuLabel">Loop video</span>
+                  <span class="controls-overflow__item-value" id="loop-video-state" data-i18n="player.loopVideo.stateOff">Off</span>
                 </button>
                 <button id="btn-pip" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.pictureInPicture" aria-label="Picture in Picture">
                   <i data-lucide="picture-in-picture-2"></i>

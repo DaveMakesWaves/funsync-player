@@ -101,6 +101,14 @@
       "title": "Vitesse de lecture (< / >)",
       "menuLabel": "Vitesse de lecture"
     },
+    "loopVideo": {
+      "menuLabel": "Lire en boucle",
+      "aria": "Basculer la lecture en boucle",
+      "stateOn": "Activé",
+      "stateOff": "Désactivé",
+      "chipAria": "Lecture en boucle activée",
+      "chipTitle": "Lire en boucle (Maj+L)"
+    },
     "vrFormatMenu": "Format VR…",
     "preparingScript": "Préparation du script…",
     "skipToNextAction": "Passer à l'action suivante",
@@ -201,7 +209,7 @@
     "folderBrowse": "Parcourir les dossiers",
     "refresh": "Actualiser la bibliothèque",
     "refreshTitle": "Actualiser la bibliothèque — détecter les nouveaux fichiers ajoutés aux dossiers sources depuis le lancement de l'app",
-    "selectionCount": "{count, plural, one {# sélectionné} other {# sélectionnés}}",
+    "selectionCount": "{count} sélectionnés",
     "vrType": "Type VR",
     "loading": "Chargement…",
     "allSources": "Toutes les sources",
@@ -267,7 +275,6 @@
     "vrOptionReset": "Réinitialiser sur auto",
     "vrOptionResetSub": "Effacer le remplacement ; utiliser l'heuristique du nom de fichier",
     "videoCountSubtitle": "{count, plural, one {# vidéo} other {# vidéos}}",
-    "selectionCount": "{count} sélectionnés",
     "selectModeEnter": "Sélectionner",
     "selectModeCancel": "Annuler",
     "variantNamingTitle": "Nommer cette variante",
@@ -329,6 +336,8 @@
     "emptyCta": "Créer ta première liste",
     "videoCount": "{count, plural, one {# vidéo} other {# vidéos}}",
     "playAll": "Tout lire",
+    "loopOnTitle": "Lecture en boucle activée — reprendre à l'élément 1 après la dernière vidéo",
+    "loopOffTitle": "Lecture en boucle désactivée — arrêter après la dernière vidéo",
     "renamePlaylist": "Renommer la liste",
     "deletePlaylist": "Supprimer la liste",
     "confirmDelete": "Supprimer cette liste ?",
@@ -489,18 +498,124 @@
     "setVRClassificationTitle": "Définir la classification VR"
   },
   "webRemote": {
-    "title": "Télécommande web",
-    "experimental": "EXPÉRIMENTAL",
-    "experimentalDetail": "La télécommande web est encore en cours de peaufinage — la synchronisation des appareils côté téléphone et les cas limites de reconnexion peuvent apparaître.",
-    "intro": "Ouvre ta bibliothèque sur un téléphone ou une tablette dans un navigateur, sur le même Wi-Fi. Scanne le QR code avec l'appareil photo de l'appareil, ou saisis l'URL.",
-    "urlLabel": "URL",
-    "detecting": "(détection…)",
-    "feature1": "Parcourir et lire des vidéos sur le téléphone",
-    "feature2": "Les appareils connectés suivent la lecture du téléphone",
-    "feature3": "Un seul téléphone ou casque VR pilote les appareils à la fois",
-    "qrTitle": "Scanner avec l'appareil photo de ton téléphone",
-    "backendNotRunning": "Backend non en cours d'exécution",
-    "qrUnavailable": "QR indisponible"
+    "header": {
+      "back": "Retour",
+      "locationAria": "Emplacement",
+      "refresh": "Actualiser la bibliothèque"
+    },
+    "search": {
+      "library": "Rechercher dans la bibliothèque",
+      "collections": "Rechercher des collections",
+      "playlists": "Rechercher des listes",
+      "categories": "Rechercher des catégories",
+      "sources": "Rechercher des sources",
+      "short": "Rechercher",
+      "aria": "Rechercher",
+      "clear": "Effacer la recherche"
+    },
+    "filterChips": {
+      "aria": "Filtres actifs"
+    },
+    "actions": {
+      "sort": "Trier",
+      "viewToggleAria": "Basculer entre vue grille et vue liste",
+      "viewToggleTitle": "Grille / liste",
+      "folderAria": "Parcourir par dossier",
+      "folderTitle": "Parcourir par dossier",
+      "filters": "Filtres"
+    },
+    "nav": {
+      "modesAria": "Modes",
+      "library": "Bibliothèque",
+      "collections": "Collections",
+      "playlists": "Listes",
+      "categories": "Catégories",
+      "folders": "Dossiers"
+    },
+    "filterSheet": {
+      "title": "Filtres",
+      "close": "Fermer les filtres",
+      "matchHeader": "Statut de correspondance",
+      "matchAria": "Statut de correspondance",
+      "matchAll": "Tous",
+      "matchMatched": "Associés",
+      "matchUnmatched": "Sans association",
+      "vrHeader": "VR",
+      "vrAria": "Filtre VR",
+      "vrAll": "Tous",
+      "vrOnly": "VR uniquement",
+      "vrFlat": "Non VR"
+    },
+    "sortSheet": {
+      "title": "Trier par",
+      "close": "Fermer le tri",
+      "aria": "Trier",
+      "nameAsc": "Nom A-Z",
+      "nameDesc": "Nom Z-A",
+      "dateAddedDesc": "Récemment ajoutés",
+      "dateAddedAsc": "Les plus anciens d'abord",
+      "durationAsc": "Durée courte-longue",
+      "durationDesc": "Durée longue-courte",
+      "avgSpeedAsc": "Vitesse moy. lente-rapide",
+      "avgSpeedDesc": "Vitesse moy. rapide-lente",
+      "maxSpeedAsc": "Vitesse max. lente-rapide",
+      "maxSpeedDesc": "Vitesse max. rapide-lente"
+    },
+    "badge": {
+      "script": "Script",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "Toutes les sources",
+      "folders": "Dossiers",
+      "notFound": "(introuvable)",
+      "unnamed": "(sans nom)"
+    },
+    "folderJump": {
+      "label": "Dans le dossier : <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "Chargement de la bibliothèque…",
+      "loadFailedTitle": "Impossible de charger la bibliothèque",
+      "noVideosTitle": "Aucune vidéo pour l'instant",
+      "noVideosBody": "Ajoutez un dossier source dans FunSync sur votre ordinateur.",
+      "noMatchesTitle": "Aucune correspondance",
+      "noMatchesBody": "Essayez une autre recherche ou un autre filtre.",
+      "noMatchesBodyShort": "Essayez une autre recherche.",
+      "noSourcesTitle": "Aucune source",
+      "noSourcesBody": "Ajoutez un dossier source dans FunSync sur votre ordinateur.",
+      "noSourcesFilteredBody": "Aucune source ne contient de vidéos correspondant au filtre actuel.",
+      "loadFoldersFailedTitle": "Impossible de charger les dossiers",
+      "folderNotFoundTitle": "Dossier introuvable",
+      "folderNotFoundBody": "Ce dossier n'existe plus sur l'ordinateur.",
+      "emptyFolderTitle": "Dossier vide",
+      "emptyFolderBody": "Aucun sous-dossier ni vidéo ici.",
+      "videoNotFoundTitle": "Vidéo introuvable",
+      "videoNotFoundBody": "Revenez en arrière et réessayez.",
+      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} other {Impossible de charger les éléments}}",
+      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} other {Rien pour l'instant}}",
+      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
+      "groupingNotFoundTitle": "Introuvable",
+      "groupingNotFoundBody": "{kind, select, collections {Cette collection n'existe plus sur l'ordinateur.} playlists {Cette liste n'existe plus sur l'ordinateur.} categories {Cette catégorie n'existe plus sur l'ordinateur.} other {Cet élément n'existe plus sur l'ordinateur.}}",
+      "groupingEmptyTitle": "Vide",
+      "groupingEmptyBody": "{kind, select, collections {Aucune vidéo disponible dans cette collection.} playlists {Aucune vidéo disponible dans cette liste.} categories {Aucune vidéo disponible dans cette catégorie.} other {Aucune vidéo disponible dans cet élément.}}"
+    },
+    "player": {
+      "switching": "Changement de script…",
+      "connecting": "Connexion aux appareils…",
+      "preparing": "Préparation des appareils…",
+      "ready": "Appareils prêts",
+      "noScript": "Pas de funscript — lecture vidéo uniquement",
+      "noScriptMatch": "L'ordinateur n'a trouvé aucun script correspondant",
+      "connected": "Connecté : {devices}",
+      "noDevices": "Aucun appareil connecté sur l'ordinateur",
+      "connectedCount": "{count, plural, one {Appareil connecté · #} other {Appareils connectés · #}}",
+      "intensity": "Intensité du funscript",
+      "avg": "Moy",
+      "max": "Max",
+      "speedUnit": "u/s",
+      "speedTooltip": "Moy {avg} u/s • Max {max} u/s"
+    }
   },
   "hevc": {
     "warningTitle": "La lecture HEVC peut saccader",
@@ -659,6 +774,9 @@
       "upNextResetCountdown": "Réinitialiser par défaut (10s)",
       "upNextResetCountdownAria": "Réinitialiser le compte à rebours par défaut",
       "upNextHint": "Affiche l'élément suivant de la bibliothèque / liste / catégorie actuelle à la fin de la vidéo, avec un compte à rebours de lecture automatique. Survole la carte pour mettre le compte à rebours en pause ; clique sur × ou appuie sur Échap pour fermer.",
+      "autoplayOnAdvanceLabel": "Lire automatiquement la vidéo suivante",
+      "autoplayOnAdvanceResetTitle": "Réinitialiser par défaut (désactivé)",
+      "autoplayOnAdvanceResetAria": "Réinitialiser la lecture automatique par défaut",
       "multiHeader": "Multi-axe",
       "fieldDefaultPlayback": "Lecture par défaut",
       "preferSingle": "Axe unique (par défaut)",
@@ -802,126 +920,6 @@
     "saveDialogTitle": "Enregistrer le rapport de diagnostic",
     "saveDialogDefaultName": "rapport-funsync.txt"
   },
-  "webRemote": {
-    "header": {
-      "back": "Retour",
-      "locationAria": "Emplacement",
-      "refresh": "Actualiser la bibliothèque"
-    },
-    "search": {
-      "library": "Rechercher dans la bibliothèque",
-      "collections": "Rechercher des collections",
-      "playlists": "Rechercher des listes",
-      "categories": "Rechercher des catégories",
-      "sources": "Rechercher des sources",
-      "short": "Rechercher",
-      "aria": "Rechercher",
-      "clear": "Effacer la recherche"
-    },
-    "filterChips": {
-      "aria": "Filtres actifs"
-    },
-    "actions": {
-      "sort": "Trier",
-      "viewToggleAria": "Basculer entre vue grille et vue liste",
-      "viewToggleTitle": "Grille / liste",
-      "folderAria": "Parcourir par dossier",
-      "folderTitle": "Parcourir par dossier",
-      "filters": "Filtres"
-    },
-    "nav": {
-      "modesAria": "Modes",
-      "library": "Bibliothèque",
-      "collections": "Collections",
-      "playlists": "Listes",
-      "categories": "Catégories",
-      "folders": "Dossiers"
-    },
-    "filterSheet": {
-      "title": "Filtres",
-      "close": "Fermer les filtres",
-      "matchHeader": "Statut de correspondance",
-      "matchAria": "Statut de correspondance",
-      "matchAll": "Tous",
-      "matchMatched": "Associés",
-      "matchUnmatched": "Sans association",
-      "vrHeader": "VR",
-      "vrAria": "Filtre VR",
-      "vrAll": "Tous",
-      "vrOnly": "VR uniquement",
-      "vrFlat": "Non VR"
-    },
-    "sortSheet": {
-      "title": "Trier par",
-      "close": "Fermer le tri",
-      "aria": "Trier",
-      "nameAsc": "Nom A-Z",
-      "nameDesc": "Nom Z-A",
-      "dateAddedDesc": "Récemment ajoutés",
-      "dateAddedAsc": "Les plus anciens d'abord",
-      "durationAsc": "Durée courte-longue",
-      "durationDesc": "Durée longue-courte",
-      "avgSpeedAsc": "Vitesse moy. lente-rapide",
-      "avgSpeedDesc": "Vitesse moy. rapide-lente",
-      "maxSpeedAsc": "Vitesse max. lente-rapide",
-      "maxSpeedDesc": "Vitesse max. rapide-lente"
-    },
-    "badge": {
-      "script": "Script",
-      "vr": "VR"
-    },
-    "breadcrumb": {
-      "allSources": "Toutes les sources",
-      "folders": "Dossiers",
-      "notFound": "(introuvable)",
-      "unnamed": "(sans nom)"
-    },
-    "folderJump": {
-      "label": "Dans le dossier : <strong>{path}</strong>"
-    },
-    "empty": {
-      "loadingLibrary": "Chargement de la bibliothèque…",
-      "loadFailedTitle": "Impossible de charger la bibliothèque",
-      "noVideosTitle": "Aucune vidéo pour l'instant",
-      "noVideosBody": "Ajoutez un dossier source dans FunSync sur votre ordinateur.",
-      "noMatchesTitle": "Aucune correspondance",
-      "noMatchesBody": "Essayez une autre recherche ou un autre filtre.",
-      "noMatchesBodyShort": "Essayez une autre recherche.",
-      "noSourcesTitle": "Aucune source",
-      "noSourcesBody": "Ajoutez un dossier source dans FunSync sur votre ordinateur.",
-      "noSourcesFilteredBody": "Aucune source ne contient de vidéos correspondant au filtre actuel.",
-      "loadFoldersFailedTitle": "Impossible de charger les dossiers",
-      "folderNotFoundTitle": "Dossier introuvable",
-      "folderNotFoundBody": "Ce dossier n'existe plus sur l'ordinateur.",
-      "emptyFolderTitle": "Dossier vide",
-      "emptyFolderBody": "Aucun sous-dossier ni vidéo ici.",
-      "videoNotFoundTitle": "Vidéo introuvable",
-      "videoNotFoundBody": "Revenez en arrière et réessayez.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Impossible de charger les collections} playlists {Impossible de charger les listes} categories {Impossible de charger les catégories} other {Impossible de charger les éléments}}",
-      "noGroupingTitle": "{kind, select, collections {Aucune collection pour l'instant} playlists {Aucune liste pour l'instant} categories {Aucune catégorie pour l'instant} other {Rien pour l'instant}}",
-      "noGroupingBody": "{kind, select, collections {Créez des collections dans FunSync sur votre ordinateur — elles apparaîtront ici.} playlists {Créez des listes dans FunSync sur votre ordinateur — elles apparaîtront ici.} categories {Créez des catégories dans FunSync sur votre ordinateur — elles apparaîtront ici.} other {Créez des éléments dans FunSync sur votre ordinateur.}}",
-      "groupingNotFoundTitle": "Introuvable",
-      "groupingNotFoundBody": "{kind, select, collections {Cette collection n'existe plus sur l'ordinateur.} playlists {Cette liste n'existe plus sur l'ordinateur.} categories {Cette catégorie n'existe plus sur l'ordinateur.} other {Cet élément n'existe plus sur l'ordinateur.}}",
-      "groupingEmptyTitle": "Vide",
-      "groupingEmptyBody": "{kind, select, collections {Aucune vidéo disponible dans cette collection.} playlists {Aucune vidéo disponible dans cette liste.} categories {Aucune vidéo disponible dans cette catégorie.} other {Aucune vidéo disponible dans cet élément.}}"
-    },
-    "player": {
-      "switching": "Changement de script…",
-      "connecting": "Connexion aux appareils…",
-      "preparing": "Préparation des appareils…",
-      "ready": "Appareils prêts",
-      "noScript": "Pas de funscript — lecture vidéo uniquement",
-      "noScriptMatch": "L'ordinateur n'a trouvé aucun script correspondant",
-      "connected": "Connecté : {devices}",
-      "noDevices": "Aucun appareil connecté sur l'ordinateur",
-      "connectedCount": "{count, plural, one {Appareil connecté · #} other {Appareils connectés · #}}",
-      "intensity": "Intensité du funscript",
-      "avg": "Moy",
-      "max": "Max",
-      "speedUnit": "u/s",
-      "speedTooltip": "Moy {avg} u/s • Max {max} u/s"
-    }
-  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "Fermer EroScripts",
@@ -961,7 +959,8 @@
     "endDismissAria": "Fermer",
     "endText": "Plus de vidéos dans cette {source}.",
     "endCta": "Retour à {source}",
-    "endSourceFallback": "liste"
+    "endSourceFallback": "liste",
+    "sourcePlaylist": "playlist"
   },
   "session": {
     "state": {
@@ -1064,7 +1063,9 @@
       "zoomIn": "Zoom avant (+)",
       "zoomOut": "Zoom arrière (-)",
       "fitAll": "Tout adapter",
-      "save": "Enregistrer (Ctrl+S)"
+      "save": "Enregistrer (Ctrl+S)",
+      "stacked": "Vue empilée — afficher tous les axes",
+      "popout": "Détacher l'éditeur dans une fenêtre séparée"
     },
     "modify": {
       "title": "Modifier le script",
@@ -1076,7 +1077,8 @@
       "offsetTime": "Décaler le temps…",
       "removePauses": "Supprimer les pauses…",
       "rangeExtend": "Étendre/comprimer la plage…",
-      "generatePattern": "Générer un motif…"
+      "generatePattern": "Générer un motif…",
+      "exportHeatmap": "Exporter le PNG du heatmap…"
     },
     "speedLabel": "Vitesse :",
     "autosaveLabel": "Sauvegarde auto",
@@ -1395,6 +1397,7 @@
     "screenshot": "Capture d'écran",
     "loopA": "Définir le point A de la boucle",
     "loopB": "Définir le point B de la boucle",
+    "toggleVideoLoop": "Basculer la lecture en boucle",
     "clearLoop": "Effacer la boucle / fermer les panneaux",
     "devicesPanel": "Afficher/masquer le panneau Appareils",
     "deviceSimulator": "Afficher/masquer le simulateur d'appareil",
@@ -1421,7 +1424,7 @@
     "editorMoveFrames": "Décaler la/les action(s) de ±N images",
     "editorDelete": "Supprimer la sélection",
     "editorInvert": "Inverser les positions",
-    "editorPlaceNumpad": "Placer une action à 0 / 11 / 22 / … / 100",
+    "editorPlaceNumpad": "Placer une action à 0 / 10 / 20 / … / 90",
     "editorInsertAtClick": "Insérer une action à la position du clic",
     "editorMoveSelected": "Déplacer les actions sélectionnées",
     "editorBookmark": "Ajouter un signet à la tête de lecture",
@@ -1433,6 +1436,15 @@
     "editorPaste": "Coller à la tête de lecture",
     "editorPasteOriginal": "Coller aux temps d'origine",
     "editorSave": "Enregistrer",
-    "editorZoom": "Zoom avant / arrière"
+    "editorZoom": "Zoom avant / arrière",
+    "editorAlternatingInsert": "Insertion alternée (inverse la précédente)",
+    "editorRepeatLastStroke": "Répéter le dernier mouvement à deux actions",
+    "editorBookmarkNav": "Aller au marqueur suivant/précédent",
+    "editorMultiBand": "Basculer la forme d'onde multi-bande (bas/med/haut)",
+    "editorVAD": "Basculer la piste d'activité vocale",
+    "editorSpeedStep": "Diminuer/augmenter la vitesse de lecture",
+    "editorSelectLeftRightOfCursor": "Sélectionner tout avant/après la tête de lecture",
+    "editorEqualize": "Égaliser — redistribuer les actions intermédiaires dans le temps",
+    "editorMoveToPlayhead": "Déplacer l'action unique sélectionnée à la tête de lecture"
   }
 }

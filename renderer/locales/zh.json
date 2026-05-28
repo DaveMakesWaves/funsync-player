@@ -101,6 +101,14 @@
       "title": "播放速度 (< / >)",
       "menuLabel": "播放速度"
     },
+    "loopVideo": {
+      "menuLabel": "循环播放视频",
+      "aria": "切换视频循环",
+      "stateOn": "开",
+      "stateOff": "关",
+      "chipAria": "视频循环已开",
+      "chipTitle": "循环播放视频 (Shift+L)"
+    },
     "vrFormatMenu": "VR 格式…",
     "preparingScript": "正在准备脚本…",
     "skipToNextAction": "跳到下一个动作",
@@ -328,6 +336,8 @@
     "emptyCta": "创建第一个播放列表",
     "videoCount": "{count} 个视频",
     "playAll": "全部播放",
+    "loopOnTitle": "循环开 — 最后一个视频后从第 1 项重新开始",
+    "loopOffTitle": "循环关 — 最后一个视频后停止",
     "renamePlaylist": "重命名播放列表",
     "deletePlaylist": "删除播放列表",
     "confirmDelete": "确定删除此播放列表？",
@@ -488,18 +498,124 @@
     "dialogFallback": "对话框"
   },
   "webRemote": {
-    "title": "网页遥控",
-    "experimental": "实验性",
-    "experimentalDetail": "网页遥控仍在调优中 — 手机端设备同步与重连边缘情况可能出现。",
-    "intro": "在同一 Wi-Fi 的手机或平板浏览器中打开您的媒体库。使用设备摄像头扫描二维码,或输入该 URL。",
-    "urlLabel": "URL",
-    "detecting": "(检测中…)",
-    "feature1": "在手机上浏览并播放视频",
-    "feature2": "已连接的设备会跟随手机的播放",
-    "feature3": "同一时间只有一部手机或 VR 头显能驱动设备",
-    "qrTitle": "用手机摄像头扫描",
-    "backendNotRunning": "后端未运行",
-    "qrUnavailable": "二维码不可用"
+    "header": {
+      "back": "返回",
+      "locationAria": "位置",
+      "refresh": "刷新媒体库"
+    },
+    "search": {
+      "library": "搜索媒体库",
+      "collections": "搜索合集",
+      "playlists": "搜索播放列表",
+      "categories": "搜索分类",
+      "sources": "搜索来源",
+      "short": "搜索",
+      "aria": "搜索",
+      "clear": "清除搜索"
+    },
+    "filterChips": {
+      "aria": "活动筛选条件"
+    },
+    "actions": {
+      "sort": "排序",
+      "viewToggleAria": "切换网格或列表视图",
+      "viewToggleTitle": "切换网格 / 列表",
+      "folderAria": "按文件夹浏览",
+      "folderTitle": "按文件夹浏览",
+      "filters": "筛选"
+    },
+    "nav": {
+      "modesAria": "模式",
+      "library": "媒体库",
+      "collections": "合集",
+      "playlists": "播放列表",
+      "categories": "分类",
+      "folders": "文件夹"
+    },
+    "filterSheet": {
+      "title": "筛选",
+      "close": "关闭筛选",
+      "matchHeader": "匹配状态",
+      "matchAria": "匹配状态",
+      "matchAll": "全部",
+      "matchMatched": "已匹配",
+      "matchUnmatched": "未匹配",
+      "vrHeader": "VR",
+      "vrAria": "VR 筛选",
+      "vrAll": "全部",
+      "vrOnly": "仅 VR",
+      "vrFlat": "非 VR"
+    },
+    "sortSheet": {
+      "title": "排序方式",
+      "close": "关闭排序",
+      "aria": "排序",
+      "nameAsc": "名称 A-Z",
+      "nameDesc": "名称 Z-A",
+      "dateAddedDesc": "最近添加",
+      "dateAddedAsc": "最早优先",
+      "durationAsc": "时长 短-长",
+      "durationDesc": "时长 长-短",
+      "avgSpeedAsc": "平均速度 慢-快",
+      "avgSpeedDesc": "平均速度 快-慢",
+      "maxSpeedAsc": "最大速度 慢-快",
+      "maxSpeedDesc": "最大速度 快-慢"
+    },
+    "badge": {
+      "script": "脚本",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "所有来源",
+      "folders": "文件夹",
+      "notFound": "（未找到）",
+      "unnamed": "（未命名）"
+    },
+    "folderJump": {
+      "label": "位于文件夹：<strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "正在加载媒体库…",
+      "loadFailedTitle": "无法加载媒体库",
+      "noVideosTitle": "尚无视频",
+      "noVideosBody": "在桌面端的 FunSync 中添加一个源文件夹。",
+      "noMatchesTitle": "没有匹配项",
+      "noMatchesBody": "请尝试其他搜索词或筛选条件。",
+      "noMatchesBodyShort": "请尝试其他搜索词。",
+      "noSourcesTitle": "没有来源",
+      "noSourcesBody": "在桌面端的 FunSync 中添加一个源文件夹。",
+      "noSourcesFilteredBody": "没有来源包含符合当前筛选条件的视频。",
+      "loadFoldersFailedTitle": "无法加载文件夹",
+      "folderNotFoundTitle": "未找到文件夹",
+      "folderNotFoundBody": "桌面端已不存在此文件夹。",
+      "emptyFolderTitle": "空文件夹",
+      "emptyFolderBody": "此处没有子文件夹或视频。",
+      "videoNotFoundTitle": "未找到视频",
+      "videoNotFoundBody": "请返回并重试。",
+      "loadGroupingFailedTitle": "{kind, select, collections {无法加载合集} playlists {无法加载播放列表} categories {无法加载分类} other {无法加载项目}}",
+      "noGroupingTitle": "{kind, select, collections {尚无合集} playlists {尚无播放列表} categories {尚无分类} other {尚无项目}}",
+      "noGroupingBody": "{kind, select, collections {在桌面端的 FunSync 中创建合集——它们将显示在此处。} playlists {在桌面端的 FunSync 中创建播放列表——它们将显示在此处。} categories {在桌面端的 FunSync 中创建分类——它们将显示在此处。} other {在桌面端的 FunSync 中创建项目。}}",
+      "groupingNotFoundTitle": "未找到",
+      "groupingNotFoundBody": "{kind, select, collections {此合集在桌面端已不存在。} playlists {此播放列表在桌面端已不存在。} categories {此分类在桌面端已不存在。} other {此项目在桌面端已不存在。}}",
+      "groupingEmptyTitle": "空",
+      "groupingEmptyBody": "{kind, select, collections {此合集中目前没有可用的视频。} playlists {此播放列表中目前没有可用的视频。} categories {此分类中目前没有可用的视频。} other {此项目中目前没有可用的视频。}}"
+    },
+    "player": {
+      "switching": "正在切换脚本…",
+      "connecting": "正在连接设备…",
+      "preparing": "正在准备设备…",
+      "ready": "设备已就绪",
+      "noScript": "无 funscript——仅播放视频",
+      "noScriptMatch": "桌面端找不到匹配的脚本",
+      "connected": "已连接：{devices}",
+      "noDevices": "桌面端没有连接的设备",
+      "connectedCount": "{count, plural, other {已连接设备 · #}}",
+      "intensity": "Funscript 强度",
+      "avg": "平均",
+      "max": "最大",
+      "speedUnit": "单位/秒",
+      "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒"
+    }
   },
   "hevc": {
     "warningTitle": "HEVC 播放可能卡顿",
@@ -658,6 +774,9 @@
       "upNextResetCountdown": "重置为默认 (10 秒)",
       "upNextResetCountdownAria": "将倒计时重置为默认",
       "upNextHint": "在视频结束时显示当前媒体库 / 播放列表 / 分类中的下一项,并自动倒计时播放。悬停卡片可暂停倒计时;点击 × 或按 Esc 关闭。",
+      "autoplayOnAdvanceLabel": "自动播放下一个视频",
+      "autoplayOnAdvanceResetTitle": "重置为默认 (关闭)",
+      "autoplayOnAdvanceResetAria": "将自动播放重置为默认",
       "multiHeader": "多轴",
       "fieldDefaultPlayback": "默认播放",
       "preferSingle": "单轴 (默认)",
@@ -801,126 +920,6 @@
     "saveDialogTitle": "保存诊断报告",
     "saveDialogDefaultName": "funsync-report.txt"
   },
-  "webRemote": {
-    "header": {
-      "back": "返回",
-      "locationAria": "位置",
-      "refresh": "刷新媒体库"
-    },
-    "search": {
-      "library": "搜索媒体库",
-      "collections": "搜索合集",
-      "playlists": "搜索播放列表",
-      "categories": "搜索分类",
-      "sources": "搜索来源",
-      "short": "搜索",
-      "aria": "搜索",
-      "clear": "清除搜索"
-    },
-    "filterChips": {
-      "aria": "活动筛选条件"
-    },
-    "actions": {
-      "sort": "排序",
-      "viewToggleAria": "切换网格或列表视图",
-      "viewToggleTitle": "切换网格 / 列表",
-      "folderAria": "按文件夹浏览",
-      "folderTitle": "按文件夹浏览",
-      "filters": "筛选"
-    },
-    "nav": {
-      "modesAria": "模式",
-      "library": "媒体库",
-      "collections": "合集",
-      "playlists": "播放列表",
-      "categories": "分类",
-      "folders": "文件夹"
-    },
-    "filterSheet": {
-      "title": "筛选",
-      "close": "关闭筛选",
-      "matchHeader": "匹配状态",
-      "matchAria": "匹配状态",
-      "matchAll": "全部",
-      "matchMatched": "已匹配",
-      "matchUnmatched": "未匹配",
-      "vrHeader": "VR",
-      "vrAria": "VR 筛选",
-      "vrAll": "全部",
-      "vrOnly": "仅 VR",
-      "vrFlat": "非 VR"
-    },
-    "sortSheet": {
-      "title": "排序方式",
-      "close": "关闭排序",
-      "aria": "排序",
-      "nameAsc": "名称 A-Z",
-      "nameDesc": "名称 Z-A",
-      "dateAddedDesc": "最近添加",
-      "dateAddedAsc": "最早优先",
-      "durationAsc": "时长 短-长",
-      "durationDesc": "时长 长-短",
-      "avgSpeedAsc": "平均速度 慢-快",
-      "avgSpeedDesc": "平均速度 快-慢",
-      "maxSpeedAsc": "最大速度 慢-快",
-      "maxSpeedDesc": "最大速度 快-慢"
-    },
-    "badge": {
-      "script": "脚本",
-      "vr": "VR"
-    },
-    "breadcrumb": {
-      "allSources": "所有来源",
-      "folders": "文件夹",
-      "notFound": "（未找到）",
-      "unnamed": "（未命名）"
-    },
-    "folderJump": {
-      "label": "位于文件夹：<strong>{path}</strong>"
-    },
-    "empty": {
-      "loadingLibrary": "正在加载媒体库…",
-      "loadFailedTitle": "无法加载媒体库",
-      "noVideosTitle": "尚无视频",
-      "noVideosBody": "在桌面端的 FunSync 中添加一个源文件夹。",
-      "noMatchesTitle": "没有匹配项",
-      "noMatchesBody": "请尝试其他搜索词或筛选条件。",
-      "noMatchesBodyShort": "请尝试其他搜索词。",
-      "noSourcesTitle": "没有来源",
-      "noSourcesBody": "在桌面端的 FunSync 中添加一个源文件夹。",
-      "noSourcesFilteredBody": "没有来源包含符合当前筛选条件的视频。",
-      "loadFoldersFailedTitle": "无法加载文件夹",
-      "folderNotFoundTitle": "未找到文件夹",
-      "folderNotFoundBody": "桌面端已不存在此文件夹。",
-      "emptyFolderTitle": "空文件夹",
-      "emptyFolderBody": "此处没有子文件夹或视频。",
-      "videoNotFoundTitle": "未找到视频",
-      "videoNotFoundBody": "请返回并重试。",
-      "loadGroupingFailedTitle": "{kind, select, collections {无法加载合集} playlists {无法加载播放列表} categories {无法加载分类} other {无法加载项目}}",
-      "noGroupingTitle": "{kind, select, collections {尚无合集} playlists {尚无播放列表} categories {尚无分类} other {尚无项目}}",
-      "noGroupingBody": "{kind, select, collections {在桌面端的 FunSync 中创建合集——它们将显示在此处。} playlists {在桌面端的 FunSync 中创建播放列表——它们将显示在此处。} categories {在桌面端的 FunSync 中创建分类——它们将显示在此处。} other {在桌面端的 FunSync 中创建项目。}}",
-      "groupingNotFoundTitle": "未找到",
-      "groupingNotFoundBody": "{kind, select, collections {此合集在桌面端已不存在。} playlists {此播放列表在桌面端已不存在。} categories {此分类在桌面端已不存在。} other {此项目在桌面端已不存在。}}",
-      "groupingEmptyTitle": "空",
-      "groupingEmptyBody": "{kind, select, collections {此合集中目前没有可用的视频。} playlists {此播放列表中目前没有可用的视频。} categories {此分类中目前没有可用的视频。} other {此项目中目前没有可用的视频。}}"
-    },
-    "player": {
-      "switching": "正在切换脚本…",
-      "connecting": "正在连接设备…",
-      "preparing": "正在准备设备…",
-      "ready": "设备已就绪",
-      "noScript": "无 funscript——仅播放视频",
-      "noScriptMatch": "桌面端找不到匹配的脚本",
-      "connected": "已连接：{devices}",
-      "noDevices": "桌面端没有连接的设备",
-      "connectedCount": "{count, plural, other {已连接设备 · #}}",
-      "intensity": "Funscript 强度",
-      "avg": "平均",
-      "max": "最大",
-      "speedUnit": "单位/秒",
-      "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒"
-    }
-  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "关闭 EroScripts",
@@ -960,7 +959,8 @@
     "endDismissAria": "关闭",
     "endText": "此{source}中没有更多视频。",
     "endCta": "返回{source}",
-    "endSourceFallback": "列表"
+    "endSourceFallback": "列表",
+    "sourcePlaylist": "播放列表"
   },
   "session": {
     "state": {
@@ -1063,7 +1063,9 @@
       "zoomIn": "放大 (+)",
       "zoomOut": "缩小 (-)",
       "fitAll": "全部适应",
-      "save": "保存 (Ctrl+S)"
+      "save": "保存 (Ctrl+S)",
+      "stacked": "堆叠视图 — 显示所有轴",
+      "popout": "将编辑器弹出到单独的窗口"
     },
     "modify": {
       "title": "修改脚本",
@@ -1075,7 +1077,8 @@
       "offsetTime": "时间偏移…",
       "removePauses": "移除停顿…",
       "rangeExtend": "时间拉伸/压缩…",
-      "generatePattern": "生成模式…"
+      "generatePattern": "生成模式…",
+      "exportHeatmap": "导出热力图 PNG…"
     },
     "speedLabel": "速度:",
     "autosaveLabel": "自动保存",
@@ -1394,6 +1397,7 @@
     "screenshot": "截图",
     "loopA": "设置循环点 A",
     "loopB": "设置循环点 B",
+    "toggleVideoLoop": "切换视频循环",
     "clearLoop": "清除循环 / 关闭面板",
     "devicesPanel": "切换设备面板",
     "deviceSimulator": "切换设备模拟器",
@@ -1420,7 +1424,7 @@
     "editorMoveFrames": "时间上移动动作 ±N 帧",
     "editorDelete": "删除所选",
     "editorInvert": "反转位置",
-    "editorPlaceNumpad": "在 0 / 11 / 22 / … / 100 处放置动作",
+    "editorPlaceNumpad": "在 0 / 10 / 20 / … / 90 处插入动作",
     "editorInsertAtClick": "在点击位置插入动作",
     "editorMoveSelected": "移动所选动作",
     "editorBookmark": "在播放头处添加书签",
@@ -1432,6 +1436,15 @@
     "editorPaste": "在播放头处粘贴",
     "editorPasteOriginal": "在原始时间粘贴",
     "editorSave": "保存",
-    "editorZoom": "放大 / 缩小"
+    "editorZoom": "放大 / 缩小",
+    "editorAlternatingInsert": "交替插入（翻转上一个位置）",
+    "editorRepeatLastStroke": "重复最后两个动作的笔画",
+    "editorBookmarkNav": "跳转到下一个/上一个书签",
+    "editorMultiBand": "切换多频段波形（低/中/高）",
+    "editorVAD": "切换语音活动轨道",
+    "editorSpeedStep": "降低/提高播放速度",
+    "editorSelectLeftRightOfCursor": "选择播放头之前/之后的全部",
+    "editorEqualize": "均衡 — 在时间上均匀重新分布中间动作",
+    "editorMoveToPlayhead": "将单选动作移动到播放头"
   }
 }

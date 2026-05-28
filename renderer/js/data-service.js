@@ -152,6 +152,13 @@ class DataService {
     eventBus.emit('playlist:changed', { action: 'rename', id, name });
   }
 
+  setPlaylistLoop(id, loop) {
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) playlist.loop = !!loop;
+    window.funsync.setPlaylistLoop(id, !!loop);
+    eventBus.emit('playlist:changed', { action: 'setLoop', id, loop: !!loop });
+  }
+
   addVideoToPlaylist(id, videoPath) {
     const playlist = this._cache.playlists.find((p) => p.id === id);
     if (playlist && !playlist.videoPaths.includes(videoPath)) {

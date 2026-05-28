@@ -40,6 +40,14 @@ eroscripts-debug.log
 .claude/
 notes/
 
+# Release-stats snapshots (scripts/release-stats.sh output).
+# Default dir is notes/release-stats/ which is already covered by
+# notes/ above; these patterns cover the case where someone runs the
+# script with a custom outdir.
+release-stats-*.json
+release-stats-latest.json
+release-stats/
+
 # OS files
 Thumbs.db
 Desktop.ini

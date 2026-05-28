@@ -101,6 +101,14 @@
       "title": "재생 속도 (< / >)",
       "menuLabel": "재생 속도"
     },
+    "loopVideo": {
+      "menuLabel": "동영상 반복",
+      "aria": "동영상 반복 전환",
+      "stateOn": "켜짐",
+      "stateOff": "꺼짐",
+      "chipAria": "동영상 반복 켜짐",
+      "chipTitle": "동영상 반복 (Shift+L)"
+    },
     "vrFormatMenu": "VR 형식…",
     "preparingScript": "스크립트 준비 중…",
     "skipToNextAction": "다음 액션으로 건너뛰기",
@@ -201,7 +209,7 @@
     "folderBrowse": "폴더 탐색",
     "refresh": "라이브러리 새로 고침",
     "refreshTitle": "라이브러리 새로 고침 — 앱 실행 이후 소스 폴더에 추가된 새 파일 가져오기",
-    "selectionCount": "{count, plural, other {#개 선택됨}}",
+    "selectionCount": "{count}개 선택됨",
     "vrType": "VR 유형",
     "loading": "로드 중…",
     "allSources": "모든 소스",
@@ -267,7 +275,6 @@
     "vrOptionReset": "자동으로 재설정",
     "vrOptionResetSub": "재정의 지우기; 파일명 휴리스틱 사용",
     "videoCountSubtitle": "{count, plural, other {동영상 #개}}",
-    "selectionCount": "{count}개 선택됨",
     "selectModeEnter": "선택",
     "selectModeCancel": "취소",
     "variantNamingTitle": "이 변형 이름 지정",
@@ -329,6 +336,8 @@
     "emptyCta": "첫 재생 목록 만들기",
     "videoCount": "{count, plural, other {동영상 #개}}",
     "playAll": "모두 재생",
+    "loopOnTitle": "반복 켜짐 — 마지막 동영상 이후 1번 항목부터 다시 시작",
+    "loopOffTitle": "반복 꺼짐 — 마지막 동영상 이후 중지",
     "renamePlaylist": "재생 목록 이름 변경",
     "deletePlaylist": "재생 목록 삭제",
     "confirmDelete": "이 재생 목록을 삭제하시겠습니까?",
@@ -489,18 +498,124 @@
     "dialogFallback": "대화 상자"
   },
   "webRemote": {
-    "title": "웹 원격",
-    "experimental": "실험적",
-    "experimentalDetail": "웹 원격은 아직 다듬는 중입니다 — 휴대폰 측 장치 동기화 및 재연결 엣지 케이스가 나타날 수 있습니다.",
-    "intro": "같은 Wi-Fi의 휴대폰 또는 태블릿 브라우저에서 라이브러리를 엽니다. 장치의 카메라로 QR 코드를 스캔하거나 URL을 입력하세요.",
-    "urlLabel": "URL",
-    "detecting": "(감지 중…)",
-    "feature1": "휴대폰에서 동영상 탐색 및 재생",
-    "feature2": "연결된 장치가 휴대폰의 재생을 따라갑니다",
-    "feature3": "한 번에 하나의 휴대폰 또는 VR 헤드셋만 장치를 구동합니다",
-    "qrTitle": "휴대폰 카메라로 스캔",
-    "backendNotRunning": "백엔드가 실행되지 않음",
-    "qrUnavailable": "QR 사용 불가"
+    "header": {
+      "back": "뒤로",
+      "locationAria": "위치",
+      "refresh": "라이브러리 새로 고침"
+    },
+    "search": {
+      "library": "라이브러리 검색",
+      "collections": "컬렉션 검색",
+      "playlists": "재생 목록 검색",
+      "categories": "카테고리 검색",
+      "sources": "소스 검색",
+      "short": "검색",
+      "aria": "검색",
+      "clear": "검색 지우기"
+    },
+    "filterChips": {
+      "aria": "활성 필터"
+    },
+    "actions": {
+      "sort": "정렬",
+      "viewToggleAria": "그리드 또는 목록 보기 전환",
+      "viewToggleTitle": "그리드 / 목록",
+      "folderAria": "폴더로 탐색",
+      "folderTitle": "폴더로 탐색",
+      "filters": "필터"
+    },
+    "nav": {
+      "modesAria": "모드",
+      "library": "라이브러리",
+      "collections": "컬렉션",
+      "playlists": "재생 목록",
+      "categories": "카테고리",
+      "folders": "폴더"
+    },
+    "filterSheet": {
+      "title": "필터",
+      "close": "필터 닫기",
+      "matchHeader": "매칭 상태",
+      "matchAria": "매칭 상태",
+      "matchAll": "전체",
+      "matchMatched": "매칭됨",
+      "matchUnmatched": "매칭 안 됨",
+      "vrHeader": "VR",
+      "vrAria": "VR 필터",
+      "vrAll": "전체",
+      "vrOnly": "VR만",
+      "vrFlat": "VR 아님"
+    },
+    "sortSheet": {
+      "title": "정렬 기준",
+      "close": "정렬 닫기",
+      "aria": "정렬",
+      "nameAsc": "이름 A-Z",
+      "nameDesc": "이름 Z-A",
+      "dateAddedDesc": "최근 추가",
+      "dateAddedAsc": "오래된 순",
+      "durationAsc": "길이 짧은-긴",
+      "durationDesc": "길이 긴-짧은",
+      "avgSpeedAsc": "평균 속도 느린-빠른",
+      "avgSpeedDesc": "평균 속도 빠른-느린",
+      "maxSpeedAsc": "최대 속도 느린-빠른",
+      "maxSpeedDesc": "최대 속도 빠른-느린"
+    },
+    "badge": {
+      "script": "스크립트",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "모든 소스",
+      "folders": "폴더",
+      "notFound": "(찾을 수 없음)",
+      "unnamed": "(이름 없음)"
+    },
+    "folderJump": {
+      "label": "폴더: <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "라이브러리 로드 중…",
+      "loadFailedTitle": "라이브러리를 로드할 수 없습니다",
+      "noVideosTitle": "아직 동영상이 없습니다",
+      "noVideosBody": "데스크톱의 FunSync에서 소스 폴더를 추가하세요.",
+      "noMatchesTitle": "일치 항목 없음",
+      "noMatchesBody": "다른 검색어나 필터를 시도해 보세요.",
+      "noMatchesBodyShort": "다른 검색어를 시도해 보세요.",
+      "noSourcesTitle": "소스 없음",
+      "noSourcesBody": "데스크톱의 FunSync에서 소스 폴더를 추가하세요.",
+      "noSourcesFilteredBody": "현재 필터와 일치하는 동영상이 있는 소스가 없습니다.",
+      "loadFoldersFailedTitle": "폴더를 로드할 수 없습니다",
+      "folderNotFoundTitle": "폴더를 찾을 수 없습니다",
+      "folderNotFoundBody": "이 폴더는 더 이상 데스크톱에 존재하지 않습니다.",
+      "emptyFolderTitle": "빈 폴더",
+      "emptyFolderBody": "여기에는 하위 폴더나 동영상이 없습니다.",
+      "videoNotFoundTitle": "동영상을 찾을 수 없습니다",
+      "videoNotFoundBody": "돌아가서 다시 시도하세요.",
+      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} other {항목을 로드할 수 없습니다}}",
+      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} other {아직 항목이 없습니다}}",
+      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
+      "groupingNotFoundTitle": "찾을 수 없음",
+      "groupingNotFoundBody": "{kind, select, collections {이 컬렉션은 더 이상 데스크톱에 존재하지 않습니다.} playlists {이 재생 목록은 더 이상 데스크톱에 존재하지 않습니다.} categories {이 카테고리는 더 이상 데스크톱에 존재하지 않습니다.} other {이 항목은 더 이상 데스크톱에 존재하지 않습니다.}}",
+      "groupingEmptyTitle": "비어 있음",
+      "groupingEmptyBody": "{kind, select, collections {이 컬렉션에는 현재 사용 가능한 동영상이 없습니다.} playlists {이 재생 목록에는 현재 사용 가능한 동영상이 없습니다.} categories {이 카테고리에는 현재 사용 가능한 동영상이 없습니다.} other {이 항목에는 현재 사용 가능한 동영상이 없습니다.}}"
+    },
+    "player": {
+      "switching": "스크립트 전환 중…",
+      "connecting": "장치에 연결 중…",
+      "preparing": "장치 준비 중…",
+      "ready": "장치 준비 완료",
+      "noScript": "funscript 없음 — 동영상만 재생",
+      "noScriptMatch": "데스크톱에서 일치하는 스크립트를 찾을 수 없습니다",
+      "connected": "연결됨: {devices}",
+      "noDevices": "데스크톱에 연결된 장치 없음",
+      "connectedCount": "{count, plural, other {연결된 장치 · #}}",
+      "intensity": "Funscript 강도",
+      "avg": "평균",
+      "max": "최대",
+      "speedUnit": "유닛/초",
+      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초"
+    }
   },
   "hevc": {
     "warningTitle": "HEVC 재생이 끊길 수 있습니다",
@@ -659,6 +774,9 @@
       "upNextResetCountdown": "기본값으로 재설정 (10초)",
       "upNextResetCountdownAria": "카운트다운을 기본값으로 재설정",
       "upNextHint": "동영상 끝에 현재 라이브러리 / 재생 목록 / 카테고리의 다음 항목을 자동 재생 카운트다운과 함께 표시합니다. 카드 위에 마우스를 올리면 카운트다운이 일시정지됩니다. ×를 클릭하거나 Esc를 눌러 닫으세요.",
+      "autoplayOnAdvanceLabel": "다음 동영상 자동 재생",
+      "autoplayOnAdvanceResetTitle": "기본값으로 재설정 (끔)",
+      "autoplayOnAdvanceResetAria": "자동 재생을 기본값으로 재설정",
       "multiHeader": "다중 축",
       "fieldDefaultPlayback": "기본 재생",
       "preferSingle": "단일 축 (기본값)",
@@ -802,126 +920,6 @@
     "saveDialogTitle": "진단 보고서 저장",
     "saveDialogDefaultName": "funsync-report.txt"
   },
-  "webRemote": {
-    "header": {
-      "back": "뒤로",
-      "locationAria": "위치",
-      "refresh": "라이브러리 새로 고침"
-    },
-    "search": {
-      "library": "라이브러리 검색",
-      "collections": "컬렉션 검색",
-      "playlists": "재생 목록 검색",
-      "categories": "카테고리 검색",
-      "sources": "소스 검색",
-      "short": "검색",
-      "aria": "검색",
-      "clear": "검색 지우기"
-    },
-    "filterChips": {
-      "aria": "활성 필터"
-    },
-    "actions": {
-      "sort": "정렬",
-      "viewToggleAria": "그리드 또는 목록 보기 전환",
-      "viewToggleTitle": "그리드 / 목록",
-      "folderAria": "폴더로 탐색",
-      "folderTitle": "폴더로 탐색",
-      "filters": "필터"
-    },
-    "nav": {
-      "modesAria": "모드",
-      "library": "라이브러리",
-      "collections": "컬렉션",
-      "playlists": "재생 목록",
-      "categories": "카테고리",
-      "folders": "폴더"
-    },
-    "filterSheet": {
-      "title": "필터",
-      "close": "필터 닫기",
-      "matchHeader": "매칭 상태",
-      "matchAria": "매칭 상태",
-      "matchAll": "전체",
-      "matchMatched": "매칭됨",
-      "matchUnmatched": "매칭 안 됨",
-      "vrHeader": "VR",
-      "vrAria": "VR 필터",
-      "vrAll": "전체",
-      "vrOnly": "VR만",
-      "vrFlat": "VR 아님"
-    },
-    "sortSheet": {
-      "title": "정렬 기준",
-      "close": "정렬 닫기",
-      "aria": "정렬",
-      "nameAsc": "이름 A-Z",
-      "nameDesc": "이름 Z-A",
-      "dateAddedDesc": "최근 추가",
-      "dateAddedAsc": "오래된 순",
-      "durationAsc": "길이 짧은-긴",
-      "durationDesc": "길이 긴-짧은",
-      "avgSpeedAsc": "평균 속도 느린-빠른",
-      "avgSpeedDesc": "평균 속도 빠른-느린",
-      "maxSpeedAsc": "최대 속도 느린-빠른",
-      "maxSpeedDesc": "최대 속도 빠른-느린"
-    },
-    "badge": {
-      "script": "스크립트",
-      "vr": "VR"
-    },
-    "breadcrumb": {
-      "allSources": "모든 소스",
-      "folders": "폴더",
-      "notFound": "(찾을 수 없음)",
-      "unnamed": "(이름 없음)"
-    },
-    "folderJump": {
-      "label": "폴더: <strong>{path}</strong>"
-    },
-    "empty": {
-      "loadingLibrary": "라이브러리 로드 중…",
-      "loadFailedTitle": "라이브러리를 로드할 수 없습니다",
-      "noVideosTitle": "아직 동영상이 없습니다",
-      "noVideosBody": "데스크톱의 FunSync에서 소스 폴더를 추가하세요.",
-      "noMatchesTitle": "일치 항목 없음",
-      "noMatchesBody": "다른 검색어나 필터를 시도해 보세요.",
-      "noMatchesBodyShort": "다른 검색어를 시도해 보세요.",
-      "noSourcesTitle": "소스 없음",
-      "noSourcesBody": "데스크톱의 FunSync에서 소스 폴더를 추가하세요.",
-      "noSourcesFilteredBody": "현재 필터와 일치하는 동영상이 있는 소스가 없습니다.",
-      "loadFoldersFailedTitle": "폴더를 로드할 수 없습니다",
-      "folderNotFoundTitle": "폴더를 찾을 수 없습니다",
-      "folderNotFoundBody": "이 폴더는 더 이상 데스크톱에 존재하지 않습니다.",
-      "emptyFolderTitle": "빈 폴더",
-      "emptyFolderBody": "여기에는 하위 폴더나 동영상이 없습니다.",
-      "videoNotFoundTitle": "동영상을 찾을 수 없습니다",
-      "videoNotFoundBody": "돌아가서 다시 시도하세요.",
-      "loadGroupingFailedTitle": "{kind, select, collections {컬렉션을 로드할 수 없습니다} playlists {재생 목록을 로드할 수 없습니다} categories {카테고리를 로드할 수 없습니다} other {항목을 로드할 수 없습니다}}",
-      "noGroupingTitle": "{kind, select, collections {아직 컬렉션이 없습니다} playlists {아직 재생 목록이 없습니다} categories {아직 카테고리가 없습니다} other {아직 항목이 없습니다}}",
-      "noGroupingBody": "{kind, select, collections {데스크톱의 FunSync에서 컬렉션을 만드세요 — 여기에 표시됩니다.} playlists {데스크톱의 FunSync에서 재생 목록을 만드세요 — 여기에 표시됩니다.} categories {데스크톱의 FunSync에서 카테고리를 만드세요 — 여기에 표시됩니다.} other {데스크톱의 FunSync에서 항목을 만드세요.}}",
-      "groupingNotFoundTitle": "찾을 수 없음",
-      "groupingNotFoundBody": "{kind, select, collections {이 컬렉션은 더 이상 데스크톱에 존재하지 않습니다.} playlists {이 재생 목록은 더 이상 데스크톱에 존재하지 않습니다.} categories {이 카테고리는 더 이상 데스크톱에 존재하지 않습니다.} other {이 항목은 더 이상 데스크톱에 존재하지 않습니다.}}",
-      "groupingEmptyTitle": "비어 있음",
-      "groupingEmptyBody": "{kind, select, collections {이 컬렉션에는 현재 사용 가능한 동영상이 없습니다.} playlists {이 재생 목록에는 현재 사용 가능한 동영상이 없습니다.} categories {이 카테고리에는 현재 사용 가능한 동영상이 없습니다.} other {이 항목에는 현재 사용 가능한 동영상이 없습니다.}}"
-    },
-    "player": {
-      "switching": "스크립트 전환 중…",
-      "connecting": "장치에 연결 중…",
-      "preparing": "장치 준비 중…",
-      "ready": "장치 준비 완료",
-      "noScript": "funscript 없음 — 동영상만 재생",
-      "noScriptMatch": "데스크톱에서 일치하는 스크립트를 찾을 수 없습니다",
-      "connected": "연결됨: {devices}",
-      "noDevices": "데스크톱에 연결된 장치 없음",
-      "connectedCount": "{count, plural, other {연결된 장치 · #}}",
-      "intensity": "Funscript 강도",
-      "avg": "평균",
-      "max": "최대",
-      "speedUnit": "유닛/초",
-      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초"
-    }
-  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "EroScripts 닫기",
@@ -961,7 +959,8 @@
     "endDismissAria": "닫기",
     "endText": "이 {source}에 더 이상 동영상이 없습니다.",
     "endCta": "{source}로 돌아가기",
-    "endSourceFallback": "목록"
+    "endSourceFallback": "목록",
+    "sourcePlaylist": "재생 목록"
   },
   "session": {
     "state": {
@@ -1064,7 +1063,9 @@
       "zoomIn": "확대 (+)",
       "zoomOut": "축소 (-)",
       "fitAll": "모두 맞춤",
-      "save": "저장 (Ctrl+S)"
+      "save": "저장 (Ctrl+S)",
+      "stacked": "스택 보기 — 모든 축 표시",
+      "popout": "에디터를 별도 창으로 팝아웃"
     },
     "modify": {
       "title": "스크립트 수정",
@@ -1076,7 +1077,8 @@
       "offsetTime": "시간 오프셋…",
       "removePauses": "일시 정지 제거…",
       "rangeExtend": "범위 확장/압축…",
-      "generatePattern": "패턴 생성…"
+      "generatePattern": "패턴 생성…",
+      "exportHeatmap": "히트맵 PNG 내보내기…"
     },
     "speedLabel": "속도:",
     "autosaveLabel": "자동 저장",
@@ -1395,6 +1397,7 @@
     "screenshot": "스크린샷",
     "loopA": "반복 지점 A 설정",
     "loopB": "반복 지점 B 설정",
+    "toggleVideoLoop": "동영상 반복 전환",
     "clearLoop": "반복 지우기 / 패널 닫기",
     "devicesPanel": "장치 패널 전환",
     "deviceSimulator": "장치 시뮬레이터 전환",
@@ -1421,7 +1424,7 @@
     "editorMoveFrames": "시간상 동작 ±N 프레임 이동",
     "editorDelete": "선택 항목 삭제",
     "editorInvert": "위치 반전",
-    "editorPlaceNumpad": "0 / 11 / 22 / … / 100에 동작 배치",
+    "editorPlaceNumpad": "0 / 10 / 20 / … / 90 에 액션 배치",
     "editorInsertAtClick": "클릭 위치에 동작 삽입",
     "editorMoveSelected": "선택한 동작 이동",
     "editorBookmark": "재생 헤드에 북마크 추가",
@@ -1433,6 +1436,15 @@
     "editorPaste": "재생 헤드에 붙여넣기",
     "editorPasteOriginal": "원래 시간에 붙여넣기",
     "editorSave": "저장",
-    "editorZoom": "확대 / 축소"
+    "editorZoom": "확대 / 축소",
+    "editorAlternatingInsert": "교대 삽입 (이전 위치 반전)",
+    "editorRepeatLastStroke": "마지막 두 액션 스트로크 반복",
+    "editorBookmarkNav": "다음/이전 북마크로 이동",
+    "editorMultiBand": "다중 대역 파형 전환 (저/중/고)",
+    "editorVAD": "음성 활동 트랙 전환",
+    "editorSpeedStep": "재생 속도 낮추기/높이기",
+    "editorSelectLeftRightOfCursor": "재생 헤드 앞/뒤 모두 선택",
+    "editorEqualize": "균등화 — 중간 액션을 시간상 균등 재배치",
+    "editorMoveToPlayhead": "단일 선택 액션을 재생 헤드로 이동"
   }
 }

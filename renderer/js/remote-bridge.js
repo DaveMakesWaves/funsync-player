@@ -132,7 +132,9 @@ export class RemoteBridge {
     const ip = msg.ip;
     switch (t) {
       case 'phone-connected':
-        if (this.onPhoneConnected) this.onPhoneConnected(ip, msg.videoId, msg.videoPath);
+        if (this.onPhoneConnected && this._dedupConnect(ip, msg.videoId)) {
+          this.onPhoneConnected(ip, msg.videoId, msg.videoPath);
+        }
         break;
       case 'phone-replaced':
         if (this.onPhoneReplaced) this.onPhoneReplaced(msg.oldIp, msg.newIp);
@@ -170,7 +172,7 @@ export class RemoteBridge {
       case 'hello':
         // Phones send hello after connecting — treat it as (re)announcing
         // the videoId so downstream can resolve the script.
-        if (this.onPhoneConnected && msg.videoId) {
+        if (this.onPhoneConnected && msg.videoId && this._dedupConnect(ip, msg.videoId)) {
           this.onPhoneConnected(ip, msg.videoId, msg.videoPath);
         }
         break;
@@ -178,5 +180,42 @@ export class RemoteBridge {
         // Unknown types are silently ignored — forward-compat.
         break;
     }
+  }
+
+  /**
+   * De-duplicate phone-connect handler invocations. The backend emits
+   * `phone-connected` AND the phone separately emits `hello` on the
+   * same connection — both arrive within ~50ms of each other. Without
+   * deduplication, `_onRemotePhoneConnected` would run end-to-end
+   * twice: two script uploads to Handy cloud, two `setScript` calls,
+   * two `syncEngine.start()` (the second is a no-op via `_active`
+   * guard but still wasteful), and the phone briefly sees two
+   * `script-loading` → `script-ready` pairs back-to-back.
+   *
+   * Dedup key is `(ip + '|' + videoId)` with a 2-second TTL — long
+   * enough to catch the close-pair race, short enough that legitimate
+   * sequential reconnects to the same video still trigger.
+   *
+   * Surfaced via community report 2026-05-01 (TODO.md backlog).
+   *
+   * Returns `true` if this is a fresh event, `false` if dedup
+   * dropped it.
+   */
+  _dedupConnect(ip, videoId) {
+    if (!ip || !videoId) return true;
+    const key = ip + '|' + videoId;
+    const now = Date.now();
+    if (!this._connectDedup) this._connectDedup = new Map();
+    const last = this._connectDedup.get(key);
+    if (last && now - last < 2000) return false;
+    this._connectDedup.set(key, now);
+    // Prune old entries occasionally so the map doesn't grow without
+    // bound on long-running sessions with many phone reconnects.
+    if (this._connectDedup.size > 32) {
+      for (const [k, ts] of this._connectDedup) {
+        if (now - ts > 2000) this._connectDedup.delete(k);
+      }
+    }
+    return true;
   }
 }

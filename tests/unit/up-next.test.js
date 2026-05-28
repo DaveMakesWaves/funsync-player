@@ -605,4 +605,154 @@ describe('UpNextEngine', () => {
       expect(onHide).not.toHaveBeenCalled();
     });
   });
+
+  // Regression: Play All used to feed nothing to the engine — context
+  // leaked in from whatever the user last did in the library, so v1 of 2
+  // showed "no more videos" because the stale context's index was at the
+  // end of some other list. _playQueueItem now sets a queue-source
+  // context with list = queue paths, index = queue position. These tests
+  // pin the engine's response to that exact shape.
+  describe('queue source (Play All)', () => {
+    it('fires onShowNext (not end-of-list) on a non-last queue item', () => {
+      const onShowNext = vi.fn();
+      const onShowEndOfList = vi.fn();
+      const player = mockVideoPlayer({ currentTime: 116, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.onShowNext = onShowNext;
+      engine.onShowEndOfList = onShowEndOfList;
+
+      // Shape mirrors exactly what app.js::_playQueueItem builds.
+      engine.setPlayContext({
+        source: 'queue',
+        sourceLabel: 'My Playlist',
+        sourceContext: { kind: 'playlist', id: 'p1' },
+        list: ['v1.mp4', 'v2.mp4'],
+        index: 0,
+      });
+      engine.check();
+
+      expect(onShowNext).toHaveBeenCalledWith('v2.mp4', expect.any(Number));
+      expect(onShowEndOfList).not.toHaveBeenCalled();
+    });
+
+    it('fires onShowEndOfList on the actual last queue item', () => {
+      const onShowNext = vi.fn();
+      const onShowEndOfList = vi.fn();
+      const player = mockVideoPlayer({ currentTime: 116, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.onShowNext = onShowNext;
+      engine.onShowEndOfList = onShowEndOfList;
+
+      engine.setPlayContext({
+        source: 'queue',
+        sourceLabel: 'My Playlist',
+        sourceContext: { kind: 'playlist', id: 'p1' },
+        list: ['v1.mp4', 'v2.mp4'],
+        index: 1,
+      });
+      engine.check();
+
+      expect(onShowEndOfList).toHaveBeenCalledWith('My Playlist', { kind: 'playlist', id: 'p1' });
+      expect(onShowNext).not.toHaveBeenCalled();
+    });
+
+    it('advancing the index via setPlayContext rearms the card for the new item', () => {
+      const onShowNext = vi.fn();
+      const onShowEndOfList = vi.fn();
+      const player = mockVideoPlayer({ currentTime: 116, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.onShowNext = onShowNext;
+      engine.onShowEndOfList = onShowEndOfList;
+
+      // First queue item (v1) — shows next-card.
+      engine.setPlayContext({
+        source: 'queue',
+        sourceLabel: 'My Playlist',
+        sourceContext: { kind: 'playlist', id: 'p1' },
+        list: ['v1.mp4', 'v2.mp4'],
+        index: 0,
+      });
+      engine.check();
+      expect(onShowNext).toHaveBeenCalledTimes(1);
+
+      // _playQueueItem(1) re-runs _setUpNextContext with index: 1 — last item.
+      engine.setPlayContext({
+        source: 'queue',
+        sourceLabel: 'My Playlist',
+        sourceContext: { kind: 'playlist', id: 'p1' },
+        list: ['v1.mp4', 'v2.mp4'],
+        index: 1,
+      });
+      engine.check();
+      expect(onShowEndOfList).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // Playlist loop semantics. When the per-playlist `loop` flag is on,
+  // the last item must NOT show end-of-list — it shows the next-up card
+  // pointing back at item 0 (wrap), and the auto-advance routes back to
+  // the start instead of stopping.
+  describe('queue source with loop', () => {
+    it('on the last item with loop, fires onShowNext (wraps to item 0) NOT end-of-list', () => {
+      const onShowNext = vi.fn();
+      const onShowEndOfList = vi.fn();
+      const player = mockVideoPlayer({ currentTime: 116, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.onShowNext = onShowNext;
+      engine.onShowEndOfList = onShowEndOfList;
+
+      engine.setPlayContext({
+        source: 'queue',
+        sourceLabel: 'My Playlist',
+        sourceContext: { kind: 'playlist', id: 'p1' },
+        list: ['v1.mp4', 'v2.mp4'],
+        index: 1, // last item
+        loop: true,
+      });
+      engine.check();
+
+      expect(onShowNext).toHaveBeenCalledWith('v1.mp4', expect.any(Number));
+      expect(onShowEndOfList).not.toHaveBeenCalled();
+    });
+
+    it('_nextPath wraps to list[0] from the last index when loop is on', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext({
+        source: 'queue',
+        list: ['a', 'b', 'c'],
+        index: 2,
+        loop: true,
+      });
+      expect(engine._nextPath()).toBe('a');
+    });
+
+    it('_nextPath returns null from the last index when loop is off', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext({
+        source: 'queue',
+        list: ['a', 'b', 'c'],
+        index: 2,
+        loop: false,
+      });
+      expect(engine._nextPath()).toBe(null);
+    });
+
+    it('_isLastInList stays false on the last item when loop is on', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext({
+        source: 'queue',
+        list: ['a', 'b'],
+        index: 1,
+        loop: true,
+      });
+      expect(engine._isLastInList()).toBe(false);
+    });
+  });
 });

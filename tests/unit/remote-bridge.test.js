@@ -184,6 +184,70 @@ describe('RemoteBridge — message routing', () => {
   });
 });
 
+// Community report 2026-05-01 (TODO.md backlog): backend's
+// `phone-connected` event AND the phone's own `hello` message both
+// route to `onPhoneConnected`, firing twice. Dedup gates the second.
+describe('RemoteBridge — onPhoneConnected dedup', () => {
+  it('phone-connected immediately followed by hello fires only once', () => {
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    latest().simulateMessage({ type: 'hello', ip: '10.0.0.5', videoId: 'abc' });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('hello-then-phone-connected within the TTL also fires only once', () => {
+    // The arrival order isn't guaranteed — both directions should dedup.
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'hello', ip: '10.0.0.5', videoId: 'abc' });
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    expect(spy).toHaveBeenCalledTimes(1);
+  });
+
+  it('different videoId on the same IP is a fresh event', () => {
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'xyz' });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('different IP is a fresh event', () => {
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.6', videoId: 'abc' });
+    expect(spy).toHaveBeenCalledTimes(2);
+  });
+
+  it('after the TTL elapses, the same (ip, videoId) fires again', () => {
+    vi.useFakeTimers();
+    const b = new RemoteBridge();
+    const spy = vi.fn();
+    b.onPhoneConnected = spy;
+    b.connect();
+    latest().simulateOpen();
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    vi.setSystemTime(Date.now() + 3000);
+    latest().simulateMessage({ type: 'phone-connected', ip: '10.0.0.5', videoId: 'abc' });
+    expect(spy).toHaveBeenCalledTimes(2);
+    vi.useRealTimers();
+  });
+});
+
 describe('RemoteBridge — sendToPhone', () => {
   it('sends JSON when the socket is open', () => {
     const b = new RemoteBridge();

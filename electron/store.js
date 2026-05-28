@@ -72,6 +72,10 @@ const DEFAULTS = {
     editor: {
       defaultCreator: '',
       patternPresets: [],
+      // Pop-out window — size only, not position. Multi-monitor users
+      // move setups around; restoring at last-saved coords on a setup
+      // that no longer has that monitor lands the window off-screen.
+      popoutBounds: null,
     },
     knownDevices: [],
     buttplug: {
@@ -181,6 +185,15 @@ function renamePlaylist(id, name) {
   const playlist = playlists.find((p) => p.id === id);
   if (playlist) {
     playlist.name = name;
+    conf.set('playlists', playlists);
+  }
+}
+
+function setPlaylistLoop(id, loop) {
+  const playlists = getPlaylists();
+  const playlist = playlists.find((p) => p.id === id);
+  if (playlist) {
+    playlist.loop = !!loop;
     conf.set('playlists', playlists);
   }
 }
@@ -347,6 +360,7 @@ module.exports = {
   addPlaylist,
   deletePlaylist,
   renamePlaylist,
+  setPlaylistLoop,
   addVideoToPlaylist,
   removeVideoFromPlaylist,
   getCategories,

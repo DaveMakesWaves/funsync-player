@@ -224,4 +224,69 @@ describe('ButtplugManager', () => {
       expect(() => manager._emitError('test')).not.toThrow();
     });
   });
+
+  // Community report (NylonBorg, via TODO.md backlog): pre-fix,
+  // `_attemptReconnect` only ran once per disconnect — the setTimeout
+  // callback didn't recurse on failure, so `_maxReconnectAttempts = 3`
+  // was effectively dead. Now we chain until the configured max.
+  describe('_attemptReconnect chain', () => {
+    it('chains setTimeout reconnects until max attempts on continued failure', async () => {
+      vi.useFakeTimers();
+      const m = new ButtplugManager();
+      m._maxReconnectAttempts = 3;
+      // Force every connect attempt to fail so we hit the recursion path.
+      m.connect = vi.fn().mockResolvedValue(false);
+
+      m._attemptReconnect();
+      expect(m._reconnectAttempts).toBe(1);
+
+      // 2000ms backoff for attempt 1 → fires + fails → schedules #2
+      await vi.advanceTimersByTimeAsync(2100);
+      expect(m._reconnectAttempts).toBe(2);
+
+      // 4000ms backoff for attempt 2 → fires + fails → schedules #3
+      await vi.advanceTimersByTimeAsync(4100);
+      expect(m._reconnectAttempts).toBe(3);
+
+      // 8000ms backoff for attempt 3 → fires + fails → hits max, resets.
+      await vi.advanceTimersByTimeAsync(8100);
+      expect(m._reconnectAttempts).toBe(0); // reset on max-reached
+      expect(m.connect).toHaveBeenCalledTimes(3);
+
+      vi.useRealTimers();
+    });
+
+    it('successful reconnect breaks the chain and resets the counter', async () => {
+      vi.useFakeTimers();
+      const m = new ButtplugManager();
+      m._maxReconnectAttempts = 3;
+      // Fail once, then succeed.
+      let calls = 0;
+      m.connect = vi.fn().mockImplementation(async () => { calls++; return calls >= 2; });
+      m.startScanning = vi.fn().mockResolvedValue(undefined);
+
+      m._attemptReconnect();
+      await vi.advanceTimersByTimeAsync(2100);   // attempt 1 fails → chains
+      await vi.advanceTimersByTimeAsync(4100);   // attempt 2 succeeds → break
+      expect(m._reconnectAttempts).toBe(0);
+      expect(m.connect).toHaveBeenCalledTimes(2);
+      // Confirm no further reconnect runs after success.
+      await vi.advanceTimersByTimeAsync(20000);
+      expect(m.connect).toHaveBeenCalledTimes(2);
+
+      vi.useRealTimers();
+    });
+
+    it('intentional disconnect prevents the reconnect from firing', () => {
+      vi.useFakeTimers();
+      const m = new ButtplugManager();
+      m._intentionalDisconnect = true;
+      m.connect = vi.fn();
+      m._attemptReconnect();
+      expect(m._reconnectAttempts).toBe(0);
+      expect(m._intentionalDisconnect).toBe(false); // flag was consumed
+      expect(m.connect).not.toHaveBeenCalled();
+      vi.useRealTimers();
+    });
+  });
 });

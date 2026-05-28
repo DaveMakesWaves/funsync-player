@@ -101,6 +101,14 @@
       "title": "Wiedergabegeschwindigkeit (< / >)",
       "menuLabel": "Wiedergabegeschwindigkeit"
     },
+    "loopVideo": {
+      "menuLabel": "Video wiederholen",
+      "aria": "Video-Wiederholung umschalten",
+      "stateOn": "Ein",
+      "stateOff": "Aus",
+      "chipAria": "Video-Wiederholung ein",
+      "chipTitle": "Video wiederholen (Umschalt+L)"
+    },
     "vrFormatMenu": "VR-Format…",
     "preparingScript": "Skript wird vorbereitet…",
     "skipToNextAction": "Zur nächsten Aktion springen",
@@ -201,7 +209,7 @@
     "folderBrowse": "Ordner durchsuchen",
     "refresh": "Bibliothek aktualisieren",
     "refreshTitle": "Bibliothek aktualisieren — neue Dateien erfassen, die seit dem App-Start zu Quellordnern hinzugefügt wurden",
-    "selectionCount": "{count, plural, one {# ausgewählt} other {# ausgewählt}}",
+    "selectionCount": "{count} ausgewählt",
     "vrType": "VR-Typ",
     "loading": "Lade…",
     "allSources": "Alle Quellen",
@@ -267,7 +275,6 @@
     "vrOptionReset": "Auf Auto zurücksetzen",
     "vrOptionResetSub": "Override löschen; Dateinamen-Heuristik verwenden",
     "videoCountSubtitle": "{count, plural, one {# Video} other {# Videos}}",
-    "selectionCount": "{count} ausgewählt",
     "selectModeEnter": "Auswählen",
     "selectModeCancel": "Abbrechen",
     "variantNamingTitle": "Diese Variante benennen",
@@ -329,6 +336,8 @@
     "emptyCta": "Erste Playlist erstellen",
     "videoCount": "{count, plural, one {# Video} other {# Videos}}",
     "playAll": "Alle abspielen",
+    "loopOnTitle": "Wiederholung ein — nach dem letzten Video wieder bei Element 1 starten",
+    "loopOffTitle": "Wiederholung aus — nach dem letzten Video stoppen",
     "renamePlaylist": "Playlist umbenennen",
     "deletePlaylist": "Playlist löschen",
     "confirmDelete": "Diese Playlist löschen?",
@@ -371,18 +380,124 @@
     "removeAria": "Filter entfernen: {label}"
   },
   "webRemote": {
-    "title": "Web-Fernsteuerung",
-    "experimental": "EXPERIMENTELL",
-    "experimentalDetail": "Die Web-Fernsteuerung wird noch verfeinert — Geräte-Sync auf der Telefonseite und Grenzfälle bei der Wiederverbindung können auftreten.",
-    "intro": "Öffne deine Bibliothek auf einem Telefon oder Tablet im Browser im selben WLAN. Scanne den QR-Code mit der Kamera des Geräts oder gib die URL ein.",
-    "urlLabel": "URL",
-    "detecting": "(erkenne…)",
-    "feature1": "Videos auf dem Telefon durchsuchen und abspielen",
-    "feature2": "Verbundene Geräte folgen der Wiedergabe des Telefons",
-    "feature3": "Nur ein Telefon oder VR-Headset steuert Geräte gleichzeitig",
-    "qrTitle": "Mit der Telefonkamera scannen",
-    "backendNotRunning": "Backend läuft nicht",
-    "qrUnavailable": "QR-Code nicht verfügbar"
+    "header": {
+      "back": "Zurück",
+      "locationAria": "Standort",
+      "refresh": "Bibliothek aktualisieren"
+    },
+    "search": {
+      "library": "Bibliothek durchsuchen",
+      "collections": "Sammlungen durchsuchen",
+      "playlists": "Wiedergabelisten durchsuchen",
+      "categories": "Kategorien durchsuchen",
+      "sources": "Quellen durchsuchen",
+      "short": "Suchen",
+      "aria": "Suchen",
+      "clear": "Suche löschen"
+    },
+    "filterChips": {
+      "aria": "Aktive Filter"
+    },
+    "actions": {
+      "sort": "Sortieren",
+      "viewToggleAria": "Raster- oder Listenansicht umschalten",
+      "viewToggleTitle": "Raster / Liste",
+      "folderAria": "Nach Ordner durchsuchen",
+      "folderTitle": "Nach Ordner durchsuchen",
+      "filters": "Filter"
+    },
+    "nav": {
+      "modesAria": "Modi",
+      "library": "Bibliothek",
+      "collections": "Sammlungen",
+      "playlists": "Wiedergabelisten",
+      "categories": "Kategorien",
+      "folders": "Ordner"
+    },
+    "filterSheet": {
+      "title": "Filter",
+      "close": "Filter schließen",
+      "matchHeader": "Übereinstimmung",
+      "matchAria": "Übereinstimmung",
+      "matchAll": "Alle",
+      "matchMatched": "Zugeordnet",
+      "matchUnmatched": "Nicht zugeordnet",
+      "vrHeader": "VR",
+      "vrAria": "VR-Filter",
+      "vrAll": "Alle",
+      "vrOnly": "Nur VR",
+      "vrFlat": "Kein VR"
+    },
+    "sortSheet": {
+      "title": "Sortieren nach",
+      "close": "Sortierung schließen",
+      "aria": "Sortieren",
+      "nameAsc": "Name A-Z",
+      "nameDesc": "Name Z-A",
+      "dateAddedDesc": "Zuletzt hinzugefügt",
+      "dateAddedAsc": "Älteste zuerst",
+      "durationAsc": "Dauer kurz-lang",
+      "durationDesc": "Dauer lang-kurz",
+      "avgSpeedAsc": "Ø Geschw. langsam-schnell",
+      "avgSpeedDesc": "Ø Geschw. schnell-langsam",
+      "maxSpeedAsc": "Max. Geschw. langsam-schnell",
+      "maxSpeedDesc": "Max. Geschw. schnell-langsam"
+    },
+    "badge": {
+      "script": "Skript",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "Alle Quellen",
+      "folders": "Ordner",
+      "notFound": "(nicht gefunden)",
+      "unnamed": "(unbenannt)"
+    },
+    "folderJump": {
+      "label": "In Ordner: <strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "Bibliothek wird geladen…",
+      "loadFailedTitle": "Bibliothek konnte nicht geladen werden",
+      "noVideosTitle": "Noch keine Videos",
+      "noVideosBody": "Füge einen Quellordner in FunSync auf deinem Desktop hinzu.",
+      "noMatchesTitle": "Keine Treffer",
+      "noMatchesBody": "Versuche eine andere Suche oder einen anderen Filter.",
+      "noMatchesBodyShort": "Versuche eine andere Suche.",
+      "noSourcesTitle": "Keine Quellen",
+      "noSourcesBody": "Füge einen Quellordner in FunSync auf deinem Desktop hinzu.",
+      "noSourcesFilteredBody": "Keine Quelle enthält Videos, die dem aktuellen Filter entsprechen.",
+      "loadFoldersFailedTitle": "Ordner konnten nicht geladen werden",
+      "folderNotFoundTitle": "Ordner nicht gefunden",
+      "folderNotFoundBody": "Dieser Ordner existiert nicht mehr auf dem Desktop.",
+      "emptyFolderTitle": "Leerer Ordner",
+      "emptyFolderBody": "Hier gibt es weder Unterordner noch Videos.",
+      "videoNotFoundTitle": "Video nicht gefunden",
+      "videoNotFoundBody": "Gehe zurück und versuche es erneut.",
+      "loadGroupingFailedTitle": "{kind, select, collections {Sammlungen konnten nicht geladen werden} playlists {Wiedergabelisten konnten nicht geladen werden} categories {Kategorien konnten nicht geladen werden} other {Einträge konnten nicht geladen werden}}",
+      "noGroupingTitle": "{kind, select, collections {Noch keine Sammlungen} playlists {Noch keine Wiedergabelisten} categories {Noch keine Kategorien} other {Noch nichts vorhanden}}",
+      "noGroupingBody": "{kind, select, collections {Erstelle Sammlungen in FunSync auf deinem Desktop — sie erscheinen hier.} playlists {Erstelle Wiedergabelisten in FunSync auf deinem Desktop — sie erscheinen hier.} categories {Erstelle Kategorien in FunSync auf deinem Desktop — sie erscheinen hier.} other {Erstelle Einträge in FunSync auf deinem Desktop.}}",
+      "groupingNotFoundTitle": "Nicht gefunden",
+      "groupingNotFoundBody": "{kind, select, collections {Diese Sammlung existiert nicht mehr auf dem Desktop.} playlists {Diese Wiedergabeliste existiert nicht mehr auf dem Desktop.} categories {Diese Kategorie existiert nicht mehr auf dem Desktop.} other {Dieser Eintrag existiert nicht mehr auf dem Desktop.}}",
+      "groupingEmptyTitle": "Leer",
+      "groupingEmptyBody": "{kind, select, collections {In dieser Sammlung sind derzeit keine Videos verfügbar.} playlists {In dieser Wiedergabeliste sind derzeit keine Videos verfügbar.} categories {In dieser Kategorie sind derzeit keine Videos verfügbar.} other {In diesem Eintrag sind derzeit keine Videos verfügbar.}}"
+    },
+    "player": {
+      "switching": "Skript wird gewechselt…",
+      "connecting": "Verbindung zu Geräten wird hergestellt…",
+      "preparing": "Geräte werden vorbereitet…",
+      "ready": "Geräte bereit",
+      "noScript": "Kein Funscript — nur Video wird abgespielt",
+      "noScriptMatch": "Desktop konnte kein passendes Skript finden",
+      "connected": "Verbunden: {devices}",
+      "noDevices": "Keine Geräte auf dem Desktop verbunden",
+      "connectedCount": "{count, plural, one {Verbundenes Gerät · #} other {Verbundene Geräte · #}}",
+      "intensity": "Funscript-Intensität",
+      "avg": "Ø",
+      "max": "Max",
+      "speedUnit": "Einheiten/s",
+      "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s"
+    }
   },
   "hevc": {
     "warningTitle": "HEVC-Wiedergabe kann stottern",
@@ -659,6 +774,9 @@
       "upNextResetCountdown": "Auf Standard zurücksetzen (10s)",
       "upNextResetCountdownAria": "Countdown auf Standard zurücksetzen",
       "upNextHint": "Zeigt am Videoende das nächste Element der aktuellen Bibliothek / Playlist / Kategorie mit Autoplay-Countdown. Mit Mauszeiger über der Karte pausiert der Countdown; mit × klicken oder Esc drücken zum Schließen.",
+      "autoplayOnAdvanceLabel": "Nächstes Video automatisch abspielen",
+      "autoplayOnAdvanceResetTitle": "Auf Standard zurücksetzen (aus)",
+      "autoplayOnAdvanceResetAria": "Autoplay auf Standard zurücksetzen",
       "multiHeader": "Mehrachsig",
       "fieldDefaultPlayback": "Standard-Wiedergabe",
       "preferSingle": "Einzelachse (Standard)",
@@ -802,126 +920,6 @@
     "saveDialogTitle": "Diagnosebericht speichern",
     "saveDialogDefaultName": "funsync-bericht.txt"
   },
-  "webRemote": {
-    "header": {
-      "back": "Zurück",
-      "locationAria": "Standort",
-      "refresh": "Bibliothek aktualisieren"
-    },
-    "search": {
-      "library": "Bibliothek durchsuchen",
-      "collections": "Sammlungen durchsuchen",
-      "playlists": "Wiedergabelisten durchsuchen",
-      "categories": "Kategorien durchsuchen",
-      "sources": "Quellen durchsuchen",
-      "short": "Suchen",
-      "aria": "Suchen",
-      "clear": "Suche löschen"
-    },
-    "filterChips": {
-      "aria": "Aktive Filter"
-    },
-    "actions": {
-      "sort": "Sortieren",
-      "viewToggleAria": "Raster- oder Listenansicht umschalten",
-      "viewToggleTitle": "Raster / Liste",
-      "folderAria": "Nach Ordner durchsuchen",
-      "folderTitle": "Nach Ordner durchsuchen",
-      "filters": "Filter"
-    },
-    "nav": {
-      "modesAria": "Modi",
-      "library": "Bibliothek",
-      "collections": "Sammlungen",
-      "playlists": "Wiedergabelisten",
-      "categories": "Kategorien",
-      "folders": "Ordner"
-    },
-    "filterSheet": {
-      "title": "Filter",
-      "close": "Filter schließen",
-      "matchHeader": "Übereinstimmung",
-      "matchAria": "Übereinstimmung",
-      "matchAll": "Alle",
-      "matchMatched": "Zugeordnet",
-      "matchUnmatched": "Nicht zugeordnet",
-      "vrHeader": "VR",
-      "vrAria": "VR-Filter",
-      "vrAll": "Alle",
-      "vrOnly": "Nur VR",
-      "vrFlat": "Kein VR"
-    },
-    "sortSheet": {
-      "title": "Sortieren nach",
-      "close": "Sortierung schließen",
-      "aria": "Sortieren",
-      "nameAsc": "Name A-Z",
-      "nameDesc": "Name Z-A",
-      "dateAddedDesc": "Zuletzt hinzugefügt",
-      "dateAddedAsc": "Älteste zuerst",
-      "durationAsc": "Dauer kurz-lang",
-      "durationDesc": "Dauer lang-kurz",
-      "avgSpeedAsc": "Ø Geschw. langsam-schnell",
-      "avgSpeedDesc": "Ø Geschw. schnell-langsam",
-      "maxSpeedAsc": "Max. Geschw. langsam-schnell",
-      "maxSpeedDesc": "Max. Geschw. schnell-langsam"
-    },
-    "badge": {
-      "script": "Skript",
-      "vr": "VR"
-    },
-    "breadcrumb": {
-      "allSources": "Alle Quellen",
-      "folders": "Ordner",
-      "notFound": "(nicht gefunden)",
-      "unnamed": "(unbenannt)"
-    },
-    "folderJump": {
-      "label": "In Ordner: <strong>{path}</strong>"
-    },
-    "empty": {
-      "loadingLibrary": "Bibliothek wird geladen…",
-      "loadFailedTitle": "Bibliothek konnte nicht geladen werden",
-      "noVideosTitle": "Noch keine Videos",
-      "noVideosBody": "Füge einen Quellordner in FunSync auf deinem Desktop hinzu.",
-      "noMatchesTitle": "Keine Treffer",
-      "noMatchesBody": "Versuche eine andere Suche oder einen anderen Filter.",
-      "noMatchesBodyShort": "Versuche eine andere Suche.",
-      "noSourcesTitle": "Keine Quellen",
-      "noSourcesBody": "Füge einen Quellordner in FunSync auf deinem Desktop hinzu.",
-      "noSourcesFilteredBody": "Keine Quelle enthält Videos, die dem aktuellen Filter entsprechen.",
-      "loadFoldersFailedTitle": "Ordner konnten nicht geladen werden",
-      "folderNotFoundTitle": "Ordner nicht gefunden",
-      "folderNotFoundBody": "Dieser Ordner existiert nicht mehr auf dem Desktop.",
-      "emptyFolderTitle": "Leerer Ordner",
-      "emptyFolderBody": "Hier gibt es weder Unterordner noch Videos.",
-      "videoNotFoundTitle": "Video nicht gefunden",
-      "videoNotFoundBody": "Gehe zurück und versuche es erneut.",
-      "loadGroupingFailedTitle": "{kind, select, collections {Sammlungen konnten nicht geladen werden} playlists {Wiedergabelisten konnten nicht geladen werden} categories {Kategorien konnten nicht geladen werden} other {Einträge konnten nicht geladen werden}}",
-      "noGroupingTitle": "{kind, select, collections {Noch keine Sammlungen} playlists {Noch keine Wiedergabelisten} categories {Noch keine Kategorien} other {Noch nichts vorhanden}}",
-      "noGroupingBody": "{kind, select, collections {Erstelle Sammlungen in FunSync auf deinem Desktop — sie erscheinen hier.} playlists {Erstelle Wiedergabelisten in FunSync auf deinem Desktop — sie erscheinen hier.} categories {Erstelle Kategorien in FunSync auf deinem Desktop — sie erscheinen hier.} other {Erstelle Einträge in FunSync auf deinem Desktop.}}",
-      "groupingNotFoundTitle": "Nicht gefunden",
-      "groupingNotFoundBody": "{kind, select, collections {Diese Sammlung existiert nicht mehr auf dem Desktop.} playlists {Diese Wiedergabeliste existiert nicht mehr auf dem Desktop.} categories {Diese Kategorie existiert nicht mehr auf dem Desktop.} other {Dieser Eintrag existiert nicht mehr auf dem Desktop.}}",
-      "groupingEmptyTitle": "Leer",
-      "groupingEmptyBody": "{kind, select, collections {In dieser Sammlung sind derzeit keine Videos verfügbar.} playlists {In dieser Wiedergabeliste sind derzeit keine Videos verfügbar.} categories {In dieser Kategorie sind derzeit keine Videos verfügbar.} other {In diesem Eintrag sind derzeit keine Videos verfügbar.}}"
-    },
-    "player": {
-      "switching": "Skript wird gewechselt…",
-      "connecting": "Verbindung zu Geräten wird hergestellt…",
-      "preparing": "Geräte werden vorbereitet…",
-      "ready": "Geräte bereit",
-      "noScript": "Kein Funscript — nur Video wird abgespielt",
-      "noScriptMatch": "Desktop konnte kein passendes Skript finden",
-      "connected": "Verbunden: {devices}",
-      "noDevices": "Keine Geräte auf dem Desktop verbunden",
-      "connectedCount": "{count, plural, one {Verbundenes Gerät · #} other {Verbundene Geräte · #}}",
-      "intensity": "Funscript-Intensität",
-      "avg": "Ø",
-      "max": "Max",
-      "speedUnit": "Einheiten/s",
-      "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s"
-    }
-  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "EroScripts schließen",
@@ -961,7 +959,8 @@
     "endDismissAria": "Schließen",
     "endText": "Keine weiteren Videos in dieser {source}.",
     "endCta": "Zurück zu {source}",
-    "endSourceFallback": "Liste"
+    "endSourceFallback": "Liste",
+    "sourcePlaylist": "Wiedergabeliste"
   },
   "session": {
     "state": {
@@ -1064,7 +1063,9 @@
       "zoomIn": "Vergrößern (+)",
       "zoomOut": "Verkleinern (-)",
       "fitAll": "Alles einpassen",
-      "save": "Speichern (Ctrl+S)"
+      "save": "Speichern (Ctrl+S)",
+      "stacked": "Gestapelte Ansicht — alle Achsen zeigen",
+      "popout": "Editor in eigenes Fenster ausklappen"
     },
     "modify": {
       "title": "Skript ändern",
@@ -1076,7 +1077,8 @@
       "offsetTime": "Zeit-Offset…",
       "removePauses": "Pausen entfernen…",
       "rangeExtend": "Bereich erweitern/komprimieren…",
-      "generatePattern": "Muster generieren…"
+      "generatePattern": "Muster generieren…",
+      "exportHeatmap": "Heatmap als PNG exportieren…"
     },
     "speedLabel": "Geschwindigkeit:",
     "autosaveLabel": "Auto-Speichern",
@@ -1395,6 +1397,7 @@
     "screenshot": "Bildschirmfoto",
     "loopA": "Schleifenpunkt A setzen",
     "loopB": "Schleifenpunkt B setzen",
+    "toggleVideoLoop": "Video-Wiederholung umschalten",
     "clearLoop": "Schleife löschen / Bereiche schließen",
     "devicesPanel": "Gerätebereich umschalten",
     "deviceSimulator": "Gerätesimulator umschalten",
@@ -1421,7 +1424,7 @@
     "editorMoveFrames": "Aktion(en) ±N Frames zeitlich verschieben",
     "editorDelete": "Auswahl löschen",
     "editorInvert": "Positionen invertieren",
-    "editorPlaceNumpad": "Aktion bei 0 / 11 / 22 / … / 100 setzen",
+    "editorPlaceNumpad": "Aktion bei 0 / 10 / 20 / … / 90 platzieren",
     "editorInsertAtClick": "Aktion an Klickposition einfügen",
     "editorMoveSelected": "Ausgewählte Aktionen verschieben",
     "editorBookmark": "Lesezeichen am Abspielkopf hinzufügen",
@@ -1433,6 +1436,15 @@
     "editorPaste": "Am Abspielkopf einfügen",
     "editorPasteOriginal": "Zu ursprünglichen Zeiten einfügen",
     "editorSave": "Speichern",
-    "editorZoom": "Vergrößern / verkleinern"
+    "editorZoom": "Vergrößern / verkleinern",
+    "editorAlternatingInsert": "Wechselnd einfügen (vorigen Wert umkehren)",
+    "editorRepeatLastStroke": "Letzten Zwei-Aktions-Hub wiederholen",
+    "editorBookmarkNav": "Zum nächsten/vorigen Lesezeichen springen",
+    "editorMultiBand": "Mehrband-Wellenform umschalten (tief/mittel/hoch)",
+    "editorVAD": "Sprachaktivitäts-Spur umschalten",
+    "editorSpeedStep": "Wiedergabegeschwindigkeit verringern/erhöhen",
+    "editorSelectLeftRightOfCursor": "Alles vor/nach dem Abspielkopf auswählen",
+    "editorEqualize": "Angleichen — mittlere Aktionen gleichmäßig in der Zeit verteilen",
+    "editorMoveToPlayhead": "Einzeln ausgewählte Aktion zum Abspielkopf verschieben"
   }
 }

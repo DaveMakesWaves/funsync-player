@@ -18,6 +18,7 @@ const SETTINGS_DEFAULTS = {
   'player.gapSkip.thresholdSec': 10,
   'player.upNext.mode': 'auto',
   'player.upNext.countdownSec': 10,
+  'player.autoplayOnAdvance': false,
   'player.preferMultiAxis': 'single',
   'player.smoothing': 'linear',
   'player.speedLimit': 0,
@@ -547,6 +548,11 @@ export class SettingsPanel {
         <span id="sp-upnext-countdown-val" class="settings-panel__field-value">10s</span>
         <button type="button" id="sp-upnext-countdown-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.upNextResetCountdown')}" aria-label="${t('settingsPanel.playback.upNextResetCountdownAria')}">↻</button>
       </div>
+      <div class="settings-panel__field" id="sp-autoplay-on-advance-row" hidden>
+        <label class="settings-panel__field-label" for="sp-autoplay-on-advance">${t('settingsPanel.playback.autoplayOnAdvanceLabel')}</label>
+        <input type="checkbox" id="sp-autoplay-on-advance" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-upnext-hint">
+        <button type="button" id="sp-autoplay-on-advance-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.autoplayOnAdvanceResetTitle')}" aria-label="${t('settingsPanel.playback.autoplayOnAdvanceResetAria')}">↻</button>
+      </div>
       <div class="settings-panel__hint" id="sp-upnext-hint">${t('settingsPanel.playback.upNextHint')}</div>
     `;
     panel.appendChild(upNextSection);
@@ -688,6 +694,28 @@ export class SettingsPanel {
         const mode = upNextMode?.value || 'auto';
         this._settings.set('player.upNext', { mode, countdownSec: seconds });
         if (this.onUpNextChanged) this.onUpNextChanged(mode, seconds);
+      });
+
+      // Auto-play on advance. Hidden when Up Next is off — the setting
+      // is only meaningful when something is actually advancing.
+      // Read at use-time in app.js::_playUpNext, so no callback needed.
+      const autoplayCheckbox = panel.querySelector('#sp-autoplay-on-advance');
+      const autoplayRow = panel.querySelector('#sp-autoplay-on-advance-row');
+      const autoplaySaved = this._settings.get('player.autoplayOnAdvance');
+      const autoplayVal = typeof autoplaySaved === 'boolean'
+        ? autoplaySaved
+        : SETTINGS_DEFAULTS['player.autoplayOnAdvance'];
+      if (autoplayCheckbox) autoplayCheckbox.checked = autoplayVal;
+      if (autoplayRow) autoplayRow.hidden = upNextModeVal === 'off';
+
+      autoplayCheckbox?.addEventListener('change', () => {
+        this._settings.set('player.autoplayOnAdvance', !!autoplayCheckbox.checked);
+      });
+
+      // Keep the autoplay row in sync with Up Next mode visibility —
+      // if the user turns Up Next off, the autoplay toggle hides too.
+      upNextMode?.addEventListener('change', () => {
+        if (autoplayRow) autoplayRow.hidden = upNextMode.value === 'off';
       });
 
       // Multi-Axis default playback. Toggle from Single → Multi opens
@@ -851,6 +879,22 @@ export class SettingsPanel {
       wireDefault(linearStrategy, null, panel.querySelector('#sp-linear-strategy-reset'), SETTINGS_DEFAULTS['player.linearStrategy']);
       wireDefault(lookahead, lookaheadVal, panel.querySelector('#sp-lookahead-reset'), SETTINGS_DEFAULTS['player.linearLookaheadMs']);
       wireDefault(minStroke, minStrokeVal, panel.querySelector('#sp-min-stroke-reset'), SETTINGS_DEFAULTS['player.minStrokeMs']);
+
+      // Checkbox variant — wireDefault reads/writes `.value` which is
+      // useless for type=checkbox (the meaningful prop is `.checked`).
+      const wireDefaultCheckbox = (input, resetBtn, defaultValue) => {
+        if (!input || !resetBtn) return;
+        const refresh = () => { resetBtn.hidden = input.checked === defaultValue; };
+        resetBtn.addEventListener('click', () => {
+          input.checked = defaultValue;
+          input.dispatchEvent(new Event('change', { bubbles: true }));
+          refresh();
+          input.focus();
+        });
+        input.addEventListener('change', refresh);
+        refresh();
+      };
+      wireDefaultCheckbox(autoplayCheckbox, panel.querySelector('#sp-autoplay-on-advance-reset'), SETTINGS_DEFAULTS['player.autoplayOnAdvance']);
     }, 0);
 
     return panel;

@@ -427,6 +427,106 @@ export class EditableScript {
     this._emit();
   }
 
+  /**
+   * Select every action whose `at` is strictly less than `cursorMs`.
+   * OFS parity: `Ctrl+Alt+Left` — isolate "everything before this point"
+   * for bulk operations without dragging across the timeline.
+   */
+  selectLeftOfCursor(cursorMs) {
+    this._selectedIndices = new Set();
+    for (let i = 0; i < this._actions.length; i++) {
+      if (this._actions[i].at < cursorMs) this._selectedIndices.add(i);
+      else break;
+    }
+    this._emit();
+  }
+
+  /**
+   * Select every action whose `at` is strictly greater than `cursorMs`.
+   * OFS parity: `Ctrl+Alt+Right`.
+   */
+  selectRightOfCursor(cursorMs) {
+    this._selectedIndices = new Set();
+    for (let i = 0; i < this._actions.length; i++) {
+      if (this._actions[i].at > cursorMs) this._selectedIndices.add(i);
+    }
+    this._emit();
+  }
+
+  /**
+   * Equalize selected actions evenly in time between the first and
+   * last of the selection. Positions stay put — only `at` timestamps
+   * are re-spaced. OFS parity (`E` key). No-op for selections of 0/1/2.
+   * First and last selected actions are preserved exactly so the
+   * outer envelope of the pattern doesn't shift.
+   */
+  equalizeSelected() {
+    const sel = [...this._selectedIndices].sort((a, b) => a - b);
+    if (sel.length < 3) return;
+    this._pushState();
+
+    const first = this._actions[sel[0]];
+    const last = this._actions[sel[sel.length - 1]];
+    const span = last.at - first.at;
+    const step = span / (sel.length - 1);
+
+    for (let i = 1; i < sel.length - 1; i++) {
+      const newAt = Math.round(first.at + step * i);
+      this._actions[sel[i]].at = newAt;
+    }
+
+    this._dirty = true;
+    this._emit();
+  }
+
+  /**
+   * Move the *single* selected action to `cursorMs`. OFS parity (`End`
+   * key). No-op when 0 or 2+ are selected (ambiguous target). Returns
+   * the new index of the moved action, or -1 if no-op.
+   */
+  moveSelectedToTime(cursorMs) {
+    if (this._selectedIndices.size !== 1) return -1;
+    const idx = [...this._selectedIndices][0];
+    return this.updateAction(idx, { at: cursorMs });
+  }
+
+  /**
+   * Insert an action at `cursorMs` with the position flipped relative
+   * to the most recent existing action. If the last action's pos is
+   * ≥ 50, place at 0; otherwise place at 100. Replaces the `1`/`9`
+   * ping-pong on the numpad with one key. Empty script falls back to 100.
+   */
+  insertAlternating(cursorMs) {
+    cursorMs = Math.round(cursorMs);
+    let lastPos = -1;
+    for (let i = this._actions.length - 1; i >= 0; i--) {
+      if (this._actions[i].at <= cursorMs) { lastPos = this._actions[i].pos; break; }
+    }
+    if (lastPos < 0 && this._actions.length > 0) lastPos = this._actions[this._actions.length - 1].pos;
+    const pos = lastPos < 0 ? 100 : (lastPos >= 50 ? 0 : 100);
+    return this.insertAction(cursorMs, pos);
+  }
+
+  /**
+   * Repeat the trailing two-action stroke at `cursorMs`. OFS parity
+   * (`Home` key). Preserves delta-time and positions. Inserts two new
+   * actions and selects them both. Returns `[firstIdx, secondIdx]` or
+   * `null` if fewer than 2 actions exist or the stroke has zero span.
+   */
+  repeatLastStroke(cursorMs) {
+    if (this._actions.length < 2) return null;
+    const last = this._actions[this._actions.length - 1];
+    const prev = this._actions[this._actions.length - 2];
+    const span = last.at - prev.at;
+    if (span <= 0) return null;
+    cursorMs = Math.round(cursorMs);
+    const firstIdx = this.insertAction(cursorMs, prev.pos);
+    const secondIdx = this.insertAction(cursorMs + span, last.pos);
+    this._selectedIndices = new Set([firstIdx, secondIdx]);
+    this._emit();
+    return [firstIdx, secondIdx];
+  }
+
   // --- Advanced Operations ---
 
   /**
@@ -442,6 +542,25 @@ export class EditableScript {
     }
     this._dirty = true;
     this._emit();
+  }
+
+  /**
+   * Dry-run RDP simplification. Returns `{kept, removed, total}` counts
+   * a hypothetical `simplify(epsilon)` would produce, without mutating
+   * actions or selection. Drives the Simplify modal's live preview.
+   */
+  previewSimplify(epsilon) {
+    const sortedIndices = [...this._selectedIndices].sort((a, b) => a - b);
+    if (sortedIndices.length < 3) {
+      return { kept: sortedIndices.length, removed: 0, total: sortedIndices.length };
+    }
+    const points = sortedIndices.map(i => this._actions[i]);
+    const simplified = this._rdpSimplify(points, epsilon);
+    return {
+      kept: simplified.length,
+      removed: points.length - simplified.length,
+      total: points.length,
+    };
   }
 
   /**

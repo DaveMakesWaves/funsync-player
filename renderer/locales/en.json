@@ -101,6 +101,14 @@
       "title": "Playback speed (< / >)",
       "menuLabel": "Playback speed"
     },
+    "loopVideo": {
+      "menuLabel": "Loop video",
+      "aria": "Loop video toggle",
+      "stateOn": "On",
+      "stateOff": "Off",
+      "chipAria": "Loop video on",
+      "chipTitle": "Loop video (Shift+L)"
+    },
     "vrFormatMenu": "VR Format…",
     "preparingScript": "Preparing script…",
     "skipToNextAction": "Skip to next action",
@@ -329,6 +337,8 @@
     "emptyCta": "Create Your First Playlist",
     "videoCount": "{count, plural, one {# video} other {# videos}}",
     "playAll": "Play All",
+    "loopOnTitle": "Loop on — restart from item 1 after the last video",
+    "loopOffTitle": "Loop off — stop after the last video",
     "renamePlaylist": "Rename Playlist",
     "deletePlaylist": "Delete Playlist",
     "confirmDelete": "Delete this playlist?",
@@ -476,6 +486,7 @@
     "screenshot": "Screenshot",
     "loopA": "Set loop point A",
     "loopB": "Set loop point B",
+    "toggleVideoLoop": "Toggle video loop",
     "clearLoop": "Clear loop / close panels",
     "devicesPanel": "Toggle Devices panel",
     "deviceSimulator": "Toggle device simulator",
@@ -502,12 +513,21 @@
     "editorMoveFrames": "Move action(s) ±N frames",
     "editorDelete": "Delete selected",
     "editorInvert": "Invert positions",
-    "editorPlaceNumpad": "Place action at 0 / 11 / 22 / … / 100",
+    "editorPlaceNumpad": "Place action at 0 / 10 / 20 / … / 90",
     "editorInsertAtClick": "Insert action at click position",
     "editorMoveSelected": "Move selected actions",
+    "editorAlternatingInsert": "Alternating insert (flip from previous)",
+    "editorRepeatLastStroke": "Repeat trailing two-action stroke",
     "editorBookmark": "Add bookmark at playhead",
+    "editorBookmarkNav": "Jump to next / previous bookmark",
     "editorRecording": "Toggle recording mode",
     "editorWaveform": "Toggle waveform",
+    "editorMultiBand": "Toggle multi-band waveform (low / mid / high)",
+    "editorVAD": "Toggle voice-activity track",
+    "editorSpeedStep": "Step playback speed down / up",
+    "editorSelectLeftRightOfCursor": "Select everything before / after the playhead",
+    "editorEqualize": "Equalize — redistribute middle actions evenly in time",
+    "editorMoveToPlayhead": "Move single-selected action to playhead",
     "editorUndo": "Undo",
     "editorRedo": "Redo",
     "editorCopyCut": "Copy / cut selected",
@@ -759,6 +779,9 @@
       "upNextResetCountdown": "Reset to default (10s)",
       "upNextResetCountdownAria": "Reset Countdown to default",
       "upNextHint": "Shows the next item in the current library / playlist / category at the end of the video, with an autoplay countdown. Hover the card to pause the countdown; click × or press Esc to dismiss.",
+      "autoplayOnAdvanceLabel": "Auto-play the next video",
+      "autoplayOnAdvanceResetTitle": "Reset to default (off)",
+      "autoplayOnAdvanceResetAria": "Reset Auto-play to default",
       "multiHeader": "Multi-Axis",
       "fieldDefaultPlayback": "Default playback",
       "preferSingle": "Single axis (default)",
@@ -1061,7 +1084,8 @@
     "endDismissAria": "Dismiss",
     "endText": "No more videos in this {source}.",
     "endCta": "Back to {source}",
-    "endSourceFallback": "list"
+    "endSourceFallback": "list",
+    "sourcePlaylist": "playlist"
   },
   "session": {
     "state": {
@@ -1164,7 +1188,9 @@
       "zoomIn": "Zoom In (+)",
       "zoomOut": "Zoom Out (-)",
       "fitAll": "Fit All",
-      "save": "Save (Ctrl+S)"
+      "save": "Save (Ctrl+S)",
+      "stacked": "Stacked View — show all axes",
+      "popout": "Pop out editor to a separate window"
     },
     "modify": {
       "title": "Modify script",
@@ -1176,7 +1202,8 @@
       "offsetTime": "Offset Time…",
       "removePauses": "Remove Pauses…",
       "rangeExtend": "Range Extend/Compress…",
-      "generatePattern": "Generate Pattern…"
+      "generatePattern": "Generate Pattern…",
+      "exportHeatmap": "Export Heatmap PNG…"
     },
     "speedLabel": "Speed:",
     "autosaveLabel": "Autosave",

@@ -4,6 +4,7 @@ import { VideoPlayer, PLAYBACK_RATE_PRESETS } from './video-player.js';
 import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch } from './funscript-engine.js';
+import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
 import { HandyManager } from './handy-manager.js';
 import { SyncEngine } from './sync-engine.js';
 import { ButtplugManager } from './buttplug-manager.js';
@@ -86,9 +87,19 @@ class App {
     this._currentVideoPath = null;
     this._playQueue = [];
     this._playQueueIndex = -1;
+    this._playQueueSource = null; // { sourceLabel, sourceContext } — captured at Play All start
+    this._playQueueLoop = false;  // when true, queue wraps after the last item (per-playlist preference)
     this._navStack = ['library']; // navigation history stack — current view is last element
     this._scriptCloudUrl = null; // cloud URL of the last uploaded script (for re-setup after HDSP)
-    this._waitingForScript = false; // true while funscript is uploading to Handy cloud
+    // Cloud-upload gate. `_pendingUploads` is the set of devices whose
+    // funscript upload is currently in flight; `_waitingForScript` is
+    // its derived "any of them" flag, kept as a separate variable for
+    // back-compat with all the existing readers (loadVideo's loadeddata
+    // handler, the variant-switch loading overlay path, the timeout
+    // fallback). When the last upload resolves, `_resolveCloudUpload`
+    // flips the flag and triggers the deferred `play()`.
+    this._pendingUploads = new Set();
+    this._waitingForScript = false;
     this._scriptLoadingTimeout = null; // fallback timeout for script upload
   }
 
@@ -230,6 +241,10 @@ class App {
       },
       onSmoothingChanged: (mode) => {
         if (this.buttplugSync) this.buttplugSync.setInterpolationMode(mode);
+        // Bug B2 (community report 2026-05-23): tcode-sync has full
+        // interpolator plumbing but was never wired to the settings
+        // callback — TCode users got linear regardless of choice.
+        if (this.tcodeSync) this.tcodeSync.setInterpolationMode(mode);
       },
       onSpeedLimitChanged: (maxSpeed) => {
         if (this.buttplugSync) this.buttplugSync.setSpeedLimit(maxSpeed);
@@ -293,6 +308,16 @@ class App {
       onAddSource: () => this._addSource(),
       onTestDevice: (deviceId, buttplugIndex) => this._testDevice(deviceId, buttplugIndex),
       onOpenVRFormat: (path) => this._openVRFormatPanel(path),
+      // Lookup callback so library cards can show the embedded-multi-axis
+      // badge for files that bundle pitch/roll/twist inside the main
+      // funscript (HereSphere `additional_axes`, OFS-extended `raw`,
+      // sibling-key, inline-TCode). Sync — returns cached data only.
+      getEmbeddedAxes: (path) => this.getEmbeddedAxes(path),
+      // Async detection — used by the modal-open path to probe a file
+      // the user hasn't played yet (cache miss). Populates the cache
+      // on success so subsequent sync reads hit it.
+      detectEmbeddedAxesForPath: (path) => this.detectEmbeddedAxesForPath(path),
+      onExtractEmbeddedAxes: (video) => this._extractEmbeddedAxesToCompanions(video),
       settings: this.settings,
     });
 
@@ -304,7 +329,7 @@ class App {
       settings: this.settings,
       library: this.library,
       onPlayVideo: (videoData, funscriptData, subtitleData, variants) => this._playFromLibrary(videoData, funscriptData, subtitleData, variants),
-      onPlayAll: (videoList) => this._playAll(videoList),
+      onPlayAll: (videoList, opts) => this._playAll(videoList, opts),
     });
 
     // Categories
@@ -389,6 +414,7 @@ class App {
     eventBus.on('vrFormat:changed', () => this._refreshVRFormatMenuVisibility());
 
     this._wireSpeedControl();
+    this._wireLoopVideo();
 
     // Wire thumbnail preview on progress hover
     this.videoPlayer.onProgressHover = (time) => {
@@ -555,6 +581,9 @@ class App {
         const savedSpeedLimit = this.settings.get('player.speedLimit') || 0;
         this.buttplugSync.setInterpolationMode(savedSmoothing);
         this.buttplugSync.setSpeedLimit(savedSpeedLimit);
+        // B2 boot path — keep tcodeSync in sync with the saved
+        // smoothing mode (parallel to the runtime callback above).
+        if (this.tcodeSync) this.tcodeSync.setInterpolationMode(savedSmoothing);
 
         // Linear strategy: action-boundary (default) sends one LinearCmd per
         // stroke with the full duration, letting the device's firmware handle
@@ -809,6 +838,7 @@ class App {
         onOpenFile: () => this.dragDrop._openNativeDialog(),
         scriptEditor: null, // Set after ScriptEditor creation below
         onNavigate: (viewId) => this._navigateTo(viewId),
+        onToggleLoop: () => { this._toggleVideoLoop?.(); },
       });
 
       // Auto-connect if a key is saved
@@ -1222,6 +1252,16 @@ class App {
     // stale-path fallback so we can persist the corrections at the end.
     let scriptPathsHealed = false;
 
+    // Collision guard (community report, TODO.md backlog): if main is
+    // routed to native Handy AND any CR route ALSO points at Handy,
+    // the CR upload races and overwrites the main upload (last call
+    // wins, no determinism). Detect once up-front; CR Handy-uploads
+    // are skipped when this fires. Main owns the Handy in collision —
+    // it was the user's primary choice via the dropdown that maps the
+    // main script to native Handy.
+    const mainOnHandy = routes.some(r => r.role === 'main' && r.deviceId === 'handy');
+    let suppressedHandyUploads = 0;
+
     let axisCounter = 1;
     for (const route of routes) {
       if (route.role === 'main') {
@@ -1258,10 +1298,16 @@ class App {
           this.tcodeSync.setAxisActions(syntheticAxis, actions);
         }
 
-        // For Handy on a non-main route: upload and start its own sync
+        // For Handy on a non-main route: upload and start its own sync.
+        // Skipped when main is already on Handy (collision guard above).
         if (route.deviceId === 'handy' && this.handyManager?.connected) {
-          await this.handyManager.uploadAndSetScript(content);
-          this.syncEngine?._scriptReady && this.syncEngine.start();
+          if (mainOnHandy) {
+            suppressedHandyUploads++;
+            console.log('[CustomRouting] Skipping Handy upload for CR route — main already targets Handy (last-write-wins collision avoided).');
+          } else {
+            await this.handyManager.uploadAndSetScript(content);
+            this.syncEngine?._scriptReady && this.syncEngine.start();
+          }
         }
 
         // For Autoblow on a non-main route: upload script
@@ -1288,6 +1334,18 @@ class App {
     // also persists when buttplug indices self-heal, but its check only
     // covers index changes — explicit call here for the path case.
     if (scriptPathsHealed) this._persistCustomRoutes();
+
+    // One-time toast if the collision guard suppressed any uploads —
+    // tell the user the device is bound to main, not to the CR route
+    // they configured. Otherwise the CR script appears to be ignored
+    // with no visible explanation.
+    if (suppressedHandyUploads > 0) {
+      showToast(
+        `Native Handy is on main (${suppressedHandyUploads} custom-routing upload${suppressedHandyUploads > 1 ? 's' : ''} skipped to avoid collision)`,
+        'warn',
+        4500,
+      );
+    }
 
     // Update editor script list for custom routing
     if (this.scriptEditor) {
@@ -1905,6 +1963,7 @@ class App {
       }
 
       this._remoteActive = true;
+      this._refreshLoopVideoVisibility?.();
       const actionCount = this.funscriptEngine.getActions().length;
       this.remoteBridge.sendToPhone({
         type: 'script-ready',
@@ -1924,6 +1983,7 @@ class App {
 
   _onRemotePhoneDisconnected(_ip) {
     this._remoteActive = false;
+    this._refreshLoopVideoVisibility?.();
 
     // Stop all device sync engines and rebind to the local player.
     if (this.syncEngine?._active) this.syncEngine.stop();
@@ -2913,21 +2973,39 @@ class App {
   }
 
   async _tryStartAutoblowSync() {
-    if (!this.autoblowSync || !this.autoblowManager?.connected) return;
-    if (!this.funscriptEngine.isLoaded) return;
+    // Every exit path resolves the gate so a caller that marked
+    // 'autoblow' pending (e.g. _playFromLibrary with autoplay-on-advance)
+    // isn't stuck behind the loading overlay if the upload short-
+    // circuits, disconnects, or fails. Resolve is idempotent; calls
+    // when nothing was marked are no-ops.
+    if (!this.autoblowSync || !this.autoblowManager?.connected) {
+      this._resolveCloudUpload('autoblow');
+      return;
+    }
+    if (!this.funscriptEngine.isLoaded) {
+      this._resolveCloudUpload('autoblow');
+      return;
+    }
 
     // Upload the funscript if not already uploaded
     if (!this.autoblowSync.scriptReady) {
       const rawContent = this.funscriptEngine.getRawContent();
-      if (!rawContent) return;
+      if (!rawContent) {
+        this._resolveCloudUpload('autoblow');
+        return;
+      }
       const ok = await this.autoblowSync.uploadScript(rawContent);
-      if (!ok) return;
+      if (!ok) {
+        this._resolveCloudUpload('autoblow');
+        return;
+      }
     }
 
     if (!this.autoblowSync._active) {
       console.log('[Autoblow] Starting sync');
       this.autoblowSync.start();
     }
+    this._resolveCloudUpload('autoblow');
   }
 
   /**
@@ -2984,12 +3062,14 @@ class App {
   async _uploadAndStartSync() {
     if (!this.handyManager?.connected) {
       console.log('[Handy] Not connected, skipping script upload');
+      this._resolveCloudUpload('handy');
       return;
     }
 
     const rawContent = this.funscriptEngine.getRawContent();
     if (!rawContent) {
       console.log('[Handy] No raw funscript content available');
+      this._resolveCloudUpload('handy');
       return;
     }
 
@@ -3000,31 +3080,14 @@ class App {
       // Store cloud URL for potential re-setup
       this._scriptCloudUrl = this.handyManager._lastCloudUrl || null;
       this.syncEngine._scriptReady = true;
-
-      // If video was waiting for script upload, start playback now
-      if (this._waitingForScript) {
-        this._waitingForScript = false;
-        if (this._scriptLoadingTimeout) {
-          clearTimeout(this._scriptLoadingTimeout);
-          this._scriptLoadingTimeout = null;
-        }
-        this._hideScriptLoadingOverlay();
-        this.videoPlayer.video.play().catch(() => {});
-      }
-
+      this._resolveCloudUpload('handy');
       this.syncEngine.start();
       console.log('[Handy] Sync engine started — HSSP active');
     } else {
-      // Upload failed — play anyway so the user isn't stuck
-      if (this._waitingForScript) {
-        this._waitingForScript = false;
-        if (this._scriptLoadingTimeout) {
-          clearTimeout(this._scriptLoadingTimeout);
-          this._scriptLoadingTimeout = null;
-        }
-        this._hideScriptLoadingOverlay();
-        this.videoPlayer.video.play().catch(() => {});
-      }
+      // Upload failed — resolve the gate so the user isn't stuck behind
+      // the loading overlay; show a toast so they know why the device
+      // is silent.
+      this._resolveCloudUpload('handy');
       showToast(t('toast.handyUploadFailed'), 'error');
     }
   }
@@ -3061,7 +3124,11 @@ class App {
     if (this.buttplugSync) this.buttplugSync._customRoutingActive = false;
     this.funscriptEngine.clear();
     this._scriptCloudUrl = null;
-    this._waitingForScript = false;
+    // Fresh video — drop any gating from the previous video's load.
+    // Per-device resolves only fire as uploads complete; without this
+    // force-clear, a video that never finished its prior gate would
+    // leak the pending state into this load.
+    this._clearCloudUploadGate();
     if (this._scriptLoadingTimeout) {
       clearTimeout(this._scriptLoadingTimeout);
       this._scriptLoadingTimeout = null;
@@ -3259,10 +3326,22 @@ class App {
     try {
       // Use loadContent directly if textContent is already available (from library or IPC),
       // otherwise use loadFile which calls file.text() for real File objects
+      const rawContent = file.textContent != null
+        ? file.textContent
+        : await file.text?.();
       const info = file.textContent != null
         ? await this.funscriptEngine.loadContent(file.textContent, file.name)
         : await this.funscriptEngine.loadFile(file);
       console.log('Funscript loaded:', info);
+
+      // Community-driven: many forum funscripts bundle pitch/roll/twist
+      // INTO the single main file (HereSphere `additional_axes`, OFS
+      // `raw`, sibling-key, or inline TCode formats). FunSync's
+      // companion-file detection misses these — the device only gets
+      // the L0 main stroke. Detect + auto-feed multi-axis here so OSR2
+      // / SR6 owners with combined files get their rotation axes
+      // immediately on load, no manual extraction needed.
+      this._feedEmbeddedMultiAxis(rawContent);
 
       this._showFunscriptBadge(info);
 
@@ -3328,6 +3407,11 @@ class App {
     const badge = document.getElementById('funscript-badge');
     if (!badge || !info) return;
 
+    // Stash so `_feedEmbeddedMultiAxis` can re-render the tooltip
+    // after embedded axes are detected (axes arrive AFTER the main
+    // info via the load flow).
+    this._lastFunscriptInfo = info;
+
     let title = `${info.filename} — ${info.actionCount} actions, ${info.durationFormatted}`;
 
     if (this._currentCustomRoutes && this._currentCustomRoutes.length > 0) {
@@ -3352,6 +3436,18 @@ class App {
       if (this._currentMultiAxis.buttplugVib) {
         lines.push('Vib → Buttplug.io');
       }
+      title = lines.join('\n');
+    }
+
+    // Embedded multi-axis (HereSphere / OFS-extended / sibling / inline
+    // TCode formats). Surfaces axes that live INSIDE the main file
+    // rather than in companion files — otherwise the user has no idea
+    // the device is reading more than just L0.
+    const embedded = this.getEmbeddedAxes(this._currentVideoPath);
+    if (embedded && embedded.suffixes.length > 0) {
+      const lines = [title, '— Embedded in main —', ...embedded.suffixes.map(s =>
+        `${s.charAt(0).toUpperCase() + s.slice(1)} (${embedded.axes.get(s).length} actions)`
+      )];
       title = lines.join('\n');
     }
 
@@ -3879,6 +3975,8 @@ class App {
     this._navigateTo('player');
     this._playQueue = [];
     this._playQueueIndex = -1;
+    this._playQueueSource = null;
+    this._playQueueLoop = false;
     this._updateQueueUI();
 
     // Capture the play context attached by library/playlists/categories
@@ -3901,7 +3999,22 @@ class App {
     // firing.
     this._resetCustomRoutingState();
 
-    this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: false });
+    // Up Next-driven advances opt into auto-play via _autoPlayOnLoad
+    // when the user enabled player.autoplayOnAdvance. Direct library
+    // clicks never set the flag — they always load paused so a click
+    // doesn't immediately commit to playback.
+    const autoPlayOnLoad = !!videoData?._autoPlayOnLoad;
+    // If we're auto-playing AND there's a funscript to upload, gate
+    // playback on every connected cloud-sync device (Handy / Autoblow).
+    // Without this, `loadeddata` would fire `.play()` immediately and
+    // the video would race ahead while the cloud upload(s) are still
+    // in flight (1–3s of device silence). `_resolveCloudUpload` from
+    // each device's upload completion path lifts the gate when the
+    // last one finishes.
+    if (autoPlayOnLoad && funscriptData?.textContent) {
+      this._markCloudUploadsPending();
+    }
+    this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: autoPlayOnLoad });
 
     // Set variants AFTER loadVideo (which resets them)
     this._currentVariants = variants || [];
@@ -4063,6 +4176,221 @@ class App {
     }
   }
 
+  /**
+   * Embedded multi-axis fallback. When a funscript bundles
+   * pitch/roll/twist into the SINGLE main file (instead of separate
+   * `.pitch.funscript` / `.roll.funscript` companion files), the
+   * canonical companion-detection in `_loadMultiAxisScripts` finds
+   * nothing — the device only gets L0. This method runs the
+   * `extractEmbeddedAxes` detector against the raw file content; if
+   * any embedded axes are found, they're fed into the multi-axis
+   * sync engines (ButtplugSync + TCodeSync) exactly the same way
+   * companion-file axes are.
+   *
+   * Side-effects:
+   *   - Sync engines receive `setAxisActions(tcode, actions)` per axis
+   *   - `_embeddedAxesByPath` cache populated so the badge tooltip,
+   *     library card, and Change-Funscript modal can surface the
+   *     embedded axes without re-parsing the file
+   *   - First time per video path per session: an info toast tells
+   *     the user that embedded axes were detected (suppressed on
+   *     subsequent loads of the same path so repeats stay quiet)
+   *
+   * No persistence to disk — axes only live in memory for this
+   * session. The kebab "Extract embedded axes…" action materialises
+   * them as proper companion files on the user's request.
+   *
+   * Surfaced via community report 2026-05-24: OSR2 owner downloaded
+   * a combined-format script from the forum; only the up-down motion
+   * worked because rotation axes were embedded, not companion-paired.
+   */
+  _feedEmbeddedMultiAxis(rawContent) {
+    if (!rawContent) return;
+    let parsed;
+    try { parsed = JSON.parse(rawContent); } catch { return; }
+    const extracted = extractEmbeddedAxes(parsed);
+
+    // Cache (or clear) for this video's funscript path. Other UI
+    // surfaces — badge tooltip, library card multi-badge, modal —
+    // read this cache so they don't re-parse the file.
+    if (!this._embeddedAxesByPath) this._embeddedAxesByPath = new Map();
+    if (!this._embeddedAxesToastShown) this._embeddedAxesToastShown = new Set();
+    const cacheKey = this._currentVideoPath || rawContent.slice(0, 64);
+
+    if (extracted.size === 0) {
+      this._embeddedAxesByPath.delete(cacheKey);
+      return;
+    }
+
+    // Same suffix→TCode map as `_loadMultiAxisScripts`.
+    const SUFFIX_TO_TCODE = {
+      surge: 'L1', sway: 'L2',
+      twist: 'R0', roll: 'R1', pitch: 'R2',
+      vib: 'V0', lube: 'V1', pump: 'V1',
+      suction: 'V2', valve: 'A0',
+    };
+
+    // Clear previous embedded-axis state so a video switch doesn't
+    // leak old axes into the new file.
+    if (this.buttplugSync?.clearAxisActions) this.buttplugSync.clearAxisActions();
+
+    const fedSuffixes = [];
+    for (const [suffix, actions] of extracted) {
+      const tcode = SUFFIX_TO_TCODE[suffix];
+      if (!tcode) continue;
+      if (!Array.isArray(actions) || actions.length < 2) continue;
+      this.buttplugSync?.setAxisActions?.(tcode, actions);
+      this.tcodeSync?.setAxisActions?.(tcode, actions);
+      fedSuffixes.push(suffix);
+      console.log(`[EmbeddedMultiAxis] Loaded ${suffix} (${tcode}): ${actions.length} actions`);
+    }
+    if (fedSuffixes.length === 0) return;
+
+    // Cache for other surfaces. Store both the suffix list (cheap to
+    // iterate) and the full action arrays (so the "Extract to
+    // companions" action doesn't need to re-parse the file).
+    this._embeddedAxesByPath.set(cacheKey, {
+      suffixes: fedSuffixes,
+      axes: extracted,
+    });
+
+    // Toast only once per video path per session. Repeated plays of
+    // the same file stay quiet.
+    if (!this._embeddedAxesToastShown.has(cacheKey)) {
+      this._embeddedAxesToastShown.add(cacheKey);
+      showToast(
+        `Multi-axis detected — loaded ${fedSuffixes.length} embedded ${fedSuffixes.length === 1 ? 'axis' : 'axes'}: ${fedSuffixes.join(', ')}`,
+        'info',
+        4000,
+      );
+    }
+
+    // Refresh the badge tooltip so the embedded-axes line shows up
+    // alongside the main filename. _showFunscriptBadge reads
+    // _embeddedAxesByPath, so re-invoking it picks up the new cache.
+    if (this._lastFunscriptInfo) this._showFunscriptBadge(this._lastFunscriptInfo);
+  }
+
+  /** Read-only accessor for the embedded-axes cache used by library
+   *  cards and the Change-Funscript modal. Returns `null` for paths
+   *  with no detected embedded axes. */
+  getEmbeddedAxes(funscriptPath) {
+    if (!this._embeddedAxesByPath) return null;
+    return this._embeddedAxesByPath.get(funscriptPath) || null;
+  }
+
+  /** On-demand detection — read a funscript file from disk and probe
+   *  for embedded axes. Used by the Change-Funscript modal so the
+   *  axis dropdowns can show `(embedded in main)` for files the user
+   *  hasn't played yet. Populates the same cache so subsequent reads
+   *  hit the in-memory copy. */
+  async detectEmbeddedAxesForPath(funscriptPath) {
+    if (!funscriptPath || typeof funscriptPath !== 'string') return null;
+    const cached = this.getEmbeddedAxes(funscriptPath);
+    if (cached) return cached;
+    try {
+      const content = await window.funsync.readFunscript(funscriptPath);
+      if (!content) return null;
+      const parsed = JSON.parse(content);
+      const extracted = extractEmbeddedAxes(parsed);
+      if (extracted.size === 0) return null;
+      if (!this._embeddedAxesByPath) this._embeddedAxesByPath = new Map();
+      const entry = { suffixes: [...extracted.keys()], axes: extracted };
+      this._embeddedAxesByPath.set(funscriptPath, entry);
+      return entry;
+    } catch (err) {
+      console.warn('[EmbeddedMultiAxis] detect failed for', funscriptPath, err?.message);
+      return null;
+    }
+  }
+
+  /**
+   * Extract embedded axes to disk as companion `.funscript` files.
+   * Called from the library kebab "Extract embedded axes…" item.
+   *
+   * For each detected axis:
+   *  1. Build a `.funscript`-shaped JSON via `buildCompanionFiles`
+   *  2. Write to `<videoStem>.<suffix>.funscript` via IPC
+   *  3. Update `library.associations[videoPath]` to register the new
+   *     companion (mode → multi if not already; axes → suffix map)
+   *
+   * After this completes, the next library scan picks up the new
+   * companion files via the standard `detectCompanionFiles` path —
+   * which means the multi badge, Stacked Lane View, modal dropdowns,
+   * all the existing multi-axis surfaces just work.
+   */
+  async _extractEmbeddedAxesToCompanions(video) {
+    if (!video?.funscriptPath || !video?.path) {
+      showToast('Cannot extract — video or funscript path missing', 'error');
+      return;
+    }
+    const entry = this.getEmbeddedAxes(video.funscriptPath)
+      || await this.detectEmbeddedAxesForPath(video.funscriptPath);
+    if (!entry || entry.suffixes.length === 0) {
+      showToast('No embedded axes detected in this funscript', 'info');
+      return;
+    }
+    const files = buildCompanionFiles(entry.axes);
+    const paths = companionPathMap(video.path, entry.suffixes);
+
+    let wrote = 0;
+    const failed = [];
+    for (const f of files) {
+      const targetPath = paths[f.suffix];
+      if (!targetPath) continue;
+      try {
+        const content = JSON.stringify(f.content);
+        const result = await window.funsync.writeFunscript(content, targetPath);
+        if (result) {
+          wrote++;
+        } else {
+          failed.push(f.suffix);
+        }
+      } catch (err) {
+        console.warn('[EmbeddedMultiAxis] write failed', f.suffix, err?.message);
+        failed.push(f.suffix);
+      }
+    }
+
+    if (wrote === 0) {
+      showToast(`Extraction failed (${failed.join(', ')})`, 'error');
+      return;
+    }
+
+    // Register the extracted axes as a multi-axis association so the
+    // library card, modal, stacked-view all pick them up without a
+    // rescan. Preserve any existing `single` slot as the fallback main.
+    try {
+      const assocs = this.settings?.get?.('library.associations') || {};
+      const existing = assocs[video.path] || {};
+      const multi = {
+        ...(existing.multi || {}),
+        main: existing.multi?.main || video.funscriptPath,
+        axes: { ...(existing.multi?.axes || {}), ...paths },
+      };
+      assocs[video.path] = {
+        ...existing,
+        active: 'multi',
+        single: existing.single || video.funscriptPath,
+        multi,
+      };
+      this.settings?.set?.('library.associations', assocs);
+    } catch (err) {
+      console.warn('[EmbeddedMultiAxis] association update failed:', err?.message);
+    }
+
+    // Refresh the library so the new companions show up in dropdowns
+    // and the multi badge promotes from "embedded" to the standard
+    // companion-detected variant. Non-blocking.
+    this.library?.ensureScanned?.(true).catch(() => {});
+
+    showToast(
+      `Extracted ${wrote} ${wrote === 1 ? 'axis' : 'axes'} to companion files${failed.length ? ` (${failed.length} failed)` : ''}`,
+      wrote > 0 ? 'info' : 'error',
+      4500,
+    );
+  }
+
   _formatActionsDuration(actions) {
     if (!actions || actions.length === 0) return '0:00';
     const totalMs = actions[actions.length - 1].at - actions[0].at;
@@ -4185,6 +4513,95 @@ class App {
 
     // Initialise — covers the path where a video is already loaded.
     updateLabels(this.videoPlayer.video.playbackRate || 1);
+  }
+
+  /**
+   * Wire the "Loop video" overflow menu item + the loop chip + the
+   * Shift+L shortcut. Session-scoped: `video.loop` resets to `false`
+   * on every new video load (the existing reset path in `loadVideo`
+   * already does this — HTMLMediaElement's default is `false`, and we
+   * set `.src` which reconstructs media state). When loop is on, Up
+   * Next stays suppressed via the existing `_syncUpNextSuppression`
+   * check (it already reads `video.loop`).
+   */
+  _wireLoopVideo() {
+    const menuItem = document.getElementById('btn-loop-video');
+    const stateLabel = document.getElementById('loop-video-state');
+    const chip = document.getElementById('loop-chip');
+    if (!menuItem || !stateLabel || !chip) return;
+
+    const refresh = () => {
+      const on = !!this.videoPlayer.video.loop;
+      menuItem.setAttribute('aria-checked', String(on));
+      stateLabel.textContent = on
+        ? t('player.loopVideo.stateOn')
+        : t('player.loopVideo.stateOff');
+      chip.hidden = !on;
+      // Sync Up Next suppression — engine reads video.loop directly,
+      // but only re-evaluates on its own check cadence. Force a check
+      // now so the card hides immediately when the user turns loop on.
+      this._syncUpNextSuppression();
+      this.upNextEngine?.check();
+    };
+
+    const toggle = () => {
+      // Defensive: ignore toggle requests while a phone is driving
+      // playback — control is suppressed in the UI but the keyboard
+      // shortcut could still fire it. Phone's <video> doesn't mirror
+      // the loop flag, so toggling here would desync the device
+      // (looping on desktop's timeline) from the phone's playback.
+      if (this._remoteActive) return;
+      this.videoPlayer.video.loop = !this.videoPlayer.video.loop;
+      refresh();
+    };
+
+    menuItem.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+    chip.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggle();
+    });
+
+    // Re-paint on every video load so the label/aria stay accurate.
+    // The flag itself is reset to `false` by `loadVideo` via the `.src`
+    // assignment — we don't carry loop state across videos.
+    this.videoPlayer.video.addEventListener('loadedmetadata', refresh);
+
+    refresh();
+    this._refreshLoopVideoVisibility = () => this._applyLoopVideoVisibility(menuItem, chip, refresh);
+    this._refreshLoopVideoVisibility();
+
+    // Expose the toggle so the keyboard handler can reach it without
+    // duplicating the state-sync logic.
+    this._toggleVideoLoop = toggle;
+  }
+
+  /**
+   * Hide the Loop video menu item + chip while a phone is driving
+   * playback. Loop only makes sense for the desktop-driven timeline —
+   * the phone's <video> doesn't mirror the loop flag, so leaving the
+   * control enabled would desync the device (which follows desktop
+   * time) from the phone's video. If loop happens to be on when the
+   * remote takes over, force it off so the device doesn't keep looping
+   * the desktop's timeline while the phone plays straight through.
+   */
+  _applyLoopVideoVisibility(menuItem, chip, refresh) {
+    const suppressed = !!this._remoteActive;
+    menuItem.hidden = suppressed;
+    if (suppressed && this.videoPlayer.video.loop) {
+      this.videoPlayer.video.loop = false;
+      refresh();
+    } else if (!suppressed) {
+      // Chip visibility is owned by `refresh` (mirrors video.loop);
+      // re-running it covers both "remote just disconnected" and the
+      // initial paint.
+      refresh();
+    } else {
+      // Suppressed AND loop is off — just make sure the chip is hidden.
+      chip.hidden = true;
+    }
   }
 
   _wireGapSkipUI() {
@@ -4375,7 +4792,22 @@ class App {
    * via `_playContextOverride` (per SCOPE §3.5 immutability).
    */
   async _playUpNext(path) {
-    if (!path || !this.library) return;
+    if (!path) return;
+    // Queue source: advance through the queue mechanism so prev/next
+    // buttons + queue indicator stay live and `_playFromLibrary`'s queue
+    // reset doesn't tear down the Play All session mid-stream.
+    if (this._currentPlayContext?.source === 'queue') {
+      const rawNext = (this._currentPlayContext.index || 0) + 1;
+      const looping = !!this._playQueueLoop;
+      const wrappedIdx = looping && this._playQueue.length > 0
+        ? rawNext % this._playQueue.length
+        : rawNext;
+      if (wrappedIdx < this._playQueue.length) {
+        return this._playQueueItem(wrappedIdx);
+      }
+      return;
+    }
+    if (!this.library) return;
     const video = this.library.getVideoByPath?.(path);
     if (!video) {
       // File missing from current library scan — try to walk past it.
@@ -4390,6 +4822,15 @@ class App {
         ...this._currentPlayContext,
         index: nextIdx,
       };
+    }
+    // When the user opts in, an Up Next-triggered advance auto-plays
+    // the next video instead of loading it paused. Default is off so
+    // existing behaviour is preserved for everyone who didn't ask.
+    // (Queue / Play All already auto-plays via _playQueueItem's default
+    // autoPlay:true, so this flag only matters for library / playlist /
+    // category sources that route through _playFromLibrary.)
+    if (this.settings?.get?.('player.autoplayOnAdvance')) {
+      video._autoPlayOnNextLoad = true;
     }
     await this.library._playVideo(video);
   }
@@ -5486,11 +5927,12 @@ class App {
     this._activeVariantIndex = index;
     this._activeVariantPath = variant.path || null;
 
-    // Handy re-uploads have a network leg (1-3s typically) that the
-    // local sync engines (Buttplug, T-Code) don't pay. Without a pause
-    // the video keeps playing while the Handy goes silent — Hick's law:
-    // unexplained absence of feedback feels like a bug. Pause + overlay
-    // gives the user a clear "loading" signal.
+    // Cloud-sync re-uploads (Handy, Autoblow) have a network leg
+    // (1-3s typically) that the local sync engines (Buttplug, T-Code)
+    // don't pay. Without a pause the video keeps playing while the
+    // device goes silent — Hick's law: unexplained absence of feedback
+    // feels like a bug. Pause + overlay gives the user a clear
+    // "loading" signal.
     //
     // Two distinct playing surfaces exist in this app:
     //   - Desktop video element (`videoPlayer.video`) — when nothing
@@ -5505,18 +5947,19 @@ class App {
     // remote) covers phone-driven playback. Earlier this branch only
     // checked `videoPlayer.video.paused` so phone-controlled switches
     // ran without any pause/overlay/broadcast — the user saw the phone
-    // keep playing through a 1-3s Handy-silent window with no signal.
-    const handyWillReupload = !!this.handyManager?.connected;
+    // keep playing through a 1-3s device-silent window with no signal.
+    const cloudWillReupload = !!this.handyManager?.connected
+      || !!this.autoblowManager?.connected;
     const desktopPlaying = !this.videoPlayer.video.paused;
     const remotePlaying = !!this._remoteActive
       && !!this._remoteProxy
       && !this._remoteProxy.paused;
-    const shouldPauseDesktop = handyWillReupload && desktopPlaying;
-    const shouldPauseRemote = handyWillReupload && remotePlaying;
+    const shouldPauseDesktop = cloudWillReupload && desktopPlaying;
+    const shouldPauseRemote = cloudWillReupload && remotePlaying;
     const willPauseAny = shouldPauseDesktop || shouldPauseRemote;
     if (shouldPauseDesktop) {
       this.videoPlayer.video.pause();
-      this._waitingForScript = true;
+      this._markCloudUploadsPending();
       this._showScriptLoadingOverlay();
     }
     if (willPauseAny && this.remoteBridge?.connected) {
@@ -5619,9 +6062,12 @@ class App {
     } catch (err) {
       console.warn('[Variants] Switch failed:', err.message);
       // Clear the loading state so the user isn't stranded on a paused
-      // video with a stuck overlay if the read/load step threw.
+      // video with a stuck overlay if the read/load step threw. Force-
+      // clear the gate (vs. per-device resolve) because we don't know
+      // how far through the upload pipeline each cloud device got
+      // before the throw.
       if (shouldPauseDesktop) {
-        this._waitingForScript = false;
+        this._clearCloudUploadGate();
         this._hideScriptLoadingOverlay();
         if (desktopPlaying) this.videoPlayer.video.play().catch(() => {});
       }
@@ -5640,10 +6086,15 @@ class App {
   }
 
   /** Play a list of videos sequentially (Play All). */
-  _playAll(videoList) {
+  _playAll(videoList, opts = {}) {
     if (!videoList || videoList.length === 0) return;
     this._playQueue = videoList;
     this._playQueueIndex = 0;
+    this._playQueueLoop = !!opts.loop;
+    this._playQueueSource = {
+      sourceLabel: opts.sourceLabel || t('upNext.sourcePlaylist'),
+      sourceContext: opts.sourceContext || {},
+    };
     this._navigateTo('player');
     this._playQueueItem(0);
   }
@@ -5653,9 +6104,28 @@ class App {
     const item = this._playQueue[index];
     this._playQueueIndex = index;
 
-    // If we have a funscript AND Handy is connected, gate autoplay until script is uploaded
-    if (item.funscriptPath && this.handyManager?.connected) {
-      this._waitingForScript = true;
+    // Feed the Up Next engine the queue context so the card shows the
+    // correct "next" item and only fires end-of-list on the actual last
+    // item. SCOPE-up-next.md §5 specified this; the wiring was missed
+    // until a community report flagged "no more videos" on a v1-of-2.
+    // When the playlist is set to loop, `loop: true` flips the engine
+    // into wrap-mode — the last item shows "next: <item 1>" instead of
+    // end-of-list, and the queue ended-listener (below) wraps too.
+    this._currentPlayContext = {
+      source: 'queue',
+      sourceLabel: this._playQueueSource?.sourceLabel || t('upNext.sourcePlaylist'),
+      sourceContext: this._playQueueSource?.sourceContext || {},
+      list: this._playQueue.map((v) => v.path),
+      index,
+      loop: !!this._playQueueLoop,
+    };
+    this._setUpNextContext(this._currentPlayContext);
+
+    // Play All always auto-plays each queue item — gate playback on
+    // every connected cloud-sync device's upload so the next video
+    // doesn't race ahead of Handy / Autoblow re-upload.
+    if (item.funscriptPath) {
+      this._markCloudUploadsPending();
     }
 
     const fileData = { name: item.name, path: item.path, _isPathBased: true };
@@ -5679,18 +6149,30 @@ class App {
 
     this._updateQueueUI();
 
-    // Wire auto-advance on ended (remove previous listener if any)
+    // Wire auto-advance on ended (remove previous listener if any). The
+    // local-var supersede guard prevents a stale in-flight listener from
+    // double-advancing when Up Next routed the same `ended` event back
+    // through `_playQueueItem` (the old listener is captured in the event
+    // dispatch loop before `removeEventListener` can take effect).
     if (this._queueEndedListener) {
       this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
     }
-    this._queueEndedListener = () => {
-      this.videoPlayer.video.removeEventListener('ended', this._queueEndedListener);
+    const queueEndedListener = () => {
+      if (this._queueEndedListener !== queueEndedListener) return; // superseded
+      this.videoPlayer.video.removeEventListener('ended', queueEndedListener);
       this._queueEndedListener = null;
-      if (this._playQueueIndex + 1 < this._playQueue.length) {
-        this._playQueueItem(this._playQueueIndex + 1);
+      const nextIdx = this._playQueueIndex + 1;
+      if (nextIdx < this._playQueue.length) {
+        this._playQueueItem(nextIdx);
+      } else if (this._playQueueLoop && this._playQueue.length > 0) {
+        // Wrap to the start. Persistent loop on the playlist itself —
+        // user opted in via the playlist's loop toggle; no end-of-list,
+        // just continuous marathon mode until they pause / navigate away.
+        this._playQueueItem(0);
       }
     };
-    this.videoPlayer.video.addEventListener('ended', this._queueEndedListener);
+    this._queueEndedListener = queueEndedListener;
+    this.videoPlayer.video.addEventListener('ended', queueEndedListener);
   }
 
   _playPrev() {
@@ -5753,15 +6235,19 @@ class App {
     const overlay = document.getElementById('script-loading-overlay');
     if (overlay) overlay.hidden = false;
 
-    // Fallback timeout — if upload takes too long, play anyway
+    // Fallback timeout — if any cloud upload takes too long, force-
+    // clear the gate and play anyway. We list the stuck devices in the
+    // toast so the user knows which device will be silent, not just
+    // "Handy" (Autoblow can be the slow one too).
     this._scriptLoadingTimeout = setTimeout(() => {
       if (this._waitingForScript) {
-        console.warn('[Handy] Script upload timeout — playing without sync');
-        this._waitingForScript = false;
+        const stuck = Array.from(this._pendingUploads).join(', ');
+        console.warn(`[Cloud] Script upload timeout (${stuck}) — playing without sync`);
+        this._clearCloudUploadGate();
         this._hideScriptLoadingOverlay();
         this.videoPlayer.video.play().catch(() => {});
         // Surface the failure — without this, the user sees the video play
-        // but the Handy stays silent and they have no idea why.
+        // but the device stays silent and they have no idea why.
         showToast(t('toast.handyUploadTimeout'), 'warn', 8000);
       }
     }, 8000);
@@ -5770,6 +6256,58 @@ class App {
   _hideScriptLoadingOverlay() {
     const overlay = document.getElementById('script-loading-overlay');
     if (overlay) overlay.hidden = true;
+  }
+
+  /**
+   * Mark every currently-connected cloud-sync device as having an
+   * upload in flight. Callers use this to defer autoplay until all
+   * uploads complete — without this, the video would race ahead while
+   * Handy / Autoblow are still uploading (1–3s of silent device).
+   *
+   * Cloud devices today: Handy (HSSP cloud upload), Autoblow
+   * Ultra / VacuGlide 2 (cloud sync API). Local devices (Buttplug,
+   * TCode serial) don't need gating — their sync engines spin up the
+   * instant the funscript parses, well before video's first frame
+   * decodes.
+   *
+   * If a new cloud device class is added later, extend this method
+   * AND its upload completion path must call `_resolveCloudUpload`
+   * with the same key on every success / failure / early-exit branch.
+   */
+  _markCloudUploadsPending() {
+    if (this.handyManager?.connected) this._pendingUploads.add('handy');
+    if (this.autoblowManager?.connected) this._pendingUploads.add('autoblow');
+    this._waitingForScript = this._pendingUploads.size > 0;
+  }
+
+  /**
+   * Resolve one device's pending upload. If the set is now empty AND
+   * the video was waiting, clear the gate + hide the overlay + resume
+   * playback. Idempotent — calling with a key that isn't pending is a
+   * no-op, so upload functions can call this defensively from every
+   * exit path without checking whether the caller actually gated.
+   */
+  _resolveCloudUpload(deviceKey) {
+    if (!this._pendingUploads.has(deviceKey)) return;
+    this._pendingUploads.delete(deviceKey);
+    if (this._pendingUploads.size === 0 && this._waitingForScript) {
+      this._waitingForScript = false;
+      if (this._scriptLoadingTimeout) {
+        clearTimeout(this._scriptLoadingTimeout);
+        this._scriptLoadingTimeout = null;
+      }
+      this._hideScriptLoadingOverlay();
+      this.videoPlayer.video.play().catch(() => {});
+    }
+  }
+
+  /**
+   * Hard-reset the gate. Used by the 8s timeout (force play through a
+   * stuck upload) and by loadVideo (fresh video discards prior gating).
+   */
+  _clearCloudUploadGate() {
+    this._pendingUploads.clear();
+    this._waitingForScript = false;
   }
 
   _updateCategoryDots() {

@@ -101,6 +101,14 @@
       "title": "再生速度 (< / >)",
       "menuLabel": "再生速度"
     },
+    "loopVideo": {
+      "menuLabel": "動画をループ",
+      "aria": "動画ループを切り替え",
+      "stateOn": "オン",
+      "stateOff": "オフ",
+      "chipAria": "動画ループ オン",
+      "chipTitle": "動画をループ (Shift+L)"
+    },
     "vrFormatMenu": "VR フォーマット…",
     "preparingScript": "スクリプトを準備中…",
     "skipToNextAction": "次のアクションへスキップ",
@@ -201,7 +209,7 @@
     "folderBrowse": "フォルダを閲覧",
     "refresh": "ライブラリを更新",
     "refreshTitle": "ライブラリを更新 — アプリ起動後にソースフォルダへ追加された新規ファイルを取り込みます",
-    "selectionCount": "{count, plural, other {# 件選択}}",
+    "selectionCount": "{count} 件選択中",
     "vrType": "VR タイプ",
     "loading": "読み込み中…",
     "allSources": "すべてのソース",
@@ -267,7 +275,6 @@
     "vrOptionReset": "自動に戻す",
     "vrOptionResetSub": "上書きをクリア;ファイル名のヒューリスティックを使用",
     "videoCountSubtitle": "{count, plural, other {# 本の動画}}",
-    "selectionCount": "{count} 件選択中",
     "selectModeEnter": "選択",
     "selectModeCancel": "キャンセル",
     "variantNamingTitle": "このバリエーションに名前を付ける",
@@ -329,6 +336,8 @@
     "emptyCta": "最初のプレイリストを作成",
     "videoCount": "{count, plural, other {# 本の動画}}",
     "playAll": "すべて再生",
+    "loopOnTitle": "ループ オン — 最後の動画の後、項目 1 から再開",
+    "loopOffTitle": "ループ オフ — 最後の動画の後に停止",
     "renamePlaylist": "プレイリスト名を変更",
     "deletePlaylist": "プレイリストを削除",
     "confirmDelete": "このプレイリストを削除しますか?",
@@ -489,18 +498,124 @@
     "dialogFallback": "ダイアログ"
   },
   "webRemote": {
-    "title": "ウェブリモート",
-    "experimental": "実験的",
-    "experimentalDetail": "ウェブリモートはまだ調整中です — 電話側のデバイス同期や再接続の細かな問題が表面化する可能性があります。",
-    "intro": "同じ Wi-Fi 上の電話やタブレットのブラウザでライブラリを開きます。デバイスのカメラで QR コードをスキャンするか、URL を入力してください。",
-    "urlLabel": "URL",
-    "detecting": "(検出中…)",
-    "feature1": "電話で動画を閲覧・再生",
-    "feature2": "接続されたデバイスは電話の再生に追従",
-    "feature3": "一度に1台の電話または VR ヘッドセットだけがデバイスを駆動",
-    "qrTitle": "電話のカメラでスキャン",
-    "backendNotRunning": "バックエンドが実行されていません",
-    "qrUnavailable": "QR を利用できません"
+    "header": {
+      "back": "戻る",
+      "locationAria": "位置",
+      "refresh": "ライブラリを更新"
+    },
+    "search": {
+      "library": "ライブラリを検索",
+      "collections": "コレクションを検索",
+      "playlists": "プレイリストを検索",
+      "categories": "カテゴリーを検索",
+      "sources": "ソースを検索",
+      "short": "検索",
+      "aria": "検索",
+      "clear": "検索をクリア"
+    },
+    "filterChips": {
+      "aria": "適用中のフィルター"
+    },
+    "actions": {
+      "sort": "並べ替え",
+      "viewToggleAria": "グリッド/リスト表示を切り替え",
+      "viewToggleTitle": "グリッド / リスト",
+      "folderAria": "フォルダーで参照",
+      "folderTitle": "フォルダーで参照",
+      "filters": "フィルター"
+    },
+    "nav": {
+      "modesAria": "モード",
+      "library": "ライブラリ",
+      "collections": "コレクション",
+      "playlists": "プレイリスト",
+      "categories": "カテゴリー",
+      "folders": "フォルダー"
+    },
+    "filterSheet": {
+      "title": "フィルター",
+      "close": "フィルターを閉じる",
+      "matchHeader": "マッチ状態",
+      "matchAria": "マッチ状態",
+      "matchAll": "すべて",
+      "matchMatched": "マッチ済み",
+      "matchUnmatched": "未マッチ",
+      "vrHeader": "VR",
+      "vrAria": "VR フィルター",
+      "vrAll": "すべて",
+      "vrOnly": "VR のみ",
+      "vrFlat": "非 VR"
+    },
+    "sortSheet": {
+      "title": "並べ替え",
+      "close": "並べ替えを閉じる",
+      "aria": "並べ替え",
+      "nameAsc": "名前 A-Z",
+      "nameDesc": "名前 Z-A",
+      "dateAddedDesc": "最近追加",
+      "dateAddedAsc": "古い順",
+      "durationAsc": "再生時間 短→長",
+      "durationDesc": "再生時間 長→短",
+      "avgSpeedAsc": "平均速度 遅→速",
+      "avgSpeedDesc": "平均速度 速→遅",
+      "maxSpeedAsc": "最大速度 遅→速",
+      "maxSpeedDesc": "最大速度 速→遅"
+    },
+    "badge": {
+      "script": "スクリプト",
+      "vr": "VR"
+    },
+    "breadcrumb": {
+      "allSources": "すべてのソース",
+      "folders": "フォルダー",
+      "notFound": "（見つかりません）",
+      "unnamed": "（名称未設定）"
+    },
+    "folderJump": {
+      "label": "フォルダー内：<strong>{path}</strong>"
+    },
+    "empty": {
+      "loadingLibrary": "ライブラリを読み込み中…",
+      "loadFailedTitle": "ライブラリを読み込めませんでした",
+      "noVideosTitle": "まだ動画がありません",
+      "noVideosBody": "デスクトップの FunSync でソースフォルダーを追加してください。",
+      "noMatchesTitle": "一致する項目がありません",
+      "noMatchesBody": "別の検索語またはフィルターをお試しください。",
+      "noMatchesBodyShort": "別の検索語をお試しください。",
+      "noSourcesTitle": "ソースがありません",
+      "noSourcesBody": "デスクトップの FunSync でソースフォルダーを追加してください。",
+      "noSourcesFilteredBody": "現在のフィルター条件に一致する動画を含むソースがありません。",
+      "loadFoldersFailedTitle": "フォルダーを読み込めませんでした",
+      "folderNotFoundTitle": "フォルダーが見つかりません",
+      "folderNotFoundBody": "このフォルダーはもうデスクトップに存在しません。",
+      "emptyFolderTitle": "空のフォルダー",
+      "emptyFolderBody": "ここにはサブフォルダーや動画がありません。",
+      "videoNotFoundTitle": "動画が見つかりません",
+      "videoNotFoundBody": "戻ってもう一度お試しください。",
+      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} other {読み込めませんでした}}",
+      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} other {まだ項目がありません}}",
+      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} other {デスクトップの FunSync で項目を作成してください。}}",
+      "groupingNotFoundTitle": "見つかりません",
+      "groupingNotFoundBody": "{kind, select, collections {このコレクションはもうデスクトップに存在しません。} playlists {このプレイリストはもうデスクトップに存在しません。} categories {このカテゴリーはもうデスクトップに存在しません。} other {この項目はもうデスクトップに存在しません。}}",
+      "groupingEmptyTitle": "空",
+      "groupingEmptyBody": "{kind, select, collections {このコレクションには現在利用可能な動画がありません。} playlists {このプレイリストには現在利用可能な動画がありません。} categories {このカテゴリーには現在利用可能な動画がありません。} other {この項目には現在利用可能な動画がありません。}}"
+    },
+    "player": {
+      "switching": "スクリプトを切り替え中…",
+      "connecting": "デバイスに接続中…",
+      "preparing": "デバイスを準備中…",
+      "ready": "デバイスの準備完了",
+      "noScript": "funscript なし — 動画のみ再生",
+      "noScriptMatch": "デスクトップで一致するスクリプトが見つかりません",
+      "connected": "接続済み：{devices}",
+      "noDevices": "デスクトップに接続されたデバイスはありません",
+      "connectedCount": "{count, plural, other {接続中のデバイス · #}}",
+      "intensity": "Funscript の強さ",
+      "avg": "平均",
+      "max": "最大",
+      "speedUnit": "ユニット/秒",
+      "speedTooltip": "平均 {avg} ユニット/秒 • 最大 {max} ユニット/秒"
+    }
   },
   "hevc": {
     "warningTitle": "HEVC 再生がカクつく可能性があります",
@@ -659,6 +774,9 @@
       "upNextResetCountdown": "デフォルトにリセット (10秒)",
       "upNextResetCountdownAria": "カウントダウンをデフォルトにリセット",
       "upNextHint": "動画の終わりに、現在のライブラリ / プレイリスト / カテゴリの次の項目を自動再生カウントダウンとともに表示します。カードにホバーするとカウントダウンが一時停止します。× をクリックまたは Esc キーを押すと閉じます。",
+      "autoplayOnAdvanceLabel": "次の動画を自動再生",
+      "autoplayOnAdvanceResetTitle": "デフォルトにリセット (オフ)",
+      "autoplayOnAdvanceResetAria": "自動再生をデフォルトにリセット",
       "multiHeader": "マルチ軸",
       "fieldDefaultPlayback": "デフォルトの再生",
       "preferSingle": "シングル軸 (デフォルト)",
@@ -802,126 +920,6 @@
     "saveDialogTitle": "診断レポートを保存",
     "saveDialogDefaultName": "funsync-report.txt"
   },
-  "webRemote": {
-    "header": {
-      "back": "戻る",
-      "locationAria": "位置",
-      "refresh": "ライブラリを更新"
-    },
-    "search": {
-      "library": "ライブラリを検索",
-      "collections": "コレクションを検索",
-      "playlists": "プレイリストを検索",
-      "categories": "カテゴリーを検索",
-      "sources": "ソースを検索",
-      "short": "検索",
-      "aria": "検索",
-      "clear": "検索をクリア"
-    },
-    "filterChips": {
-      "aria": "適用中のフィルター"
-    },
-    "actions": {
-      "sort": "並べ替え",
-      "viewToggleAria": "グリッド/リスト表示を切り替え",
-      "viewToggleTitle": "グリッド / リスト",
-      "folderAria": "フォルダーで参照",
-      "folderTitle": "フォルダーで参照",
-      "filters": "フィルター"
-    },
-    "nav": {
-      "modesAria": "モード",
-      "library": "ライブラリ",
-      "collections": "コレクション",
-      "playlists": "プレイリスト",
-      "categories": "カテゴリー",
-      "folders": "フォルダー"
-    },
-    "filterSheet": {
-      "title": "フィルター",
-      "close": "フィルターを閉じる",
-      "matchHeader": "マッチ状態",
-      "matchAria": "マッチ状態",
-      "matchAll": "すべて",
-      "matchMatched": "マッチ済み",
-      "matchUnmatched": "未マッチ",
-      "vrHeader": "VR",
-      "vrAria": "VR フィルター",
-      "vrAll": "すべて",
-      "vrOnly": "VR のみ",
-      "vrFlat": "非 VR"
-    },
-    "sortSheet": {
-      "title": "並べ替え",
-      "close": "並べ替えを閉じる",
-      "aria": "並べ替え",
-      "nameAsc": "名前 A-Z",
-      "nameDesc": "名前 Z-A",
-      "dateAddedDesc": "最近追加",
-      "dateAddedAsc": "古い順",
-      "durationAsc": "再生時間 短→長",
-      "durationDesc": "再生時間 長→短",
-      "avgSpeedAsc": "平均速度 遅→速",
-      "avgSpeedDesc": "平均速度 速→遅",
-      "maxSpeedAsc": "最大速度 遅→速",
-      "maxSpeedDesc": "最大速度 速→遅"
-    },
-    "badge": {
-      "script": "スクリプト",
-      "vr": "VR"
-    },
-    "breadcrumb": {
-      "allSources": "すべてのソース",
-      "folders": "フォルダー",
-      "notFound": "（見つかりません）",
-      "unnamed": "（名称未設定）"
-    },
-    "folderJump": {
-      "label": "フォルダー内：<strong>{path}</strong>"
-    },
-    "empty": {
-      "loadingLibrary": "ライブラリを読み込み中…",
-      "loadFailedTitle": "ライブラリを読み込めませんでした",
-      "noVideosTitle": "まだ動画がありません",
-      "noVideosBody": "デスクトップの FunSync でソースフォルダーを追加してください。",
-      "noMatchesTitle": "一致する項目がありません",
-      "noMatchesBody": "別の検索語またはフィルターをお試しください。",
-      "noMatchesBodyShort": "別の検索語をお試しください。",
-      "noSourcesTitle": "ソースがありません",
-      "noSourcesBody": "デスクトップの FunSync でソースフォルダーを追加してください。",
-      "noSourcesFilteredBody": "現在のフィルター条件に一致する動画を含むソースがありません。",
-      "loadFoldersFailedTitle": "フォルダーを読み込めませんでした",
-      "folderNotFoundTitle": "フォルダーが見つかりません",
-      "folderNotFoundBody": "このフォルダーはもうデスクトップに存在しません。",
-      "emptyFolderTitle": "空のフォルダー",
-      "emptyFolderBody": "ここにはサブフォルダーや動画がありません。",
-      "videoNotFoundTitle": "動画が見つかりません",
-      "videoNotFoundBody": "戻ってもう一度お試しください。",
-      "loadGroupingFailedTitle": "{kind, select, collections {コレクションを読み込めませんでした} playlists {プレイリストを読み込めませんでした} categories {カテゴリーを読み込めませんでした} other {読み込めませんでした}}",
-      "noGroupingTitle": "{kind, select, collections {まだコレクションがありません} playlists {まだプレイリストがありません} categories {まだカテゴリーがありません} other {まだ項目がありません}}",
-      "noGroupingBody": "{kind, select, collections {デスクトップの FunSync でコレクションを作成してください — ここに表示されます。} playlists {デスクトップの FunSync でプレイリストを作成してください — ここに表示されます。} categories {デスクトップの FunSync でカテゴリーを作成してください — ここに表示されます。} other {デスクトップの FunSync で項目を作成してください。}}",
-      "groupingNotFoundTitle": "見つかりません",
-      "groupingNotFoundBody": "{kind, select, collections {このコレクションはもうデスクトップに存在しません。} playlists {このプレイリストはもうデスクトップに存在しません。} categories {このカテゴリーはもうデスクトップに存在しません。} other {この項目はもうデスクトップに存在しません。}}",
-      "groupingEmptyTitle": "空",
-      "groupingEmptyBody": "{kind, select, collections {このコレクションには現在利用可能な動画がありません。} playlists {このプレイリストには現在利用可能な動画がありません。} categories {このカテゴリーには現在利用可能な動画がありません。} other {この項目には現在利用可能な動画がありません。}}"
-    },
-    "player": {
-      "switching": "スクリプトを切り替え中…",
-      "connecting": "デバイスに接続中…",
-      "preparing": "デバイスを準備中…",
-      "ready": "デバイスの準備完了",
-      "noScript": "funscript なし — 動画のみ再生",
-      "noScriptMatch": "デスクトップで一致するスクリプトが見つかりません",
-      "connected": "接続済み：{devices}",
-      "noDevices": "デスクトップに接続されたデバイスはありません",
-      "connectedCount": "{count, plural, other {接続中のデバイス · #}}",
-      "intensity": "Funscript の強さ",
-      "avg": "平均",
-      "max": "最大",
-      "speedUnit": "ユニット/秒",
-      "speedTooltip": "平均 {avg} ユニット/秒 • 最大 {max} ユニット/秒"
-    }
-  },
   "eroscripts": {
     "title": "EroScripts",
     "closeAria": "EroScripts を閉じる",
@@ -961,7 +959,8 @@
     "endDismissAria": "閉じる",
     "endText": "この{source}にはこれ以上動画がありません。",
     "endCta": "{source}に戻る",
-    "endSourceFallback": "リスト"
+    "endSourceFallback": "リスト",
+    "sourcePlaylist": "プレイリスト"
   },
   "session": {
     "state": {
@@ -1064,7 +1063,9 @@
       "zoomIn": "拡大 (+)",
       "zoomOut": "縮小 (-)",
       "fitAll": "すべて表示",
-      "save": "保存 (Ctrl+S)"
+      "save": "保存 (Ctrl+S)",
+      "stacked": "スタック表示 — すべての軸を表示",
+      "popout": "エディタを別ウィンドウにポップアウト"
     },
     "modify": {
       "title": "スクリプトを変更",
@@ -1076,7 +1077,8 @@
       "offsetTime": "時間をオフセット…",
       "removePauses": "休止を削除…",
       "rangeExtend": "範囲を拡張/圧縮…",
-      "generatePattern": "パターンを生成…"
+      "generatePattern": "パターンを生成…",
+      "exportHeatmap": "ヒートマップ PNG をエクスポート…"
     },
     "speedLabel": "速度:",
     "autosaveLabel": "自動保存",
@@ -1395,6 +1397,7 @@
     "screenshot": "スクリーンショット",
     "loopA": "ループ点 A を設定",
     "loopB": "ループ点 B を設定",
+    "toggleVideoLoop": "動画ループを切り替え",
     "clearLoop": "ループをクリア / パネルを閉じる",
     "devicesPanel": "デバイスパネルを切り替え",
     "deviceSimulator": "デバイスシミュレーターを切り替え",
@@ -1421,7 +1424,7 @@
     "editorMoveFrames": "アクションを時間軸で ±N フレーム移動",
     "editorDelete": "選択を削除",
     "editorInvert": "位置を反転",
-    "editorPlaceNumpad": "0 / 11 / 22 / … / 100 にアクションを配置",
+    "editorPlaceNumpad": "0 / 10 / 20 / … / 90 にアクションを配置",
     "editorInsertAtClick": "クリック位置にアクションを挿入",
     "editorMoveSelected": "選択したアクションを移動",
     "editorBookmark": "再生ヘッドにブックマークを追加",
@@ -1433,6 +1436,15 @@
     "editorPaste": "再生ヘッドに貼り付け",
     "editorPasteOriginal": "元の時間に貼り付け",
     "editorSave": "保存",
-    "editorZoom": "拡大 / 縮小"
+    "editorZoom": "拡大 / 縮小",
+    "editorAlternatingInsert": "交互挿入(前回の位置を反転)",
+    "editorRepeatLastStroke": "末尾の2アクションのストロークを繰り返す",
+    "editorBookmarkNav": "次/前のブックマークへジャンプ",
+    "editorMultiBand": "マルチバンド波形を切替(低/中/高)",
+    "editorVAD": "音声検出トラックを切替",
+    "editorSpeedStep": "再生速度を下げる/上げる",
+    "editorSelectLeftRightOfCursor": "再生ヘッドの前/後の全てを選択",
+    "editorEqualize": "イコライズ — 中間アクションを時間軸上で均等配分",
+    "editorMoveToPlayhead": "単一選択アクションを再生ヘッドへ移動"
   }
 }
