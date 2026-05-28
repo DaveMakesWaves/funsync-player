@@ -28,6 +28,7 @@ import { showToast } from './toast.js';
 import { maybeShowHevcGuidance } from './hevc-detect.js';
 import { initTheme } from './theme-manager.js';
 import { matchButtplugRoute } from './custom-routing-match.js';
+import { extendRawScriptContent } from './device-transform-stack.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library } from '../components/library.js';
@@ -257,6 +258,16 @@ class App {
       },
       onMinStrokeChanged: (ms) => {
         if (this.buttplugSync) this.buttplugSync.setMinStrokeMs(ms);
+      },
+      onRangeExtenderChanged: (enabled) => {
+        // Per-tick sync engines cache the flag for performance.
+        // Cloud-upload paths (Handy HSSP, Autoblow) read it from
+        // settings directly on each upload, so they pick up the new
+        // state on the next video load / variant switch without
+        // needing the callback. See SCOPE-device-settings-expansion.md
+        // §4 for the cloud-upload tradeoff.
+        if (this.buttplugSync) this.buttplugSync.setRangeExtenderEnabled(enabled);
+        if (this.tcodeSync) this.tcodeSync.setRangeExtenderEnabled(enabled);
       },
       // Snapshot device-connection flags for the "Report a problem"
       // diagnostics bundle. Read defensively — managers may be null
@@ -584,6 +595,14 @@ class App {
         // B2 boot path — keep tcodeSync in sync with the saved
         // smoothing mode (parallel to the runtime callback above).
         if (this.tcodeSync) this.tcodeSync.setInterpolationMode(savedSmoothing);
+
+        // Range Extender boot — push the saved state into both per-tick
+        // sync engines. Without this, a user with the extender saved as
+        // ON would get no stretch until they toggled the setting in the
+        // current session (sync engines default to false in constructor).
+        const savedExt = !!this.settings.get('player.rangeExtender.enabled');
+        this.buttplugSync.setRangeExtenderEnabled(savedExt);
+        if (this.tcodeSync) this.tcodeSync.setRangeExtenderEnabled(savedExt);
 
         // Linear strategy: action-boundary (default) sends one LinearCmd per
         // stroke with the full duration, letting the device's firmware handle
@@ -2994,7 +3013,11 @@ class App {
         this._resolveCloudUpload('autoblow');
         return;
       }
-      const ok = await this.autoblowSync.uploadScript(rawContent);
+      // Apply Range Extender at upload time for Autoblow. Same reason
+      // as Handy HSSP: cloud-script-upload model, no per-tick hook.
+      const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
+      const uploadContent = extendRawScriptContent(rawContent, extenderEnabled);
+      const ok = await this.autoblowSync.uploadScript(uploadContent);
       if (!ok) {
         this._resolveCloudUpload('autoblow');
         return;
@@ -3073,8 +3096,16 @@ class App {
       return;
     }
 
+    // Apply Range Extender at upload time for Handy HSSP. HSSP plays
+    // back from a cloud-hosted script — there's no per-tick hook to
+    // apply the stretch, so it must happen pre-upload. Returns the
+    // original content if extender is off or the script is already
+    // wide (no-op short-circuit inside the helper).
+    const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
+    const uploadContent = extendRawScriptContent(rawContent, extenderEnabled);
+
     console.log('[Handy] Uploading funscript to cloud...');
-    const setupOk = await this.handyManager.uploadAndSetScript(rawContent);
+    const setupOk = await this.handyManager.uploadAndSetScript(uploadContent);
 
     if (setupOk) {
       // Store cloud URL for potential re-setup

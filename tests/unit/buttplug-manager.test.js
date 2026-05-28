@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ButtplugManager } from '../../renderer/js/buttplug-manager.js';
+import { ButtplugManager, _describeError } from '../../renderer/js/buttplug-manager.js';
 
 // Mock devices using v4 API pattern (hasOutput + runOutput)
 const mockVibeDevice = {
@@ -288,5 +288,73 @@ describe('ButtplugManager', () => {
       expect(m.connect).not.toHaveBeenCalled();
       vi.useRealTimers();
     });
+  });
+});
+
+// Regression: WebSocket Event objects (Intiface not running, port
+// closed, etc.) previously stringified to "[object Event]" in the
+// user-visible status text via `String(err)`. _describeError guards
+// against that and similar coercion leaks across the manager's error
+// surfaces (Connection failed, Scan failed).
+describe('_describeError — never leaks [object Event] / [object Object]', () => {
+  it('Error with message → returns the message', () => {
+    expect(_describeError(new Error('boom'))).toBe('boom');
+  });
+
+  it('object with .message → returns the message', () => {
+    expect(_describeError({ message: 'cloud rejected' })).toBe('cloud rejected');
+  });
+
+  it('object with .reason → returns the reason (WebSocket close with reason)', () => {
+    expect(_describeError({ reason: 'going away', code: 1001 })).toBe('going away');
+  });
+
+  it('plain string → returns the string', () => {
+    expect(_describeError('Nope')).toBe('Nope');
+  });
+
+  it('null / undefined → "Unknown error" (never crashes)', () => {
+    expect(_describeError(null)).toBe('Unknown error');
+    expect(_describeError(undefined)).toBe('Unknown error');
+  });
+
+  it('WebSocket-style Event (browser) → user-friendly Intiface hint, NEVER [object Event]', () => {
+    // Simulate the actual WebSocket open-error case: an Event-like
+    // object with .type but no .message / .reason. Pre-fix this was
+    // the bug — `String(err)` returned "[object Event]" which leaked
+    // straight to the status bar.
+    const fakeWsEvent = { type: 'error', target: { readyState: 3 } };
+    const out = _describeError(fakeWsEvent);
+    expect(out).not.toContain('[object');
+    expect(out).toContain('Intiface');
+  });
+
+  it('real DOM Event instance → user-friendly hint (instanceof Event branch)', () => {
+    // jsdom provides Event. This branch ensures we catch native
+    // Event instances even if their `.type` somehow evaluates falsy.
+    if (typeof Event === 'undefined') return; // node-only environment
+    const e = new Event('error');
+    const out = _describeError(e);
+    expect(out).not.toContain('[object');
+    expect(out).toContain('Intiface');
+  });
+
+  it('arbitrary object with no useful fields → "Unknown error" (NEVER [object Object])', () => {
+    // Defensive last-resort: `String({})` produces "[object Object]"
+    // which would also be useless to a user. Filter that out too.
+    expect(_describeError({})).toBe('Unknown error');
+    expect(_describeError({ foo: 'bar' })).toBe('Unknown error');
+  });
+
+  it('object that custom-toStrings to a sensible value → uses the toString', () => {
+    // Some SDK errors override toString. Honour that.
+    const customErr = { toString: () => 'custom-error-text' };
+    expect(_describeError(customErr)).toBe('custom-error-text');
+  });
+
+  it('empty .message string → falls through to next branch', () => {
+    // err.message = "" shouldn't be returned (would render blank).
+    // Falls through to .reason → Event check → toString chain.
+    expect(_describeError({ message: '' })).toBe('Unknown error');
   });
 });

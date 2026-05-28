@@ -6,6 +6,42 @@
 
 let ButtplugSDK = null;
 
+/**
+ * Coerce an arbitrary thrown value into a user-readable string.
+ *
+ * The WebSocket-backed Buttplug client rejects with a browser Event
+ * (open/error) when the connection refuses — Intiface not running,
+ * wrong port, blocked by firewall. Event objects have no `.message`
+ * or `.reason`, so the previous `String(err)` produced the infamous
+ * `[object Event]` user-visible status string.
+ *
+ * Order of preference:
+ *   1. Real Error / SDK rejection → `.message`
+ *   2. WebSocket close info → `.reason` (when set by Intiface)
+ *   3. DOM Event → user-friendly hint (Intiface likely not running)
+ *   4. Anything else → cautious `String(err)`, but only if it doesn't
+ *      stringify to `[object Object]` / `[object Event]`.
+ */
+export function _describeError(err) {
+  if (err == null) return 'Unknown error';
+  if (typeof err === 'string') return err;
+  if (typeof err.message === 'string' && err.message) return err.message;
+  if (typeof err.reason === 'string' && err.reason) return err.reason;
+  // DOM Event (WebSocket open/error) — no useful properties surface
+  // through stringification. The dominant cause for Buttplug is
+  // "Intiface Central isn't running on this port"; surface that
+  // instead of the JS coercion artifact.
+  const isEvent = (typeof Event !== 'undefined' && err instanceof Event)
+    || typeof err.type === 'string';
+  if (isEvent) {
+    return 'Intiface Central is not reachable on this port — start Intiface and try again.';
+  }
+  const s = String(err);
+  // Final defense: never return a useless `[object ...]` artifact.
+  if (s.startsWith('[object ')) return 'Unknown error';
+  return s;
+}
+
 export class ButtplugManager {
   constructor() {
     this._client = null;
@@ -95,8 +131,7 @@ export class ButtplugManager {
     } catch (err) {
       this._connected = false;
       this._connecting = false;
-      const msg = err?.message || err?.reason || String(err);
-      this._emitError(`Connection failed: ${msg}`);
+      this._emitError(`Connection failed: ${_describeError(err)}`);
       return false;
     }
   }
@@ -131,7 +166,7 @@ export class ButtplugManager {
       await this._client.startScanning();
     } catch (err) {
       if (!err.message?.includes('already')) {
-        this._emitError(`Scan failed: ${err.message}`);
+        this._emitError(`Scan failed: ${_describeError(err)}`);
       }
     }
   }

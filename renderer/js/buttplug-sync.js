@@ -19,6 +19,12 @@
 // duration and need frequent re-sampling to track stroke speed.
 
 import { getInterpolator, applySpeedLimit, linearInterpolate } from './interpolation.js';
+import {
+  applyRange,
+  applyExtender,
+  computeNaturalRange,
+  RANGE_EXTENDER_THRESHOLD_PCT,
+} from './device-transform-stack.js';
 
 const TICK_INTERVAL_MS = 40;     // ~25Hz polling — safe for BLE
 const MIN_SEND_INTERVAL_MS = 50; // Don't send derived-intensity commands faster than this
@@ -61,6 +67,22 @@ export class ButtplugSync {
     this._rotateModeMap = new Map();        // deviceIndex → 'speed'|'position'|'intensity'
     this._maxIntensityMap = new Map();      // deviceIndex → 0-100 (safety cap for e-stim)
     this._rampUpMap = new Map();            // deviceIndex → true/false
+    // Per-device range: linearly remaps script 0-100 into user's
+    // configured min-max window. Default {min:0, max:100} = no-op.
+    // Applied BEFORE the e-stim safety cap so a 90% range max can still
+    // be clipped to a 70% safety ceiling. See device-transform-stack.js
+    // §2 for the full composition order.
+    this._rangeMap = new Map();             // deviceIndex → {min, max}
+
+    // Range Extender state. When enabled, narrow scripts (natural width
+    // < threshold) get stretched to 0-100 BEFORE invert/range/safety in
+    // the transform stack. Natural range cached per action source so we
+    // don't re-scan on every tick.
+    this._rangeExtenderEnabled = false;
+    this._naturalRange = { min: 0, max: 100 };       // main script
+    this._vibScriptNaturalRange = { min: 0, max: 100 };
+    // Per-axis natural ranges live on each axis's state entry inside
+    // _axisActions, computed when setAxisActions caches the array.
     this._rampUpStartTime = 0;             // timestamp when playback started (for ramp-up calc)
     this._rampUpDuration = 2000;           // ms for ramp-up
 
@@ -171,6 +193,23 @@ export class ButtplugSync {
     this._vibActions = actions && actions.length >= 2 ? actions : null;
     this._vibActionIndex = -1;
     this._lastVibSentIntensity = -1;
+    // Cache natural range so extender can stretch a narrow vib script.
+    this._vibScriptNaturalRange = computeNaturalRange(this._vibActions);
+  }
+
+  /**
+   * Toggle Range Extender (script-side stretch). When enabled, narrow
+   * scripts (natural width < 80%) get their action positions stretched
+   * to 0-100 BEFORE per-device invert/range/safety transforms apply.
+   * See device-transform-stack.js §2 for the composition order and
+   * SCOPE-device-settings-expansion.md §4 for the rationale.
+   */
+  setRangeExtenderEnabled(enabled) {
+    this._rangeExtenderEnabled = !!enabled;
+  }
+
+  isRangeExtenderEnabled() {
+    return this._rangeExtenderEnabled;
   }
 
   // --- Action cache ---
@@ -181,6 +220,9 @@ export class ButtplugSync {
     } else {
       this._actions = null;
     }
+    // Cache the main script's natural range whenever actions change.
+    // Recomputed on variant switch via reloadActions → _cacheActions.
+    this._naturalRange = computeNaturalRange(this._actions);
   }
 
   // --- Video event wiring ---
@@ -464,13 +506,24 @@ export class ButtplugSync {
    */
   _sendLinearToDevices(position, durationMs, prevPosition) {
     const devices = this.buttplug.devices;
+    // Range Extender is script-side, applied ONCE per send-call so
+    // every device sees the same stretched input. Per-device transforms
+    // (invert, range) layer on top per the stack order.
+    const stretched = applyExtender(
+      position, this._naturalRange,
+      this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+    );
     for (const dev of devices) {
       if (!dev.canLinear) continue;
       const assigned = this._axisAssignmentMap.get(dev.index);
       if (assigned && assigned !== 'L0') continue;
       if (this._customRoutingActive && !assigned) continue;
       const inverted = this._invertedDevices.has(dev.index);
-      const pos = inverted ? 100 - position : position;
+      let pos = inverted ? 100 - stretched : stretched;
+      // Apply per-device range AFTER extender + invert, BEFORE send.
+      // Default {0,100} is a true no-op (existing users unaffected).
+      // See device-transform-stack.js §2 for composition order rationale.
+      pos = applyRange(pos, this._rangeMap.get(dev.index));
       this.buttplug.sendLinear(dev.index, pos, durationMs);
     }
   }
@@ -486,6 +539,16 @@ export class ButtplugSync {
   _sendToDevices(position, durationMs, prevPosition, opts = {}) {
     const emitLinear = opts.emitLinear !== false;
     const devices = this.buttplug.devices;
+    // Range Extender applied once before per-device transforms — same
+    // stretched input shared across all devices in this send-call.
+    const stretchedPos = applyExtender(
+      position, this._naturalRange,
+      this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+    );
+    const stretchedPrev = applyExtender(
+      prevPosition, this._naturalRange,
+      this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+    );
 
     for (const dev of devices) {
       // Skip devices assigned to a specific axis — they're driven by _sendPendingAxisActions
@@ -497,8 +560,13 @@ export class ButtplugSync {
       if (this._customRoutingActive && !assigned) continue;
 
       const inverted = this._invertedDevices.has(dev.index);
-      const pos = inverted ? 100 - position : position;
-      const prevPos = inverted ? 100 - prevPosition : prevPosition;
+      const range = this._rangeMap.get(dev.index);
+      // Invert then range on BOTH position and prevPosition so derived
+      // calculations (vibe/scalar/rotate velocity, mode logic) see the
+      // same range-aware values. Without ranging prevPos too, the
+      // speed-mode velocity calc would mix raw and ranged units.
+      const pos = applyRange(inverted ? 100 - stretchedPos : stretchedPos, range);
+      const prevPos = applyRange(inverted ? 100 - stretchedPrev : stretchedPrev, range);
 
       if (dev.canLinear && emitLinear) {
         this.buttplug.sendLinear(dev.index, pos, durationMs);
@@ -591,12 +659,21 @@ export class ButtplugSync {
       if (assigned && assigned !== 'L0' && assigned !== 'V0') continue;
       if (this._customRoutingActive && !assigned) continue;
 
+      // Range Extender on the vib script uses its own natural range
+      // (vib scripts can have different dynamics than the main stroke).
+      // Stretched value then feeds the per-device range remap. Vib
+      // script doesn't invert (single-axis vib funscripts have no
+      // direction concept).
+      const stretchedVib = applyExtender(
+        intensity, this._vibScriptNaturalRange,
+        this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+      );
+      const ranged = applyRange(stretchedVib, this._rangeMap.get(dev.index));
       if (dev.canVibrate) {
-        this.buttplug.sendVibrate(dev.index, intensity);
+        this.buttplug.sendVibrate(dev.index, ranged);
       }
       if (dev.canScalar) {
-        let scalarIntensity = intensity;
-        scalarIntensity = this._applyScalarSafety(dev.index, scalarIntensity);
+        const scalarIntensity = this._applyScalarSafety(dev.index, ranged);
         this.buttplug.sendScalar(dev.index, scalarIntensity);
       }
     }
@@ -658,13 +735,24 @@ export class ButtplugSync {
 
       if (state.lastSentValue >= 0 && Math.abs(value - state.lastSentValue) < MIN_POS_DELTA) continue;
 
+      // Range Extender uses THIS AXIS's natural range, not the main
+      // script's — each axis stretches independently (a 0-100 main
+      // alongside a 40-60 twist keeps main unchanged, stretches twist).
+      const stretchedAxis = applyExtender(
+        value, state.naturalRange,
+        this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+      );
+
       // Route to devices assigned to this axis
       for (const dev of devices) {
         const assigned = this._axisAssignmentMap.get(dev.index);
         if (assigned !== tcode) continue;
 
         const inverted = this._invertedDevices.has(dev.index);
-        const pos = inverted ? 100 - value : value;
+        // Invert then range; same composition order as the main stroke
+        // path. Per-device range applies regardless of axis assignment
+        // because the user owns the device, not the axis.
+        const pos = applyRange(inverted ? 100 - stretchedAxis : stretchedAxis, this._rangeMap.get(dev.index));
 
         if (featureType === 'C') {
           // Custom route: send based on device capabilities. Linear was
@@ -725,12 +813,23 @@ export class ButtplugSync {
 
     const duration = Math.max(this._minStrokeMs || 0, strokeDuration);
 
+    // Apply extender to the action-boundary target. Uses this axis's
+    // natural range (cached in state.naturalRange when actions were
+    // loaded via setAxisActions).
+    const stretchedTarget = applyExtender(
+      nextAction.pos, state.naturalRange,
+      this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+    );
+
     for (const dev of devices) {
       const assigned = this._axisAssignmentMap.get(dev.index);
       if (assigned !== tcode) continue;
       if (!dev.canLinear) continue;
       const inverted = this._invertedDevices.has(dev.index);
-      const pos = inverted ? 100 - nextAction.pos : nextAction.pos;
+      const pos = applyRange(
+        inverted ? 100 - stretchedTarget : stretchedTarget,
+        this._rangeMap.get(dev.index),
+      );
       this.buttplug.sendLinear(dev.index, pos, duration);
     }
 
@@ -773,6 +872,9 @@ export class ButtplugSync {
         index: -1,
         lastSendTime: 0,
         lastSentValue: -1,
+        // Per-axis natural range cached at set-time. Each axis stretches
+        // independently — main 0-100 stays untouched if twist is 40-60.
+        naturalRange: computeNaturalRange(actions),
       });
     }
   }
@@ -841,6 +943,23 @@ export class ButtplugSync {
   }
 
   /**
+   * Per-device power range — linearly remap script position 0-100 into
+   * the user's configured min-max window. Default {0, 100} = no-op.
+   *
+   * Degenerate inputs (min >= max, NaN, undefined) are stored but
+   * treated as no-op at apply time (see `applyRange` in
+   * device-transform-stack.js). UI should prevent collapsed ranges, but
+   * defensive storage means a malformed config file won't crash sync.
+   */
+  setDeviceRange(deviceIndex, min, max) {
+    this._rangeMap.set(deviceIndex, { min, max });
+  }
+
+  getDeviceRange(deviceIndex) {
+    return this._rangeMap.get(deviceIndex) || { min: 0, max: 100 };
+  }
+
+  /**
    * Drop every per-device entry for `deviceIndex` from the in-memory maps.
    * Called from app.js's `onDeviceRemoved` wiring so that if Intiface
    * recycles the index (e.g. after a full disconnect + reconnect), a
@@ -860,6 +979,7 @@ export class ButtplugSync {
     this._rotateModeMap.delete(deviceIndex);
     this._maxIntensityMap.delete(deviceIndex);
     this._rampUpMap.delete(deviceIndex);
+    this._rangeMap.delete(deviceIndex);
   }
 
   setInterpolationMode(mode) {

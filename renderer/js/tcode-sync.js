@@ -3,6 +3,12 @@
 // Same architecture as ButtplugSync but outputs multi-axis TCode strings.
 
 import { getInterpolator, applySpeedLimit, linearInterpolate } from './interpolation.js';
+import {
+  applyInvert,
+  applyExtender,
+  computeNaturalRange,
+  RANGE_EXTENDER_THRESHOLD_PCT,
+} from './device-transform-stack.js';
 
 const TICK_INTERVAL_MS = 40;     // ~25Hz
 const MIN_SEND_INTERVAL_MS = 50;
@@ -33,9 +39,19 @@ export class TCodeSync {
     // Multi-axis: tcode → { actions, index, lastSentValue }
     this._axisActions = new Map();
 
-    // Per-axis enable/disable and range
+    // Per-axis enable/disable, range, and direction-invert. Each map is
+    // keyed independently by TCode axis (L0/L1/L2/R0/R1/R2/V0/V1/V2/A0)
+    // so the three settings can be toggled without touching each other.
     this._axisEnabled = new Map();   // tcode → boolean
     this._axisRanges = new Map();    // tcode → { min, max }
+    this._axisInverted = new Map();  // tcode → boolean
+
+    // Range Extender state. When enabled, narrow scripts get stretched
+    // to 0-100 before invert/range. Natural range cached per source so
+    // ticks don't re-scan the action arrays.
+    this._rangeExtenderEnabled = false;
+    this._naturalRange = { min: 0, max: 100 };  // main script (L0)
+    // Per-axis natural ranges live on the axis state inside _axisActions.
 
     // Interpolation
     this._interpolationMode = 'linear';
@@ -86,8 +102,29 @@ export class TCodeSync {
     if (!actions || actions.length < 2) {
       this._axisActions.delete(tcode);
     } else {
-      this._axisActions.set(tcode, { actions, index: -1, lastSentValue: -1 });
+      this._axisActions.set(tcode, {
+        actions,
+        index: -1,
+        lastSentValue: -1,
+        // Per-axis natural range cached at set-time. Each axis stretches
+        // independently so a 0-100 main alongside a 40-60 twist leaves
+        // main untouched and stretches twist.
+        naturalRange: computeNaturalRange(actions),
+      });
     }
+  }
+
+  /**
+   * Toggle Range Extender. Stretches narrow scripts (natural width <
+   * threshold) to 0-100 before invert/range apply. See
+   * device-transform-stack.js §2 for composition order.
+   */
+  setRangeExtenderEnabled(enabled) {
+    this._rangeExtenderEnabled = !!enabled;
+  }
+
+  isRangeExtenderEnabled() {
+    return this._rangeExtenderEnabled;
   }
 
   clearAxisActions() {
@@ -109,6 +146,20 @@ export class TCodeSync {
 
   getAxisRange(tcode) {
     return this._axisRanges.get(tcode) || { min: 0, max: 100 };
+  }
+
+  /**
+   * Per-axis direction flip. Applied BEFORE range remap so "invert AND
+   * limit to 30-70" reads as expected: input pos 100 → invert to 0 →
+   * range to 30 (device min). Default false; missing entries treated as
+   * not inverted.
+   */
+  setAxisInverted(tcode, inverted) {
+    this._axisInverted.set(tcode, !!inverted);
+  }
+
+  isAxisInverted(tcode) {
+    return !!this._axisInverted.get(tcode);
   }
 
   setInterpolationMode(mode) {
@@ -142,6 +193,9 @@ export class TCodeSync {
 
   _cacheActions() {
     this._actions = this.funscript.isLoaded ? this.funscript.getActions() : null;
+    // Cache the main axis's natural range whenever actions reload —
+    // variant switch, script clear, etc. all funnel through here.
+    this._naturalRange = computeNaturalRange(this._actions);
   }
 
   _resetState() {
@@ -248,6 +302,19 @@ export class TCodeSync {
         if (durationMs <= MAX_GAP_MS) {
           let targetPos = this._interpolator(this._actions, timeMs);
           if (targetPos !== null) {
+            // Stack order: extender → invert → speed-limit → range.
+            // Extender stretches before anything else so subsequent
+            // transforms operate on a 0-100-normalised value.
+            targetPos = applyExtender(
+              targetPos, this._naturalRange,
+              this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+            );
+            // Invert first, BEFORE speed-limit + range. Velocity magnitude
+            // is unchanged by direction-flip so the speed-limit clamp
+            // still produces the same physical-stroke-rate limit; range
+            // then operates on the inverted-then-clamped value.
+            targetPos = applyInvert(targetPos, this.isAxisInverted('L0'));
+
             if (this._speedLimit > 0 && this._lastSentPos >= 0) {
               const deltaMs = now - this._lastSendTime;
               targetPos = applySpeedLimit(targetPos, this._lastSentPos, deltaMs, this._speedLimit);
@@ -287,6 +354,15 @@ export class TCodeSync {
       const span = nextAction.at - action.at;
       const t = span > 0 ? (timeMs - action.at) / span : 0;
       let value = Math.max(0, Math.min(100, action.pos + t * (nextAction.pos - action.pos)));
+
+      // Extender → invert → range, matching L0's stack order so every
+      // axis transforms identically. Per-axis natural range cached on
+      // the axis state entry by setAxisActions.
+      value = applyExtender(
+        value, state.naturalRange,
+        this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
+      );
+      value = applyInvert(value, this.isAxisInverted(tcode));
 
       // Apply range
       const range = this.getAxisRange(tcode);

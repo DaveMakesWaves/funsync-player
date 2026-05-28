@@ -1172,6 +1172,68 @@ export class ConnectionPanel {
 
       row.appendChild(controlsRow);
 
+      // Per-device range — applies to every command type this device
+      // supports (linear, vibrate, scalar, rotate). Mirrors the TCode
+      // per-axis range pattern so users learn one control surface. The
+      // dual slider's clamp logic prevents min >= max which would
+      // collapse the range and freeze the device.
+      const rangeRow = document.createElement('div');
+      rangeRow.className = 'connection-panel__device-safety';
+      const rangeMinLabel = document.createElement('span');
+      rangeMinLabel.className = 'connection-panel__tcode-range-label';
+      rangeMinLabel.textContent = t('connection.buttplug.rangeMin');
+      const rangeMinSlider = document.createElement('input');
+      rangeMinSlider.type = 'range';
+      rangeMinSlider.min = '0';
+      rangeMinSlider.max = '99';
+      rangeMinSlider.className = 'connection-panel__safety-slider';
+      rangeMinSlider.setAttribute('aria-label', t('connection.buttplug.rangeMinAria'));
+      const rangeMaxLabel = document.createElement('span');
+      rangeMaxLabel.className = 'connection-panel__tcode-range-label';
+      rangeMaxLabel.textContent = t('connection.buttplug.rangeMax');
+      const rangeMaxSlider = document.createElement('input');
+      rangeMaxSlider.type = 'range';
+      rangeMaxSlider.min = '1';
+      rangeMaxSlider.max = '100';
+      rangeMaxSlider.className = 'connection-panel__safety-slider';
+      rangeMaxSlider.setAttribute('aria-label', t('connection.buttplug.rangeMaxAria'));
+      const rangeReadout = document.createElement('span');
+      rangeReadout.className = 'connection-panel__safety-value';
+
+      const currentRange = this.buttplugSync?.getDeviceRange(dev.index) || { min: 0, max: 100 };
+      rangeMinSlider.value = String(currentRange.min);
+      rangeMaxSlider.value = String(currentRange.max);
+      rangeReadout.textContent = `${currentRange.min}-${currentRange.max}%`;
+
+      const commitRange = () => {
+        let mn = parseInt(rangeMinSlider.value, 10);
+        let mx = parseInt(rangeMaxSlider.value, 10);
+        // Prevent collapsed range (min >= max). Same pattern as the
+        // TCode per-axis range commit — push whichever slider isn't
+        // being dragged out of the way.
+        if (mn >= mx) {
+          if (document.activeElement === rangeMinSlider) {
+            mn = mx - 1;
+            rangeMinSlider.value = String(mn);
+          } else {
+            mx = mn + 1;
+            rangeMaxSlider.value = String(mx);
+          }
+        }
+        rangeReadout.textContent = `${mn}-${mx}%`;
+        if (this.buttplugSync) this.buttplugSync.setDeviceRange(dev.index, mn, mx);
+        this._saveButtplugDeviceSettings();
+      };
+      rangeMinSlider.addEventListener('input', commitRange);
+      rangeMaxSlider.addEventListener('input', commitRange);
+
+      rangeRow.appendChild(rangeMinLabel);
+      rangeRow.appendChild(rangeMinSlider);
+      rangeRow.appendChild(rangeMaxLabel);
+      rangeRow.appendChild(rangeMaxSlider);
+      rangeRow.appendChild(rangeReadout);
+      row.appendChild(rangeRow);
+
       // E-stim safety section (only for scalar devices)
       if (dev.canScalar) {
         const safetySection = document.createElement('div');
@@ -1352,6 +1414,13 @@ export class ConnectionPanel {
       if (maxIntensity !== 70) settings.maxIntensity = maxIntensity;
       const rampUp = this.buttplugSync.getRampUp(dev.index);
       if (!rampUp) settings.rampUp = false;
+      // Per-device range: persist only if non-default. Keeps existing
+      // user configs lean and means an absent `range` key reliably
+      // means "no remap" rather than "missing or defaults".
+      const range = this.buttplugSync.getDeviceRange(dev.index);
+      if (range && (range.min !== 0 || range.max !== 100)) {
+        settings.range = { min: range.min, max: range.max };
+      }
       if (Object.keys(settings).length > 0) {
         // Key by index:name — stable across sessions (Intiface preserves device indices)
         // Allows two identical devices to have separate settings
@@ -1396,6 +1465,14 @@ export class ConnectionPanel {
         if (saved.rotateMode) this.buttplugSync.setRotateMode(dev.index, saved.rotateMode);
         if (saved.maxIntensity !== undefined) this.buttplugSync.setMaxIntensity(dev.index, saved.maxIntensity);
         if (saved.rampUp === false) this.buttplugSync.setRampUp(dev.index, false);
+        // Per-device range: only apply if both min and max are finite
+        // numbers. Defensive against a malformed config where the field
+        // exists but the values are NaN / strings / etc.
+        if (saved.range
+          && Number.isFinite(saved.range.min)
+          && Number.isFinite(saved.range.max)) {
+          this.buttplugSync.setDeviceRange(dev.index, saved.range.min, saved.range.max);
+        }
       }
     }
 
@@ -1651,8 +1728,10 @@ export class ConnectionPanel {
       const enabled = cfg.enabled !== false;  // default on
       const min = Number.isFinite(cfg.min) ? cfg.min : 0;
       const max = Number.isFinite(cfg.max) ? cfg.max : 100;
+      const inverted = cfg.inverted === true;  // default false; missing → false
       this.tcodeSync.setAxisEnabled(tcode, enabled);
       this.tcodeSync.setAxisRange(tcode, min, max);
+      this.tcodeSync.setAxisInverted(tcode, inverted);
     }
   }
 
@@ -1676,6 +1755,7 @@ export class ConnectionPanel {
       const enabled = cfg.enabled !== false;
       const min = Number.isFinite(cfg.min) ? cfg.min : 0;
       const max = Number.isFinite(cfg.max) ? cfg.max : 100;
+      const inverted = cfg.inverted === true;
 
       const row = document.createElement('div');
       row.className = 'connection-panel__tcode-axis-row';
@@ -1706,6 +1786,21 @@ export class ConnectionPanel {
       typePill.className = `connection-panel__tcode-axis-type connection-panel__tcode-axis-type--${type}`;
       typePill.textContent = t(`connection.tcode.type.${type}`);
       head.appendChild(typePill);
+
+      // Per-axis invert checkbox — sits in the header next to the type
+      // pill, parallel to the Buttplug per-device invert pattern. Common
+      // use: physically mounted OSR2/SR6 where one rotation axis reads
+      // reversed due to mount orientation. Affects only the current
+      // axis's value stream; other axes are independent.
+      const invertLabel = document.createElement('label');
+      invertLabel.className = 'connection-panel__device-toggle connection-panel__tcode-axis-invert';
+      const invertCheck = document.createElement('input');
+      invertCheck.type = 'checkbox';
+      invertCheck.checked = inverted;
+      if (!enabled) invertCheck.disabled = true;
+      invertLabel.appendChild(invertCheck);
+      invertLabel.appendChild(document.createTextNode(' ' + t('connection.tcode.invert')));
+      head.appendChild(invertLabel);
 
       row.appendChild(head);
 
@@ -1754,7 +1849,12 @@ export class ConnectionPanel {
         }
         valReadout.textContent = `${mn}-${mx}%`;
         if (this.tcodeSync) this.tcodeSync.setAxisRange(tcode, mn, mx);
-        this._saveTCodeAxis(tcode, { enabled: toggle.checked, min: mn, max: mx });
+        this._saveTCodeAxis(tcode, {
+          enabled: toggle.checked,
+          min: mn,
+          max: mx,
+          inverted: invertCheck.checked,
+        });
       };
       minSlider.addEventListener('input', commit);
       maxSlider.addEventListener('input', commit);
@@ -1763,12 +1863,24 @@ export class ConnectionPanel {
         const on = toggle.checked;
         minSlider.disabled = !on;
         maxSlider.disabled = !on;
+        invertCheck.disabled = !on;
         row.classList.toggle('connection-panel__tcode-axis-row--disabled', !on);
         if (this.tcodeSync) this.tcodeSync.setAxisEnabled(tcode, on);
         this._saveTCodeAxis(tcode, {
           enabled: on,
           min: parseInt(minSlider.value, 10),
           max: parseInt(maxSlider.value, 10),
+          inverted: invertCheck.checked,
+        });
+      });
+
+      invertCheck.addEventListener('change', () => {
+        if (this.tcodeSync) this.tcodeSync.setAxisInverted(tcode, invertCheck.checked);
+        this._saveTCodeAxis(tcode, {
+          enabled: toggle.checked,
+          min: parseInt(minSlider.value, 10),
+          max: parseInt(maxSlider.value, 10),
+          inverted: invertCheck.checked,
         });
       });
 

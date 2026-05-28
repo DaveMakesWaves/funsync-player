@@ -19,6 +19,7 @@ const SETTINGS_DEFAULTS = {
   'player.upNext.mode': 'auto',
   'player.upNext.countdownSec': 10,
   'player.autoplayOnAdvance': false,
+  'player.rangeExtender.enabled': false,
   'player.preferMultiAxis': 'single',
   'player.smoothing': 'linear',
   'player.speedLimit': 0,
@@ -40,6 +41,7 @@ export class SettingsPanel {
     onLinearStrategyChanged,
     onLinearLookaheadChanged,
     onMinStrokeChanged,
+    onRangeExtenderChanged,
     getConnectionState,
   }) {
     this._settings = settings;
@@ -53,6 +55,7 @@ export class SettingsPanel {
     this.onLinearStrategyChanged = onLinearStrategyChanged || null;
     this.onLinearLookaheadChanged = onLinearLookaheadChanged || null;
     this.onMinStrokeChanged = onMinStrokeChanged || null;
+    this.onRangeExtenderChanged = onRangeExtenderChanged || null;
     // Optional — returns a snapshot of device connection state for the
     // "Report a problem" dialog. Caller (app.js) owns the device managers
     // so it's the natural place to read this from.
@@ -603,6 +606,12 @@ export class SettingsPanel {
         <span id="sp-speed-limit-val" class="settings-panel__field-value">${t('settingsPanel.playback.speedLimitOff')}</span>
         <button type="button" id="sp-speed-limit-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.speedLimitResetTitle')}" aria-label="${t('settingsPanel.playback.speedLimitResetAria')}">↻</button>
       </div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-range-extender">${t('settingsPanel.playback.rangeExtenderLabel')}</label>
+        <input type="checkbox" id="sp-range-extender" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-range-extender-hint">
+        <button type="button" id="sp-range-extender-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.rangeExtenderResetTitle')}" aria-label="${t('settingsPanel.playback.rangeExtenderResetAria')}">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-range-extender-hint">${t('settingsPanel.playback.rangeExtenderHint')}</div>
       <div class="settings-panel__hint" id="sp-smoothing-hint">${t('settingsPanel.playback.smoothingHint')}</div>
     `;
     panel.appendChild(smoothSection);
@@ -775,6 +784,21 @@ export class SettingsPanel {
         });
       }
 
+      // Range Extender — script-side stretch for limited-range scripts.
+      // Default off; users opt in when they have a script that doesn't
+      // use their device's full range. See device-transform-stack.js for
+      // the apply pipeline (extender → invert → range → safety cap).
+      const rangeExtender = panel.querySelector('#sp-range-extender');
+      const savedExt = this._settings.get('player.rangeExtender.enabled');
+      const extVal = typeof savedExt === 'boolean'
+        ? savedExt
+        : SETTINGS_DEFAULTS['player.rangeExtender.enabled'];
+      if (rangeExtender) rangeExtender.checked = extVal;
+      rangeExtender?.addEventListener('change', () => {
+        this._settings.set('player.rangeExtender.enabled', !!rangeExtender.checked);
+        if (this.onRangeExtenderChanged) this.onRangeExtenderChanged(!!rangeExtender.checked);
+      });
+
       // Linear strategy + lookahead + min-stroke
       const linearStrategy = panel.querySelector('#sp-linear-strategy');
       const lookahead = panel.querySelector('#sp-lookahead');
@@ -895,6 +919,7 @@ export class SettingsPanel {
         refresh();
       };
       wireDefaultCheckbox(autoplayCheckbox, panel.querySelector('#sp-autoplay-on-advance-reset'), SETTINGS_DEFAULTS['player.autoplayOnAdvance']);
+      wireDefaultCheckbox(rangeExtender, panel.querySelector('#sp-range-extender-reset'), SETTINGS_DEFAULTS['player.rangeExtender.enabled']);
     }, 0);
 
     return panel;
