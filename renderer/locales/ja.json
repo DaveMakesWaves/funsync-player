@@ -498,6 +498,18 @@
     "dialogFallback": "ダイアログ"
   },
   "webRemote": {
+    "title": "Web リモート",
+    "experimental": "実験的",
+    "experimentalDetail": "Web リモートはまだ調整中です — 電話側のデバイス同期や再接続のエッジケースが発生する可能性があります。",
+    "intro": "同じ Wi-Fi 上のブラウザで携帯電話またはタブレットからライブラリを開きます。デバイスのカメラで QR コードをスキャンするか、URL を入力してください。",
+    "urlLabel": "URL",
+    "detecting": "(検出中…)",
+    "feature1": "電話で動画を閲覧・再生",
+    "feature2": "接続されたデバイスは電話の再生に追従",
+    "feature3": "デバイスを駆動するのは一度に一台の電話または VR ヘッドセットのみ",
+    "qrTitle": "電話のカメラでスキャン",
+    "backendNotRunning": "バックエンドが実行されていません",
+    "qrUnavailable": "QR を利用できません",
     "header": {
       "back": "戻る",
       "locationAria": "位置",

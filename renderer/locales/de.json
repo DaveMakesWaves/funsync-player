@@ -380,6 +380,18 @@
     "removeAria": "Filter entfernen: {label}"
   },
   "webRemote": {
+    "title": "Web-Fernsteuerung",
+    "experimental": "EXPERIMENTELL",
+    "experimentalDetail": "Die Web-Fernsteuerung wird noch verbessert — Edge Cases bei Telefonsynchronisierung und Wiederverbindung können auftreten.",
+    "intro": "Öffne deine Bibliothek auf einem Telefon oder Tablet in einem Browser im selben WLAN. Scanne den QR-Code mit der Gerätekamera oder gib die URL ein.",
+    "urlLabel": "URL",
+    "detecting": "(wird erkannt…)",
+    "feature1": "Videos auf dem Telefon durchsuchen und abspielen",
+    "feature2": "Verbundene Geräte folgen der Wiedergabe des Telefons",
+    "feature3": "Nur ein Telefon oder VR-Headset steuert Geräte gleichzeitig",
+    "qrTitle": "Mit der Kamera deines Telefons scannen",
+    "backendNotRunning": "Backend läuft nicht",
+    "qrUnavailable": "QR nicht verfügbar",
     "header": {
       "back": "Zurück",
       "locationAria": "Standort",

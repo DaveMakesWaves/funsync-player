@@ -380,20 +380,6 @@
   "filterChip": {
     "removeAria": "Remove filter: {label}"
   },
-  "webRemote": {
-    "title": "Web Remote",
-    "experimental": "EXPERIMENTAL",
-    "experimentalDetail": "Web Remote is still being polished — phone-side device sync and reconnection edge cases may surface.",
-    "intro": "Open your library on a phone or tablet in a browser on the same Wi-Fi. Scan the QR code with the device's camera, or type the URL.",
-    "urlLabel": "URL",
-    "detecting": "(detecting…)",
-    "feature1": "Browse and play videos on the phone",
-    "feature2": "Connected devices follow the phone's playback",
-    "feature3": "Only one phone or VR headset drives devices at a time",
-    "qrTitle": "Scan with your phone's camera",
-    "backendNotRunning": "Backend not running",
-    "qrUnavailable": "QR unavailable"
-  },
   "hevc": {
     "warningTitle": "HEVC playback may stutter",
     "dontShowAgain": "Don't show again",
@@ -930,6 +916,18 @@
     "saveDialogDefaultName": "funsync-report.txt"
   },
   "webRemote": {
+    "title": "Web Remote",
+    "experimental": "EXPERIMENTAL",
+    "experimentalDetail": "Web Remote is still being polished — phone-side device sync and reconnection edge cases may surface.",
+    "intro": "Open your library on a phone or tablet in a browser on the same Wi-Fi. Scan the QR code with the device's camera, or type the URL.",
+    "urlLabel": "URL",
+    "detecting": "(detecting…)",
+    "feature1": "Browse and play videos on the phone",
+    "feature2": "Connected devices follow the phone's playback",
+    "feature3": "Only one phone or VR headset drives devices at a time",
+    "qrTitle": "Scan with your phone's camera",
+    "backendNotRunning": "Backend not running",
+    "qrUnavailable": "QR unavailable",
     "header": {
       "back": "Back",
       "locationAria": "Location",

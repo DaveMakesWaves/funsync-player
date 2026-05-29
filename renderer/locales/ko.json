@@ -498,6 +498,18 @@
     "dialogFallback": "대화 상자"
   },
   "webRemote": {
+    "title": "웹 리모컨",
+    "experimental": "실험적",
+    "experimentalDetail": "웹 리모컨은 아직 다듬는 중입니다 — 전화 측 장치 동기화 및 재연결 엣지 케이스가 발생할 수 있습니다.",
+    "intro": "같은 Wi-Fi에 있는 휴대폰이나 태블릿의 브라우저에서 라이브러리를 엽니다. 장치의 카메라로 QR 코드를 스캔하거나 URL을 입력하세요.",
+    "urlLabel": "URL",
+    "detecting": "(감지 중…)",
+    "feature1": "전화에서 동영상 탐색 및 재생",
+    "feature2": "연결된 장치가 전화의 재생을 따릅니다",
+    "feature3": "한 번에 하나의 전화 또는 VR 헤드셋만 장치를 구동합니다",
+    "qrTitle": "전화 카메라로 스캔",
+    "backendNotRunning": "백엔드가 실행되지 않음",
+    "qrUnavailable": "QR을 사용할 수 없음",
     "header": {
       "back": "뒤로",
       "locationAria": "위치",

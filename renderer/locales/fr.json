@@ -498,6 +498,18 @@
     "setVRClassificationTitle": "Définir la classification VR"
   },
   "webRemote": {
+    "title": "Télécommande Web",
+    "experimental": "EXPÉRIMENTAL",
+    "experimentalDetail": "La télécommande Web est encore en cours d'amélioration — des cas limites de synchronisation et de reconnexion côté téléphone peuvent apparaître.",
+    "intro": "Ouvre ta bibliothèque sur un téléphone ou une tablette dans un navigateur sur le même Wi-Fi. Scanne le QR code avec la caméra de l'appareil ou saisis l'URL.",
+    "urlLabel": "URL",
+    "detecting": "(détection…)",
+    "feature1": "Parcourir et lire des vidéos sur le téléphone",
+    "feature2": "Les appareils connectés suivent la lecture du téléphone",
+    "feature3": "Seul un téléphone ou un casque VR contrôle les appareils à la fois",
+    "qrTitle": "Scanner avec la caméra de ton téléphone",
+    "backendNotRunning": "Backend non démarré",
+    "qrUnavailable": "QR indisponible",
     "header": {
       "back": "Retour",
       "locationAria": "Emplacement",

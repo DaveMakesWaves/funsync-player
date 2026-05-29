@@ -498,6 +498,18 @@
     "dialogFallback": "diálogo"
   },
   "webRemote": {
+    "title": "Mando web",
+    "experimental": "EXPERIMENTAL",
+    "experimentalDetail": "El mando web aún se está puliendo — pueden aparecer casos límite en la sincronización con el teléfono y la reconexión.",
+    "intro": "Abre tu biblioteca en un teléfono o tablet en un navegador en la misma red Wi-Fi. Escanea el código QR con la cámara del dispositivo o escribe la URL.",
+    "urlLabel": "URL",
+    "detecting": "(detectando…)",
+    "feature1": "Explorar y reproducir vídeos en el teléfono",
+    "feature2": "Los dispositivos conectados siguen la reproducción del teléfono",
+    "feature3": "Solo un teléfono o casco VR controla los dispositivos a la vez",
+    "qrTitle": "Escanea con la cámara de tu teléfono",
+    "backendNotRunning": "Backend no ejecutándose",
+    "qrUnavailable": "QR no disponible",
     "header": {
       "back": "Atrás",
       "locationAria": "Ubicación",

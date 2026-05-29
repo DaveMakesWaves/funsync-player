@@ -97,6 +97,68 @@ describe('locale key parity', () => {
     }
   });
 
+  // Regression — JSON.parse silently keeps the LAST occurrence when a
+  // top-level key is declared twice, so two `"webRemote": {...}` blocks
+  // become one (the second). The other parity tests pass because both
+  // bundles end up with matching key SETS after the silent drop.
+  //
+  // This test re-reads the raw text and counts top-level key declarations
+  // — depth 1 in brace-counted terms — to catch the duplication BEFORE
+  // JSON.parse hides it. Caught a real bug 2026-05-28 where en.json had
+  // two `webRemote` blocks; the modal-specific keys (title, intro, etc.)
+  // were silently dropped at runtime.
+  it.each(SHIPPED)('%s.json has no duplicate top-level keys', (code) => {
+    const raw = readFileSync(resolve(localesDir, `${code}.json`), 'utf8');
+    const topLevelKeys = [];
+    let depth = 0;
+    let inString = false;
+    let prevChar = '';
+    let i = 0;
+    while (i < raw.length) {
+      const ch = raw[i];
+      if (inString) {
+        if (ch === '"' && prevChar !== '\\') inString = false;
+      } else {
+        if (ch === '"') {
+          // Collect everything up to the next unescaped quote.
+          const start = i + 1;
+          let j = start;
+          while (j < raw.length) {
+            const c = raw[j];
+            if (c === '"' && raw[j - 1] !== '\\') break;
+            j++;
+          }
+          const key = raw.slice(start, j);
+          // Look ahead for the `:` that confirms this is a key, not a
+          // string value. Strings used as values are preceded by `:`
+          // (a key) plus whitespace.
+          let k = j + 1;
+          while (k < raw.length && /\s/.test(raw[k])) k++;
+          const isKey = raw[k] === ':';
+          if (isKey && depth === 1) topLevelKeys.push(key);
+          i = j; // resume scanning after the closing quote
+        } else if (ch === '{') {
+          depth++;
+        } else if (ch === '}') {
+          depth--;
+        }
+      }
+      prevChar = ch;
+      i++;
+    }
+
+    const seen = new Set();
+    const duplicates = [];
+    for (const k of topLevelKeys) {
+      if (seen.has(k)) duplicates.push(k);
+      seen.add(k);
+    }
+    expect(
+      duplicates,
+      `${code}.json has duplicate top-level keys (silently dropped by JSON.parse): ${duplicates.join(', ')}`
+    ).toEqual([]);
+  });
+
   it.each(NON_EN)('%s.json ICU placeholder names match en.json', (code) => {
     const other = flatten(loadBundle(code));
     for (const [k, enVal] of Object.entries(en)) {

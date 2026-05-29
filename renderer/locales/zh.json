@@ -498,6 +498,18 @@
     "dialogFallback": "对话框"
   },
   "webRemote": {
+    "title": "网页遥控",
+    "experimental": "实验性",
+    "experimentalDetail": "网页遥控仍在打磨中 — 手机端设备同步和重连的边缘情况可能会出现。",
+    "intro": "在同一 Wi-Fi 下的手机或平板浏览器中打开你的媒体库。用设备摄像头扫描二维码,或输入 URL。",
+    "urlLabel": "URL",
+    "detecting": "(正在检测…)",
+    "feature1": "在手机上浏览并播放视频",
+    "feature2": "已连接的设备跟随手机的播放",
+    "feature3": "一次只有一部手机或 VR 头显驱动设备",
+    "qrTitle": "用手机摄像头扫描",
+    "backendNotRunning": "后端未运行",
+    "qrUnavailable": "二维码不可用",
     "header": {
       "back": "返回",
       "locationAria": "位置",
