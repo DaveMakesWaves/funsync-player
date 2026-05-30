@@ -5,7 +5,7 @@
 //
 // FunSync's companion-file detection (`multi-axis.js::detectCompanionFiles`)
 // already covers the OFS-canonical pattern. This module covers the
-// FOUR non-canonical embedded formats that show up on EroScripts and
+// FIVE non-canonical embedded formats that show up on EroScripts and
 // other forums:
 //
 // Format A — HereSphere style (`additional_axes`):
@@ -36,6 +36,21 @@
 //       { "at": 100, "pos": 50, "R0": 80, "R1": 30, "R2": 70 }
 //     ]
 //   }
+//
+// Format E — `axes` array keyed by TCode id (Iwara / 99DM scripter
+// convention, version 1.1 funscripts):
+//   {
+//     "actions": [...],
+//     "axes": [
+//       { "id": "R1", "actions": [...] },
+//       { "id": "R2", "actions": [...] }
+//     ],
+//     "version": "1.1"
+//   }
+// Surfaced via community report 2026-05-30: 99DM's Iwara scripts ship
+// in this shape. Detection ordering puts E above C/D (more explicit
+// than loose sibling sniffing or inline) but below A/B (which are the
+// most widely-documented formats and win precedence ties).
 //
 // Returns a `Map<suffix, actions>` keyed by the standard FunSync axis
 // suffix (matches `multi-axis.js::AXIS_DEFINITIONS`). Suffixes:
@@ -119,12 +134,32 @@ export function extractEmbeddedAxes(parsed) {
     }
   }
 
+  // --- Format E: `axes` array of {id, actions} -----------------------
+  // Iwara / 99DM scripter convention; TCode IDs sit directly in the
+  // entry's `id` field. L0 is silently ignored — it's the main stroke,
+  // already covered by parsed.actions and never extracted as a separate
+  // axis (matches the TCODE_TO_SUFFIX `L0: null` convention).
+  if (Array.isArray(parsed.axes)) {
+    for (const entry of parsed.axes) {
+      if (!entry || typeof entry !== 'object') continue;
+      // Defensive: id may be lowercase in some hand-edited files.
+      const rawId = typeof entry.id === 'string' ? entry.id.toUpperCase() : null;
+      if (!rawId || !(rawId in TCODE_TO_SUFFIX)) continue;
+      const suffix = TCODE_TO_SUFFIX[rawId];
+      if (!suffix) continue;                  // covers L0 (null in the map)
+      if (!isValidActionArray(entry.actions)) continue;
+      // Earlier-format precedence — Format A/B win if both present.
+      if (out.has(suffix)) continue;
+      out.set(suffix, entry.actions);
+    }
+  }
+
   // --- Format C: direct sibling keys --------------------------------
   // Walk top-level keys; skip the standard funscript fields. Anything
   // that looks like an axis name gets considered.
   const SKIP = new Set([
     'actions', 'version', 'inverted', 'range', 'metadata', 'raw',
-    'additional_axes', 'tcode',
+    'additional_axes', 'tcode', 'axes',
     // Backend-cached / FunSync-internal fields — never axis data.
     'cachedAt', '_sourcePath', 'csvHash',
   ]);
