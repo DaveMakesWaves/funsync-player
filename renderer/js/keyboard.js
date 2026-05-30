@@ -4,7 +4,7 @@ import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
@@ -13,6 +13,7 @@ export class KeyboardHandler {
     this.gapSkipEngine = gapSkipEngine || null;
     this.onNavigate = onNavigate || null;
     this.onToggleLoop = onToggleLoop || null;
+    this.onToggleQueue = onToggleQueue || null;
     this._bindEvents();
   }
 
@@ -85,6 +86,17 @@ export class KeyboardHandler {
           this.onToggleLoop();
         } else {
           this.player.skip(10);
+        }
+        break;
+
+      case 'q':
+      case 'Q':
+        // Shift+Q toggles the queue panel. Plain Q is taken by the
+        // editor's alternating-insert binding and is only meaningful
+        // when the editor canvas has focus.
+        if (e.shiftKey && this.onToggleQueue) {
+          e.preventDefault();
+          this.onToggleQueue();
         }
         break;
 

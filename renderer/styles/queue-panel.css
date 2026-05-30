@@ -1,0 +1,580 @@
+/* Queue Panel
+ *
+ * Right-side slide-in over the video. Per DESIGN.md §2.2, all chrome
+ * painting on top of the video uses the --video-overlay-* token
+ * namespace (theme-independent: always white-on-dark). The panel width
+ * is exposed as --queue-panel-width so the top-bar toggle button can
+ * translate by the same amount when the panel is open, landing flush
+ * against the panel's left edge.
+ *
+ * Touch targets follow the 36×36 desktop Fitts floor (DESIGN.md §1.5)
+ * for primary controls (toggle, close). Dense row affordances (remove,
+ * drag) stay smaller to keep the row visually compact but get padded
+ * hit areas. */
+
+:root {
+  --queue-panel-width: 360px;
+}
+
+@media (max-width: 1280px) {
+  :root { --queue-panel-width: 320px; }
+}
+
+@media (max-width: 800px) {
+  :root { --queue-panel-width: min(90vw, 360px); }
+}
+
+/* === Library "Add to queue" context menu (right-click) ================== */
+
+.library__queue-context-menu {
+  background: var(--video-overlay-bg);
+  border: 1px solid var(--video-overlay-border);
+  border-radius: 6px;
+  padding: 4px;
+  z-index: 200;
+  min-width: 200px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+}
+
+.library__queue-context-menu button {
+  background: transparent;
+  border: none;
+  color: var(--video-overlay-text);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.library__queue-context-menu button:hover,
+.library__queue-context-menu button:focus-visible {
+  background: var(--video-overlay-control-hover);
+  outline: none;
+}
+
+/* === Top-bar toggle button ============================================== */
+/* Sits at the far-right of .player__top-bar (margin-left: auto). When
+   the panel opens, aria-pressed flips to "true" and the button slides
+   left by the panel width so it visually anchors to the panel's left
+   edge — mirrors YouTube / Cast UI conventions. */
+
+.player__queue-toggle {
+  background: var(--video-overlay-control-hover);
+  border: none;
+  color: var(--video-overlay-text);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition:
+    background var(--transition-fast),
+    color var(--transition-fast),
+    transform 0.22s ease-out;
+}
+
+.player__queue-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.player__queue-toggle:hover {
+  background: var(--video-overlay-control-active);
+}
+
+.player__queue-toggle[aria-pressed="true"] {
+  background: var(--accent);
+  color: #fff;
+  transform: translateX(calc(var(--queue-panel-width) * -1));
+}
+
+.player__queue-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .player__queue-toggle { transition: background var(--transition-fast), color var(--transition-fast); }
+}
+
+/* === Queue panel ======================================================== */
+
+.queue-panel {
+  position: absolute;
+  top: 0;
+  right: 0;
+  /* Sits above the playback controls bar (which lives at `bottom: 0`).
+     Matches the gap-skip / up-next overlay offset convention so the
+     panel reaches the top edge of the playback chrome rather than
+     overlapping it. */
+  bottom: 100px;
+  width: var(--queue-panel-width);
+  background: var(--video-overlay-bg);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  color: var(--video-overlay-text);
+  z-index: 18; /* above gap-skip (15) and up-next (16); below modals (100+) */
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.22s ease-out;
+  border-left: 1px solid var(--video-overlay-border);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4);
+}
+
+.queue-panel--open {
+  transform: translateX(0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .queue-panel { transition: none; }
+}
+
+/* Header */
+.queue-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 12px 16px;
+  border-bottom: 1px solid var(--video-overlay-border);
+  flex-shrink: 0;
+}
+
+.queue-panel__title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: 0.01em;
+  color: var(--video-overlay-text);
+}
+
+.queue-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--video-overlay-text-dim);
+  cursor: pointer;
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.queue-panel__close:hover {
+  background: var(--video-overlay-control-hover);
+  color: var(--video-overlay-text);
+}
+
+.queue-panel__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Body — scrollable */
+.queue-panel__body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 4px 0;
+}
+
+.queue-panel__body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.queue-panel__body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.queue-panel__body::-webkit-scrollbar-thumb {
+  background: var(--video-overlay-control-hover);
+  border-radius: 4px;
+}
+
+.queue-panel__body::-webkit-scrollbar-thumb:hover {
+  background: var(--video-overlay-control-active);
+}
+
+/* Empty state */
+.queue-panel__empty {
+  padding: 32px 20px;
+  text-align: center;
+  color: var(--video-overlay-text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.queue-panel__empty p {
+  margin: 0 0 16px 0;
+}
+
+.queue-panel__open-library {
+  background: var(--video-overlay-control-hover);
+  border: 1px solid var(--video-overlay-border);
+  color: var(--video-overlay-text);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  transition: background 0.15s;
+}
+
+.queue-panel__open-library:hover {
+  background: var(--video-overlay-control-active);
+}
+
+/* Sections */
+.queue-panel__sections {
+  display: flex;
+  flex-direction: column;
+}
+
+.queue-panel__section {
+  padding: 8px 0;
+}
+
+.queue-panel__section + .queue-panel__section {
+  border-top: 1px solid var(--video-overlay-border);
+  margin-top: 4px;
+}
+
+.queue-panel__section-head {
+  padding: 8px 16px 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.queue-panel__section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--video-overlay-text-dim);
+  font-weight: 600;
+}
+
+.queue-panel__section-action {
+  background: transparent;
+  border: none;
+  color: var(--video-overlay-text-dim);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  transition: background 0.15s, color 0.15s;
+}
+
+.queue-panel__section-action:hover {
+  background: var(--video-overlay-control-hover);
+  color: var(--video-overlay-text);
+}
+
+/* List */
+.queue-panel__list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+/* Row — compact library card variant */
+.queue-panel__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 6px 8px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.12s;
+  border-left: 3px solid transparent;
+  min-height: 64px;
+}
+
+.queue-panel__row:hover {
+  background: var(--video-overlay-control-hover);
+}
+
+.queue-panel__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.queue-panel__row--current {
+  border-left-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.queue-panel__row--dim {
+  opacity: 0.6;
+}
+
+.queue-panel__row--dim:hover {
+  opacity: 1;
+}
+
+.queue-panel__row--dragging {
+  opacity: 0.4;
+}
+
+.queue-panel__row--drop-target {
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+/* Drag handle */
+.queue-panel__drag-handle {
+  background: transparent;
+  border: none;
+  color: var(--video-overlay-text-dim);
+  opacity: 0.6;
+  cursor: grab;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  border-radius: 4px;
+}
+
+.queue-panel__drag-handle:hover {
+  color: var(--video-overlay-text);
+  opacity: 1;
+  background: var(--video-overlay-control-hover);
+}
+
+.queue-panel__drag-handle:active {
+  cursor: grabbing;
+}
+
+/* Thumbnail */
+.queue-panel__thumb {
+  width: 96px;
+  height: 54px;
+  border-radius: 4px;
+  overflow: hidden;
+  position: relative;
+  background: rgba(0, 0, 0, 0.4);
+  flex-shrink: 0;
+}
+
+.queue-panel__thumb-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.queue-panel__thumb-skel {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.1) 50%,
+    rgba(255, 255, 255, 0.04) 100%
+  );
+  background-size: 200% 100%;
+  animation: queue-panel-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes queue-panel-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+/* Meta */
+.queue-panel__meta {
+  flex: 1;
+  min-width: 0; /* allow ellipsis */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.queue-panel__title-row {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--video-overlay-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queue-panel__sub-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  font-size: 11px;
+  color: var(--video-overlay-text-dim);
+}
+
+.queue-panel__duration {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sub-row badges — mirror library card inline badges so the FS /
+ * subtitle / multi-axis / custom routing / speed indicators read
+ * identically across surfaces. Colors reuse the same --state-* /
+ * --badge-* tokens the library uses (see styles/library.css §inline). */
+.queue-panel__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.queue-panel__badge svg {
+  width: 12px;
+  height: 12px;
+}
+
+.queue-panel__badge--fs-auto    { color: var(--state-connected); }
+.queue-panel__badge--fs-manual  { color: var(--badge-info); }
+.queue-panel__badge--sub-auto   { color: var(--state-warning); }
+.queue-panel__badge--sub-manual { color: var(--badge-purple); }
+.queue-panel__badge--multi      { color: var(--badge-multi); }
+.queue-panel__badge--custom     { color: var(--badge-custom); }
+
+/* Speed gauge — five-tier color scale matches library__speed-badge. */
+.queue-panel__badge--speed-slow    { color: var(--badge-info); }
+.queue-panel__badge--speed-medium  { color: var(--state-connected); }
+.queue-panel__badge--speed-fast    { color: var(--state-warning); }
+.queue-panel__badge--speed-extreme { color: var(--accent); }
+.queue-panel__badge--speed-insane  { color: var(--badge-purple); }
+
+/* VR / FLAT pill — only present when the user has manually overridden
+ * the heuristic classification (parity with library__vr-badge). */
+.queue-panel__vr-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  line-height: 1.4;
+  color: #fff;
+  flex-shrink: 0;
+}
+
+.queue-panel__vr-pill--vr   { background: var(--badge-purple, #8b5cf6); }
+.queue-panel__vr-pill--flat { background: var(--badge-info, #3b82f6); }
+
+/* Category dots — bottom-right of the thumbnail, mirrors the library
+ * card placement so the visual language is consistent. */
+.queue-panel__category-dots {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  display: flex;
+  gap: 3px;
+  z-index: 1;
+}
+
+.queue-panel__category-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+
+/* Remove button — appears on row hover. Hit area is 32×32 so it
+   reads as a tidy column inside the dense row layout; full row hit
+   target stays primary. */
+.queue-panel__remove {
+  background: transparent;
+  border: none;
+  color: var(--video-overlay-text-dim);
+  cursor: pointer;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, color 0.15s;
+}
+
+.queue-panel__row:hover .queue-panel__remove,
+.queue-panel__remove:focus-visible {
+  opacity: 1;
+}
+
+.queue-panel__remove:hover {
+  background: var(--video-overlay-control-hover);
+  color: var(--accent);
+}
+
+/* Auto-advance countdown chip — appears on the row UpNextEngine will
+ * jump to next when the up-next card is suppressed by the open queue
+ * panel. Pill carries the live "Ns" + an X to cancel. Click on the
+ * pill body (not just the X) cancels — the whole chip is the cancel
+ * target so it isn't a Fitts puzzle to hit a single 11px glyph.
+ *
+ * Row gets a faint accent wash so the auto-advance target stands out
+ * from the rest of the upcoming list — same job the up-next card does
+ * for the closed-panel state (Nielsen #1: visibility of system status). */
+.queue-panel__row--auto-advance {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.queue-panel__row--auto-advance:hover {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.queue-panel__auto-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  padding: 2px 6px 2px 8px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+
+.queue-panel__auto-chip:hover {
+  background: var(--accent-hover, var(--accent));
+}
+
+.queue-panel__auto-chip:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 1px;
+}
+
+.queue-panel__auto-x {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.85;
+}
+
+.queue-panel__auto-chip:hover .queue-panel__auto-x {
+  opacity: 1;
+}

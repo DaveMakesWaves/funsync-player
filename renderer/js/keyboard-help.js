@@ -20,6 +20,8 @@
 
 import { Modal } from '../components/modal.js';
 import { t } from './i18n.js';
+import { formatBindingLabel } from '../components/key-capture.js';
+import { dataService } from './data-service.js';
 
 /**
  * Open the keyboard-help overlay with the given groups.
@@ -134,6 +136,7 @@ export function getPlayerShortcutGroups() {
         ['A',             t('kbd.loopA')],
         ['B',             t('kbd.loopB')],
         ['Shift+L',       t('kbd.toggleVideoLoop')],
+        ['Shift+Q',       t('kbd.toggleQueue')],
         ['Esc',           t('kbd.clearLoop')],
       ],
     },
@@ -200,6 +203,7 @@ export function getEditorShortcutGroups() {
       title: t('kbd.editorPlace'),
       rows: [
         ['0 – 9 (or Numpad)',   t('kbd.editorPlaceNumpad')],
+        ['Shift+0 / - / Numpad-', t('kbd.editorPlaceTop')],
         ['Alt+Click',           t('kbd.editorInsertAtClick')],
         ['Shift+Drag dot',      t('kbd.editorMoveSelected')],
         ['Q',                   t('kbd.editorAlternatingInsert')],
@@ -231,5 +235,28 @@ export function getEditorShortcutGroups() {
         ['?',                   t('kbd.showHelp')],
       ],
     },
+    ...buildCustomPositionKeysGroup(),
   ];
+}
+
+/**
+ * Build the dynamic "Custom position keys" group from the user's saved
+ * bindings. Returns an empty array when the user has no custom bindings
+ * — so the empty group is never rendered (no visual noise). Per
+ * Nielsen #6 (recognition > recall), users should be able to find their
+ * own bindings via `?` without rummaging through Settings.
+ */
+function buildCustomPositionKeysGroup() {
+  let bindings = [];
+  try {
+    const raw = dataService?.get?.('editor.customPositionKeys');
+    if (Array.isArray(raw)) bindings = raw;
+  } catch { /* not initialised — fall through to empty group */ }
+  if (bindings.length === 0) return [];
+  return [{
+    title: t('editor.customKeysHelpGroup'),
+    rows: bindings
+      .filter((b) => b && typeof b.code === 'string')
+      .map((b) => [formatBindingLabel(b), `→ ${b.position}`]),
+  }];
 }

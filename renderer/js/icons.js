@@ -34,6 +34,7 @@ export { default as Clapperboard } from '../../node_modules/lucide/dist/esm/icon
 export { default as PictureInPicture2 } from '../../node_modules/lucide/dist/esm/icons/picture-in-picture-2.js';
 export { default as Repeat } from '../../node_modules/lucide/dist/esm/icons/repeat.js';
 export { default as Repeat1 } from '../../node_modules/lucide/dist/esm/icons/repeat-1.js';
+export { default as Columns2 } from '../../node_modules/lucide/dist/esm/icons/columns-2.js';
 export { default as SkipBack } from '../../node_modules/lucide/dist/esm/icons/skip-back.js';
 export { default as SkipForward } from '../../node_modules/lucide/dist/esm/icons/skip-forward.js';
 export { default as Undo2 } from '../../node_modules/lucide/dist/esm/icons/undo-2.js';

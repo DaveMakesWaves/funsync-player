@@ -24,6 +24,7 @@ import { dataService } from '../js/data-service.js';
 import { openKeyboardHelp, getEditorShortcutGroups } from '../js/keyboard-help.js';
 import { t, translatePage } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
+import { buildResolverMap, lookupBinding } from '../js/position-key-resolver.js';
 
 export class ScriptEditor {
   constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyHdspSync, handyManager, settings }) {
@@ -104,6 +105,14 @@ export class ScriptEditor {
     // Live device preview
     this._livePreview = false;
 
+    // Custom position-key resolver. User can bind any (code, mods) to
+    // any 0-100 position via Settings → Editor → Position keys. Map is
+    // checked BEFORE the default numpad map in _handleKeyDown so user
+    // overrides win. Rebuilt on every settings:changed for editor.
+    this._customPositionKeyMap = buildResolverMap(
+      this.settings?.get?.('editor.customPositionKeys') || [],
+    );
+
     this._buildPanel();
     this._bindEvents();
 
@@ -131,6 +140,17 @@ export class ScriptEditor {
     this._unsubscribeRateChange = eventBus.on('playback:rate-changed', (rate) => {
       if (this._speedSelect && this._speedSelect.value !== String(rate)) {
         this._speedSelect.value = String(rate);
+      }
+    });
+
+    // Rebuild the custom position-key resolver when the user adds /
+    // removes / edits bindings in Settings. Keeps the runtime map in
+    // lockstep with persisted state without requiring an editor reopen.
+    this._unsubscribeSettings = eventBus.on('settings:changed', (key) => {
+      if (key === 'editor.customPositionKeys' || key === '*') {
+        this._customPositionKeyMap = buildResolverMap(
+          this.settings?.get?.('editor.customPositionKeys') || [],
+        );
       }
     });
   }
@@ -726,58 +746,52 @@ export class ScriptEditor {
 
     const ctrl = e.ctrlKey || e.metaKey;
 
+    // Custom position-key bindings win over defaults — user explicitly
+    // configured them in Settings → Editor → Position keys. Resolution
+    // order per SCOPE-editor-custom-position-keys.md §2 decision #2:
+    //   1. user's custom map
+    //   2. default position-key map (this block below)
+    //   3. editor command switch-case (further down)
+    const customPos = lookupBinding(this._customPositionKeyMap, {
+      code: e.code,
+      mods: { shift: !!e.shiftKey, ctrl: !!ctrl, alt: !!e.altKey },
+    });
+    if (customPos !== null) {
+      e.preventDefault();
+      e.stopPropagation();
+      this._placeOrTweakAt(customPos);
+      return;
+    }
+
     // 0-9 keys: place action at current video time with fixed position
     // Works with both regular number row and numpad. OFS parity: round
-    // 10s, not 11s (key 9 = 90; placement at 100 is via Alt+Click at
-    // top, then Up arrow, or via the `Q` alternating-insert hotkey
-    // which clamps to 100 when flipping from low).
+    // 10s, not 11s (key 9 = 90). The top of the range (100) wasn't
+    // reachable in the original map — a community report flagged this.
+    // Three bindings cover it now:
+    //   - Shift+0 (modifier promotes the 0-floor to the 100-ceiling —
+    //     Photoshop opacity convention)
+    //   - `-` (Minus, number-row neighbor of 0 — single-handed reach)
+    //   - Numpad- (NumpadSubtract, same role for numpad workflows)
+    // Default scheme stays increments of 10 per Dave 2026-05-30; users
+    // who want every-point binding granularity use the custom-key UI
+    // wired above (notes/features/SCOPE-editor-custom-position-keys.md).
+    const TOP_KEYS = new Set(['Minus', 'NumpadSubtract']);
+    const isShiftZero = e.shiftKey && (e.code === 'Digit0' || e.code === 'Numpad0');
     const numpadMap = {
       'Digit0': 0, 'Digit1': 10, 'Digit2': 20, 'Digit3': 30, 'Digit4': 40,
       'Digit5': 50, 'Digit6': 60, 'Digit7': 70, 'Digit8': 80, 'Digit9': 90,
       'Numpad0': 0, 'Numpad1': 10, 'Numpad2': 20, 'Numpad3': 30, 'Numpad4': 40,
       'Numpad5': 50, 'Numpad6': 60, 'Numpad7': 70, 'Numpad8': 80, 'Numpad9': 90,
     };
-    if (e.code in numpadMap) {
+    // Resolve the position from whichever binding fired. Shift+0 wins
+    // over the plain 0→0 mapping (the shifted variant never matches
+    // the unshifted entry in `numpadMap` because we early-return).
+    const topKeyMatch = TOP_KEYS.has(e.code) && !ctrl && !e.altKey;
+    if (isShiftZero || topKeyMatch || (e.code in numpadMap && !e.shiftKey && !ctrl && !e.altKey)) {
       e.preventDefault();
       e.stopPropagation();
-      const pos = numpadMap[e.code];
-
-      if (this._recordingMode) {
-        // Recording mode: insert at live playhead, don't select, don't pause
-        const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
-        this.editableScript.insertAction(timeMs, pos);
-        this._sendLivePreview(pos);
-      } else {
-        // Disambiguate "tweak the selected action" from "insert new at
-        // playhead" by checking whether the playhead is actually ON the
-        // selected action's frame. The previous logic used `sel.size === 1`
-        // alone — but every successful insertion auto-selects the new
-        // action, so the second numpad press always hit the modify branch
-        // and the user could only ever place ONE point (every subsequent
-        // press just nudged the first point's position). Now: same frame
-        // → tweak; different frame → insert new.
-        const sel = this.editableScript.selectedIndices;
-        const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
-        let modifyIdx = -1;
-        if (sel.size === 1) {
-          const idx = [...sel][0];
-          const action = this.editableScript.actions[idx];
-          // Sub-millisecond tolerance covers float rounding from snapTime
-          // when snap-to-frame is off; with snap on, both values land on
-          // exact integer frame boundaries.
-          if (action && Math.abs(action.at - timeMs) < 1) modifyIdx = idx;
-        }
-        if (modifyIdx >= 0) {
-          const newIdx = this.editableScript.updateAction(modifyIdx, { pos });
-          this.editableScript.select(newIdx);
-          this._lastSelectedIndex = newIdx;
-        } else {
-          const newIdx = this.editableScript.insertAction(timeMs, pos);
-          this.editableScript.select(newIdx);
-          this._lastSelectedIndex = newIdx;
-        }
-        this._sendLivePreview(pos);
-      }
+      const pos = (isShiftZero || topKeyMatch) ? 100 : numpadMap[e.code];
+      this._placeOrTweakAt(pos);
       return;
     }
 
@@ -3161,6 +3175,50 @@ export class ScriptEditor {
   }
 
   // === Fast-scripting hotkeys (§2.2) ==================================
+
+  /**
+   * Place a new action at the current playhead with the given position,
+   * OR — if a single action is already selected ON the same frame —
+   * update that action's position instead. Shared by the default 0-9
+   * key map, the Shift+0 / Minus top-keys, and the user's custom
+   * position-key bindings.
+   *
+   * Disambiguation: every successful insertion auto-selects the new
+   * action, so the second numpad press always hit the modify branch
+   * if we used `sel.size === 1` alone. The same-frame check fixes that
+   * — same frame → tweak; different frame → insert new.
+   *
+   * @param {number} pos — 0-100
+   */
+  _placeOrTweakAt(pos) {
+    if (this._recordingMode) {
+      const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+      this.editableScript.insertAction(timeMs, pos);
+      this._sendLivePreview(pos);
+      return;
+    }
+    const sel = this.editableScript.selectedIndices;
+    const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
+    let modifyIdx = -1;
+    if (sel.size === 1) {
+      const idx = [...sel][0];
+      const action = this.editableScript.actions[idx];
+      // Sub-millisecond tolerance covers float rounding from snapTime
+      // when snap-to-frame is off; with snap on, both values land on
+      // exact integer frame boundaries.
+      if (action && Math.abs(action.at - timeMs) < 1) modifyIdx = idx;
+    }
+    if (modifyIdx >= 0) {
+      const newIdx = this.editableScript.updateAction(modifyIdx, { pos });
+      this.editableScript.select(newIdx);
+      this._lastSelectedIndex = newIdx;
+    } else {
+      const newIdx = this.editableScript.insertAction(timeMs, pos);
+      this.editableScript.select(newIdx);
+      this._lastSelectedIndex = newIdx;
+    }
+    this._sendLivePreview(pos);
+  }
 
   _alternatingInsertAtCursor() {
     const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);

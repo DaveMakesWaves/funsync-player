@@ -38,7 +38,7 @@ import { record, mark } from '../js/startup-timer.js';
 const MAX_CONCURRENT_THUMBNAILS = 4;
 
 export class Library {
-  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, getEmbeddedAxes, detectEmbeddedAxesForPath, onExtractEmbeddedAxes, settings }) {
+  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, getEmbeddedAxes, detectEmbeddedAxesForPath, onExtractEmbeddedAxes, onAddToQueue, settings }) {
     this._onPlayVideo = onPlayVideo;
     this._onBack = onBack;
     this._onAddSource = onAddSource || null;
@@ -47,6 +47,7 @@ export class Library {
     this._getEmbeddedAxes = getEmbeddedAxes || null;
     this._detectEmbeddedAxesForPath = detectEmbeddedAxesForPath || null;
     this._onExtractEmbeddedAxes = onExtractEmbeddedAxes || null;
+    this._onAddToQueue = onAddToQueue || null;
     this._settings = settings;
 
     // Wire the manual VR override store. Per-call closure over `_settings`
@@ -114,6 +115,15 @@ export class Library {
     this._previewGeneration = 0;
     this._previewHoverTimer = null;
     this._isVideoPlaying = false; // set by app.js to gate preview
+
+    // Right-click context menu for "Add to queue" / "Add to queue (next)".
+    // Delegated on document so it catches cards across grid and list
+    // views without per-card listener overhead. Resolves the card via
+    // closest('.library__card, .library__list-item') and reads
+    // dataset.videoPath. SCOPE-queue-panel.md §4.6.
+    if (this._onAddToQueue) {
+      document.addEventListener('contextmenu', (e) => this._handleCardContextMenu(e));
+    }
 
     // Virtual-scroll resize handling. `_vsColumns` is computed once per
     // `_renderGrid` call; without a resize listener, going from a small
@@ -1013,6 +1023,11 @@ export class Library {
     this._filteredVideos = items.filter(i => !i.isFolder);
     this._pendingThumbnails = [];
     this._activeThumbnails = 0;
+
+    // Emit so dependent surfaces (queue panel "Up next" derivation) can
+    // re-read the post-sort/post-filter video list. Sort/filter changes
+    // mid-playback recompute upcoming live per SCOPE §3.4.
+    eventBus.emit('library:filtered', { count: this._filteredVideos.length });
     if (this._observer) this._observer.disconnect();
 
     // No-results-due-to-filters state. The "no videos at all in source"
@@ -3481,6 +3496,37 @@ export class Library {
       menu.appendChild(removeSubBtn);
     }
 
+    // Queue actions — "Play next" before "Add to queue" mirrors the
+    // YouTube / Spotify / Plex kebab convention (priority order: head
+    // first, tail second). Reuses the same callback + locale strings as
+    // the right-click context menu so both paths produce identical
+    // behavior — Nielsen #4 (consistency) + Norman (single conceptual
+    // model). If the queue panel is open, addToUserQueue() updates it
+    // live; either way a toast confirms. No auto-open: matches YouTube
+    // / Spotify behavior — opening the panel on every add would be
+    // intrusive when the user is mid-video.
+    if (this._onAddToQueue) {
+      const queueNextBtn = document.createElement('button');
+      queueNextBtn.className = 'library__kebab-menu-item';
+      queueNextBtn.textContent = t('queuePanel.contextAddToQueueNext');
+      queueNextBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closeMenu();
+        this._onAddToQueue(video.path, 'next');
+      });
+      menu.appendChild(queueNextBtn);
+
+      const queueEndBtn = document.createElement('button');
+      queueEndBtn.className = 'library__kebab-menu-item';
+      queueEndBtn.textContent = t('queuePanel.contextAddToQueue');
+      queueEndBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closeMenu();
+        this._onAddToQueue(video.path, 'end');
+      });
+      menu.appendChild(queueEndBtn);
+    }
+
     // Add to Playlist
     const playlistBtn = document.createElement('button');
     playlistBtn.className = 'library__kebab-menu-item';
@@ -5583,5 +5629,68 @@ export class Library {
       }
       this._exitSelectMode();
     }
+  }
+
+  /**
+   * Delegated contextmenu handler — shows a tiny "Add to queue" floating
+   * menu at the cursor when the user right-clicks a library card. Click
+   * an item or anywhere else to dismiss. SCOPE-queue-panel.md §4.6.
+   */
+  _handleCardContextMenu(e) {
+    const card = e.target.closest('.library__card, .library__list-item');
+    if (!card) return;
+    const path = card.dataset.videoPath;
+    if (!path) return;
+    e.preventDefault();
+    this._showQueueContextMenu(e.clientX, e.clientY, path);
+  }
+
+  _showQueueContextMenu(x, y, path) {
+    // Dismiss any existing one
+    this._dismissQueueContextMenu();
+    const menu = document.createElement('div');
+    menu.className = 'library__queue-context-menu';
+    menu.setAttribute('role', 'menu');
+    menu.style.position = 'fixed';
+    menu.style.left = `${x}px`;
+    menu.style.top = `${y}px`;
+    menu.innerHTML = `
+      <button type="button" role="menuitem" data-pos="end">${this._escContext(t('queuePanel.contextAddToQueue'))}</button>
+      <button type="button" role="menuitem" data-pos="next">${this._escContext(t('queuePanel.contextAddToQueueNext'))}</button>
+    `;
+    for (const btn of menu.querySelectorAll('button')) {
+      btn.addEventListener('click', () => {
+        this._onAddToQueue?.(path, btn.dataset.pos);
+        this._dismissQueueContextMenu();
+      });
+    }
+    document.body.appendChild(menu);
+    this._activeQueueContextMenu = menu;
+    // Reposition if it overflows viewport
+    const rect = menu.getBoundingClientRect();
+    if (rect.right > window.innerWidth) menu.style.left = `${window.innerWidth - rect.width - 8}px`;
+    if (rect.bottom > window.innerHeight) menu.style.top = `${window.innerHeight - rect.height - 8}px`;
+    // Auto-dismiss
+    const dismiss = (ev) => {
+      if (!menu.contains(ev.target)) this._dismissQueueContextMenu();
+    };
+    setTimeout(() => {
+      document.addEventListener('click', dismiss, { once: true });
+      document.addEventListener('contextmenu', dismiss, { once: true });
+    }, 0);
+    this._activeQueueContextMenuDismiss = dismiss;
+  }
+
+  _dismissQueueContextMenu() {
+    if (this._activeQueueContextMenu) {
+      this._activeQueueContextMenu.remove();
+      this._activeQueueContextMenu = null;
+    }
+  }
+
+  _escContext(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
   }
 }

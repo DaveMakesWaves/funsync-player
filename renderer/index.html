@@ -16,6 +16,7 @@
   <link rel="stylesheet" href="styles/session-card.css">
   <link rel="stylesheet" href="styles/up-next.css">
   <link rel="stylesheet" href="styles/vr-format-panel.css">
+  <link rel="stylesheet" href="styles/queue-panel.css">
 </head>
 <body>
   <div id="app">
@@ -268,6 +269,17 @@
         </div>
         <div id="video-category-dots" class="player__category-dots"></div>
         <button id="btn-add-to-playlist" class="player__quick-add" data-i18n-aria-label="player.addToPlaylist" data-i18n-title="player.addToPlaylist" aria-label="Add to playlist" title="Add to Playlist"><i data-lucide="plus"></i></button>
+        <!-- Queue panel toggle — far-right corner of the top bar. The
+             columns-2 icon mirrors the Android Auto split-screen look
+             (two side-by-side panels). Shift+Q keyboard shortcut also
+             toggles. See SCOPE-queue-panel.md §3.8. -->
+        <button id="btn-queue-toggle" class="player__queue-toggle" type="button"
+                data-i18n-aria-label="queuePanel.toggleAria"
+                data-i18n-title="queuePanel.toggleTooltip"
+                aria-label="Toggle queue panel" title="Queue (Shift+Q)"
+                aria-pressed="false" aria-controls="queue-panel" aria-expanded="false">
+          <i data-lucide="columns-2"></i>
+        </button>
       </div>
 
       <!-- Gap Skip Overlay -->
@@ -278,6 +290,10 @@
 
       <!-- Up Next card (end-of-video autoplay countdown) -->
       <div id="up-next-card" class="up-next" hidden></div>
+
+      <!-- Queue panel mount — slides in from right edge of the player.
+           Component populates content at runtime. SCOPE-queue-panel.md. -->
+      <aside id="queue-panel" hidden></aside>
     </div>
   </div>
 

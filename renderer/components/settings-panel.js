@@ -162,6 +162,7 @@ export class SettingsPanel {
     const tabs = [
       { id: 'sources', label: t('settingsPanel.tabSources') },
       { id: 'playback', label: t('settingsPanel.tabPlayback') },
+      { id: 'editor', label: t('settingsPanel.tabEditor') },
       { id: 'appearance', label: t('settingsPanel.tabAppearance') },
       { id: 'data', label: t('settingsPanel.tabData') },
       { id: 'help', label: t('settingsPanel.tabHelp') },
@@ -227,6 +228,13 @@ export class SettingsPanel {
     // --- Playback Tab ---
     panels.playback = this._buildPlaybackTab();
     body.appendChild(wirePanel('playback'));
+
+    // --- Editor Tab — script-authoring settings (position keys; future
+    //     home for other editor-specific tunables). Sits between Playback
+    //     and Appearance because it's content-side work that belongs
+    //     next to playback in mental model, not next to theme settings. ---
+    panels.editor = this._buildEditorTab();
+    body.appendChild(wirePanel('editor'));
 
     // --- Appearance Tab (theme toggle) ---
     panels.appearance = this._buildAppearanceTab();
@@ -920,6 +928,44 @@ export class SettingsPanel {
       };
       wireDefaultCheckbox(autoplayCheckbox, panel.querySelector('#sp-autoplay-on-advance-reset'), SETTINGS_DEFAULTS['player.autoplayOnAdvance']);
       wireDefaultCheckbox(rangeExtender, panel.querySelector('#sp-range-extender-reset'), SETTINGS_DEFAULTS['player.rangeExtender.enabled']);
+    }, 0);
+
+    return panel;
+  }
+
+  /**
+   * Editor tab — script-authoring settings. Home for editor-specific
+   * tunables that don't belong in Playback (which is about how the
+   * video + script run together). Currently hosts the custom
+   * position-key bindings; future editor-only options land here too.
+   *
+   * SCOPE: notes/features/SCOPE-editor-custom-position-keys.md
+   */
+  _buildEditorTab() {
+    const panel = document.createElement('div');
+    panel.className = 'settings-panel__tab-content';
+
+    const customKeysSection = document.createElement('div');
+    customKeysSection.className = 'settings-panel__section';
+    customKeysSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('editor.customKeysTitle')}</h2>
+      <div id="sp-custom-position-keys-mount"></div>
+    `;
+    panel.appendChild(customKeysSection);
+
+    // Defer + lazy-load: the settings modal doesn't pay the cost of
+    // pulling in custom-position-keys.js (and its KeyCapture dep) until
+    // the user actually opens the Editor tab.
+    setTimeout(async () => {
+      const mountSlot = panel.querySelector('#sp-custom-position-keys-mount');
+      if (!mountSlot) return;
+      try {
+        const { CustomPositionKeys } = await import('./custom-position-keys.js');
+        new CustomPositionKeys({ element: mountSlot, settings: this._settings });
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn('[settings-panel] failed to mount custom-position-keys', err);
+      }
     }, 0);
 
     return panel;

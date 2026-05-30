@@ -9,6 +9,17 @@
  * would make light-mode controls invisible against dark scenes.
  */
 
+/* When the queue panel is open it already lists the next video at the
+ * head of its "Up next" section, so the auto-advance countdown card
+ * would be a second view of the same data competing for the same
+ * corner — Nielsen #8 (aesthetic / minimalist) + Norman (single
+ * conceptual model). Same precedent as DESIGN.md §7 "Hide unsupported
+ * PiP" (Nielsen #5, constraints). Closing the queue (Shift+Q) restores
+ * the card; Space still pauses if the user wants to cancel autoplay. */
+.player-container:has(.queue-panel--open) .up-next {
+  display: none;
+}
+
 .up-next {
   position: absolute;
   bottom: 100px;

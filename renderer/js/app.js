@@ -32,6 +32,7 @@ import { extendRawScriptContent } from './device-transform-stack.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library } from '../components/library.js';
+import { QueuePanel } from '../components/queue-panel.js';
 import { NavBar } from '../components/nav-bar.js';
 import { Modal } from '../components/modal.js';
 import { rankFunscriptMatches } from './fuzzy-match.js';
@@ -47,7 +48,7 @@ import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
   EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles,
   Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-  Pencil, FileCheck, Captions, RotateCcw,
+  Pencil, FileCheck, Captions, RotateCcw, Columns2,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
@@ -90,6 +91,17 @@ class App {
     this._playQueueIndex = -1;
     this._playQueueSource = null; // { sourceLabel, sourceContext } — captured at Play All start
     this._playQueueLoop = false;  // when true, queue wraps after the last item (per-playlist preference)
+
+    // Queue panel state (SCOPE-queue-panel.md). History is session-
+    // bounded and resets when the panel is closed; user queue persists
+    // via dataService. `_queueHistoryPushedForCurrent` is a one-shot
+    // flag per video load so the 5s threshold fires exactly once.
+    this._queueHistory = [];
+    this._queueHistoryCap = 50;
+    this._queueHistoryThresholdMs = 5000;
+    this._queueHistoryPushedForCurrent = false;
+    this._userQueue = []; // hydrated from settings on boot
+
     this._navStack = ['library']; // navigation history stack — current view is last element
     this._scriptCloudUrl = null; // cloud URL of the last uploaded script (for re-setup after HDSP)
     // Cloud-upload gate. `_pendingUploads` is the set of devices whose
@@ -150,6 +162,8 @@ class App {
         // 'rectangle-goggles' (exported as `Goggles`) for the overflow
         // menu's VR Format item — only shown for VR-detected videos.
         Gauge, ChevronDown, Goggles,
+        // Queue panel toggle icon (Android Auto split-screen look).
+        Columns2,
       },
       attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
     });
@@ -329,6 +343,7 @@ class App {
       // on success so subsequent sync reads hit it.
       detectEmbeddedAxesForPath: (path) => this.detectEmbeddedAxesForPath(path),
       onExtractEmbeddedAxes: (video) => this._extractEmbeddedAxesToCompanions(video),
+      onAddToQueue: (path, position) => this.addToUserQueue(path, position),
       settings: this.settings,
     });
 
@@ -349,6 +364,12 @@ class App {
       library: this.library,
       onPlayVideo: (videoData, funscriptData, subtitleData, variants) => this._playFromLibrary(videoData, funscriptData, subtitleData, variants),
     });
+
+    // Queue panel — right-side slide-in showing history, now-playing,
+    // user queue (persistent), and upcoming (live from playlist or
+    // library). See SCOPE-queue-panel.md. Must come after library so
+    // the panel can resolve video metadata via library.getVideoByPath.
+    this._initQueuePanel();
 
     // Player back button
     const btnPlayerBack = document.getElementById('btn-player-back');
@@ -415,6 +436,11 @@ class App {
     // the panel.
     document.getElementById('btn-vr-format-menu')?.addEventListener('click', () => {
       if (this._currentVideoPath) this._openVRFormatPanel(this._currentVideoPath);
+    });
+
+    // Queue panel toggle (top bar, far-right).
+    document.getElementById('btn-queue-toggle')?.addEventListener('click', () => {
+      this._toggleQueuePanel();
     });
     // Defensive refresh on every overflow open — covers the case where
     // the user toggles VR/flat via the library kebab and then navigates
@@ -858,6 +884,7 @@ class App {
         scriptEditor: null, // Set after ScriptEditor creation below
         onNavigate: (viewId) => this._navigateTo(viewId),
         onToggleLoop: () => { this._toggleVideoLoop?.(); },
+        onToggleQueue: () => { this._toggleQueuePanel(); },
       });
 
       // Auto-connect if a key is saved
@@ -3126,6 +3153,13 @@ class App {
   loadVideo(file, { skipViewSwitch = false, autoPlay = true } = {}) {
     console.log('Loading video:', file.name);
 
+    // Push previous video to queue history if it was watched ≥5s
+    // (SCOPE-queue-panel.md §3.5). Must check BEFORE we clear out
+    // currentVideoPath / revoke the previous URL — currentTime still
+    // reflects the outgoing video at this point.
+    this._maybePushCurrentToHistory();
+    this._queueHistoryPushedForCurrent = false;
+
     // Clean up previous video
     if (this._currentVideoUrl) {
       URL.revokeObjectURL(this._currentVideoUrl);
@@ -3215,6 +3249,9 @@ class App {
     this.videoPlayer.loadSource(videoUrl, file.name);
     this.progressBar.setVideoSource(videoUrl);
     this._updateCategoryDots();
+    // Refresh the queue panel state so the "Now playing" row updates
+    // and upcoming re-derives from the new context.
+    this._updateQueuePanelState();
 
     // Apply any saved VR-as-flat preference for this video. Two inputs:
     //   - per-video saved eye ('left' / 'right' / null) in
@@ -4104,6 +4141,13 @@ class App {
     if (subtitleData) {
       this._loadSubtitleFromLibrary(subtitleData);
     }
+    // Final queue panel refresh — `loadVideo` already fired one, but
+    // by now `_currentPlayContext` is set so `_getUpcoming` can derive
+    // the library-context upcoming list correctly. Without this final
+    // call the panel would show empty upcoming on the FIRST video play
+    // of a session (because the loadVideo refresh fired before
+    // `_playFromLibrary` finished setting `_currentPlayContext`).
+    this._updateQueuePanelState();
   }
 
   async _loadMultiAxisScripts(config) {
@@ -4755,9 +4799,14 @@ class App {
       onBackToSource: (sourceContext) => this._upNextBackToSource(sourceContext),
     });
 
-    // Engine → card.
+    // Engine → card + queue panel chip. The card is CSS-hidden when the
+    // queue is open (DESIGN.md §7 / Nielsen #5), so the chip carries
+    // the same "in Ns + ×" affordance into the queue surface. Both
+    // consumers subscribe to the same engine — no duplicate tickers.
     this.upNextEngine.onShowNext = (path, countdownSec) => {
       this.upNextCard.show(path, countdownSec);
+      this._upNextCurrentPath = path;
+      this.queuePanel?.setAutoAdvanceCountdown(path, countdownSec);
       // Up Next supersedes gap-skip's trailing overlay (SCOPE §3.4).
       const gapEl = document.getElementById('gap-skip-overlay');
       if (gapEl) gapEl.hidden = true;
@@ -4765,8 +4814,17 @@ class App {
     this.upNextEngine.onShowEndOfList = (sourceLabel, sourceContext) => {
       this.upNextCard.showEndOfList(sourceLabel, sourceContext);
     };
-    this.upNextEngine.onTick = (remaining) => this.upNextCard.tick(remaining);
-    this.upNextEngine.onHide = () => this.upNextCard.hide();
+    this.upNextEngine.onTick = (remaining) => {
+      this.upNextCard.tick(remaining);
+      if (this._upNextCurrentPath) {
+        this.queuePanel?.setAutoAdvanceCountdown(this._upNextCurrentPath, remaining);
+      }
+    };
+    this.upNextEngine.onHide = () => {
+      this.upNextCard.hide();
+      this._upNextCurrentPath = null;
+      this.queuePanel?.clearAutoAdvance();
+    };
     this.upNextEngine.onPlayNext = (path) => this._playUpNext(path);
 
     // Video events → engine.check(). The engine is idempotent, so it's
@@ -4824,6 +4882,15 @@ class App {
    */
   async _playUpNext(path) {
     if (!path) return;
+    // User queue priority — if the panel's user queue has items, play
+    // the head before falling through to library / playlist context.
+    // Mirrors foobar2000's queue priority insert (SCOPE §3.2 #3).
+    if (this._userQueue && this._userQueue.length > 0) {
+      const next = this._userQueue[0];
+      this._userQueue = this._userQueue.slice(1);
+      this._persistUserQueue();
+      return this._jumpToVideoFromQueue(next);
+    }
     // Queue source: advance through the queue mechanism so prev/next
     // buttons + queue indicator stay live and `_playFromLibrary`'s queue
     // reset doesn't tear down the Play All session mid-stream.
@@ -4864,6 +4931,221 @@ class App {
       video._autoPlayOnNextLoad = true;
     }
     await this.library._playVideo(video);
+  }
+
+  // --- Queue panel (SCOPE-queue-panel.md) ---
+
+  /**
+   * Initialise the queue panel component, hydrate user queue from
+   * settings, subscribe to relevant events. Called once during boot
+   * after library / dataService are ready.
+   */
+  _initQueuePanel() {
+    const el = document.getElementById('queue-panel');
+    if (!el) return;
+
+    // Hydrate the persistent user queue. Broken-path pruning happens
+    // lazily on first surface — we don't want to block boot on
+    // fileExists() calls for an arbitrary number of stored entries.
+    this._userQueue = (this.settings?.get?.('player.userQueue') || []).filter(
+      (p) => typeof p === 'string' && p.length > 0,
+    );
+
+    this.queuePanel = new QueuePanel({
+      element: el,
+      library: this.library,
+      settings: this.settings,
+      getEmbeddedAxes: (fp) => this.getEmbeddedAxes?.(fp),
+      onJump: (path) => this._jumpToVideoFromQueue(path),
+      onRemoveFromQueue: (path) => this._removeFromUserQueue(path),
+      onReorderQueue: (fromIdx, toIdx) => this._reorderUserQueue(fromIdx, toIdx),
+      onClearQueue: () => this._clearUserQueue(),
+      onClose: () => this._toggleQueuePanel(),
+      onOpenLibrary: () => this._navigateTo('library'),
+      onCancelAutoAdvance: () => this.upNextEngine?.dismiss(),
+    });
+
+    // Live-update on library sort / filter changes. The panel's
+    // upcoming section re-derives from `library._filteredVideos` each
+    // render, so we just trigger a render here.
+    eventBus.on('library:filtered', () => {
+      if (this.queuePanel?.visible) this._updateQueuePanelState();
+    });
+
+    // Panel is closed by default each session. The user opens it
+    // explicitly via the top-bar button or Shift+Q. No persistence —
+    // an auto-open on launch competes with the video for attention
+    // and felt intrusive in user testing.
+  }
+
+  /**
+   * Resolve the "upcoming" list (next 10) from whichever context is
+   * driving playback. Returns paths only; the panel resolves metadata
+   * per-row via library.getVideoByPath.
+   *
+   * @returns {{ items: string[], hasContext: boolean }}
+   */
+  _getUpcoming() {
+    // Play All / queue source — pull remainder of _playQueue
+    if (this._playQueue && this._playQueue.length > 0) {
+      const idx = (this._playQueueIndex ?? -1) + 1;
+      const items = this._playQueue
+        .slice(idx, idx + 10)
+        .map((entry) => entry?.path || entry)
+        .filter(Boolean);
+      return { items, hasContext: true };
+    }
+    // Library context — derive from current filter/sort
+    if (this._currentPlayContext?.source === 'library'
+      && this.library?._filteredVideos
+      && this._currentVideoPath) {
+      const filtered = this.library._filteredVideos;
+      const currentIdx = filtered.findIndex((v) => v?.path === this._currentVideoPath);
+      if (currentIdx < 0) return { items: [], hasContext: true };
+      const items = filtered.slice(currentIdx + 1, currentIdx + 11).map((v) => v.path);
+      return { items, hasContext: true };
+    }
+    // Drag-drop / Browse / Open Recent — no library context
+    return { items: [], hasContext: false };
+  }
+
+  /**
+   * Recompute panel state from current data and push to the component.
+   * Cheap — called on every state-changing event.
+   */
+  _updateQueuePanelState() {
+    if (!this.queuePanel) return;
+    const upcoming = this._getUpcoming();
+    this.queuePanel.setState({
+      history: this._queueHistory,
+      nowPlaying: this._currentVideoPath || null,
+      userQueue: [...this._userQueue],
+      upcoming: upcoming.items,
+      hasContext: upcoming.hasContext || !!this._currentVideoPath,
+    });
+  }
+
+  /**
+   * Show / hide the panel. History resets on close per SCOPE §3.5.
+   * Panel open/closed state is intentionally session-only — not
+   * persisted to settings (see _initQueuePanel comment).
+   */
+  _toggleQueuePanel() {
+    if (!this.queuePanel) return;
+    const opening = !this.queuePanel.visible;
+    if (opening) {
+      this._updateQueuePanelState();
+      this.queuePanel.open();
+    } else {
+      // History resets on close. Re-render is implicit because the
+      // panel won't redraw while hidden.
+      this._queueHistory = [];
+      this.queuePanel.close();
+    }
+    // Sync toggle button aria-pressed + aria-expanded. The CSS uses
+    // [aria-pressed="true"] to slide the button left by the panel
+    // width so it lands flush with the panel's left edge.
+    const btn = document.getElementById('btn-queue-toggle');
+    if (btn) {
+      btn.setAttribute('aria-pressed', String(opening));
+      btn.setAttribute('aria-expanded', String(opening));
+    }
+  }
+
+  /**
+   * Push the current video path to history if it's been watched long
+   * enough (≥ threshold). Called on video transition. Dedups by path:
+   * if a video is already in history, its earlier entry is removed and
+   * a new one added at the bottom (matches Spotify "Recently played"
+   * semantics, SCOPE §3.5).
+   */
+  _maybePushCurrentToHistory() {
+    if (this._queueHistoryPushedForCurrent) return;
+    if (!this._currentVideoPath) return;
+    const watchedMs = (this.videoPlayer?.video?.currentTime || 0) * 1000;
+    if (watchedMs < this._queueHistoryThresholdMs) return;
+    // Dedup
+    this._queueHistory = this._queueHistory.filter((p) => p !== this._currentVideoPath);
+    this._queueHistory.push(this._currentVideoPath);
+    // Cap from the front
+    if (this._queueHistory.length > this._queueHistoryCap) {
+      this._queueHistory = this._queueHistory.slice(-this._queueHistoryCap);
+    }
+    this._queueHistoryPushedForCurrent = true;
+  }
+
+  /**
+   * Click-to-play from anywhere in the queue panel. Pushes current to
+   * history (if eligible), then routes through library._playVideo
+   * which handles all the existing wiring (funscript, subtitles,
+   * variants, multi-axis, etc).
+   */
+  async _jumpToVideoFromQueue(path) {
+    if (!path || !this.library) return;
+    this._maybePushCurrentToHistory();
+    // If the jumped-to path is in the user queue, remove it (we're
+    // about to play it; no point keeping a duplicate in the queue).
+    const queueIdx = this._userQueue.indexOf(path);
+    if (queueIdx >= 0) {
+      this._userQueue.splice(queueIdx, 1);
+      this._persistUserQueue();
+    }
+    const video = this.library.getVideoByPath?.(path);
+    if (!video) {
+      showToast(t('toast.nextNotFound'), 'warn', 3000);
+      return;
+    }
+    await this.library._playVideo(video);
+    this._updateQueuePanelState();
+  }
+
+  /**
+   * Append a path to the user queue (default) or insert at the head
+   * (position = 'next'). Toast confirms. Refuses duplicates.
+   */
+  addToUserQueue(path, position = 'end') {
+    if (!path || typeof path !== 'string') return;
+    if (this._userQueue.includes(path)) {
+      showToast(t('queuePanel.toastAlreadyQueued'), 'info', 2000);
+      return;
+    }
+    if (position === 'next') {
+      this._userQueue.unshift(path);
+    } else {
+      this._userQueue.push(path);
+    }
+    this._persistUserQueue();
+    this._updateQueuePanelState();
+    showToast(t('queuePanel.toastAddedToQueue'), 'info', 1500);
+  }
+
+  _removeFromUserQueue(path) {
+    const idx = this._userQueue.indexOf(path);
+    if (idx < 0) return;
+    this._userQueue.splice(idx, 1);
+    this._persistUserQueue();
+    this._updateQueuePanelState();
+  }
+
+  _clearUserQueue() {
+    if (this._userQueue.length === 0) return;
+    this._userQueue = [];
+    this._persistUserQueue();
+    this._updateQueuePanelState();
+  }
+
+  _reorderUserQueue(fromIdx, toIdx) {
+    if (fromIdx === toIdx) return;
+    if (fromIdx < 0 || fromIdx >= this._userQueue.length) return;
+    if (toIdx < 0 || toIdx >= this._userQueue.length) return;
+    const [moved] = this._userQueue.splice(fromIdx, 1);
+    this._userQueue.splice(toIdx, 0, moved);
+    this._persistUserQueue();
+    this._updateQueuePanelState();
+  }
+
+  _persistUserQueue() {
+    this.settings?.set?.('player.userQueue', [...this._userQueue]);
   }
 
   /**
@@ -6192,6 +6474,17 @@ class App {
       if (this._queueEndedListener !== queueEndedListener) return; // superseded
       this.videoPlayer.video.removeEventListener('ended', queueEndedListener);
       this._queueEndedListener = null;
+      // User queue priority — when present, intercepts Play All
+      // advancement so a queued video plays next rather than the next
+      // playlist item. Mirrors the same priority injection in
+      // _playUpNext (SCOPE §3.2 #3).
+      if (this._userQueue && this._userQueue.length > 0) {
+        const next = this._userQueue[0];
+        this._userQueue = this._userQueue.slice(1);
+        this._persistUserQueue();
+        this._jumpToVideoFromQueue(next);
+        return;
+      }
       const nextIdx = this._playQueueIndex + 1;
       if (nextIdx < this._playQueue.length) {
         this._playQueueItem(nextIdx);
