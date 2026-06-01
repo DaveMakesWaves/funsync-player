@@ -23,6 +23,7 @@ uniform float u_fov;          // viewport horizontal FOV in radians
 uniform float u_aspect;       // canvas aspect (width / height)
 uniform float u_yaw;          // radians
 uniform float u_pitch;        // radians
+uniform float u_roll;         // radians — rotate around forward axis (180° flips upside-down content)
 uniform int u_eye;            // 0 = left, 1 = right
 uniform int u_stereoMode;     // 0 = mono, 1 = sbs-half
 uniform float u_sourceFov;    // source fisheye FOV in radians (π for 180°, …)
@@ -48,6 +49,13 @@ void main() {
     rotated.x,
     rotated.y * cp - rotated.z * sp,
     rotated.y * sp + rotated.z * cp
+  );
+  // Roll rotates around Z (forward axis) — flips upside-down source.
+  float cr = cos(u_roll); float sr = sin(u_roll);
+  rotated = vec3(
+    rotated.x * cr - rotated.y * sr,
+    rotated.x * sr + rotated.y * cr,
+    rotated.z
   );
 
   // Direction in front-hemisphere check — anything pointing backwards

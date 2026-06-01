@@ -31,6 +31,7 @@ uniform float u_fov;          // viewport horizontal FOV in radians
 uniform float u_aspect;       // canvas aspect ratio (width / height)
 uniform float u_yaw;          // radians — pan horizontal
 uniform float u_pitch;        // radians — pan vertical
+uniform float u_roll;         // radians — rotate around forward axis (180° flips upside-down content)
 uniform int u_eye;            // 0 = left/top eye, 1 = right/bottom eye
 uniform int u_stereoMode;     // 0 = mono, 1 = sbs-half, 2 = tb-half
 uniform float u_lonRange;     // π for VR180, 2π for VR360 (the full source-texture longitude span)
@@ -62,6 +63,15 @@ void main() {
     rotated.x,
     rotated.y * cp - rotated.z * sp,
     rotated.y * sp + rotated.z * cp
+  );
+  // Roll rotates around Z (forward axis). Last in the chain so it
+  // re-orients the already-aimed view — used to flip upside-down
+  // source content (camera mounted inverted on the rig).
+  float cr = cos(u_roll); float sr = sin(u_roll);
+  rotated = vec3(
+    rotated.x * cr - rotated.y * sr,
+    rotated.x * sr + rotated.y * cr,
+    rotated.z
   );
 
   // 3. Direction → (longitude, latitude).

@@ -1135,7 +1135,14 @@ ipcMain.handle('select-subtitle', async () => {
 
 ipcMain.handle('read-funscript', async (_event, filePath) => {
   try {
-    return await fs.promises.readFile(filePath, 'utf-8');
+    const raw = await fs.promises.readFile(filePath, 'utf-8');
+    // Strip UTF-8 BOM (EF BB BF, U+FEFF) at the I/O boundary. Some
+    // scripting tools (Windows editors, older OFS, hand-saved files)
+    // write a leading BOM that JSON.parse rejects. Community report
+    // 2026-06-01: RyzaMerged.funscript loaded fine in Handyverse but
+    // errored here because of the BOM. Strip once, every consumer
+    // gets clean content automatically.
+    return raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
   } catch (err) {
     log.error('read-funscript failed:', err.message);
     return null;

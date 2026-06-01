@@ -178,6 +178,37 @@ export class VideoPlayer {
   // --- Public API ---
 
   loadSource(url, filename) {
+    // Hide the video element AND any active VR projection canvas while
+    // the new source decodes its first frame. Without this, both keep
+    // painting the LAST frame of the previous video until the new one
+    // is ready — visible as a stale-frame leak behind any overlay
+    // opened during the transition (e.g. the VR Format modal during a
+    // queue auto-advance to a big HEVC VR file, where first-frame
+    // decode can take hundreds of ms).
+    //
+    // VR projection mode is the dominant repro: the underlying <video>
+    // is already CSS-hidden, but the WebGL canvas keeps reading frames
+    // from it via texImage2D so the OLD frame paints to the projected
+    // canvas until the new one decodes. Both surfaces need hiding.
+    //
+    // `visibility: hidden` rather than `display: none` so layout stays
+    // stable and any sibling overlays anchored to the player retain
+    // their geometry. Cleared on `loadeddata` (one-shot listener so
+    // the hide doesn't persist across subsequent unrelated loads).
+    this.video.style.visibility = 'hidden';
+    const vrCanvas = this._vrRenderer?.canvas || null;
+    if (vrCanvas) vrCanvas.style.visibility = 'hidden';
+    const revealOnFirstFrame = () => {
+      this.video.style.visibility = '';
+      if (vrCanvas) vrCanvas.style.visibility = '';
+      this.video.removeEventListener('loadeddata', revealOnFirstFrame);
+      this.video.removeEventListener('error', revealOnFirstFrame);
+    };
+    this.video.addEventListener('loadeddata', revealOnFirstFrame);
+    // Error path also clears the hide — otherwise a failed load leaves
+    // the element invisible until the next successful src change.
+    this.video.addEventListener('error', revealOnFirstFrame);
+
     this.video.src = url;
     this.video.load();
 
@@ -505,9 +536,11 @@ export class VideoPlayer {
       this.tooltipTime.textContent = this._formatTime(time);
       this.progressTooltip.style.left = `${pct * 100}%`;
 
-      // Notify for thumbnail preview
+      // Notify for thumbnail preview + chapter/bookmark marker tooltip.
+      // Second arg is the cursor X within the progress container so the
+      // marker resolver can hit-test against its own px coordinates.
       if (this.onProgressHover) {
-        this.onProgressHover(time);
+        this.onProgressHover(time, e.clientX - rect.left, rect.width);
       }
     }
   }
@@ -707,10 +740,11 @@ export class VideoPlayer {
     this._vrFlattenZoom = zoom;
   }
 
-  /** Update the pan/zoom of an already-active spherical projection
-   *  without remounting. Caller (drag-to-pan, FOV slider) uses this
-   *  on every input event. No-op when not projecting. */
-  updateVRProjection({ fov, yaw, pitch } = {}) {
+  /** Update the pan/zoom/roll of an already-active spherical projection
+   *  without remounting. Caller (drag-to-pan, FOV slider, "Rotate 180°"
+   *  toggle from VR Format panel) uses this on every input event.
+   *  No-op when not projecting. */
+  updateVRProjection({ fov, yaw, pitch, roll } = {}) {
     if (!this._vrRenderer?.mounted) return;
     if (Number.isFinite(fov))   this._vrRenderer.setFov(fov);
     if (Number.isFinite(yaw) || Number.isFinite(pitch)) {
@@ -719,6 +753,7 @@ export class VideoPlayer {
         Number.isFinite(pitch) ? pitch : 0,
       );
     }
+    if (Number.isFinite(roll)) this._vrRenderer.setRoll(roll);
   }
 
   /** Whether a non-planar VR projection is currently being rendered.

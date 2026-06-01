@@ -65,6 +65,7 @@ export class VRProjectionRenderer {
       fov: 90 * Math.PI / 180,
       yaw: 0,
       pitch: 0,
+      roll: 0,              // radians — for upside-down source content; persisted per-video
     };
 
     // Whether the last render produced anything. Useful for tests.
@@ -199,10 +200,17 @@ export class VRProjectionRenderer {
     this._state.pitch = pitch * Math.PI / 180;
   }
 
-  /** Reset yaw + pitch to 0 (double-click recenter callsite). */
+  /** Reset yaw + pitch to 0 (double-click recenter callsite).
+   *  Roll is NOT reset — it's a per-video orientation flag, not a pan. */
   recenter() {
     this._state.yaw = 0;
     this._state.pitch = 0;
+  }
+
+  /** Roll in degrees (rotates around the forward axis). 180° flips
+   *  upside-down source content. No clamp — full ±360° is valid. */
+  setRoll(degrees) {
+    this._state.roll = (Number(degrees) || 0) * Math.PI / 180;
   }
 
   /**
@@ -253,6 +261,7 @@ export class VRProjectionRenderer {
       u_aspect:     gl.getUniformLocation(program, 'u_aspect'),
       u_yaw:        gl.getUniformLocation(program, 'u_yaw'),
       u_pitch:      gl.getUniformLocation(program, 'u_pitch'),
+      u_roll:       gl.getUniformLocation(program, 'u_roll'),
       u_eye:        gl.getUniformLocation(program, 'u_eye'),
       u_stereoMode: gl.getUniformLocation(program, 'u_stereoMode'),
       u_lonRange:   gl.getUniformLocation(program, 'u_lonRange'),
@@ -357,6 +366,7 @@ export class VRProjectionRenderer {
     gl.uniform1f(entry.uniforms.u_aspect, aspect);
     gl.uniform1f(entry.uniforms.u_yaw, this._state.yaw);
     gl.uniform1f(entry.uniforms.u_pitch, this._state.pitch);
+    gl.uniform1f(entry.uniforms.u_roll, this._state.roll);
     gl.uniform1i(entry.uniforms.u_eye, this._state.eye === 'right' ? 1 : 0);
     gl.uniform1i(entry.uniforms.u_stereoMode, this._state.stereoMode);
     if (isEquirect) gl.uniform1f(entry.uniforms.u_lonRange, lonRange);

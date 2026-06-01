@@ -694,6 +694,29 @@ html, body {
   height: 100%;
 }
 
+/* Chapter strip — slim band below the heatmap with per-chapter colored
+ * segments. Sits inside the same progress container; absolute-positioned
+ * so it shares the time axis without affecting the heatmap geometry.
+ * Hidden by default (toggled via `hidden` attr from progress-bar.js)
+ * so videos without chapter metadata don't show an empty strip. */
+.progress__chapter-strip {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  border-radius: 1px;
+  overflow: hidden;
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.progress__chapter-strip canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
 /* Progress bar idle / hover heights bumped from 4px → 6px / 12px → 14px,
    and the scrub thumb from 14px → 18px. Fitts: a 6px track is still
    visually slim but offers a noticeably larger hit zone (vertical) for
@@ -774,6 +797,34 @@ html, body {
   background: rgba(0, 0, 0, 0.8);
   padding: 2px 6px;
   border-radius: 3px;
+}
+
+/* Marker label inside the progress tooltip — chapter / bookmark name
+ * shown above the thumbnail when the cursor resolves to a marker.
+ * Per SCOPE-chapters-bookmarks.md §4.3. */
+.tooltip__marker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 4px;
+  padding: 3px 8px;
+  background: rgba(0, 0, 0, 0.85);
+  border-radius: 3px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 220px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tooltip__marker-swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 2px;
+  flex-shrink: 0;
 }
 
 /* === Bottom Controls === */

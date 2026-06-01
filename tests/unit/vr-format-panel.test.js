@@ -50,6 +50,7 @@ describe('buildEntry', () => {
       fov: 90,
       yaw: 0,
       pitch: 0,
+      roll: 0,
       source: 'manual',
     });
   });
@@ -83,6 +84,14 @@ describe('buildEntry', () => {
   it("source defaults to 'manual'", () => {
     expect(buildEntry({ projection: 'sbs-half', eye: 'left', zoom: 1 }).source).toBe('manual');
     expect(buildEntry({ projection: 'sbs-half', eye: 'left', zoom: 1, source: 'auto' }).source).toBe('auto');
+  });
+
+  it("roll defaults to 0 and persists supplied value", () => {
+    expect(buildEntry({ projection: 'equirect-180', eye: 'left' }).roll).toBe(0);
+    expect(buildEntry({ projection: 'equirect-180', eye: 'left', roll: 180 }).roll).toBe(180);
+    expect(buildEntry({ projection: 'flat' }).roll).toBe(0);
+    // Non-finite -> 0
+    expect(buildEntry({ projection: 'equirect-180', eye: 'left', roll: NaN }).roll).toBe(0);
   });
 });
 

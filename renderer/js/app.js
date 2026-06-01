@@ -3,7 +3,7 @@
 import { VideoPlayer, PLAYBACK_RATE_PRESETS } from './video-player.js';
 import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
-import { FunscriptEngine, isAutoMatch } from './funscript-engine.js';
+import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
 import { HandyManager } from './handy-manager.js';
 import { SyncEngine } from './sync-engine.js';
@@ -453,9 +453,15 @@ class App {
     this._wireSpeedControl();
     this._wireLoopVideo();
 
-    // Wire thumbnail preview on progress hover
-    this.videoPlayer.onProgressHover = (time) => {
+    // Wire thumbnail preview + marker tooltip on progress hover. The
+    // marker tooltip resolves the cursor to the nearest chapter / bookmark
+    // (or null) and shows the marker's name above the thumbnail.
+    this.videoPlayer.onProgressHover = (time, xPx, widthPx) => {
       this.progressBar.updateThumbnailPreview(time);
+      const durMs = (this.videoPlayer.duration || 0) * 1000;
+      if (Number.isFinite(xPx) && Number.isFinite(widthPx)) {
+        this.progressBar.updateMarkerTooltip(xPx, widthPx, durMs);
+      }
     };
 
     // Redraw heatmap on resize
@@ -485,6 +491,17 @@ class App {
           this.funscriptEngine.getActions(),
           this.videoPlayer.duration,
         );
+        // Markers (chapters + bookmarks) can exist even with zero
+        // actions (C-E19); push them whenever the engine is loaded,
+        // and render the chapter strip against the video's own
+        // duration axis. Per SCOPE-chapters-bookmarks.md §4.
+        this.progressBar.setMarkers({
+          chapters: this.funscriptEngine.getChapters(),
+          bookmarks: this.funscriptEngine.getBookmarks(),
+        });
+        if (this.funscriptEngine.getChapters().length > 0) {
+          this.progressBar.renderChapterStrip(this.videoPlayer.duration);
+        }
       }
     });
 
@@ -885,6 +902,8 @@ class App {
         onNavigate: (viewId) => this._navigateTo(viewId),
         onToggleLoop: () => { this._toggleVideoLoop?.(); },
         onToggleQueue: () => { this._toggleQueuePanel(); },
+        onJumpChapter: (direction) => this._jumpChapter(direction),
+        onJumpBookmark: (direction) => this._jumpBookmark(direction),
       });
 
       // Auto-connect if a key is saved
@@ -3201,6 +3220,7 @@ class App {
     this._hideScriptLoadingOverlay();
     this.progressBar.clearHeatmap();
     this.progressBar.setGaps(null);
+    this.progressBar.setMarkers({ chapters: [], bookmarks: [] });
     const fsBadge = document.getElementById('funscript-badge');
     if (fsBadge) {
       fsBadge.hidden = true;
@@ -3427,6 +3447,13 @@ class App {
           this.funscriptEngine.getActions(),
           this.videoPlayer.duration,
         );
+        this.progressBar.setMarkers({
+          chapters: this.funscriptEngine.getChapters(),
+          bookmarks: this.funscriptEngine.getBookmarks(),
+        });
+        if (this.funscriptEngine.getChapters().length > 0) {
+          this.progressBar.renderChapterStrip(this.videoPlayer.duration);
+        }
       }
 
       // Load into script editor if open + set funscript path for autosave
@@ -3764,7 +3791,12 @@ class App {
       const fov = Number.isFinite(entry.fov) ? entry.fov : 90;
       const yaw = Number.isFinite(entry.yaw) ? entry.yaw : 0;
       const pitch = Number.isFinite(entry.pitch) ? entry.pitch : 0;
+      const roll = Number.isFinite(entry.roll) ? entry.roll : 0;
       this.videoPlayer.setVRFlatten(this._currentStereoFormat, eye, { zoom, fov, yaw, pitch });
+      // Roll is independent of `setVRFlatten` (which handles projection
+      // mount + planar zoom); pushed separately so it applies to the
+      // spherical render path as soon as it's mounted.
+      this.videoPlayer.updateVRProjection({ roll });
     } else {
       this.videoPlayer.setVRFlatten('off');
     }
@@ -3979,6 +4011,86 @@ class App {
    * `library.vrFormat` schema; the old `library.vrFlatten` key is no
    * longer touched (kept indefinitely as a downgrade fallback).
    */
+  /**
+   * Seek to the previous / next chapter relative to the current time.
+   * No wrap-around per SCOPE-chapters-bookmarks.md C-E23 — at the last
+   * chapter, "next" is a no-op (stays put). Editor-focus guard happens
+   * upstream in keyboard.js; this method just does the math + seek.
+   *
+   * @param {number} direction — -1 (prev) or +1 (next)
+   */
+  _jumpChapter(direction) {
+    const chapters = this.funscriptEngine?.getChapters?.() || [];
+    if (chapters.length === 0) return;
+    if (!this.videoPlayer?.video) return;
+    const currentMs = (this.videoPlayer.video.currentTime || 0) * 1000;
+
+    let target = null;
+    if (direction < 0) {
+      // Previous chapter: the latest start that is strictly before the
+      // current time. The 0.5s window prevents the "next" pressed and
+      // then "prev" pressed immediately from landing back at the same
+      // chapter you came from.
+      const PREV_THRESHOLD_MS = 500;
+      for (let i = chapters.length - 1; i >= 0; i--) {
+        if (chapters[i].startMs < currentMs - PREV_THRESHOLD_MS) {
+          target = chapters[i];
+          break;
+        }
+      }
+      // Falling off the start: seek to 0 instead of doing nothing —
+      // matches YouTube's behaviour.
+      if (!target) {
+        this.videoPlayer.video.currentTime = 0;
+        return;
+      }
+    } else {
+      for (const c of chapters) {
+        if (c.startMs > currentMs) {
+          target = c;
+          break;
+        }
+      }
+      if (!target) return;  // no wrap — stay put
+    }
+    this.videoPlayer.video.currentTime = target.startMs / 1000;
+  }
+
+  /**
+   * Seek to the previous / next bookmark relative to the current time.
+   * Same semantics as _jumpChapter (no wrap). Editor's Shift+B / Ctrl+B
+   * continues to use its own EditableScript bookmark list when the
+   * editor is open; this method only fires from the player surface.
+   *
+   * @param {number} direction — -1 (prev) or +1 (next)
+   */
+  _jumpBookmark(direction) {
+    const bookmarks = this.funscriptEngine?.getBookmarks?.() || [];
+    if (bookmarks.length === 0) return;
+    if (!this.videoPlayer?.video) return;
+    const currentMs = (this.videoPlayer.video.currentTime || 0) * 1000;
+
+    let target = null;
+    if (direction < 0) {
+      const PREV_THRESHOLD_MS = 500;
+      for (let i = bookmarks.length - 1; i >= 0; i--) {
+        if (bookmarks[i].at < currentMs - PREV_THRESHOLD_MS) {
+          target = bookmarks[i];
+          break;
+        }
+      }
+    } else {
+      for (const b of bookmarks) {
+        if (b.at > currentMs) {
+          target = b;
+          break;
+        }
+      }
+    }
+    if (!target) return;
+    this.videoPlayer.video.currentTime = target.at / 1000;
+  }
+
   _cycleVRFlatten() {
     if (!this.videoPlayer) return null;
     if (!this._currentStereoFormat) {
@@ -4221,6 +4333,13 @@ class App {
       });
       if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
         this.progressBar.renderHeatmap(firstLoadedScript.actions, this.videoPlayer.duration);
+        this.progressBar.setMarkers({
+          chapters: this.funscriptEngine.getChapters(),
+          bookmarks: this.funscriptEngine.getBookmarks(),
+        });
+        if (this.funscriptEngine.getChapters().length > 0) {
+          this.progressBar.renderChapterStrip(this.videoPlayer.duration);
+        }
       }
     }
 
@@ -4282,7 +4401,10 @@ class App {
   _feedEmbeddedMultiAxis(rawContent) {
     if (!rawContent) return;
     let parsed;
-    try { parsed = JSON.parse(rawContent); } catch { return; }
+    // Drag-drop path can pass content straight from `file.text()` which
+    // preserves any leading UTF-8 BOM. Strip defensively — IPC reads
+    // already strip at the boundary.
+    try { parsed = JSON.parse(stripBOM(rawContent)); } catch { return; }
     const extracted = extractEmbeddedAxes(parsed);
 
     // Cache (or clear) for this video's funscript path. Other UI
@@ -6300,12 +6422,20 @@ class App {
       const fsName = variant.name || variant.path.split(/[\\/]/).pop();
       await this.funscriptEngine.loadContent(content, fsName);
 
-      // Update heatmap
+      // Update heatmap + markers (C-E20: variant switch replaces markers
+      // with whatever the new script carries).
       if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
         this.progressBar.renderHeatmap(
           this.funscriptEngine.getActions(),
           this.videoPlayer.duration,
         );
+        this.progressBar.setMarkers({
+          chapters: this.funscriptEngine.getChapters(),
+          bookmarks: this.funscriptEngine.getBookmarks(),
+        });
+        if (this.funscriptEngine.getChapters().length > 0) {
+          this.progressBar.renderChapterStrip(this.videoPlayer.duration);
+        }
       }
 
       // Update badge

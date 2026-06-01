@@ -23,6 +23,17 @@ export class ProgressBar {
     this.tooltipThumbnail = document.getElementById('tooltip-thumbnail');
     this.heatmapCanvas = document.getElementById('heatmap-canvas');
     this.heatmapCtx = this.heatmapCanvas ? this.heatmapCanvas.getContext('2d') : null;
+    // Chapter strip — separate canvas below the heatmap. Hidden until
+    // a funscript with chapters loads. Per SCOPE-chapters-bookmarks.md §4.2.
+    this.chapterStripContainer = document.getElementById('chapter-strip-container');
+    this.chapterStripCanvas = document.getElementById('chapter-strip-canvas');
+    this.chapterStripCtx = this.chapterStripCanvas ? this.chapterStripCanvas.getContext('2d') : null;
+    // Tooltip marker label — fills with chapter/bookmark name on hover.
+    this.tooltipMarker = document.getElementById('tooltip-marker');
+    this.tooltipMarkerSwatch = document.getElementById('tooltip-marker-swatch');
+    this.tooltipMarkerName = document.getElementById('tooltip-marker-name');
+    this._chapters = [];
+    this._bookmarks = [];
   }
 
   /**
@@ -227,6 +238,157 @@ export class ProgressBar {
     if (this._gapData) {
       this._renderGapIndicators(ctx, w, h, durationMs);
     }
+
+    // Render bookmark ticks ON TOP of the heatmap so they always read
+    // against the underlying gradient. Chapters live on a separate
+    // canvas below the seekbar — see _renderChapterStrip().
+    if (this._bookmarks.length > 0) {
+      this._renderBookmarkTicks(ctx, w, h, durationMs);
+    }
+  }
+
+  /**
+   * Draw bookmark ticks on the progress bar. Gold vertical lines, 2px
+   * wide, full height of the canvas. Drawn after the heatmap so they
+   * sit on top. Per SCOPE-chapters-bookmarks.md §4.1.
+   */
+  _renderBookmarkTicks(ctx, w, h, durationMs) {
+    if (durationMs <= 0) return;
+    ctx.fillStyle = 'rgba(255, 215, 0, 0.8)';
+    for (const bm of this._bookmarks) {
+      const x = Math.round((bm.at / durationMs) * w);
+      // Clip at the edges so out-of-range bookmarks (C-E18) don't break
+      // the layout. 2px wide centred at x.
+      const drawX = Math.max(0, Math.min(w - 2, x - 1));
+      ctx.fillRect(drawX, 0, 2, h);
+    }
+  }
+
+  /**
+   * Set chapter + bookmark marker data. Called from app.js whenever a
+   * funscript loads (or a variant switches). Either array can be empty;
+   * the chapter strip auto-shows/hides based on chapter count.
+   *
+   * @param {{chapters: Array, bookmarks: Array}} markers
+   */
+  setMarkers({ chapters, bookmarks } = {}) {
+    this._chapters = Array.isArray(chapters) ? chapters : [];
+    this._bookmarks = Array.isArray(bookmarks) ? bookmarks : [];
+
+    // Show/hide the chapter strip element based on whether we have any.
+    // `hidden` attribute respects the global `[hidden] { display: none }`
+    // CSS reset so layout collapses cleanly when no chapters present.
+    if (this.chapterStripContainer) {
+      this.chapterStripContainer.hidden = this._chapters.length === 0;
+    }
+
+    this.redraw();
+  }
+
+  /**
+   * Render the chapter strip below the seek bar. 4px tall band with
+   * per-chapter color segments. Time axis derives from the video's
+   * own duration (chapters can exist without actions per C-E19), so
+   * the caller passes duration in seconds.
+   *
+   * @param {number} durationSec — video duration in seconds (from the player)
+   */
+  renderChapterStrip(durationSec) {
+    if (!this.chapterStripCanvas || !this.chapterStripCtx) return;
+    if (!Number.isFinite(durationSec) || durationSec <= 0) return;
+    if (this._chapters.length === 0) return;
+
+    const canvas = this.chapterStripCanvas;
+    const ctx = this.chapterStripCtx;
+    const rect = canvas.parentElement.getBoundingClientRect();
+    canvas.width = rect.width * window.devicePixelRatio;
+    canvas.height = rect.height * window.devicePixelRatio;
+    ctx.scale(window.devicePixelRatio, window.devicePixelRatio);
+
+    const w = rect.width;
+    const h = rect.height;
+    const durationMs = durationSec * 1000;
+
+    ctx.clearRect(0, 0, w, h);
+
+    for (const c of this._chapters) {
+      const x1 = Math.max(0, Math.min(w, (c.startMs / durationMs) * w));
+      const x2 = Math.max(0, Math.min(w, (c.endMs / durationMs) * w));
+      const width = Math.max(1, x2 - x1);
+      ctx.fillStyle = c.color;
+      ctx.fillRect(x1, 0, width, h);
+    }
+  }
+
+  /**
+   * Update the marker label inside the progress tooltip. Called on
+   * every hover frame; resolves the marker at the cursor and either
+   * fills the marker label (chapter name + swatch / bookmark name)
+   * or hides it so the regular thumbnail + time still read.
+   *
+   * @param {number} xPx — cursor x relative to container
+   * @param {number} widthPx — container width
+   * @param {number} durationMs
+   */
+  updateMarkerTooltip(xPx, widthPx, durationMs) {
+    if (!this.tooltipMarker) return;
+    const m = this.resolveHoverMarker(xPx, widthPx, durationMs);
+    if (!m) {
+      this.tooltipMarker.hidden = true;
+      return;
+    }
+    this.tooltipMarker.hidden = false;
+    if (m.kind === 'chapter') {
+      if (this.tooltipMarkerSwatch) {
+        this.tooltipMarkerSwatch.style.background = m.data.color;
+        this.tooltipMarkerSwatch.style.visibility = '';
+      }
+      this.tooltipMarkerName.textContent = m.data.name || '';
+    } else {
+      // Bookmark — show a small icon (rendered via CSS class) instead
+      // of a color swatch. Single source for both kinds keeps the
+      // tooltip layout stable.
+      if (this.tooltipMarkerSwatch) {
+        this.tooltipMarkerSwatch.style.background = 'rgba(255, 215, 0, 0.9)';
+        this.tooltipMarkerSwatch.style.visibility = '';
+      }
+      this.tooltipMarkerName.textContent = m.data.name || '';
+    }
+  }
+
+  /**
+   * Hover-resolution helper for the tooltip. Given a horizontal cursor
+   * position (in CSS px relative to the progress container) and the
+   * video duration in ms, return whichever marker is closest. Bookmarks
+   * win over chapters within their hit radius (smaller, more precise
+   * target per C-E24).
+   *
+   * @param {number} xPx — cursor x relative to container
+   * @param {number} widthPx — container width in CSS px
+   * @param {number} durationMs
+   * @returns {{kind: 'bookmark'|'chapter', data: object}|null}
+   */
+  resolveHoverMarker(xPx, widthPx, durationMs) {
+    if (widthPx <= 0 || durationMs <= 0) return null;
+    const HIT_RADIUS_PX = 6;
+
+    for (const bm of this._bookmarks) {
+      const x = (bm.at / durationMs) * widthPx;
+      if (Math.abs(xPx - x) <= HIT_RADIUS_PX) {
+        return { kind: 'bookmark', data: bm };
+      }
+    }
+    for (let i = this._chapters.length - 1; i >= 0; i--) {
+      // Iterate in reverse so overlapping chapters resolve to the
+      // topmost one (last added) per C-E13.
+      const c = this._chapters[i];
+      const x1 = (c.startMs / durationMs) * widthPx;
+      const x2 = (c.endMs / durationMs) * widthPx;
+      if (xPx >= x1 && xPx <= x2) {
+        return { kind: 'chapter', data: c };
+      }
+    }
+    return null;
   }
 
   /**
@@ -299,15 +461,26 @@ export class ProgressBar {
       this.heatmapCtx.clearRect(0, 0, this.heatmapCanvas.width, this.heatmapCanvas.height);
     }
     this._heatmapData = null;
+    // Markers persist across heatmap clears — the funscript engine
+    // controls them via setMarkers() and may keep chapters even when
+    // a script has zero actions (C-E19). The chapter strip is cleared
+    // separately when setMarkers receives an empty list.
+    if (this.chapterStripCtx && this.chapterStripCanvas) {
+      this.chapterStripCtx.clearRect(0, 0, this.chapterStripCanvas.width, this.chapterStripCanvas.height);
+    }
     this._destroyThumbVideo();
   }
 
   /**
-   * Redraw heatmap (call on window resize).
+   * Redraw heatmap + chapter strip (call on window resize).
    */
   redraw() {
     if (this._heatmapData) {
       this.renderHeatmap(this._heatmapData.actions, this._heatmapData.duration);
+    }
+    if (this._chapters.length > 0) {
+      const duration = this._heatmapData?.duration ?? this.player?.duration ?? 0;
+      if (duration > 0) this.renderChapterStrip(duration);
     }
   }
 }

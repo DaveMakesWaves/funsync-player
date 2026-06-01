@@ -4,7 +4,7 @@ import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, onJumpChapter, onJumpBookmark }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
@@ -14,6 +14,8 @@ export class KeyboardHandler {
     this.onNavigate = onNavigate || null;
     this.onToggleLoop = onToggleLoop || null;
     this.onToggleQueue = onToggleQueue || null;
+    this.onJumpChapter = onJumpChapter || null;
+    this.onJumpBookmark = onJumpBookmark || null;
     this._bindEvents();
   }
 
@@ -163,8 +165,24 @@ export class KeyboardHandler {
 
       case 'b':
       case 'B':
-        e.preventDefault();
-        this.player.setLoopPoint('b');
+        // Shift+B / Ctrl+B → bookmark prev/next (player-side bindings,
+        // mirrors editor convention). Editor intercepts these when open,
+        // so the guard below keeps player nav out of the way during
+        // script authoring. Bare B is the A-B loop B-point.
+        if (this.scriptEditor?.isOpen) {
+          // Editor handles its own bookmark nav; let it through.
+          break;
+        }
+        if (e.shiftKey && this.onJumpBookmark) {
+          e.preventDefault();
+          this.onJumpBookmark(-1);
+        } else if ((e.ctrlKey || e.metaKey) && this.onJumpBookmark) {
+          e.preventDefault();
+          this.onJumpBookmark(+1);
+        } else if (!e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          e.preventDefault();
+          this.player.setLoopPoint('b');
+        }
         break;
 
       case 'r':
@@ -193,18 +211,28 @@ export class KeyboardHandler {
         // Shift+, decrements playback speed (YouTube convention).
         // `,` arrives without Shift on US/UK layouts; `<` is what
         // some browsers report with Shift held. Accept both.
+        // Bare `,` (no modifier) jumps to the previous chapter — the
+        // editor's `,` is for selection and only fires when the editor
+        // canvas has focus, so the guard below stays out of the way.
         if (e.shiftKey || e.key === '<') {
           e.preventDefault();
           this.player.cyclePlaybackRate(-1);
+        } else if (!e.ctrlKey && !e.altKey && !e.metaKey && !this.scriptEditor?.isOpen && this.onJumpChapter) {
+          e.preventDefault();
+          this.onJumpChapter(-1);
         }
         break;
 
       case '>':
       case '.':
         // Shift+. increments playback speed.
+        // Bare `.` jumps to the next chapter — same guard as `,` above.
         if (e.shiftKey || e.key === '>') {
           e.preventDefault();
           this.player.cyclePlaybackRate(+1);
+        } else if (!e.ctrlKey && !e.altKey && !e.metaKey && !this.scriptEditor?.isOpen && this.onJumpChapter) {
+          e.preventDefault();
+          this.onJumpChapter(+1);
         }
         break;
 

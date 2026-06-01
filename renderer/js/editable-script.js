@@ -1,5 +1,7 @@
 // EditableScript — Mutable funscript action array with undo/redo, selection, clipboard
 
+import { parseFunscriptTime } from './funscript-time.js';
+
 export class EditableScript {
   constructor() {
     this._actions = [];
@@ -779,11 +781,20 @@ export class EditableScript {
     const { actions, ...rest } = metadata;
     this._metadata = JSON.parse(JSON.stringify(rest));
 
-    // Extract bookmarks from metadata.metadata.bookmarks if present
+    // Extract bookmarks from metadata.metadata.bookmarks if present.
+    // Routed through parseFunscriptTime so the editor accepts the same
+    // shapes the player does — `at: <ms-number>`, `time: "HH:MM:SS.mmm"`
+    // (MFP / .NET TimeSpan), or string-encoded numbers. Per SCOPE-
+    // chapters-bookmarks.md §5 (editable-script bookmark parse).
     if (this._metadata.metadata && Array.isArray(this._metadata.metadata.bookmarks)) {
       this._bookmarks = this._metadata.metadata.bookmarks
-        .filter(b => b && typeof b.at === 'number')
-        .map(b => ({ at: b.at, name: b.name || '' }))
+        .map((b) => {
+          if (!b || typeof b !== 'object') return null;
+          const at = parseFunscriptTime(b.at ?? b.time);
+          if (at === null) return null;
+          return { at, name: typeof b.name === 'string' ? b.name : '' };
+        })
+        .filter(Boolean)
         .sort((a, b) => a.at - b.at);
     } else {
       this._bookmarks = [];

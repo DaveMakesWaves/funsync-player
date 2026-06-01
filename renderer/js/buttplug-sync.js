@@ -145,6 +145,14 @@ export class ButtplugSync {
 
   /**
    * Stop the sync engine.
+   *
+   * Also fires StopDeviceCmd to every connected device. Without this,
+   * Vibrate / Rotate / Oscillate outputs persist at their last
+   * intensity until the next command — a community-reported bug where
+   * devices kept buzzing after switching videos via the queue or Play
+   * All. Linear strokes stop on their own at the target position;
+   * other outputs need an explicit stop command. Fire-and-forget so a
+   * disconnected client doesn't block the transition.
    */
   stop() {
     this._active = false;
@@ -158,6 +166,12 @@ export class ButtplugSync {
     this._lastVibSentIntensity = -1;
     this._lastLinearSentForIdx = -1;
     this._axisLastLinearSentIdx.clear();
+
+    if (this.buttplug?.stopAll) {
+      Promise.resolve(this.buttplug.stopAll()).catch((err) => {
+        console.debug('[ButtplugSync] StopAll on stop() failed:', err?.message || err);
+      });
+    }
 
     console.log('[ButtplugSync] Stopped');
   }

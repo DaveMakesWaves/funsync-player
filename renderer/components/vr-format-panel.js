@@ -55,9 +55,9 @@ function projectionLabel(key) {
  * Compute the dataService entry shape from the panel's current
  * controls. Pure — exported for tests.
  */
-export function buildEntry({ projection, eye, zoom, fov, yaw, pitch, source = 'manual' }) {
+export function buildEntry({ projection, eye, zoom, fov, yaw, pitch, roll, source = 'manual' }) {
   if (!projection || projection === 'flat') {
-    return { projection: 'flat', eye: null, zoom: 1, fov: 90, yaw: 0, pitch: 0, source };
+    return { projection: 'flat', eye: null, zoom: 1, fov: 90, yaw: 0, pitch: 0, roll: 0, source };
   }
   return {
     projection,
@@ -66,6 +66,9 @@ export function buildEntry({ projection, eye, zoom, fov, yaw, pitch, source = 'm
     fov: Number.isFinite(fov) ? Math.max(30, Math.min(160, fov)) : 90,
     yaw: Number.isFinite(yaw) ? yaw : 0,
     pitch: Number.isFinite(pitch) ? Math.max(-85, Math.min(85, pitch)) : 0,
+    // Roll is binary (off / 180°) from the v1 UI but stored as degrees
+    // so we can extend to free-roll later without a schema change.
+    roll: Number.isFinite(roll) ? roll : 0,
     source,
   };
 }
@@ -108,6 +111,7 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
     fov: Number.isFinite(initial?.fov) ? initial.fov : 90,
     yaw: Number.isFinite(initial?.yaw) ? initial.yaw : 0,
     pitch: Number.isFinite(initial?.pitch) ? initial.pitch : 0,
+    roll: Number.isFinite(initial?.roll) ? initial.roll : 0,
     source: initial?.source || (initial ? 'manual' : 'auto'),
   };
 
@@ -265,6 +269,24 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
         commit();
       });
       fovSection.appendChild(recenterBtn);
+
+      // --- Rotate 180° toggle ---
+      // For camera rigs mounted upside-down on the rig — content reads
+      // inverted after flatten until the user flips it. Spherical-only;
+      // planar half-frame paths don't run the shader. Stored as degrees
+      // so v2 can extend to free-roll without a schema change.
+      const rotateToggle = document.createElement('button');
+      rotateToggle.type = 'button';
+      rotateToggle.className = 'modal-btn modal-btn--secondary vr-format-panel__inline-btn';
+      rotateToggle.setAttribute('aria-pressed', 'false');
+      rotateToggle.textContent = t('vrFormat.rotate180');
+      rotateToggle.addEventListener('click', () => {
+        state.roll = state.roll === 180 ? 0 : 180;
+        state.source = 'manual';
+        refresh();
+        commit();
+      });
+      fovSection.appendChild(rotateToggle);
       wrap.appendChild(fovSection);
 
       // --- Action row ---
@@ -283,6 +305,7 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
         state.fov = 90;
         state.yaw = 0;
         state.pitch = 0;
+        state.roll = 0;
         state.source = 'auto';
         projSelect.value = state.projection || 'flat';
         zoomSlider.value = String(state.zoom);
@@ -337,6 +360,7 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
           fov: state.fov,
           yaw: state.yaw,
           pitch: state.pitch,
+          roll: state.roll,
           source: state.source,
         });
       }
@@ -367,10 +391,13 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
         zoomLabel.textContent = t('vrFormat.zoomLabel', { value: state.zoom.toFixed(2) });
         zoomSlider.value = String(state.zoom);
 
-        // FOV + recenter: spherical only (WebGL viewport).
+        // FOV + recenter + rotate-180: spherical only (WebGL viewport).
         fovSection.style.display = isSpherical ? '' : 'none';
         fovLabel.textContent = t('vrFormat.fovLabel', { value: Math.round(state.fov) });
         fovSlider.value = String(state.fov);
+        const rolled = state.roll === 180;
+        rotateToggle.classList.toggle('vr-format-panel__seg-btn--active', rolled);
+        rotateToggle.setAttribute('aria-pressed', rolled ? 'true' : 'false');
 
         // Status line.
         if (proj === 'flat') {

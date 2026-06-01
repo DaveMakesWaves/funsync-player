@@ -59,10 +59,23 @@
           <div class="progress__heatmap" id="heatmap-canvas-container">
             <canvas id="heatmap-canvas" aria-hidden="true"></canvas>
           </div>
+          <!-- Chapter strip — slim band below the heatmap with per-chapter
+               colored segments. Only visible when the current funscript
+               provides metadata.chapters. SCOPE-chapters-bookmarks.md §4.2. -->
+          <div class="progress__chapter-strip" id="chapter-strip-container" aria-hidden="true" hidden>
+            <canvas id="chapter-strip-canvas" aria-hidden="true"></canvas>
+          </div>
           <div class="progress__buffered" id="buffered-bar"></div>
           <div class="progress__filled" id="progress-bar"></div>
           <div class="progress__thumb" id="progress-thumb"></div>
           <div class="progress__tooltip" id="progress-tooltip" aria-hidden="true">
+            <!-- Marker label (chapter / bookmark name on hover). Drawn
+                 above the thumbnail when a marker resolves at the cursor;
+                 hidden otherwise. SCOPE-chapters-bookmarks.md §4.3. -->
+            <div class="tooltip__marker" id="tooltip-marker" hidden>
+              <span class="tooltip__marker-swatch" id="tooltip-marker-swatch" aria-hidden="true"></span>
+              <span class="tooltip__marker-name" id="tooltip-marker-name"></span>
+            </div>
             <div class="tooltip__thumbnail" id="tooltip-thumbnail"></div>
             <span class="tooltip__time" id="tooltip-time">0:00</span>
           </div>

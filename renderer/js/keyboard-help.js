@@ -156,6 +156,15 @@ export function getPlayerShortcutGroups() {
       ],
     },
     {
+      title: t('kbd.chaptersBookmarks'),
+      rows: [
+        [',',             t('kbd.prevChapter')],
+        ['.',             t('kbd.nextChapter')],
+        ['Shift+B',       t('kbd.prevBookmark')],
+        ['Ctrl+B',        t('kbd.nextBookmark')],
+      ],
+    },
+    {
       title: t('kbd.libraryGroup'),
       rows: [
         ['O',             t('kbd.openFile')],

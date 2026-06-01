@@ -1,5 +1,87 @@
 // FunscriptEngine — Client-side funscript parsing, heatmap data, and backend conversion
 
+import { parseFunscriptTime } from './funscript-time.js';
+
+/**
+ * Strip a leading UTF-8 BOM (U+FEFF) from a JSON string. Some scripting
+ * tools (Windows editors, older OFS, hand-saved files) write a leading
+ * BOM that JSON.parse rejects. The Electron `read-funscript` IPC strips
+ * it at the I/O boundary; this helper is the defence-in-depth layer
+ * for content arriving via `file.text()` (drag-and-drop, browse) or
+ * other in-process sources.
+ *
+ * Exported so any module that does its own funscript JSON.parse can
+ * stay safe without re-implementing the strip.
+ *
+ * @param {string} content
+ * @returns {string}
+ */
+export function stripBOM(content) {
+  if (typeof content !== 'string') return content;
+  return content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content;
+}
+
+// Auto-palette for chapters that don't carry an author color. Chosen to
+// sit alongside the heatmap (which spans cool-to-hot reds/oranges) —
+// these are de-saturated mid-tones so the chapter strip reads as
+// "metadata" rather than competing with the stroke-density gradient.
+const CHAPTER_AUTO_PALETTE = [
+  '#5b8def', '#8e6cef', '#22b8a6', '#d97a4d',
+  '#6c8a3a', '#c8557a', '#3aa8c8', '#a8783a',
+];
+
+/**
+ * Parse `metadata.chapters` (or top-level `chapters` for scripts that
+ * inline them) into ms-int normalised entries. Reverse chapters
+ * (endMs < startMs) are dropped per SCOPE C-E11. Color falls back to
+ * the palette by index; both 'color' and 'colour' spellings accepted.
+ *
+ * @param {Object} data — parsed funscript JSON
+ * @returns {Array<{startMs:number,endMs:number,name:string,color:string}>}
+ */
+function parseChapters(data) {
+  const src = data?.metadata?.chapters ?? data?.chapters;
+  if (!Array.isArray(src)) return [];
+  const out = [];
+  for (const c of src) {
+    if (!c || typeof c !== 'object') continue;
+    const startMs = parseFunscriptTime(c.startTime ?? c.start ?? c.at);
+    const endMs   = parseFunscriptTime(c.endTime ?? c.end);
+    if (startMs === null || endMs === null) continue;
+    if (endMs < startMs) continue;  // C-E11: drop reversed
+    const name = typeof c.name === 'string' ? c.name : '';
+    const color = (typeof c.color === 'string' && c.color)
+      || (typeof c.colour === 'string' && c.colour)
+      || CHAPTER_AUTO_PALETTE[out.length % CHAPTER_AUTO_PALETTE.length];
+    out.push({ startMs, endMs, name, color });
+  }
+  out.sort((a, b) => a.startMs - b.startMs);
+  return out;
+}
+
+/**
+ * Parse `metadata.bookmarks` (or top-level `bookmarks`) into ms-int
+ * normalised entries. Accepts both `at: <number>` and `time: "HH:MM:SS"`
+ * shapes. Sorted by time.
+ *
+ * @param {Object} data
+ * @returns {Array<{at:number,name:string}>}
+ */
+function parseBookmarks(data) {
+  const src = data?.metadata?.bookmarks ?? data?.bookmarks;
+  if (!Array.isArray(src)) return [];
+  const out = [];
+  for (const b of src) {
+    if (!b || typeof b !== 'object') continue;
+    const at = parseFunscriptTime(b.at ?? b.time);
+    if (at === null) continue;
+    const name = typeof b.name === 'string' ? b.name : '';
+    out.push({ at, name });
+  }
+  out.sort((a, b) => a.at - b.at);
+  return out;
+}
+
 export class FunscriptEngine {
   constructor({ backendPort }) {
     this.backendPort = backendPort;
@@ -26,7 +108,10 @@ export class FunscriptEngine {
    * @returns {Object} Parsed info with actions, duration, CSV URL
    */
   async loadContent(content, filename = 'unknown.funscript') {
-    // Client-side validation first
+    // Client-side validation first. stripBOM() defends against
+    // BOM-prefixed files arriving via drag-and-drop / `file.text()`
+    // (the IPC path also strips, so this is the second line).
+    content = stripBOM(content);
     let data;
     try {
       data = JSON.parse(content);
@@ -56,6 +141,12 @@ export class FunscriptEngine {
       actions: data.actions,
       actionCount: data.actions.length,
       durationMs: data.actions[data.actions.length - 1].at,
+      // Per SCOPE-chapters-bookmarks.md §3: extract chapters + bookmarks
+      // from `metadata` (or the top-level keys some scripts use). Both
+      // are normalised to ms-int here so progress-bar / keyboard nav /
+      // tooltip code never has to re-parse.
+      chapters: parseChapters(data),
+      bookmarks: parseBookmarks(data),
     };
 
     // Convert to CSV via backend
@@ -95,6 +186,25 @@ export class FunscriptEngine {
    */
   getActions() {
     return this._parsed?.actions || null;
+  }
+
+  /**
+   * Get the chapter list (already ms-int normalised + sorted).
+   * Returns `[]` (not null) when no chapters present — caller can
+   * `length`-check without a null-guard.
+   * @returns {Array<{startMs:number,endMs:number,name:string,color:string}>}
+   */
+  getChapters() {
+    return this._parsed?.chapters || [];
+  }
+
+  /**
+   * Get the bookmark list (already ms-int normalised + sorted).
+   * Returns `[]` when no bookmarks present.
+   * @returns {Array<{at:number,name:string}>}
+   */
+  getBookmarks() {
+    return this._parsed?.bookmarks || [];
   }
 
   /**
