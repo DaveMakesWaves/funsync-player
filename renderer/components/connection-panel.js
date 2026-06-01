@@ -32,7 +32,7 @@ const TCODE_UI_AXES = [
 ];
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings }) {
+  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete }) {
     this.handy = handyManager;
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
@@ -42,6 +42,14 @@ export class ConnectionPanel {
     this.autoblowSync = autoblowSync || null;
     this.vrBridge = vrBridge || null;
     this.settings = settings;
+    // Called after the Re-sync time button completes a successful sync.
+    // App wires this to hsspStop + hsspPlay at the current video position
+    // so the device is left in a clean HSSP state. Without it, the SDK's
+    // `.sync()` routine can leave the device in maintenance mode and
+    // subsequent pause / setScript / next-video commands silently fail.
+    // Community-reported bug 2026-06-01: "after Re-sync time, script
+    // doesn't pause when video pauses, doesn't switch on new video".
+    this.onResyncComplete = onResyncComplete || null;
     this._panel = null;
     this._visible = false;
     this._activeTab = 'handy'; // 'handy' | 'buttplug'
@@ -751,6 +759,19 @@ export class ConnectionPanel {
     const result = await this.handy.syncTime();
     if (result) {
       syncQuality.textContent = t('connection.handy.rtdResult', { rtd: Math.round(result.avgRtd) });
+      // Re-engage HSSP playback at the current video position. The SDK's
+      // `.sync()` routine leaves the device in a state where the next
+      // hsspStop / setScript can be ignored; the app then thinks
+      // playback is being controlled but pause / next-video commands
+      // never reach the device. Mirrors the auto-drift recovery in
+      // sync-engine.js — same fix shape, manual trigger.
+      if (this.onResyncComplete) {
+        try {
+          await this.onResyncComplete();
+        } catch (err) {
+          console.warn('[ConnectionPanel] onResyncComplete failed:', err?.message || err);
+        }
+      }
     } else {
       syncQuality.textContent = t('connection.handy.syncFailed');
     }

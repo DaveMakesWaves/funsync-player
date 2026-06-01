@@ -627,6 +627,7 @@ class App {
         autoblowSync: this.autoblowSync,
         vrBridge: this.vrBridge,
         settings: this.settings,
+        onResyncComplete: () => this._restoreHssspAfterResync(),
       });
 
       // Load saved smoothing settings into buttplug sync
@@ -4011,6 +4012,33 @@ class App {
    * `library.vrFormat` schema; the old `library.vrFlatten` key is no
    * longer touched (kept indefinitely as a downgrade fallback).
    */
+  /**
+   * After the manual "Re-sync time" button completes its SDK sync,
+   * re-engage HSSP playback at the current video position. Without
+   * this, the SDK's `.sync()` routine can leave the device in a state
+   * where subsequent hsspStop / setScript calls silently fail — the
+   * app then thinks it's controlling playback but pause / next-video
+   * never reach the device.
+   *
+   * Mirrors the auto-drift recovery in sync-engine.js: if video is
+   * playing, stop + replay HSSP at current time. If paused, leave
+   * device alone (HSSP is already stopped via the pause handler).
+   *
+   * Community-reported 2026-06-01.
+   */
+  async _restoreHssspAfterResync() {
+    if (!this.handyManager?.connected) return;
+    if (!this.videoPlayer?.video) return;
+    if (this.videoPlayer.video.paused) return;  // already stopped, nothing to restore
+    const timeMs = Math.round(this.videoPlayer.video.currentTime * 1000);
+    try {
+      await this.handyManager.hsspStop();
+      await this.handyManager.hsspPlay(timeMs);
+    } catch (err) {
+      console.warn('[Resync] HSSP restore failed:', err?.message || err);
+    }
+  }
+
   /**
    * Seek to the previous / next chapter relative to the current time.
    * No wrap-around per SCOPE-chapters-bookmarks.md C-E23 — at the last
