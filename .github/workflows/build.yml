@@ -11,6 +11,10 @@ permissions:
 jobs:
   build:
     strategy:
+      # Don't cancel a healthy Windows build because Linux had a network
+      # blip. Each OS publishes its own artifact independently — the
+      # release job only requires both to have succeeded.
+      fail-fast: false
       matrix:
         include:
           - os: windows-latest
@@ -58,10 +62,30 @@ jobs:
 
       - name: Download ffmpeg (Linux)
         if: matrix.os == 'ubuntu-latest'
+        # Source: BtbN/FFmpeg-Builds. Hosted on GitHub's own CDN so
+        # GitHub Actions runners never hit a cloud-IP rate limit (which
+        # killed the johnvansickle.com mirror twice during 0.8.0-experimental.0).
+        # `latest` tag tracks the current release ffmpeg; the master
+        # variant tracks tip-of-master. We want the release variant for
+        # stability. `--tries=3 --waitretry=5` adds belt-and-suspenders
+        # retries for transient blips.
         run: |
           mkdir -p ffmpeg-linux
-          wget -q https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz -O ffmpeg-linux.tar.xz
+          # Pinned to the 8.1 release line to match the Windows bundle
+          # (memory: "ffmpeg 8.1 bundled in ffmpeg/ directory"). When
+          # bumping the project to a newer ffmpeg version, update both
+          # the Windows bundle and this URL together.
+          wget --tries=3 --waitretry=5 -q \
+            https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-linux64-gpl-8.1.tar.xz \
+            -O ffmpeg-linux.tar.xz
           tar xf ffmpeg-linux.tar.xz --strip-components=1 -C ffmpeg-linux
+          # BtbN bundles binaries under bin/ — flatten to match the
+          # previous layout so electron-builder / runtime _find_binary
+          # logic doesn't need to know about the source change.
+          if [ -d ffmpeg-linux/bin ]; then
+            mv ffmpeg-linux/bin/ffmpeg ffmpeg-linux/ffmpeg
+            mv ffmpeg-linux/bin/ffprobe ffmpeg-linux/ffprobe
+          fi
           chmod +x ffmpeg-linux/ffmpeg ffmpeg-linux/ffprobe
 
       - name: Build Electron app
