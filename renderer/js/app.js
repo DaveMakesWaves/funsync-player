@@ -6,6 +6,8 @@ import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
 import { HandyManager } from './handy-manager.js';
+import { AudienceBridge } from './audience-bridge.js';
+import * as AUDIENCE from './audience-popout-protocol.js';
 import { SyncEngine } from './sync-engine.js';
 import { ButtplugManager } from './buttplug-manager.js';
 import { ButtplugSync } from './buttplug-sync.js';
@@ -62,6 +64,7 @@ class App {
     this.progressBar = null;
     this.funscriptEngine = null;
     this.handyManager = null;
+    this.audienceBridge = null;
     this.syncEngine = null;
     this.buttplugManager = null;
     this.buttplugSync = null;
@@ -474,14 +477,22 @@ class App {
     this.videoPlayer.video.addEventListener('play', () => {
       if (this.library) this.library._isVideoPlaying = true;
       this._updatePlayerSyncChip();
+      // Fan out to audience viewers (SCOPE-audience-broadcast.md). No-op
+      // if no room is open.
+      this._audienceFanOut('play', Math.round(this.videoPlayer.video.currentTime * 1000));
     });
     this.videoPlayer.video.addEventListener('pause', () => {
       if (this.library) this.library._isVideoPlaying = false;
       this._updatePlayerSyncChip();
+      this._audienceFanOut('stop');
     });
     this.videoPlayer.video.addEventListener('ended', () => {
       if (this.library) this.library._isVideoPlaying = false;
       this._updatePlayerSyncChip();
+      this._audienceFanOut('stop');
+    });
+    this.videoPlayer.video.addEventListener('seeked', () => {
+      this._audienceFanOut('seek', Math.round(this.videoPlayer.video.currentTime * 1000));
     });
 
     // Render heatmap once video duration is known
@@ -617,6 +628,23 @@ class App {
         console.warn('Remote bridge unavailable:', err.message);
       }
 
+      // AudienceBridge — fans out HSSP commands to N viewer Handys for
+      // the broadcast feature (SCOPE-audience-broadcast.md). Constructed
+      // here so it can use the same HandyManager class for each viewer
+      // (cloud-fire-and-forget by key; no shared instance contention).
+      this.audienceBridge = new AudienceBridge({
+        settings: this.settings,
+        eventBus,
+        HandyManagerCtor: HandyManager,
+        getCurrentVideoTimeMs: () => Math.round((this.videoPlayer?.video?.currentTime || 0) * 1000),
+        isVideoPlaying: () => !!(this.videoPlayer?.video && !this.videoPlayer.video.paused),
+        getCurrentScriptUrl: () => this._scriptCloudUrl || this.funscriptEngine?.getCsvUrl?.() || null,
+        // Self-key collision guard — the streamer's own key is held by
+        // handyManager. If they paste it as a viewer, refuse.
+        getStreamerOwnKey: () => this.settings?.get?.('handy.connectionKey') || null,
+      });
+      this._wireAudiencePopoutRelay();
+
       this.connectionPanel = new ConnectionPanel({
         handyManager: this.handyManager,
         buttplugManager: this.buttplugManager,
@@ -627,8 +655,20 @@ class App {
         autoblowSync: this.autoblowSync,
         vrBridge: this.vrBridge,
         settings: this.settings,
+        audienceBridge: this.audienceBridge,
         onResyncComplete: () => this._restoreHssspAfterResync(),
       });
+
+      // Keep the Audience tab's LED in lockstep with the bridge's
+      // aggregate state.
+      const refreshAudienceLed = () => {
+        this.connectionPanel?.setAudienceTabLed?.(this.audienceBridge.aggregateStatus);
+      };
+      for (const evt of ['audience:room-opened', 'audience:room-ended',
+                          'audience:viewer-added', 'audience:viewer-removed',
+                          'audience:viewer-status']) {
+        eventBus.on(evt, refreshAudienceLed);
+      }
 
       // Load saved smoothing settings into buttplug sync
       if (this.buttplugSync) {
@@ -4036,6 +4076,170 @@ class App {
       await this.handyManager.hsspPlay(timeMs);
     } catch (err) {
       console.warn('[Resync] HSSP restore failed:', err?.message || err);
+    }
+  }
+
+  // ============ Audience broadcast (SCOPE-audience-broadcast.md) ============
+
+  /**
+   * Wire the audience pop-out IPC relay. Pop-out renderer sends ops via
+   * `audiencePopoutRelay('to-parent', ...)`; we receive them here and
+   * dispatch to AudienceBridge. AudienceBridge events fan back out via
+   * `audiencePopoutRelay('to-popout', ...)` so the pop-out re-renders.
+   */
+  _wireAudiencePopoutRelay() {
+    if (!window.funsync?.onAudiencePopoutEvent) return;
+
+    // Pop-out → main
+    window.funsync.onAudiencePopoutEvent(async (evt) => {
+      if (!evt) return;
+      // Closing the pop-out window ends the room automatically. The
+      // SCOPE originally kept room state alive across pop-out close
+      // (Shneiderman #6 reversibility), but Dave reversed that 2026-06-02
+      // — explicit "End Room" + confirm was high-friction; closing the
+      // window IS the end-room intent. The Audience tab's End Room
+      // button now just calls audiencePopoutClose() so both paths
+      // funnel through here.
+      if (evt.type === 'closed') {
+        if (this.audienceBridge?.roomActive) {
+          await this.audienceBridge.endRoom();
+        }
+        return;
+      }
+      if (evt.type !== 'message') return;
+      const payload = evt.payload;
+      switch (payload?.type) {
+        case AUDIENCE.READY: {
+          // Pop-out is up; push initial state.
+          this._pushAudienceInitialState();
+          break;
+        }
+        case AUDIENCE.ADD_VIEWER: {
+          try {
+            await this.audienceBridge.addViewer({
+              key: payload.key,
+              label: payload.label,
+              offsetMs: payload.offsetMs,
+            });
+          } catch (err) {
+            // SELF_KEY collision or generic add failure — surface to the
+            // pop-out as a toast-style status; the bridge already
+            // refused the add, so no state change is needed.
+            const msg = err?.code === 'SELF_KEY' ? t('audience.toast.selfKey')
+                      : err?.message || String(err);
+            showToast(msg, 'warn', 3500);
+          }
+          break;
+        }
+        case AUDIENCE.REMOVE_VIEWER:
+          await this.audienceBridge.removeViewer(payload.key, { forget: !!payload.forget });
+          break;
+        case AUDIENCE.SET_OFFSET:
+          this.audienceBridge.setOffsetForViewer(payload.key, payload.offsetMs);
+          break;
+        case AUDIENCE.SET_MUTED:
+          await this.audienceBridge.setMuted(payload.key, payload.muted);
+          break;
+        case AUDIENCE.TEST_BUZZ:
+          this._flashScreenForBuzzCalibration();
+          await this.audienceBridge.testBuzz(payload.key);
+          break;
+        case AUDIENCE.TEST_BUZZ_ALL:
+          this._flashScreenForBuzzCalibration();
+          await this.audienceBridge.testBuzzAll();
+          break;
+        case AUDIENCE.SET_HIDE_KEYS:
+          this.settings?.set?.('audience.hideKeys', !!payload.hideKeys);
+          this._pushAudienceMessage(AUDIENCE.HIDE_KEYS_CHANGED, { hideKeys: !!payload.hideKeys });
+          break;
+        case AUDIENCE.END_ROOM:
+          // Single funnel: closing the pop-out triggers the 'closed'
+          // event above which calls endRoom. The End Room button in
+          // the pop-out or the tab just closes the window.
+          await window.funsync.audiencePopoutClose?.();
+          break;
+      }
+    });
+
+    // Bridge → pop-out fan-out
+    eventBus.on('audience:viewer-added', ({ key }) => {
+      const viewer = this.audienceBridge.viewers.find((v) => v.key === key);
+      if (viewer) this._pushAudienceMessage(AUDIENCE.VIEWER_ADDED, { viewer });
+    });
+    eventBus.on('audience:viewer-removed', ({ key }) => {
+      this._pushAudienceMessage(AUDIENCE.VIEWER_REMOVED, { key });
+    });
+    eventBus.on('audience:viewer-status', (payload) => {
+      this._pushAudienceMessage(AUDIENCE.VIEWER_STATUS, payload);
+    });
+    eventBus.on('audience:viewer-offset', (payload) => {
+      this._pushAudienceMessage(AUDIENCE.VIEWER_OFFSET, payload);
+    });
+  }
+
+  _pushAudienceMessage(type, fields = {}) {
+    window.funsync?.audiencePopoutRelay?.('to-popout', { type, ...fields });
+  }
+
+  _pushAudienceInitialState() {
+    this._pushAudienceMessage(AUDIENCE.INITIAL_STATE, {
+      roomActive: this.audienceBridge.roomActive,
+      viewers: this.audienceBridge.viewers,
+      hideKeys: !!this.settings?.get?.('audience.hideKeys'),
+      theme: document.documentElement.dataset.theme || 'dark',
+      // Pop-out renderer has its own module-level i18n state. Pass the
+      // streamer's chosen locale so the pop-out shows translated UI
+      // instead of raw key constants like "audience.room.empty".
+      locale: this.settings?.get?.('player.language') || 'en',
+    });
+  }
+
+  /**
+   * Flash the screen white for ~80ms for the buzz-calibration ping
+   * (SCOPE §3.4). Viewer sees the flash via Discord screen-share + feels
+   * the device pulse a tick later — reports felt-vs-saw delta back in
+   * Discord chat so the streamer can dial the per-viewer offset.
+   */
+  _flashScreenForBuzzCalibration() {
+    let overlay = document.getElementById('audience-buzz-flash');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'audience-buzz-flash';
+      overlay.className = 'audience-buzz-flash';
+      document.body.appendChild(overlay);
+    }
+    overlay.classList.add('audience-buzz-flash--active');
+    setTimeout(() => overlay.classList.remove('audience-buzz-flash--active'), 80);
+  }
+
+  /**
+   * Fan-out hook: called from the existing single-Handy play / pause /
+   * seek / load-video pipeline to push the same op out to every viewer.
+   * Idempotent + safe to call when no room is open (no-op).
+   *
+   * `op` is one of: 'play', 'stop', 'seek', 'script'.
+   */
+  async _audienceFanOut(op, ...args) {
+    if (!this.audienceBridge?.roomActive) return;
+    try {
+      switch (op) {
+        case 'play':
+          await this.audienceBridge.hsspPlayAll(args[0] || 0);
+          break;
+        case 'stop':
+          await this.audienceBridge.hsspStopAll();
+          break;
+        case 'seek':
+          // Stop + replay at new time. Same as auto-drift recovery.
+          await this.audienceBridge.hsspStopAll();
+          await this.audienceBridge.hsspPlayAll(args[0] || 0);
+          break;
+        case 'script':
+          await this.audienceBridge.uploadScriptToAll(args[0]);
+          break;
+      }
+    } catch (err) {
+      console.warn('[Audience] fan-out failed:', err?.message || err);
     }
   }
 

@@ -8,7 +8,7 @@ import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Pla
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
-import { fuzzySearch, sortVideos, computeSpeedStats } from '../js/library-search.js';
+import { fuzzySearch, sortVideos, computeSpeedStats, compareNames } from '../js/library-search.js';
 import { AXIS_DEFINITIONS, detectCompanionFiles, parseAxisSuffix } from '../js/multi-axis.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
@@ -4877,7 +4877,7 @@ export class Library {
         folderEntries.push({ isFolder: true, node, count: filtered.length });
         totalVideos += filtered.length;
       }
-      folderEntries.sort((a, b) => a.node.label.localeCompare(b.node.label));
+      folderEntries.sort((a, b) => compareNames(a.node.label, b.node.label));
       items.push(...folderEntries);
     } else {
       const node = index.get(this._currentFolderPath);
@@ -4892,7 +4892,7 @@ export class Library {
           folderEntries.push({ isFolder: true, node: childNode, count: filtered.length });
           totalVideos += filtered.length;
         }
-        folderEntries.sort((a, b) => a.node.label.localeCompare(b.node.label));
+        folderEntries.sort((a, b) => compareNames(a.node.label, b.node.label));
 
         // Then videos directly in this folder, filtered + sorted (but keep
         // fuzzy ranking intact when searching — see flat-view branch).

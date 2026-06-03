@@ -39,6 +39,61 @@
     "toastMissingRemoved": "{count, plural, other {# 件の見つからない動画}}をキューから削除しました",
     "cancelAutoAdvance": "自動再生をキャンセル"
   },
+  "audience": {
+    "tab": {
+      "label": "オーディエンス",
+      "experimental": "オーディエンス配信 — 実験的機能",
+      "intro": "FunSync から友人の Handy を駆動できます。Discord / Twitch の画面共有で動画を再生し、視聴者がデバイスを接続するのに最適です。",
+      "bullet": {
+        "handyOnly": "現状は Handy のみ — Buttplug / OSR2 は今後のアップデートで対応予定です。",
+        "keysArePasswords": "視聴者のキーは彼らのデバイスを完全に制御します。パスワードと同じ扱いとし、画面に映さないでください。",
+        "popoutPurpose": "管理画面はポップアウトウィンドウで動作するので、配信中も別モニター (または隠して) で操作できます。"
+      },
+      "createRoom": "ルームを作成",
+      "bringToFront": "最前面に表示",
+      "endRoom": "ルームを終了",
+      "endRoomConfirm": "ルームを終了しますか？",
+      "endRoomConfirmWithCount": "ルームを終了して {count} 人の視聴者を切断しますか？彼らのデバイスは停止します。",
+      "statusNoRoom": "ルーム: 未オープン",
+      "statusRoomEmpty": "ルームは開いていますが視聴者はまだいません",
+      "statusConnectedN": "{count} 人接続中",
+      "statusCalibratingN": "{count} 人キャリブレーション中",
+      "statusErroredN": "{count} 件のエラー"
+    },
+    "room": {
+      "empty": "ルームは開いています。下に視聴者のキーを貼り付けて追加してください。",
+      "emptyHint": "視聴者はまだいません。下に Handy 接続キーを貼り付けて招待してください。",
+      "activeCount": "ルーム稼働中 — {count} 人の視聴者",
+      "hideKeys": "キーを隠す",
+      "hideKeysTitle": "画面共有で接続キーが映らないようマスクします",
+      "testBuzzAll": "全員テスト",
+      "testBuzzAllTitle": "動作確認のため接続中の全デバイスを振動させます",
+      "testBuzz": "テスト振動",
+      "mute": "ミュート",
+      "unmute": "ミュート解除",
+      "remove": "視聴者を削除",
+      "removeConfirm": "{label} を切断しますか？デバイスは停止します。",
+      "unlabeled": "(ラベルなし)",
+      "offsetLabel": "オフセット",
+      "offsetReset": "オフセットを 0 にリセット",
+      "addKeyPlaceholder": "接続キー (ここに貼り付け)",
+      "addLabelPlaceholder": "ラベル (任意)",
+      "addSubmit": "追加",
+      "statusConnecting": "接続中…",
+      "statusUploading": "スクリプトをアップロード中…",
+      "statusCalibrating": "キャリブレーション中…",
+      "statusSynced": "同期済み",
+      "statusPlaying": "再生中",
+      "statusPlayingWithRtd": "再生中 · {rtd}ms RTD",
+      "statusPaused": "一時停止",
+      "statusMuted": "ミュート",
+      "statusError": "エラー",
+      "statusDisconnected": "切断"
+    },
+    "toast": {
+      "selfKey": "それはあなた自身の Handy です — すでに Handy タブから制御されています。"
+    }
+  },
   "nav": {
     "library": "ライブラリ",
     "playlists": "プレイリスト",

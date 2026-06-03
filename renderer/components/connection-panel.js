@@ -32,7 +32,7 @@ const TCODE_UI_AXES = [
 ];
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete }) {
+  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete, audienceBridge }) {
     this.handy = handyManager;
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
@@ -41,6 +41,7 @@ export class ConnectionPanel {
     this.autoblowManager = autoblowManager || null;
     this.autoblowSync = autoblowSync || null;
     this.vrBridge = vrBridge || null;
+    this.audienceBridge = audienceBridge || null;
     this.settings = settings;
     // Called after the Re-sync time button completes a successful sync.
     // App wires this to hsspStop + hsspPlay at the current video position
@@ -96,6 +97,10 @@ export class ConnectionPanel {
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-autoblow" aria-selected="false" aria-controls="tab-autoblow" data-tab="autoblow" tabindex="-1">
           <span class="connection-panel__tab-led" data-tab-led="autoblow" aria-hidden="true"></span>
           <span class="connection-panel__tab-label">Autoblow</span>
+        </button>
+        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-audience" aria-selected="false" aria-controls="tab-audience" data-tab="audience" tabindex="-1">
+          <span class="connection-panel__tab-led" data-tab-led="audience" aria-hidden="true"></span>
+          <span class="connection-panel__tab-label" data-i18n="audience.tab.label">Audience</span>
         </button>
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-sync" aria-selected="false" aria-controls="tab-sync" data-tab="sync" tabindex="-1">
           <span class="connection-panel__tab-label" data-i18n="connection.tabSync">Sync</span>
@@ -330,6 +335,13 @@ export class ConnectionPanel {
       </div>
 
       </div><!-- end tab-autoblow -->
+
+      <!-- Audience tab — SCOPE-audience-broadcast.md §3.1. Slim by design:
+           info block + status + Create / Bring to front / End Room.
+           All viewer management lives in the pop-out window. -->
+      <div class="connection-panel__tab-content" id="tab-audience" role="tabpanel" aria-labelledby="connection-panel__tab-btn-audience" hidden>
+        <div id="audience-panel-mount"></div>
+      </div>
 
       <div class="connection-panel__tab-content" id="tab-sync" role="tabpanel" aria-labelledby="connection-panel__tab-btn-sync" hidden>
 
@@ -955,8 +967,51 @@ export class ConnectionPanel {
     this._panel.querySelector('#tab-buttplug').hidden = tabId !== 'buttplug';
     this._panel.querySelector('#tab-tcode').hidden = tabId !== 'tcode';
     this._panel.querySelector('#tab-autoblow').hidden = tabId !== 'autoblow';
+    const audienceTab = this._panel.querySelector('#tab-audience');
+    if (audienceTab) audienceTab.hidden = tabId !== 'audience';
     this._panel.querySelector('#tab-sync').hidden = tabId !== 'sync';
     if (tabId === 'sync') this._refreshSyncTab();
+    if (tabId === 'audience') this._ensureAudiencePanelMounted();
+  }
+
+  /**
+   * Lazy-mount the AudiencePanel + sync the Audience tab LED to the
+   * bridge's aggregate status. Idempotent.
+   */
+  _ensureAudiencePanelMounted() {
+    if (this._audiencePanel) return;
+    const mountSlot = this._panel.querySelector('#audience-panel-mount');
+    if (!mountSlot) return;
+    if (!this.audienceBridge) return;  // bridge not wired yet — no-op
+    import('./audience-panel.js').then(({ AudiencePanel }) => {
+      this._audiencePanel = new AudiencePanel({
+        element: mountSlot,
+        bridge: this.audienceBridge,
+        onOpenPopout: () => window.funsync.audiencePopoutOpen?.(),
+        onClosePopout: () => window.funsync.audiencePopoutClose?.(),
+        isPopoutOpen: async () => {
+          const s = await window.funsync.audiencePopoutStatus?.();
+          return !!s?.open;
+        },
+      });
+    });
+  }
+
+  /**
+   * Refresh the Audience tab LED. Called from the constructor wiring
+   * by app.js when the bridge's aggregate state changes.
+   */
+  setAudienceTabLed(state) {
+    this._setTabLedState('audience', this._mapAudienceAggregateToLed(state));
+  }
+
+  _mapAudienceAggregateToLed(state) {
+    switch (state) {
+      case 'connected': return 'connected';
+      case 'warning':   return 'connecting';
+      case 'error':     return 'error';
+      default:          return 'disconnected';
+    }
   }
 
   // --- Buttplug ---

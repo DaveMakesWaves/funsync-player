@@ -1399,11 +1399,13 @@ html, body {
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   padding: 24px;
-  /* Was fixed `min-width:520; max-width:650`. Cap to viewport so a
-     narrow window can't push the modal off-screen. min(90vw, 650) is
-     the standard responsive cap for our modals. */
-  min-width: min(90vw, 520px);
-  max-width: min(90vw, 650px);
+  /* Was 520–650px. Widened to 620–760px after the Audience tab landed
+     in 2026-06-02 — 7 tabs (Handy / Buttplug.io / TCode / Autoblow /
+     Audience / Sync / Settings) didn't fit in the old cap and the
+     row started wrapping. min/max stay capped at 90vw so a narrow
+     viewport can't push the modal off-screen. */
+  min-width: min(90vw, 620px);
+  max-width: min(90vw, 760px);
   max-height: 90vh;
   overflow-y: auto;
   z-index: 1000;
@@ -2826,4 +2828,189 @@ html, body {
 .update-toast__btn:disabled {
   opacity: 0.6;
   cursor: default;
+}
+
+/* === Audience Broadcast — Slim tab content + buzz flash overlay =========
+ * SCOPE: notes/features/SCOPE-audience-broadcast.md §3.1, §3.2, §3.4.
+ * Pop-out window has its own stylesheet (audience-room.css). The bits
+ * here are everything that lives in the main app's chrome: the slim
+ * Audience tab content, the buzz-calibration screen-flash overlay, and
+ * the broadcasting chip in the player top bar. */
+
+.audience-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.audience-panel__info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: color-mix(in srgb, var(--state-warning) 8%, var(--surface-overlay));
+  border: 1px solid color-mix(in srgb, var(--state-warning) 35%, transparent);
+  border-radius: 6px;
+}
+
+.audience-panel__info-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audience-panel__info-warn-icon {
+  color: var(--state-warning);
+}
+
+.audience-panel__info-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--state-warning);
+}
+
+.audience-panel__info-intro {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: var(--text-primary);
+}
+
+.audience-panel__info-bullets {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audience-panel__info-bullets li {
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+.audience-panel__divider {
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+.audience-panel__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 0;
+}
+
+.audience-panel__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.audience-panel__status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.audience-panel__status-dot--connected { background: var(--state-connected); box-shadow: 0 0 8px var(--state-connected-glow); }
+.audience-panel__status-dot--warning   { background: var(--state-warning); }
+.audience-panel__status-dot--error     { background: var(--accent); }
+.audience-panel__status-dot--dim       { background: var(--text-muted); }
+
+.audience-panel__buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.audience-panel__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  min-height: 36px;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.audience-panel__btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.audience-panel__btn--primary:hover {
+  background: var(--accent-hover, var(--accent));
+}
+
+.audience-panel__btn--danger {
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--accent) 50%, transparent);
+  color: var(--accent);
+}
+
+.audience-panel__btn--danger:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Buzz-calibration screen flash — 80ms white overlay. Drawn outside any
+ * stacking context (body child) so it covers the whole window. */
+.audience-buzz-flash {
+  position: fixed;
+  inset: 0;
+  background: #fff;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 99999;
+  transition: opacity 40ms ease-out;
+}
+
+.audience-buzz-flash--active {
+  opacity: 0.85;
+  transition: opacity 0ms;
+}
+
+/* Broadcasting indicator in the player top bar — mirrors the existing
+ * sync chip's shape (DESIGN.md §2.2 video-overlay tokens). */
+.player__broadcast-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  background: var(--video-overlay-bg-soft);
+  color: var(--video-overlay-text);
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.player__broadcast-chip:hover {
+  background: var(--video-overlay-control-hover);
+}
+
+.player__broadcast-chip-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--state-connected);
+  box-shadow: 0 0 6px var(--state-connected-glow);
+}
+
+.player__broadcast-chip[hidden] {
+  display: none;
 }

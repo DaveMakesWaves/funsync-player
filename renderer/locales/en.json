@@ -39,6 +39,61 @@
     "toastMissingRemoved": "Removed {count, plural, one {# missing video} other {# missing videos}} from queue",
     "cancelAutoAdvance": "Cancel auto-play"
   },
+  "audience": {
+    "tab": {
+      "label": "Audience",
+      "experimental": "Audience Broadcast — Experimental",
+      "intro": "Drive your friends' Handys from your FunSync. Best for Discord / Twitch screen-shares where you control the video and viewers connect their devices to your session.",
+      "bullet": {
+        "handyOnly": "Handy only for now — Buttplug / OSR2 coming in a future update.",
+        "keysArePasswords": "Viewer keys give you FULL control of their devices. Treat them like a password and never screen-share them.",
+        "popoutPurpose": "Management lives in a pop-out window so you can keep it on a second monitor (or hidden) while broadcasting."
+      },
+      "createRoom": "Create Room",
+      "bringToFront": "Bring to front",
+      "endRoom": "End Room",
+      "endRoomConfirm": "End room?",
+      "endRoomConfirmWithCount": "End room and disconnect {count, plural, one {# viewer} other {# viewers}}? Their devices will stop.",
+      "statusNoRoom": "Room: not open",
+      "statusRoomEmpty": "Room open — no viewers yet",
+      "statusConnectedN": "{count, plural, one {# connected} other {# connected}}",
+      "statusCalibratingN": "{count, plural, one {# calibrating} other {# calibrating}}",
+      "statusErroredN": "{count, plural, one {# errored} other {# errored}}"
+    },
+    "room": {
+      "empty": "Room is open — paste a viewer's key below to add them.",
+      "emptyHint": "No viewers yet. Paste a Handy connection key below to invite someone.",
+      "activeCount": "Room active — {count, plural, one {# viewer} other {# viewers}}",
+      "hideKeys": "Hide keys",
+      "hideKeysTitle": "Mask connection keys so they don't appear on screen-share",
+      "testBuzzAll": "Test all",
+      "testBuzzAllTitle": "Buzz every connected device for a sanity check",
+      "testBuzz": "Test buzz",
+      "mute": "Mute",
+      "unmute": "Unmute",
+      "remove": "Remove viewer",
+      "removeConfirm": "Disconnect {label}? Their device will stop.",
+      "unlabeled": "(no label)",
+      "offsetLabel": "Offset",
+      "offsetReset": "Reset offset to 0",
+      "addKeyPlaceholder": "Connection key (paste here)",
+      "addLabelPlaceholder": "Label (optional)",
+      "addSubmit": "Add",
+      "statusConnecting": "Connecting…",
+      "statusUploading": "Uploading script…",
+      "statusCalibrating": "Calibrating…",
+      "statusSynced": "Synced",
+      "statusPlaying": "Playing",
+      "statusPlayingWithRtd": "Playing · {rtd}ms RTD",
+      "statusPaused": "Paused",
+      "statusMuted": "Muted",
+      "statusError": "Error",
+      "statusDisconnected": "Disconnected"
+    },
+    "toast": {
+      "selfKey": "That's your own Handy — it's already controlled by the Handy tab."
+    }
+  },
   "nav": {
     "library": "Library",
     "playlists": "Playlists",

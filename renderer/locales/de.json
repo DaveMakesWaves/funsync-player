@@ -39,6 +39,61 @@
     "toastMissingRemoved": "{count, plural, one {# fehlendes Video} other {# fehlende Videos}} aus Warteschlange entfernt",
     "cancelAutoAdvance": "Autoplay abbrechen"
   },
+  "audience": {
+    "tab": {
+      "label": "Publikum",
+      "experimental": "Publikums-Übertragung — Experimentell",
+      "intro": "Steuere die Handys deiner Freunde von deinem FunSync aus. Ideal für Discord-/Twitch-Bildschirmübertragungen, bei denen du das Video steuerst und Zuschauer ihre Geräte mit deiner Sitzung verbinden.",
+      "bullet": {
+        "handyOnly": "Vorerst nur Handy — Buttplug / OSR2 kommen in einer zukünftigen Version.",
+        "keysArePasswords": "Zuschauer-Schlüssel geben dir VOLLE Kontrolle über deren Geräte. Behandle sie wie ein Passwort und teile sie niemals auf dem Bildschirm.",
+        "popoutPurpose": "Die Verwaltung läuft in einem Popup-Fenster, damit du es auf einem zweiten Monitor (oder versteckt) halten kannst, während du sendest."
+      },
+      "createRoom": "Raum erstellen",
+      "bringToFront": "In den Vordergrund",
+      "endRoom": "Raum beenden",
+      "endRoomConfirm": "Raum beenden?",
+      "endRoomConfirmWithCount": "Raum beenden und {count, plural, one {# Zuschauer} other {# Zuschauer}} trennen? Ihre Geräte werden gestoppt.",
+      "statusNoRoom": "Raum: nicht offen",
+      "statusRoomEmpty": "Raum offen — noch keine Zuschauer",
+      "statusConnectedN": "{count, plural, one {# verbunden} other {# verbunden}}",
+      "statusCalibratingN": "{count, plural, one {# kalibriert} other {# kalibrieren}}",
+      "statusErroredN": "{count, plural, one {# Fehler} other {# Fehler}}"
+    },
+    "room": {
+      "empty": "Raum ist offen — füge unten einen Zuschauer-Schlüssel ein.",
+      "emptyHint": "Noch keine Zuschauer. Füge unten einen Handy-Verbindungsschlüssel ein, um jemanden einzuladen.",
+      "activeCount": "Raum aktiv — {count, plural, one {# Zuschauer} other {# Zuschauer}}",
+      "hideKeys": "Schlüssel verbergen",
+      "hideKeysTitle": "Verbindungsschlüssel maskieren, damit sie nicht auf der Bildschirmübertragung erscheinen",
+      "testBuzzAll": "Alle testen",
+      "testBuzzAllTitle": "Alle verbundenen Geräte zur Plausibilitätsprüfung kurz vibrieren lassen",
+      "testBuzz": "Test-Vibration",
+      "mute": "Stumm",
+      "unmute": "Laut",
+      "remove": "Zuschauer entfernen",
+      "removeConfirm": "{label} trennen? Das Gerät wird gestoppt.",
+      "unlabeled": "(ohne Label)",
+      "offsetLabel": "Offset",
+      "offsetReset": "Offset auf 0 zurücksetzen",
+      "addKeyPlaceholder": "Verbindungsschlüssel (hier einfügen)",
+      "addLabelPlaceholder": "Label (optional)",
+      "addSubmit": "Hinzufügen",
+      "statusConnecting": "Verbinde…",
+      "statusUploading": "Script wird hochgeladen…",
+      "statusCalibrating": "Kalibrierung…",
+      "statusSynced": "Synchronisiert",
+      "statusPlaying": "Läuft",
+      "statusPlayingWithRtd": "Läuft · {rtd}ms RTD",
+      "statusPaused": "Pausiert",
+      "statusMuted": "Stumm",
+      "statusError": "Fehler",
+      "statusDisconnected": "Getrennt"
+    },
+    "toast": {
+      "selfKey": "Das ist dein eigenes Handy — es wird bereits vom Handy-Tab gesteuert."
+    }
+  },
   "nav": {
     "library": "Bibliothek",
     "playlists": "Playlists",

@@ -39,6 +39,61 @@
     "toastMissingRemoved": "Удалено {count, plural, one {# отсутствующее видео} few {# отсутствующих видео} many {# отсутствующих видео} other {# отсутствующих видео}} из очереди",
     "cancelAutoAdvance": "Отменить автовоспроизведение"
   },
+  "audience": {
+    "tab": {
+      "label": "Аудитория",
+      "experimental": "Трансляция аудитории — Экспериментально",
+      "intro": "Управляйте Handy ваших друзей из FunSync. Подходит для трансляций экрана в Discord / Twitch, где вы управляете видео, а зрители подключают свои устройства к вашей сессии.",
+      "bullet": {
+        "handyOnly": "Пока только Handy — Buttplug / OSR2 появятся в будущих обновлениях.",
+        "keysArePasswords": "Ключи зрителей дают вам ПОЛНЫЙ контроль над их устройствами. Относитесь к ним как к паролям и никогда не показывайте на экране.",
+        "popoutPurpose": "Управление живёт во всплывающем окне, чтобы вы могли держать его на втором мониторе (или скрытым) во время трансляции."
+      },
+      "createRoom": "Создать комнату",
+      "bringToFront": "На передний план",
+      "endRoom": "Завершить комнату",
+      "endRoomConfirm": "Завершить комнату?",
+      "endRoomConfirmWithCount": "Завершить комнату и отключить {count, plural, one {# зрителя} few {# зрителей} other {# зрителей}}? Их устройства остановятся.",
+      "statusNoRoom": "Комната: не открыта",
+      "statusRoomEmpty": "Комната открыта — зрителей пока нет",
+      "statusConnectedN": "{count, plural, one {# подключён} few {# подключено} other {# подключено}}",
+      "statusCalibratingN": "{count, plural, one {# калибруется} other {# калибруются}}",
+      "statusErroredN": "{count, plural, one {# ошибка} other {# ошибок}}"
+    },
+    "room": {
+      "empty": "Комната открыта — вставьте ключ зрителя ниже, чтобы добавить его.",
+      "emptyHint": "Зрителей пока нет. Вставьте ключ подключения Handy ниже, чтобы пригласить кого-то.",
+      "activeCount": "Комната активна — {count, plural, one {# зритель} few {# зрителя} other {# зрителей}}",
+      "hideKeys": "Скрыть ключи",
+      "hideKeysTitle": "Маскировать ключи подключения, чтобы они не попали в трансляцию",
+      "testBuzzAll": "Тест всех",
+      "testBuzzAllTitle": "Завибрировать каждое подключённое устройство для проверки",
+      "testBuzz": "Тест",
+      "mute": "Отключить",
+      "unmute": "Включить",
+      "remove": "Удалить зрителя",
+      "removeConfirm": "Отключить {label}? Их устройство остановится.",
+      "unlabeled": "(без метки)",
+      "offsetLabel": "Смещение",
+      "offsetReset": "Сбросить смещение на 0",
+      "addKeyPlaceholder": "Ключ подключения (вставьте сюда)",
+      "addLabelPlaceholder": "Метка (опционально)",
+      "addSubmit": "Добавить",
+      "statusConnecting": "Подключение…",
+      "statusUploading": "Загрузка скрипта…",
+      "statusCalibrating": "Калибровка…",
+      "statusSynced": "Синхронизировано",
+      "statusPlaying": "Воспроизведение",
+      "statusPlayingWithRtd": "Воспроизведение · {rtd}мс RTD",
+      "statusPaused": "Пауза",
+      "statusMuted": "Без звука",
+      "statusError": "Ошибка",
+      "statusDisconnected": "Отключено"
+    },
+    "toast": {
+      "selfKey": "Это ваш собственный Handy — он уже управляется через вкладку Handy."
+    }
+  },
   "nav": {
     "library": "Библиотека",
     "playlists": "Плейлисты",

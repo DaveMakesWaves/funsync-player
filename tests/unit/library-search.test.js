@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fuzzySearch, sortVideos, filterVideos } from '../../renderer/js/library-search.js';
+import { fuzzySearch, sortVideos, filterVideos, compareNames } from '../../renderer/js/library-search.js';
 
 const videos = [
   { name: 'Alpha Video.mp4', path: '/v/alpha.mp4', hasFunscript: true, duration: 120, lastPlayed: 1000 },
@@ -186,8 +186,41 @@ describe('library-search', () => {
     it('sorts by name ascending', () => {
       const sorted = sortVideos(videos, 'name', 'asc');
       expect(sorted[0].name).toBe('Alpha Video.mp4');
-      // localeCompare is case-insensitive: A, B, D, e, G
+      // Collator sensitivity: 'base' is case-insensitive: A, B, D, e, G
       expect(sorted[4].name).toBe('Gamma Test.avi');
+    });
+
+    // Community-reported 2026-06-02: Chinese / Japanese filenames
+    // ended up at the TOP of name-sort on users with CJK OS locales
+    // because bare localeCompare() falls back to the system collation
+    // (zh/ja put CJK characters earlier than Latin in some cases).
+    // The new compareNames() forces 'en' collation so the ordering
+    // matches Windows Explorer regardless of OS locale.
+    it('Windows-style: Latin names sort before CJK', () => {
+      const mixed = [
+        { name: '中文影片.mp4' },
+        { name: 'Alpha.mp4' },
+        { name: '日本語動画.mp4' },
+        { name: 'Beta.mp4' },
+      ];
+      const sorted = sortVideos(mixed, 'name', 'asc');
+      // Latin names land first
+      expect(sorted[0].name).toBe('Alpha.mp4');
+      expect(sorted[1].name).toBe('Beta.mp4');
+      // CJK names land after Latin
+      const cjkNames = [sorted[2].name, sorted[3].name];
+      expect(cjkNames).toContain('中文影片.mp4');
+      expect(cjkNames).toContain('日本語動画.mp4');
+    });
+
+    it('Windows-style: natural-number ordering (file2 before file10)', () => {
+      const numbered = [
+        { name: 'file10.mp4' },
+        { name: 'file2.mp4' },
+        { name: 'file1.mp4' },
+      ];
+      const sorted = sortVideos(numbered, 'name', 'asc');
+      expect(sorted.map((v) => v.name)).toEqual(['file1.mp4', 'file2.mp4', 'file10.mp4']);
     });
 
     it('sorts by name descending', () => {
@@ -345,6 +378,36 @@ describe('library-search', () => {
     it('ignores inCategory without videoCategoryMap', () => {
       const filtered = filterVideos(videos, { inCategory: 'cat1' });
       expect(filtered).toEqual(videos);
+    });
+  });
+
+  describe('compareNames — Windows Explorer collation', () => {
+    it('returns 0 for identical strings', () => {
+      expect(compareNames('foo', 'foo')).toBe(0);
+    });
+
+    it('handles null / undefined / empty defensively', () => {
+      expect(compareNames(null, null)).toBe(0);
+      expect(compareNames(undefined, '')).toBe(0);
+      expect(compareNames('foo', null)).toBeGreaterThan(0);
+      expect(compareNames(null, 'foo')).toBeLessThan(0);
+    });
+
+    it('case-insensitive base sensitivity (A and a tie, A and B differ)', () => {
+      expect(compareNames('Alpha', 'alpha')).toBe(0);
+      expect(compareNames('Alpha', 'beta')).toBeLessThan(0);
+    });
+
+    it('puts Latin before CJK regardless of system locale', () => {
+      expect(compareNames('Alpha', '中文')).toBeLessThan(0);
+      expect(compareNames('Zebra', '日本語')).toBeLessThan(0);
+      expect(compareNames('a', '一')).toBeLessThan(0);
+    });
+
+    it('natural-number ordering (file2 before file10)', () => {
+      expect(compareNames('file2', 'file10')).toBeLessThan(0);
+      expect(compareNames('episode1', 'episode2')).toBeLessThan(0);
+      expect(compareNames('chapter9.mp4', 'chapter11.mp4')).toBeLessThan(0);
     });
   });
 });

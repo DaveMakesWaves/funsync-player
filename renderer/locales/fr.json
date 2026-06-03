@@ -39,6 +39,61 @@
     "toastMissingRemoved": "{count, plural, one {# vidéo manquante retirée} other {# vidéos manquantes retirées}} de la file",
     "cancelAutoAdvance": "Annuler la lecture auto"
   },
+  "audience": {
+    "tab": {
+      "label": "Public",
+      "experimental": "Diffusion au public — Expérimental",
+      "intro": "Pilote les Handys de tes amis depuis ton FunSync. Idéal pour les partages d'écran Discord / Twitch où tu contrôles la vidéo et les spectateurs connectent leurs appareils à ta session.",
+      "bullet": {
+        "handyOnly": "Handy uniquement pour le moment — Buttplug / OSR2 arriveront dans une future mise à jour.",
+        "keysArePasswords": "Les clés des spectateurs te donnent un contrôle TOTAL sur leurs appareils. Traite-les comme des mots de passe et ne les partage jamais à l'écran.",
+        "popoutPurpose": "La gestion vit dans une fenêtre détachée que tu peux garder sur un second écran (ou masquée) pendant la diffusion."
+      },
+      "createRoom": "Créer une salle",
+      "bringToFront": "Mettre au premier plan",
+      "endRoom": "Fermer la salle",
+      "endRoomConfirm": "Fermer la salle ?",
+      "endRoomConfirmWithCount": "Fermer la salle et déconnecter {count, plural, one {# spectateur} other {# spectateurs}} ? Leurs appareils s'arrêteront.",
+      "statusNoRoom": "Salle : non ouverte",
+      "statusRoomEmpty": "Salle ouverte — aucun spectateur pour l'instant",
+      "statusConnectedN": "{count, plural, one {# connecté} other {# connectés}}",
+      "statusCalibratingN": "{count, plural, one {# en calibrage} other {# en calibrage}}",
+      "statusErroredN": "{count, plural, one {# en erreur} other {# en erreur}}"
+    },
+    "room": {
+      "empty": "Salle ouverte — colle ci-dessous la clé d'un spectateur pour l'ajouter.",
+      "emptyHint": "Aucun spectateur pour l'instant. Colle une clé de connexion Handy ci-dessous pour inviter quelqu'un.",
+      "activeCount": "Salle active — {count, plural, one {# spectateur} other {# spectateurs}}",
+      "hideKeys": "Masquer les clés",
+      "hideKeysTitle": "Masquer les clés de connexion pour qu'elles n'apparaissent pas au partage d'écran",
+      "testBuzzAll": "Tester tous",
+      "testBuzzAllTitle": "Faire vibrer chaque appareil connecté pour vérifier qu'ils répondent",
+      "testBuzz": "Test vibration",
+      "mute": "Couper",
+      "unmute": "Réactiver",
+      "remove": "Retirer le spectateur",
+      "removeConfirm": "Déconnecter {label} ? Son appareil s'arrêtera.",
+      "unlabeled": "(sans étiquette)",
+      "offsetLabel": "Décalage",
+      "offsetReset": "Réinitialiser le décalage à 0",
+      "addKeyPlaceholder": "Clé de connexion (coller ici)",
+      "addLabelPlaceholder": "Étiquette (optionnel)",
+      "addSubmit": "Ajouter",
+      "statusConnecting": "Connexion…",
+      "statusUploading": "Téléversement du script…",
+      "statusCalibrating": "Calibrage…",
+      "statusSynced": "Synchronisé",
+      "statusPlaying": "Lecture",
+      "statusPlayingWithRtd": "Lecture · {rtd}ms RTD",
+      "statusPaused": "En pause",
+      "statusMuted": "Coupé",
+      "statusError": "Erreur",
+      "statusDisconnected": "Déconnecté"
+    },
+    "toast": {
+      "selfKey": "C'est ton propre Handy — il est déjà contrôlé par l'onglet Handy."
+    }
+  },
   "nav": {
     "library": "Bibliothèque",
     "playlists": "Listes de lecture",

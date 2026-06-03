@@ -1,0 +1,384 @@
+/* Audience Room — pop-out window styling
+ *
+ * SCOPE: notes/features/SCOPE-audience-broadcast.md §3.3.
+ *
+ * Pop-out is a fresh BrowserWindow that doesn't inherit the main app
+ * chrome, so this stylesheet sets up the body baseline AND owns the
+ * per-viewer card pattern. Reuses --video-overlay-* / --surface-* /
+ * --state-* tokens for parity with the main UI (DESIGN.md §2). Fits
+ * the 36×36 desktop Fitts floor on primary controls.
+ */
+
+.audience-room-body {
+  margin: 0;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  font-size: 14px;
+  min-height: 100vh;
+}
+
+.audience-room {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  min-height: 100vh;
+  box-sizing: border-box;
+}
+
+.audience-room-loading {
+  padding: 32px;
+  color: var(--text-muted);
+  text-align: center;
+  font-style: italic;
+}
+
+/* === Header ============================================================== */
+.audience-room__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.audience-room__status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.audience-room__status-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.audience-room__status-dot--connected { background: var(--state-connected); box-shadow: 0 0 8px var(--state-connected-glow); }
+.audience-room__status-dot--warning   { background: var(--state-warning); }
+.audience-room__status-dot--error     { background: var(--accent); }
+.audience-room__status-dot--dim       { background: var(--text-muted); }
+
+.audience-room__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.audience-room__hide-keys-btn,
+.audience-room__buzz-all-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  min-height: 36px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.audience-room__hide-keys-btn:hover,
+.audience-room__buzz-all-btn:hover {
+  background: var(--surface-card-hover);
+}
+
+.audience-room__hide-keys-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--accent) 14%, var(--surface-elevated));
+  border-color: var(--accent);
+}
+
+.audience-room__buzz-all-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.audience-room__divider {
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* === Empty state ========================================================= */
+.audience-room__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.audience-room__empty p {
+  margin: 0;
+  font-size: 13px;
+  max-width: 360px;
+  line-height: 1.4;
+}
+
+/* === Viewer list ========================================================= */
+.audience-room__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audience-room__card {
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.audience-room__card-top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.audience-room__card-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--text-muted);
+}
+
+.audience-room__card-dot--connected { background: var(--state-connected); box-shadow: 0 0 6px var(--state-connected-glow); }
+.audience-room__card-dot--warning   { background: var(--state-warning); }
+.audience-room__card-dot--error     { background: var(--accent); }
+.audience-room__card-dot--muted     { background: var(--text-muted); }
+
+.audience-room__card-name-key {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.audience-room__card-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audience-room__card-key {
+  font-size: 11px;
+  font-family: var(--font-mono, monospace);
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.audience-room__card-status {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* === Offset row ========================================================== */
+.audience-room__card-offset {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.audience-room__card-offset-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.audience-room__card-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: var(--surface-overlay);
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.audience-room__card-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+}
+
+.audience-room__card-offset-value {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  min-width: 60px;
+  text-align: right;
+}
+
+.audience-room__card-offset-reset {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 14px;
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+}
+
+.audience-room__card-offset-reset:hover:not(:disabled) {
+  background: var(--surface-overlay-strong);
+  color: var(--text-primary);
+}
+
+.audience-room__card-offset-reset:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+
+/* === Action row ========================================================== */
+.audience-room__card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.audience-room__card-buzz-btn,
+.audience-room__card-mute-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  min-height: 32px;
+  transition: background 0.15s;
+}
+
+.audience-room__card-buzz-btn:hover,
+.audience-room__card-mute-btn:hover {
+  background: var(--surface-card-hover);
+}
+
+.audience-room__card-mute-btn[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--state-warning) 14%, transparent);
+  border-color: var(--state-warning);
+}
+
+.audience-room__card-remove-btn {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.audience-room__card-remove-btn:hover {
+  background: var(--surface-overlay-strong);
+  color: var(--accent);
+}
+
+.audience-room__card-error {
+  font-size: 11px;
+  color: var(--accent);
+  padding-top: 4px;
+  border-top: 1px dashed var(--border-subtle);
+}
+
+/* === Add-viewer form ===================================================== */
+.audience-room__add-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  padding: 12px;
+  background: var(--surface-elevated);
+  border: 1px dashed var(--border-subtle);
+  border-radius: 8px;
+}
+
+.audience-room__add-key,
+.audience-room__add-label {
+  padding: 8px 10px;
+  background: var(--surface-base);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: var(--font-mono, monospace);
+  min-height: 36px;
+  box-sizing: border-box;
+}
+
+.audience-room__add-label {
+  font-family: inherit;
+}
+
+.audience-room__add-key:focus-visible,
+.audience-room__add-label:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.audience-room__add-submit {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 18px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 36px;
+  transition: background 0.15s;
+}
+
+.audience-room__add-submit:hover {
+  background: var(--accent-hover, var(--accent));
+}
+
+/* Responsive — narrower windows stack the add form */
+@media (max-width: 540px) {
+  .audience-room__add-form {
+    grid-template-columns: 1fr;
+  }
+  .audience-room__card-top {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .audience-room__card-status {
+    grid-column: 1 / -1;
+    text-align: left;
+    padding-left: 20px;
+  }
+}

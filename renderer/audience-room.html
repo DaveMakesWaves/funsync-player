@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <title>FunSync — Audience Room</title>
+  <link rel="stylesheet" href="styles/player.css">
+  <link rel="stylesheet" href="styles/modal.css">
+  <link rel="stylesheet" href="styles/audience-room.css">
+</head>
+<body class="audience-room-body">
+  <!-- Mount point for the audience-room renderer. Bootstrap script
+       fills this in once it receives INITIAL_STATE from main. Until
+       then a tiny loading shimmer keeps the user oriented. -->
+  <div id="audience-room-host">
+    <div class="audience-room-loading">Connecting to FunSync…</div>
+  </div>
+  <script src="audience-room.js" type="module"></script>
+</body>
+</html>

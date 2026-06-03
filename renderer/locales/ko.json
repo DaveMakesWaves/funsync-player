@@ -39,6 +39,61 @@
     "toastMissingRemoved": "{count, plural, other {대기열에서 누락된 동영상 #개}} 제거됨",
     "cancelAutoAdvance": "자동 재생 취소"
   },
+  "audience": {
+    "tab": {
+      "label": "오디언스",
+      "experimental": "오디언스 브로드캐스트 — 실험적",
+      "intro": "FunSync에서 친구들의 Handy를 구동하세요. Discord/Twitch 화면 공유에서 사용자가 비디오를 제어하고 시청자가 자신의 기기를 세션에 연결하는 데 적합합니다.",
+      "bullet": {
+        "handyOnly": "현재는 Handy 전용 — Buttplug / OSR2는 추후 업데이트에서 지원됩니다.",
+        "keysArePasswords": "시청자 키는 그들의 기기에 대한 완전한 제어권을 부여합니다. 비밀번호처럼 다루고 절대 화면에 공유하지 마세요.",
+        "popoutPurpose": "관리는 팝아웃 창에서 이루어지므로 방송 중에도 보조 모니터에 두거나 숨길 수 있습니다."
+      },
+      "createRoom": "룸 만들기",
+      "bringToFront": "앞으로 가져오기",
+      "endRoom": "룸 종료",
+      "endRoomConfirm": "룸을 종료할까요?",
+      "endRoomConfirmWithCount": "룸을 종료하고 {count}명의 시청자를 연결 해제할까요? 그들의 기기가 정지됩니다.",
+      "statusNoRoom": "룸: 열려 있지 않음",
+      "statusRoomEmpty": "룸은 열려 있지만 시청자가 아직 없습니다",
+      "statusConnectedN": "{count}명 연결됨",
+      "statusCalibratingN": "{count}명 보정 중",
+      "statusErroredN": "{count}건 오류"
+    },
+    "room": {
+      "empty": "룸이 열렸습니다. 시청자 키를 아래에 붙여넣어 추가하세요.",
+      "emptyHint": "아직 시청자가 없습니다. 아래에 Handy 연결 키를 붙여넣어 초대하세요.",
+      "activeCount": "룸 활성 — 시청자 {count}명",
+      "hideKeys": "키 숨기기",
+      "hideKeysTitle": "화면 공유에 연결 키가 나타나지 않도록 마스킹",
+      "testBuzzAll": "전체 테스트",
+      "testBuzzAllTitle": "동작 확인을 위해 연결된 모든 기기를 진동시킵니다",
+      "testBuzz": "진동 테스트",
+      "mute": "음소거",
+      "unmute": "음소거 해제",
+      "remove": "시청자 제거",
+      "removeConfirm": "{label}을(를) 연결 해제할까요? 그들의 기기가 정지됩니다.",
+      "unlabeled": "(레이블 없음)",
+      "offsetLabel": "오프셋",
+      "offsetReset": "오프셋을 0으로 재설정",
+      "addKeyPlaceholder": "연결 키 (여기에 붙여넣기)",
+      "addLabelPlaceholder": "레이블 (선택)",
+      "addSubmit": "추가",
+      "statusConnecting": "연결 중…",
+      "statusUploading": "스크립트 업로드 중…",
+      "statusCalibrating": "보정 중…",
+      "statusSynced": "동기화됨",
+      "statusPlaying": "재생 중",
+      "statusPlayingWithRtd": "재생 중 · {rtd}ms RTD",
+      "statusPaused": "일시 중지",
+      "statusMuted": "음소거",
+      "statusError": "오류",
+      "statusDisconnected": "연결 끊김"
+    },
+    "toast": {
+      "selfKey": "본인의 Handy입니다 — 이미 Handy 탭에서 제어 중입니다."
+    }
+  },
   "nav": {
     "library": "라이브러리",
     "playlists": "재생 목록",

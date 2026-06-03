@@ -39,6 +39,61 @@
     "toastMissingRemoved": "{count, plural, other {从队列中移除 # 个丢失的视频}}",
     "cancelAutoAdvance": "取消自动播放"
   },
+  "audience": {
+    "tab": {
+      "label": "观众",
+      "experimental": "观众广播 — 实验功能",
+      "intro": "从你的 FunSync 驱动朋友们的 Handy。适合在 Discord / Twitch 屏幕共享中，你控制视频，观众连接他们的设备到你的会话。",
+      "bullet": {
+        "handyOnly": "目前仅支持 Handy — Buttplug / OSR2 将在后续更新中加入。",
+        "keysArePasswords": "观众的密钥让你拥有他们设备的完全控制权。请像密码一样对待，绝不要在屏幕共享中显示。",
+        "popoutPurpose": "管理界面在弹出窗口中，方便你直播时放在第二显示器上（或隐藏起来）。"
+      },
+      "createRoom": "创建房间",
+      "bringToFront": "置于最前",
+      "endRoom": "结束房间",
+      "endRoomConfirm": "结束房间？",
+      "endRoomConfirmWithCount": "结束房间并断开 {count} 位观众？他们的设备会停止。",
+      "statusNoRoom": "房间：未打开",
+      "statusRoomEmpty": "房间已打开 — 暂无观众",
+      "statusConnectedN": "{count} 位已连接",
+      "statusCalibratingN": "{count} 位校准中",
+      "statusErroredN": "{count} 项错误"
+    },
+    "room": {
+      "empty": "房间已打开 — 在下方粘贴观众密钥以添加。",
+      "emptyHint": "暂无观众。在下方粘贴 Handy 连接密钥邀请某人。",
+      "activeCount": "房间活跃 — {count} 位观众",
+      "hideKeys": "隐藏密钥",
+      "hideKeysTitle": "屏蔽连接密钥，避免在屏幕共享中显示",
+      "testBuzzAll": "测试全部",
+      "testBuzzAllTitle": "对每个已连接设备进行振动测试",
+      "testBuzz": "测试振动",
+      "mute": "静音",
+      "unmute": "取消静音",
+      "remove": "移除观众",
+      "removeConfirm": "断开 {label}？他们的设备会停止。",
+      "unlabeled": "(无标签)",
+      "offsetLabel": "偏移",
+      "offsetReset": "将偏移重置为 0",
+      "addKeyPlaceholder": "连接密钥 (粘贴到此)",
+      "addLabelPlaceholder": "标签 (可选)",
+      "addSubmit": "添加",
+      "statusConnecting": "连接中…",
+      "statusUploading": "正在上传脚本…",
+      "statusCalibrating": "校准中…",
+      "statusSynced": "已同步",
+      "statusPlaying": "播放中",
+      "statusPlayingWithRtd": "播放中 · {rtd}ms RTD",
+      "statusPaused": "已暂停",
+      "statusMuted": "已静音",
+      "statusError": "错误",
+      "statusDisconnected": "已断开"
+    },
+    "toast": {
+      "selfKey": "这是你自己的 Handy — 它已经由 Handy 标签控制。"
+    }
+  },
   "nav": {
     "library": "媒体库",
     "playlists": "播放列表",

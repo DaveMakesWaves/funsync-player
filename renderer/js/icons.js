@@ -96,6 +96,13 @@ export { default as Languages } from '../../node_modules/lucide/dist/esm/icons/l
 // popped-out mental model better than Maximize (which implies fullscreen).
 export { default as ExternalLink } from '../../node_modules/lucide/dist/esm/icons/external-link.js';
 
+// Audience-broadcast feature (SCOPE-audience-broadcast.md)
+export { default as Eye } from '../../node_modules/lucide/dist/esm/icons/eye.js';
+export { default as EyeOff } from '../../node_modules/lucide/dist/esm/icons/eye-off.js';
+export { default as Bell } from '../../node_modules/lucide/dist/esm/icons/bell.js';
+export { default as Users } from '../../node_modules/lucide/dist/esm/icons/users.js';
+export { default as TriangleAlert } from '../../node_modules/lucide/dist/esm/icons/triangle-alert.js';
+
 /**
  * Create an SVG element from a Lucide icon node.
  * @param {Array} iconNode — icon definition array (e.g. Play, Pause)

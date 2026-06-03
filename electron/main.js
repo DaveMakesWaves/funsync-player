@@ -9,6 +9,7 @@ const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
 const { EroScriptsAPI } = require('./eroscripts-api');
 const editorPopout = require('./editor-popout-window');
+const audiencePopout = require('./audience-popout-window');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -1475,6 +1476,32 @@ ipcMain.handle('editor-popout:status', () => {
 // place rather than forking into N typed channels.
 ipcMain.handle('editor-popout:relay', (_event, direction, payload) => {
   editorPopout.relay(direction, payload);
+  return { success: true };
+});
+
+// --- Audience pop-out (SCOPE-audience-broadcast.md §3.3) ---
+// Same lifecycle shape as editor-popout. Channel: `audience-popout:event`.
+// Bounds key: `audience.popoutBounds`. Room state lives in the main
+// renderer's AudienceBridge — closing this window doesn't end the room.
+ipcMain.handle('audience-popout:open', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { success: false, error: 'Main window unavailable' };
+  }
+  audiencePopout.open(mainWindow, store);
+  return { success: true };
+});
+
+ipcMain.handle('audience-popout:close', () => {
+  audiencePopout.close();
+  return { success: true };
+});
+
+ipcMain.handle('audience-popout:status', () => {
+  return { open: audiencePopout.isOpen() };
+});
+
+ipcMain.handle('audience-popout:relay', (_event, direction, payload) => {
+  audiencePopout.relay(direction, payload);
   return { success: true };
 });
 

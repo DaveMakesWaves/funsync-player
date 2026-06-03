@@ -39,6 +39,61 @@
     "toastMissingRemoved": "Quitado {count, plural, one {# vídeo perdido} other {# vídeos perdidos}} de la cola",
     "cancelAutoAdvance": "Cancelar reproducción automática"
   },
+  "audience": {
+    "tab": {
+      "label": "Audiencia",
+      "experimental": "Difusión a la audiencia — Experimental",
+      "intro": "Controla los Handys de tus amigos desde tu FunSync. Ideal para retransmisiones por Discord / Twitch donde tú controlas el vídeo y los espectadores conectan sus dispositivos a tu sesión.",
+      "bullet": {
+        "handyOnly": "Por ahora solo Handy — Buttplug / OSR2 llegarán en una futura actualización.",
+        "keysArePasswords": "Las claves de los espectadores te dan control TOTAL de sus dispositivos. Trátalas como contraseñas y nunca las compartas en pantalla.",
+        "popoutPurpose": "La gestión vive en una ventana emergente para que puedas tenerla en un segundo monitor (u oculta) mientras retransmites."
+      },
+      "createRoom": "Crear sala",
+      "bringToFront": "Traer al frente",
+      "endRoom": "Cerrar sala",
+      "endRoomConfirm": "¿Cerrar sala?",
+      "endRoomConfirmWithCount": "¿Cerrar sala y desconectar a {count, plural, one {# espectador} other {# espectadores}}? Sus dispositivos se detendrán.",
+      "statusNoRoom": "Sala: no abierta",
+      "statusRoomEmpty": "Sala abierta — aún sin espectadores",
+      "statusConnectedN": "{count, plural, one {# conectado} other {# conectados}}",
+      "statusCalibratingN": "{count, plural, one {# calibrando} other {# calibrando}}",
+      "statusErroredN": "{count, plural, one {# con error} other {# con errores}}"
+    },
+    "room": {
+      "empty": "Sala abierta — pega abajo la clave de un espectador para añadirlo.",
+      "emptyHint": "Aún sin espectadores. Pega una clave de conexión Handy abajo para invitar a alguien.",
+      "activeCount": "Sala activa — {count, plural, one {# espectador} other {# espectadores}}",
+      "hideKeys": "Ocultar claves",
+      "hideKeysTitle": "Enmascarar las claves de conexión para que no aparezcan al compartir pantalla",
+      "testBuzzAll": "Probar todos",
+      "testBuzzAllTitle": "Vibrar cada dispositivo conectado para una comprobación rápida",
+      "testBuzz": "Probar vibración",
+      "mute": "Silenciar",
+      "unmute": "Activar",
+      "remove": "Quitar espectador",
+      "removeConfirm": "¿Desconectar a {label}? Su dispositivo se detendrá.",
+      "unlabeled": "(sin etiqueta)",
+      "offsetLabel": "Offset",
+      "offsetReset": "Restablecer offset a 0",
+      "addKeyPlaceholder": "Clave de conexión (pegar aquí)",
+      "addLabelPlaceholder": "Etiqueta (opcional)",
+      "addSubmit": "Añadir",
+      "statusConnecting": "Conectando…",
+      "statusUploading": "Subiendo script…",
+      "statusCalibrating": "Calibrando…",
+      "statusSynced": "Sincronizado",
+      "statusPlaying": "Reproduciendo",
+      "statusPlayingWithRtd": "Reproduciendo · {rtd}ms RTD",
+      "statusPaused": "Pausado",
+      "statusMuted": "Silenciado",
+      "statusError": "Error",
+      "statusDisconnected": "Desconectado"
+    },
+    "toast": {
+      "selfKey": "Es tu propio Handy — ya está controlado por la pestaña Handy."
+    }
+  },
   "nav": {
     "library": "Biblioteca",
     "playlists": "Listas de reproducción",

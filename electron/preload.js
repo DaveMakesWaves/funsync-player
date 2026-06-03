@@ -165,6 +165,17 @@ contextBridge.exposeInMainWorld('funsync', {
     return () => ipcRenderer.removeListener('editor-popout:event', handler);
   },
 
+  // Audience pop-out window (SCOPE-audience-broadcast.md §3.3)
+  audiencePopoutOpen: () => ipcRenderer.invoke('audience-popout:open'),
+  audiencePopoutClose: () => ipcRenderer.invoke('audience-popout:close'),
+  audiencePopoutStatus: () => ipcRenderer.invoke('audience-popout:status'),
+  audiencePopoutRelay: (direction, payload) => ipcRenderer.invoke('audience-popout:relay', direction, payload),
+  onAudiencePopoutEvent: (callback) => {
+    const handler = (_event, evt) => callback(evt);
+    ipcRenderer.on('audience-popout:event', handler);
+    return () => ipcRenderer.removeListener('audience-popout:event', handler);
+  },
+
   // Auto-updater
   updaterCheck: () => ipcRenderer.invoke('updater-check'),
   updaterDownload: () => ipcRenderer.invoke('updater-download'),

@@ -15,6 +15,42 @@ const DIACRITICS_RE = new RegExp('[\\u0300-\\u036f]', 'g');
 const SEPARATOR_RE = /[._\-\[\]()\/\\&+]/g;
 
 /**
+ * Windows Explorer-style name comparator. Bare `localeCompare()` falls
+ * back to the runtime's default locale — on a Chinese / Japanese OS
+ * that's `zh-CN` / `ja-JP`, which can place CJK characters BEFORE
+ * Latin in the sort (community-reported 2026-06-02). Windows Explorer
+ * uses `StrCmpLogicalW` which sorts ASCII letters first, then CJK /
+ * other scripts by Unicode codepoint, with natural-number ordering
+ * (file2.mp4 before file10.mp4). Forcing `'en'` collation gives the
+ * same practical result regardless of OS locale.
+ *
+ * Cached module-level since `Intl.Collator` construction isn't free
+ * and library sort fires on every filter / sort change.
+ *
+ * `sensitivity: 'base'` makes "a" and "A" tie (matches Explorer's
+ * case-insensitive default); `numeric: true` enables natural-number
+ * sort; `ignorePunctuation: false` keeps the existing fuzzy / token
+ * matching predictable since separators are already normalised.
+ */
+export const naturalSortCollator = new Intl.Collator('en', {
+  numeric: true,
+  sensitivity: 'base',
+});
+
+/**
+ * Compare two name strings using the Windows-Explorer-style collator.
+ * Use this everywhere a name-tiebreak is needed instead of bare
+ * `String#localeCompare` so behaviour stays consistent.
+ *
+ * @param {string} a
+ * @param {string} b
+ * @returns {number}
+ */
+export function compareNames(a, b) {
+  return naturalSortCollator.compare(a || '', b || '');
+}
+
+/**
  * Token-based fuzzy search across video names. The query is split on
  * whitespace; every token must match (in any order). Separators
  * (`.`, `_`, `-`, brackets, etc.) are flattened to spaces so
@@ -81,7 +117,7 @@ export function fuzzySearch(videos, query, options = {}) {
     }
   }
 
-  results.sort((a, b) => a.score - b.score || (a.video.name || '').localeCompare(b.video.name || ''));
+  results.sort((a, b) => a.score - b.score || compareNames(a.video.name, b.video.name));
   return results.map(r => r.video);
 }
 
@@ -188,7 +224,7 @@ export function sortVideos(videos, sortBy, order = 'asc') {
 
   switch (sortBy) {
     case 'name':
-      sorted.sort((a, b) => dir * (a.name || '').localeCompare(b.name || ''));
+      sorted.sort((a, b) => dir * compareNames(a.name, b.name));
       break;
 
     case 'duration':
@@ -219,7 +255,7 @@ export function sortVideos(videos, sortBy, order = 'asc') {
       sorted.sort((a, b) => {
         const aVal = a.hasFunscript ? 1 : 0;
         const bVal = b.hasFunscript ? 1 : 0;
-        return -dir * (aVal - bVal) || (a.name || '').localeCompare(b.name || '');
+        return -dir * (aVal - bVal) || compareNames(a.name, b.name);
       });
       break;
 
