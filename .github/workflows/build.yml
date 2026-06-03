@@ -94,4 +94,9 @@ jobs:
             artifacts/funsync-win/*.exe
             artifacts/funsync-linux/*.AppImage
           draft: false
-          prerelease: false
+          # Auto-detect pre-release from the tag name. Any semver suffix
+          # (e.g. v0.8.0-experimental.0, v1.0.0-rc.1) marks the GitHub
+          # release as a pre-release, which electron-updater respects by
+          # default — stable users on `latest` channel won't auto-update
+          # to it unless they explicitly opt into pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
