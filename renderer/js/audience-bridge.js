@@ -88,6 +88,7 @@ export class AudienceBridge {
   openRoom() {
     if (this._roomActive) return;
     this._roomActive = true;
+    console.log('[Audience] Room opened');
     this._emit('audience:room-opened', {});
   }
 
@@ -99,9 +100,11 @@ export class AudienceBridge {
   async endRoom() {
     if (!this._roomActive) return;
     const keys = [...this._viewers.keys()];
+    console.log(`[Audience] Ending room — tearing down ${keys.length} viewer(s)`);
     await Promise.allSettled(keys.map((k) => this._teardownViewer(k)));
     this._viewers.clear();
     this._roomActive = false;
+    console.log('[Audience] Room ended');
     this._emit('audience:room-ended', {});
   }
 
@@ -129,6 +132,7 @@ export class AudienceBridge {
     // through Audience too would just create chaos.
     const ownKey = this._getStreamerOwnKey?.();
     if (ownKey && this._normalizeKey(ownKey) === this._normalizeKey(key)) {
+      console.warn(`[Audience] Refused self-key add (${this._maskKey(key)}) — already driven by the Handy tab`);
       const err = new Error("This is your own Handy — it's already controlled by the Handy tab.");
       err.code = 'SELF_KEY';
       throw err;
@@ -158,14 +162,35 @@ export class AudienceBridge {
     this._emit('audience:viewer-added', { key, label });
     this._setStatus(key, VIEWER_STATUS.CONNECTING);
 
+    const mask = this._maskKey(key);
+    const who = label ? `"${label}" (${mask})` : mask;
+    console.log(`[Audience] addViewer ${who} — connecting…`);
+
     try {
-      viewer.manager = new this._HandyManagerCtor({ connectionKey: key });
-      const ok = await viewer.manager.connect();
-      if (!ok) throw new Error('Connect failed');
+      viewer.manager = new this._HandyManagerCtor();
+      // HandyManager requires init() — it loads the SDK ESM bundle and
+      // creates this instance's own Handy object — BEFORE connect() will
+      // do anything (connect() returns false while `_handy` is null).
+      // The SDK's init() returns a FRESH Handy per call, so every viewer
+      // gets independent connection state; nothing is shared with the
+      // streamer's own Handy or with other viewers. Missing this call was
+      // the "Audience connects nothing" bug — the test fake didn't model
+      // init(), so the unit suite stayed green while production failed.
+      if (typeof viewer.manager.init === 'function') await viewer.manager.init();
+      // connect() needs the key as an argument — the constructor does not
+      // capture it.
+      const ok = await viewer.manager.connect(key);
+      if (!ok) throw new Error('Connect failed (device offline, in BT mode, or bad key?)');
+      console.log(`[Audience] ${mask} connected`);
 
       // Apply saved offset if any.
       if (viewer.offsetMs !== 0 && typeof viewer.manager.setOffset === 'function') {
-        try { await viewer.manager.setOffset(viewer.offsetMs); } catch { /* non-fatal */ }
+        try {
+          await viewer.manager.setOffset(viewer.offsetMs);
+          console.log(`[Audience] ${mask} offset applied: ${viewer.offsetMs}ms`);
+        } catch (err) {
+          console.warn(`[Audience] ${mask} setOffset failed (non-fatal): ${err?.message || err}`);
+        }
       }
 
       // Auto-arm if a script is loaded.
@@ -173,10 +198,12 @@ export class AudienceBridge {
       if (url) {
         await this._armViewer(viewer, url);
       } else {
+        console.log(`[Audience] ${mask} synced — no script loaded yet`);
         this._setStatus(key, VIEWER_STATUS.SYNCED);
       }
     } catch (err) {
       viewer.lastError = err?.message || String(err);
+      console.error(`[Audience] ${mask} FAILED to add: ${viewer.lastError}`);
       this._setStatus(key, VIEWER_STATUS.ERROR, { error: viewer.lastError });
     }
 
@@ -190,6 +217,7 @@ export class AudienceBridge {
    */
   async removeViewer(key, { forget = false } = {}) {
     if (!this._viewers.has(key)) return;
+    console.log(`[Audience] ${this._maskKey(key)} removed${forget ? ' (forgotten)' : ''}`);
     await this._teardownViewer(key);
     this._viewers.delete(key);
     if (forget) {
@@ -225,6 +253,9 @@ export class AudienceBridge {
     if (!viewer) return;
     const wasMuted = viewer.muted;
     viewer.muted = !!muted;
+    if (wasMuted !== viewer.muted) {
+      console.log(`[Audience] ${this._maskKey(key)} ${viewer.muted ? 'muted' : 'unmuted'}`);
+    }
     if (!wasMuted && viewer.muted) {
       if (viewer.manager?.hsspStop) await viewer.manager.hsspStop().catch(() => {});
       this._setStatus(key, VIEWER_STATUS.MUTED);
@@ -247,6 +278,7 @@ export class AudienceBridge {
         .filter((v) => !v.muted && v.manager)
         .map((v) => this._uploadFor(v, url)),
     );
+    this._logFanout('uploadScriptToAll', results);
     return results;
   }
 
@@ -265,6 +297,7 @@ export class AudienceBridge {
           }
         }),
     );
+    this._logFanout(`hsspPlayAll(${timeMs}ms)`, results);
     return results;
   }
 
@@ -283,6 +316,7 @@ export class AudienceBridge {
           }
         }),
     );
+    this._logFanout('hsspStopAll', results);
     return results;
   }
 
@@ -316,6 +350,7 @@ export class AudienceBridge {
           }
         }),
     );
+    this._logFanout('syncTimeAll', results);
     return results;
   }
 
@@ -326,6 +361,7 @@ export class AudienceBridge {
   async testBuzz(key) {
     const viewer = this._viewers.get(key);
     if (!viewer?.manager?.hdsp) return;
+    console.log(`[Audience] ${this._maskKey(key)} test buzz`);
     try {
       await viewer.manager.hdsp(100, 80, 'percent', 'time', false, false);
       // Settle to bottom 200ms later
@@ -378,8 +414,10 @@ export class AudienceBridge {
    * video time. Idempotent — safe to call on a re-arming viewer.
    */
   async _armViewer(viewer, url) {
+    const mask = this._maskKey(viewer.key);
     try {
       this._setStatus(viewer.key, VIEWER_STATUS.UPLOADING);
+      console.log(`[Audience] ${mask} uploading script…`);
       await viewer.manager.setupScript(url);
 
       this._setStatus(viewer.key, VIEWER_STATUS.CALIBRATING);
@@ -387,12 +425,16 @@ export class AudienceBridge {
       if (sync?.avgRtd != null) viewer.rtdMs = Math.round(sync.avgRtd);
 
       if (this._isVideoPlaying()) {
-        await viewer.manager.hsspPlay(this._getCurrentVideoTimeMs());
+        const t = this._getCurrentVideoTimeMs();
+        await viewer.manager.hsspPlay(t);
+        console.log(`[Audience] ${mask} playing at ${t}ms (RTD ${viewer.rtdMs ?? '?'}ms)`);
         this._setStatus(viewer.key, VIEWER_STATUS.PLAYING);
       } else {
+        console.log(`[Audience] ${mask} synced + armed (RTD ${viewer.rtdMs ?? '?'}ms)`);
         this._setStatus(viewer.key, VIEWER_STATUS.SYNCED);
       }
     } catch (err) {
+      console.error(`[Audience] ${mask} arm failed: ${err?.message || err}`);
       this._setError(viewer.key, err);
       throw err;
     }
@@ -465,6 +507,32 @@ export class AudienceBridge {
    *  case from Discord. */
   _normalizeKey(k) {
     return String(k || '').trim().toLowerCase();
+  }
+
+  /** Mask a Handy key for logging. Keys are passwords (SCOPE §2) and logs
+   *  get shared publicly when users report problems — never log a full key.
+   *  Shows the last 4 chars only, enough to correlate a viewer across lines. */
+  _maskKey(k) {
+    const s = String(k || '');
+    return s.length <= 4 ? '••••' : `••••${s.slice(-4)}`;
+  }
+
+  /**
+   * Summarize a fan-out Promise.allSettled result for the log. Successes
+   * go to console.debug (DevTools only — these fire per play/seek and would
+   * flood the file); any failures go to console.warn (forwarded to the file)
+   * so a broadcast-wide problem is always captured.
+   */
+  _logFanout(op, results) {
+    if (!Array.isArray(results)) return;
+    const failed = results.filter((r) => r.status === 'rejected');
+    const ok = results.length - failed.length;
+    if (failed.length) {
+      const reasons = failed.map((r) => r.reason?.message || String(r.reason)).join('; ');
+      console.warn(`[Audience] ${op}: ${ok}/${results.length} ok, ${failed.length} failed — ${reasons}`);
+    } else {
+      console.debug(`[Audience] ${op}: ${ok}/${results.length} ok`);
+    }
   }
 
   // --- Settings roster ---

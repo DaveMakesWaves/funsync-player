@@ -6,6 +6,13 @@ import { t } from './i18n.js';
 // (bare specifier '@ohdoki/handy-sdk' fails in Electron renderer with contextIsolation)
 let HandySDK = null;
 
+/** Mask a connection key for logging — keys are passwords and logs get
+ *  shared when users report problems. Last 4 chars only. */
+function maskKey(k) {
+  const s = String(k || '');
+  return s.length <= 4 ? '••••' : `••••${s.slice(-4)}`;
+}
+
 export class HandyManager {
   constructor() {
     this._handy = null;
@@ -89,14 +96,17 @@ export class HandyManager {
 
     this._connectionKey = connectionKey;
 
+    console.log(`[Handy] connect(${maskKey(connectionKey)}) — requesting…`);
     try {
       const result = await this._handy.connect(connectionKey);
       // ConnectResult: 0 = NOT_CONNECTED, 1 = CONNECTED
       const code = typeof result === 'number' ? result : result?.result;
+      console.log(`[Handy] connect result code: ${code} (1 = connected, 0 = not connected)`);
       if (code === 1) {
         this._connected = true;
         await this._fetchDeviceInfo();
         this._startHealthCheck();
+        console.log('[Handy] connected — device reachable via cloud');
         return true;
       } else {
         this._emitError(t('error.handyConnectionFailed'));

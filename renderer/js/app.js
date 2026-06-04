@@ -53,6 +53,7 @@ import {
   Pencil, FileCheck, Captions, RotateCcw, Columns2,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
+import { installConsoleForwarding } from './logger.js';
 import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
 import { classifyStereoFormat, isFlattenableStereo, isVRVideo } from './vr-detect.js';
 import { HandyHdspSync } from './handy-hdsp-sync.js';
@@ -142,9 +143,18 @@ class App {
     // `_offerLocaleIfApplicable` once toast.js is wired.
     await this._initI18n();
 
-    // Renderer error handlers (electron-log forwards console to main log file)
-    window.onerror = (msg, src, line, col, err) => console.error('[Window]', msg, err);
-    window.addEventListener('unhandledrejection', (e) => console.error('[Rejection]', e.reason));
+    // Renderer error handlers. These route through console.error, which
+    // logger.installConsoleForwarding() (called at boot) forwards into the
+    // electron-log file — so uncaught errors land in the user-submittable
+    // log. Include source location + stack for diagnosis.
+    window.onerror = (msg, src, line, col, err) => {
+      const where = src ? ` @ ${src}:${line}:${col}` : '';
+      console.error(`[Window]${where} ${msg}`, err?.stack || err || '');
+    };
+    window.addEventListener('unhandledrejection', (e) => {
+      const r = e.reason;
+      console.error('[Rejection]', r?.stack || r?.message || r);
+    });
 
     // Replace <i data-lucide="..."> placeholders with SVG icons.
     // Volume1 added 2026-04-27 for the 3-state mute icon (audible /
@@ -4101,6 +4111,7 @@ class App {
       // button now just calls audiencePopoutClose() so both paths
       // funnel through here.
       if (evt.type === 'closed') {
+        console.log('[Audience] pop-out window closed');
         if (this.audienceBridge?.roomActive) {
           await this.audienceBridge.endRoom();
         }
@@ -4108,6 +4119,9 @@ class App {
       }
       if (evt.type !== 'message') return;
       const payload = evt.payload;
+      // Log the op TYPE only — payloads carry viewer keys (passwords) and
+      // must never hit the log file.
+      if (payload?.type) console.debug(`[Audience] pop-out → ${payload.type}`);
       switch (payload?.type) {
         case AUDIENCE.READY: {
           // Pop-out is up; push initial state.
@@ -7086,6 +7100,10 @@ class App {
 }
 
 // Boot
+// Route all renderer console.* into the electron-log file (and capture
+// uncaught errors) BEFORE anything else runs, so a user-submitted log file
+// contains the full renderer-side diagnostic trail. See logger.js.
+installConsoleForwarding();
 const app = new App();
 // Expose on window so components that live in modals (e.g. the library's
 // association dialog) can reach back to clear live-session routing state

@@ -13,13 +13,26 @@ import { AudienceBridge, VIEWER_STATUS } from '../../renderer/js/audience-bridge
 function makeFakeManager(opts = {}) {
   const calls = [];
   let connected = false;
+  let initialized = false;
 
   const inst = {
     connectionKey: opts.connectionKey,
     calls,
-    async connect() {
-      calls.push({ kind: 'connect' });
+    // Mirror the real HandyManager contract: init() must run before
+    // connect() does anything. Modelling this is what guards against the
+    // "AudienceBridge never called init()" regression.
+    async init() {
+      calls.push({ kind: 'init' });
+      initialized = true;
+    },
+    async connect(key) {
+      calls.push({ kind: 'connect', key });
+      // Real connect() returns false when the SDK was never initialized
+      // (this._handy is null). Fail the same way so a missing init() call
+      // surfaces as a failed connect in tests too.
+      if (!initialized) return false;
       if (opts.failConnect) return false;
+      if (key) inst.connectionKey = key;
       connected = true;
       return true;
     },
@@ -75,7 +88,7 @@ function makeBus() {
 function makeBridge({ settings, bus, video = {}, fakeOpts = {} } = {}) {
   settings = settings || makeSettings();
   bus = bus || makeBus();
-  const HandyManagerCtor = function HMC({ connectionKey }) {
+  const HandyManagerCtor = function HMC({ connectionKey } = {}) {
     return makeFakeManager({ connectionKey, ...fakeOpts });
   };
   return {
@@ -147,6 +160,29 @@ describe('AudienceBridge — addViewer', () => {
     expect(bus.events.some((e) => e.type === 'audience:viewer-added')).toBe(true);
   });
 
+  it('calls init() before connect(), and passes the key to connect()', async () => {
+    // Regression guard: the real HandyManager needs init() before
+    // connect() does anything, and connect() takes the key as an arg —
+    // the constructor does not capture it. AudienceBridge previously
+    // skipped init() and called connect() with no args, so every viewer
+    // silently failed in production while this suite stayed green.
+    const fakes = [];
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
+      const m = makeFakeManager({ connectionKey });
+      fakes.push(m);
+      return m;
+    };
+    const bridge = new AudienceBridge({ settings: makeSettings(), eventBus: makeBus(), HandyManagerCtor });
+    bridge.openRoom();
+    const snap = await bridge.addViewer({ key: 'KEY1234' });
+
+    expect(snap.status).not.toBe(VIEWER_STATUS.ERROR);
+    const kinds = fakes[0].calls.map((c) => c.kind);
+    expect(kinds.indexOf('init')).toBeGreaterThanOrEqual(0);
+    expect(kinds.indexOf('init')).toBeLessThan(kinds.indexOf('connect'));
+    expect(fakes[0].calls.find((c) => c.kind === 'connect').key).toBe('KEY1234');
+  });
+
   it('duplicate add updates label only, no second connect', async () => {
     const { bridge, settings } = makeBridge();
     bridge.openRoom();
@@ -180,7 +216,7 @@ describe('AudienceBridge — addViewer', () => {
   });
 
   it('rejects self-key collision with SELF_KEY error', async () => {
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       return makeFakeManager({ connectionKey });
     };
     const bridge = new AudienceBridge({
@@ -196,7 +232,7 @@ describe('AudienceBridge — addViewer', () => {
   });
 
   it('self-key check is whitespace + case insensitive', async () => {
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       return makeFakeManager({ connectionKey });
     };
     const bridge = new AudienceBridge({
@@ -211,7 +247,7 @@ describe('AudienceBridge — addViewer', () => {
   });
 
   it('different keys do not trigger SELF_KEY', async () => {
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       return makeFakeManager({ connectionKey });
     };
     const bridge = new AudienceBridge({
@@ -227,7 +263,7 @@ describe('AudienceBridge — addViewer', () => {
 
   it('applies saved offset on connect', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -246,7 +282,7 @@ describe('AudienceBridge — addViewer', () => {
 describe('AudienceBridge — removeViewer', () => {
   it('stops + disconnects + emits viewer-removed', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -286,7 +322,7 @@ describe('AudienceBridge — removeViewer', () => {
 describe('AudienceBridge — fan-out (Promise.allSettled)', () => {
   it('hsspPlayAll fires hsspPlay on every viewer in parallel', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -307,7 +343,7 @@ describe('AudienceBridge — fan-out (Promise.allSettled)', () => {
   it('one viewer failing does NOT abort the rest', async () => {
     const fakes = [];
     let i = 0;
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({
         connectionKey,
         failPlay: i++ === 1,  // second viewer fails hsspPlay
@@ -335,7 +371,7 @@ describe('AudienceBridge — fan-out (Promise.allSettled)', () => {
 
   it('hsspStopAll fires hsspStop on every viewer', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -353,7 +389,7 @@ describe('AudienceBridge — fan-out (Promise.allSettled)', () => {
 
   it('uploadScriptToAll fans out setupScript', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -371,7 +407,7 @@ describe('AudienceBridge — fan-out (Promise.allSettled)', () => {
 
   it('muted viewers are skipped on fan-out', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -394,7 +430,7 @@ describe('AudienceBridge — fan-out (Promise.allSettled)', () => {
 describe('AudienceBridge — syncTimeAll', () => {
   it('runs sync + restores HSSP at current time when video is playing', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey, rtdMs: 75 });
       fakes.push(m);
       return m;
@@ -426,7 +462,7 @@ describe('AudienceBridge — syncTimeAll', () => {
 
   it('skips hsspStop+hsspPlay when video is paused', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -450,7 +486,7 @@ describe('AudienceBridge — syncTimeAll', () => {
 describe('AudienceBridge — setMuted', () => {
   it('mute calls hsspStop, sets status MUTED', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -467,7 +503,7 @@ describe('AudienceBridge — setMuted', () => {
 
   it('unmute re-arms when video is playing', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -494,7 +530,7 @@ describe('AudienceBridge — setMuted', () => {
 describe('AudienceBridge — setOffsetForViewer', () => {
   it('clamps to [-500, 500] and persists', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -534,7 +570,7 @@ describe('AudienceBridge — aggregate status', () => {
   it('returns "error" when any viewer is in error state', async () => {
     const fakes = [];
     let i = 0;
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey, failConnect: i++ === 1 });
       fakes.push(m);
       return m;
@@ -550,7 +586,7 @@ describe('AudienceBridge — aggregate status', () => {
 describe('AudienceBridge — testBuzz', () => {
   it('fires HDSP pulse on the targeted viewer only', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
@@ -568,7 +604,7 @@ describe('AudienceBridge — testBuzz', () => {
 
   it('testBuzzAll fires HDSP on every viewer', async () => {
     const fakes = [];
-    const HandyManagerCtor = function HMC({ connectionKey }) {
+    const HandyManagerCtor = function HMC({ connectionKey } = {}) {
       const m = makeFakeManager({ connectionKey });
       fakes.push(m);
       return m;
