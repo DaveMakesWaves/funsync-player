@@ -89,9 +89,16 @@ jobs:
           chmod +x ffmpeg-linux/ffmpeg ffmpeg-linux/ffprobe
 
       - name: Build Electron app
-        run: npx electron-builder --config electron-builder.yml --${{ matrix.target }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # --publish never: electron-builder ONLY builds here; it must NOT
+        # create a GitHub release. electron-builder.yml has `publish: github`
+        # (needed so electron-updater knows where to look for updates), and
+        # on a tag build with a token present electron-builder would otherwise
+        # auto-create a DRAFT release for the version. That draft then collides
+        # with the `release` job's softprops/action-gh-release on the same
+        # tag_name → "Validation Failed: already_exists" → "Too many retries".
+        # Two publishers, one tag = the bug that broke every 0.8.0-experimental
+        # release. Publishing is centralized in the `release` job below.
+        run: npx electron-builder --config electron-builder.yml --${{ matrix.target }} --publish never
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
