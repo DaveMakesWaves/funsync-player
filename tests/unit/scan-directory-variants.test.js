@@ -22,7 +22,21 @@ const normalizeName = (name) =>
   name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
 
 // Mirror of `funscriptList` build + post-pass from main.js scan-directory.
-function classify(funscriptFilenames, dir = '/lib') {
+// `videoFilenames` are the video files present in the same `dir` (so the
+// classifier can tell a real-title parenthetical from a variant suffix).
+function classify(funscriptFilenames, dir = '/lib', videoFilenames = []) {
+  const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+  const videoBaseLocal = new Set();
+  const videoBaseGlobal = new Set();
+  for (const vname of videoFilenames) {
+    const dotPos = vname.lastIndexOf('.');
+    const vext = dotPos >= 0 ? vname.slice(dotPos).toLowerCase() : '';
+    if (!VIDEO_EXTS.includes(vext)) continue;
+    const vbase = normalizeName(vname.slice(0, dotPos));
+    videoBaseLocal.add(dir + '\0' + vbase);
+    videoBaseGlobal.add(vbase);
+  }
+
   const funscriptList = [];
   for (const filename of funscriptFilenames) {
     const nameNoExt = filename.replace(/\.funscript$/i, '');
@@ -37,8 +51,14 @@ function classify(funscriptFilenames, dir = '/lib') {
       videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
       variantLabel = null;
     } else if (parenMatch) {
-      videoBase = normalizeName(parenMatch[1]);
-      variantLabel = parenMatch[2].trim();
+      const fullBase = normalizeName(nameNoExt);
+      if (videoBaseLocal.has(dir + '\0' + fullBase) || videoBaseGlobal.has(fullBase)) {
+        videoBase = fullBase;
+        variantLabel = null;
+      } else {
+        videoBase = normalizeName(parenMatch[1]);
+        variantLabel = parenMatch[2].trim();
+      }
     } else if (dotSuffix && dotIdx > 0) {
       videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
       variantLabel = dotSuffix;
@@ -139,6 +159,57 @@ describe('Funscript variant classifier — dot-disambiguation', () => {
     expect(result[0].variantLabel).toBe('Soft');
     expect(result[0].videoBase).toBe('title');
     expect(result[0].isAmbiguousDotVariant).toBe(false);
+  });
+
+  it('parenthesized name becomes PRIMARY when a same-named video exists', () => {
+    // Regression (shy4649): "Title (Nude).funscript" alongside its own
+    // "Title (Nude).mp4" must be that video's primary, not a "(Nude)"
+    // variant of "Title" — otherwise "Title (Nude).mp4" gets no script
+    // and is hidden under the Matched tab.
+    const result = classify(
+      ['Title (Nude).funscript'],
+      '/lib',
+      ['Title (Nude).mp4'],
+    );
+    expect(result[0].variantLabel).toBe(null);
+    expect(result[0].videoBase).toBe('title (nude)');
+  });
+
+  it('full reported scenario: two similar-named videos both keep their scripts', () => {
+    // "[LazyProcrastinator] Fiona - Riding" + "... Riding (Nude)" in one
+    // folder. Both funscripts must end up as primaries of their OWN video,
+    // not collapse the "(Nude)" script onto the plain video.
+    const result = classify(
+      [
+        '[LazyProcrastinator] Fiona - Riding.funscript',
+        '[LazyProcrastinator] Fiona - Riding (Nude).funscript',
+      ],
+      '/lib',
+      [
+        '[LazyProcrastinator] Fiona - Riding.mp4',
+        '[LazyProcrastinator] Fiona - Riding (Nude).mp4',
+      ],
+    );
+    const plain = result.find((r) => r.name === '[LazyProcrastinator] Fiona - Riding.funscript');
+    const nude = result.find((r) => r.name === '[LazyProcrastinator] Fiona - Riding (Nude).funscript');
+    expect(plain.variantLabel).toBe(null);
+    expect(nude.variantLabel).toBe(null);
+    // Distinct bases → each pairs with its own video, neither absorbed.
+    expect(plain.videoBase).not.toBe(nude.videoBase);
+    expect(nude.videoBase).toBe(normalizeName('[LazyProcrastinator] Fiona - Riding (Nude)'));
+  });
+
+  it('still a variant when only the plain video (not the parenthesized one) exists', () => {
+    // "Title.mp4" + "Title.funscript" + "Title (Soft).funscript", no
+    // "Title (Soft).mp4" → "(Soft)" remains a variant of "Title".
+    const result = classify(
+      ['Title.funscript', 'Title (Soft).funscript'],
+      '/lib',
+      ['Title.mp4'],
+    );
+    const variant = result.find((r) => r.name === 'Title (Soft).funscript');
+    expect(variant.variantLabel).toBe('Soft');
+    expect(variant.videoBase).toBe('title');
   });
 
   it('mixed: primary, variant, axis, dotted-filename all coexist correctly', () => {

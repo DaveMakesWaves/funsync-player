@@ -55,6 +55,10 @@ function applyTheme(t) {
     document.documentElement.dataset.theme = t;
   }
 }
+function applyStyle(s) {
+  // No-op on undefined so a theme-only message can't reset the style.
+  if (s === 'classic' || s === 'modern') document.documentElement.dataset.style = s;
+}
 
 host.classList.add('script-editor', 'script-editor--popout-window');
 
@@ -819,10 +823,12 @@ window.funsync.onEditorPopoutEvent((event) => {
   switch (m.type) {
     case THEME: {
       applyTheme(m.theme);
+      applyStyle(m.uiStyle);
       break;
     }
     case INITIAL_STATE: {
       if (m.theme) applyTheme(m.theme);
+      applyStyle(m.uiStyle);
       activePath = m.activePath || null;
       updateScriptSelect(m.scripts || [], activePath);
       if (Array.isArray(m.actions)) {

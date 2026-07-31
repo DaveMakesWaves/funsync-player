@@ -232,3 +232,33 @@
   0% { background-position: 200% 0; }
   100% { background-position: -200% 0; }
 }
+
+/* === Mini-player: minimal Up Next =======================================
+   In the docked corner mini-player (340×191, overflow:hidden) the full card
+   overflows. The card renders a minimal `.up-next__mini-text` line in mini
+   mode ("Next video starts in Ns"); style it as a small bottom-right chip.
+   Hover-pause is disabled in mini mode (up-next-card.js) so the countdown
+   never freezes when the pointer is over the overlay. Classic + Modern. */
+.player-container--mini .up-next {
+  top: auto;
+  bottom: 8px;
+  left: auto;
+  right: 8px;
+  width: auto;
+  max-width: calc(100% - 16px);
+  padding: 5px 9px;
+  border-radius: 6px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.5);
+  animation: none; /* no slide-in in the tiny overlay */
+}
+.up-next__mini-text {
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+.up-next__mini-text .up-next__countdown {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}

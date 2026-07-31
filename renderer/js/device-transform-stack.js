@@ -13,11 +13,20 @@
 //       ↓
 //   [2] applyInvert      — script-side direction flip
 //       ↓
-//   [3] applyRange       — user's device clamp / remap
+//   [3] applyRange       — user's device range remap (rescale into window)
 //       ↓
-//   [4] applySafetyCap   — hardware safety limit (e-stim max intensity)
+//   [4] applyCutoff      — user's hard floor/ceiling clamp (pin out-of-band)
+//       ↓
+//   [5] applySafetyCap   — hardware safety limit (e-stim max intensity)
 //       ↓
 //   output (0-100)
+//
+// NOTE on [3] vs [4]: applyRange RESCALES the whole 0-100 stroke into a
+// window (pos 10 with 20-100 → 28). applyCutoff CLAMPS — it pins values
+// outside [min,max] to the boundary and leaves the rest untouched (pos 10
+// with floor 20 → 20, pos 50 → 50). They are deliberately separate
+// controls: "Range" compresses, "Output limits" floor/ceiling clips. See
+// SCOPE-device-cutoff-threshold.md §1.
 //
 // Speed limit + transport precision encoding live in the sync engines
 // themselves; they operate on stroke deltas / send-format, not on the
@@ -102,6 +111,30 @@ export function applyRange(rawPos, range) {
 }
 
 /**
+ * Hard floor/ceiling clamp on the output value. Distinct from applyRange:
+ * this PINS out-of-band values to the boundary and leaves in-band values
+ * untouched (a true clamp), whereas applyRange linearly rescales the whole
+ * 0-100 input into the window. This is F4NTY's "commands below 20 are
+ * ignored" request — see SCOPE-device-cutoff-threshold.md.
+ *
+ * Applied AFTER invert + range so "the device never physically goes below
+ * the floor" holds regardless of the other transforms.
+ *
+ * @param {number} rawPos
+ * @param {{min:number, max:number}|null|undefined} cutoff
+ * @returns {number}
+ */
+export function applyCutoff(rawPos, cutoff) {
+  if (!cutoff || typeof cutoff !== 'object') return rawPos;
+  if (!Number.isFinite(cutoff.min) || !Number.isFinite(cutoff.max)) return rawPos;
+  const floor = Math.max(0, Math.min(100, cutoff.min));
+  const ceil = Math.max(0, Math.min(100, cutoff.max));
+  if (floor === 0 && ceil === 100) return rawPos;  // no-op at defaults
+  if (floor >= ceil) return rawPos;                // degenerate, refuse (UI prevents this)
+  return Math.min(ceil, Math.max(floor, clamp01(rawPos)));
+}
+
+/**
  * Hard-clip intensity to a safety cap (e-stim max intensity). Already
  * existed in buttplug-sync.js as inline logic; lifted here so the order
  * in `applyDeviceStack` is explicit and the composition is testable.
@@ -128,6 +161,7 @@ export function applySafetyCap(rawPos, maxIntensity) {
  * @param {object|null}       [ctx.extender]      — { enabled, thresholdPct }
  * @param {boolean}           [ctx.inverted]
  * @param {{min,max}|null}    [ctx.range]
+ * @param {{min,max}|null}    [ctx.cutoff]        — hard floor/ceiling clamp
  * @param {number}            [ctx.maxIntensity]  — e-stim safety, 0-100
  * @returns {number} transformed position, guaranteed 0-100
  */
@@ -137,6 +171,7 @@ export function applyDeviceStack(rawPos, ctx) {
     v = applyExtender(v, ctx.natural, !!ctx.extender?.enabled, ctx.extender?.thresholdPct);
     v = applyInvert(v, ctx.inverted);
     v = applyRange(v, ctx.range);
+    v = applyCutoff(v, ctx.cutoff);
     v = applySafetyCap(v, ctx.maxIntensity);
   }
   // Final clamp guards against any future stage producing out-of-bounds.
@@ -244,4 +279,51 @@ export function extendRawScriptContent(rawContent, enabled) {
     }),
   };
   return JSON.stringify(stretched);
+}
+
+/**
+ * Pre-clamp raw funscript JSON content with a floor/ceiling cutoff for
+ * cloud upload (Handy HSSP, Autoblow). Cloud devices play the script
+ * server-side, so the per-tick `applyCutoff` doesn't reach them — this
+ * applies the SAME hard clamp to each action's `pos` at upload time so a
+ * floor behaves identically on a Handy as it does on a local Buttplug
+ * device (Nielsen #4 consistency).
+ *
+ * Deliberately NOT Handy's native `setStrokeZone`: that is a REMAP
+ * (rescales the full range into the zone), which is different behaviour
+ * from the clamp the user asked for. Pre-clamping the content gives true
+ * clamp semantics on cloud devices.
+ *
+ * Returns the original content string unchanged if: cutoff is a no-op
+ * (0/100 or degenerate), content isn't valid JSON, or there's no actions
+ * array — preserving the source author's whitespace / key ordering.
+ *
+ * @param {string} rawContent — funscript JSON
+ * @param {{min:number, max:number}|null} cutoff
+ * @returns {string} possibly-clamped JSON, or original string on no-op
+ */
+export function clampRawScriptContent(rawContent, cutoff) {
+  if (typeof rawContent !== 'string' || rawContent.length === 0) return rawContent;
+  if (!cutoff || !Number.isFinite(cutoff.min) || !Number.isFinite(cutoff.max)) return rawContent;
+  const floor = Math.max(0, Math.min(100, cutoff.min));
+  const ceil = Math.max(0, Math.min(100, cutoff.max));
+  if (floor === 0 && ceil === 100) return rawContent;  // no-op at defaults
+  if (floor >= ceil) return rawContent;                // degenerate, refuse
+  let parsed;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return rawContent;
+  }
+  if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
+    return rawContent;
+  }
+  const clamped = {
+    ...parsed,
+    actions: parsed.actions.map((a) => {
+      if (!a || typeof a.pos !== 'number') return a;
+      return { ...a, pos: applyCutoff(a.pos, { min: floor, max: ceil }) };
+    }),
+  };
+  return JSON.stringify(clamped);
 }

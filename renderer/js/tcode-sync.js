@@ -5,15 +5,25 @@
 import { getInterpolator, applySpeedLimit, linearInterpolate } from './interpolation.js';
 import {
   applyInvert,
+  applyCutoff,
   applyExtender,
   computeNaturalRange,
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from './device-transform-stack.js';
 
-const TICK_INTERVAL_MS = 40;     // ~25Hz
+const TICK_INTERVAL_MS = 40;     // ~25Hz — default output rate (user-tunable)
+const MIN_UPDATE_HZ = 15;        // clamp floor for the tunable rate
+const MAX_UPDATE_HZ = 60;        // clamp ceiling (well within 115200 baud)
+// Floor for the interpolation window to the NEXT keyframe (target/speed
+// computation) — independent of the output rate. Keeps a 0-duration move
+// from producing a divide-by-zero / instant snap.
 const MIN_SEND_INTERVAL_MS = 50;
 const MAX_GAP_MS = 5000;
 const MIN_POS_DELTA = 0.5;
+// Ceiling for the per-move TCode interval (I-suffix). A stale gap
+// (first send, post-seek/pause) must not make the device crawl toward
+// the target over seconds — cap it so it catches up within ~one frame.
+const MOVE_INTERVAL_CAP_MS = 150;
 
 export class TCodeSync {
   /**
@@ -29,6 +39,11 @@ export class TCodeSync {
 
     this._active = false;
     this._intervalId = null;
+    // Output rate (ms per tick). User-tunable via setUpdateRate — higher
+    // rates smooth wired OSR2+/SR6 motion (more points per stroke). Also used
+    // as the per-move interval floor so the TCode I-suffix tracks the send
+    // cadence at any rate (a fixed floor above the tick caused under-travel).
+    this._tickIntervalMs = TICK_INTERVAL_MS;
 
     // Main axis (L0) tracking
     this._actions = null;
@@ -43,7 +58,8 @@ export class TCodeSync {
     // keyed independently by TCode axis (L0/L1/L2/R0/R1/R2/V0/V1/V2/A0)
     // so the three settings can be toggled without touching each other.
     this._axisEnabled = new Map();   // tcode → boolean
-    this._axisRanges = new Map();    // tcode → { min, max }
+    this._axisRanges = new Map();    // tcode → { min, max }  (remap)
+    this._axisCutoff = new Map();    // tcode → { min, max }  (hard clamp, after remap)
     this._axisInverted = new Map();  // tcode → boolean
 
     // Range Extender state. When enabled, narrow scripts get stretched
@@ -146,6 +162,19 @@ export class TCodeSync {
 
   getAxisRange(tcode) {
     return this._axisRanges.get(tcode) || { min: 0, max: 100 };
+  }
+
+  /**
+   * Per-axis output cutoff — a hard floor/ceiling clamp applied AFTER the
+   * range remap. Pins out-of-band values to the boundary (vs setAxisRange
+   * which rescales). Default {0, 100} = no-op. See applyCutoff.
+   */
+  setAxisCutoff(tcode, min, max) {
+    this._axisCutoff.set(tcode, { min, max });
+  }
+
+  getAxisCutoff(tcode) {
+    return this._axisCutoff.get(tcode) || { min: 0, max: 100 };
   }
 
   /**
@@ -259,12 +288,27 @@ export class TCodeSync {
 
   // --- Scheduler ---
 
+  /**
+   * Set the T-Code output rate in Hz (default 25). Higher rates give smoother
+   * motion on wired OSR2+/SR6 — each fast stroke gets more points — at a
+   * negligible serial cost (a few KB/s at 115200 baud). Clamped to 15–60 Hz.
+   * Restarts the scheduler live if currently syncing.
+   */
+  setUpdateRate(hz) {
+    const clamped = Math.max(MIN_UPDATE_HZ, Math.min(MAX_UPDATE_HZ, Number(hz) || 25));
+    this._tickIntervalMs = Math.round(1000 / clamped);
+    if (this._intervalId) {
+      this._stopScheduler();
+      this._startScheduler();
+    }
+  }
+
   _startScheduler() {
     if (this._intervalId) return;
     this._intervalId = setInterval(() => {
       if (!this._active || this.player.paused) return;
       this._tick();
-    }, TICK_INTERVAL_MS);
+    }, this._tickIntervalMs);
   }
 
   _stopScheduler() {
@@ -281,7 +325,11 @@ export class TCodeSync {
     if (!this.tcode.connected) return;
 
     const now = performance.now();
-    if (now - this._lastSendTime < MIN_SEND_INTERVAL_MS) return;
+    // Rate-limit sends to the configured output rate. Use a fraction of the
+    // tick so scheduler jitter (a tick firing a hair early) doesn't drop a
+    // send, while a manual/extra _tick() call within the window is still
+    // suppressed. The scheduler itself paces at this._tickIntervalMs.
+    if (now - this._lastSendTime < this._tickIntervalMs * 0.5) return;
 
     const timeMs = this._currentTimeMs();
     const axisValues = {};
@@ -322,6 +370,8 @@ export class TCodeSync {
 
             const range = this.getAxisRange('L0');
             targetPos = range.min + (targetPos / 100) * (range.max - range.min);
+            // Hard floor/ceiling clamp after the remap (no-op at defaults).
+            targetPos = applyCutoff(targetPos, this._axisCutoff.get('L0'));
 
             if (this._lastSentPos < 0 || Math.abs(targetPos - this._lastSentPos) >= MIN_POS_DELTA) {
               axisValues.L0 = targetPos;
@@ -364,9 +414,10 @@ export class TCodeSync {
       );
       value = applyInvert(value, this.isAxisInverted(tcode));
 
-      // Apply range
+      // Apply range, then hard cutoff clamp (no-op at defaults).
       const range = this.getAxisRange(tcode);
       value = range.min + (value / 100) * (range.max - range.min);
+      value = applyCutoff(value, this._axisCutoff.get(tcode));
 
       if (state.lastSentValue < 0 || Math.abs(value - state.lastSentValue) >= MIN_POS_DELTA) {
         axisValues[tcode] = value;
@@ -374,9 +425,20 @@ export class TCodeSync {
       }
     }
 
-    // Only send if there are changed values (no I suffix — let device interpolate at native rate)
+    // Only send if there are changed values. Attach an interval (I-suffix)
+    // so the firmware paces each move to the target over roughly one update
+    // period instead of snapping. Bare position commands made fast strokes
+    // under-travel on wired OSR/SR6: at ~20Hz a fast stroke gets only a few
+    // points, and with no timing hint the device rounds off the peaks it's
+    // given. Use the realized send period (self-correcting if the cadence
+    // drifts), floored at the rate-limit and capped so a stale gap doesn't
+    // make the device crawl.
     if (Object.keys(axisValues).length > 0) {
-      this.tcode.sendAxes(axisValues);
+      const sendDelta = this._lastSendTime > 0 ? (now - this._lastSendTime) : this._tickIntervalMs;
+      const moveInterval = Math.round(
+        Math.min(MOVE_INTERVAL_CAP_MS, Math.max(this._tickIntervalMs, sendDelta)),
+      );
+      this.tcode.sendAxes(axisValues, moveInterval);
       this._lastSendTime = now;
     }
   }

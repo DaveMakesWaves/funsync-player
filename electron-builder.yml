@@ -22,6 +22,14 @@ win:
   target:
     - target: nsis
       arch: x64
+    # Portable: a single self-extracting .exe that runs from a USB/external
+    # disk and keeps its data in a `data/` folder next to itself (the app
+    # detects PORTABLE_EXECUTABLE_DIR — see main.js). No installer, no
+    # auto-update. unpackDirName is intentionally LEFT AT DEFAULT (per-build
+    # UUID): pinning it makes two running instances share a temp dir and the
+    # second one's exit corrupts the first. See SCOPE-portable-install.md §7.
+    - target: portable
+      arch: x64
   extraFiles:
     - from: ffmpeg/
       to: ffmpeg

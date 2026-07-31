@@ -188,7 +188,9 @@
 .library__grid-wrapper {
   flex: 1;
   overflow-y: auto;
-  padding: 16px;
+  /* No top padding — the first card row sits flush at the top. Row/column
+     spacing between cards comes from the grid `gap`, not this padding. */
+  padding: 0 16px 16px;
 }
 
 .library__grid {
@@ -880,6 +882,18 @@
   z-index: 100;
   min-width: 180px;
   padding: 4px 0;
+  /* Safety net: if the menu is taller than the space available even after
+     flipping, let it scroll rather than run off-screen. */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+/* Edge-aware flip: opens ABOVE the card instead of below when a downward
+   menu would be clipped by the bottom of the scrolling library area. Applied
+   by `_positionKebabMenu()` after measuring. */
+.library__kebab-menu--up {
+  top: auto;
+  bottom: calc(100% + 4px);
 }
 
 .library__kebab-menu-item {
@@ -1922,3 +1936,66 @@
   text-overflow: ellipsis;
   min-width: 0;
 }
+
+/* Custom-thumbnail frame picker (kebab → "Set thumbnail frame…"). A
+   WYSIWYG scrubber: the <video> shows the exact frame as the slider moves;
+   confirming pins that seek % as the library tile. */
+.library__thumb-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: min(560px, 80vw);
+}
+.library__thumb-picker-video {
+  width: 100%;
+  max-height: 50vh;
+  background: #000;
+  border-radius: 8px;
+  aspect-ratio: 16 / 9;
+  object-fit: contain;
+}
+.library__thumb-picker-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.library__thumb-picker-slider {
+  flex: 1;
+  min-width: 0;
+}
+.library__thumb-picker-time {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary, #a0a0a0);
+  min-width: 3.5em;
+  text-align: right;
+}
+.library__thumb-picker-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted, #808080);
+  line-height: 1.45;
+}
+.library__thumb-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.library__thumb-picker-use,
+.library__thumb-picker-cancel {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border, #333);
+  cursor: pointer;
+  font-size: 14px;
+}
+.library__thumb-picker-use {
+  background: var(--accent, #e0397a);
+  color: #fff;
+  border-color: transparent;
+}
+.library__thumb-picker-cancel {
+  background: transparent;
+  color: var(--text-primary, #e0e0e0);
+}
+.library__thumb-picker-use:hover { filter: brightness(1.08); }
+.library__thumb-picker-cancel:hover { background: var(--surface-overlay); }

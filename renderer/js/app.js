@@ -8,6 +8,7 @@ import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './em
 import { HandyManager } from './handy-manager.js';
 import { AudienceBridge } from './audience-bridge.js';
 import * as AUDIENCE from './audience-popout-protocol.js';
+import * as PLAYERWIN from './player-popout-protocol.js';
 import { SyncEngine } from './sync-engine.js';
 import { ButtplugManager } from './buttplug-manager.js';
 import { ButtplugSync } from './buttplug-sync.js';
@@ -30,7 +31,7 @@ import { showToast } from './toast.js';
 import { maybeShowHevcGuidance } from './hevc-detect.js';
 import { initTheme } from './theme-manager.js';
 import { matchButtplugRoute } from './custom-routing-match.js';
-import { extendRawScriptContent } from './device-transform-stack.js';
+import { extendRawScriptContent, clampRawScriptContent } from './device-transform-stack.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library } from '../components/library.js';
@@ -49,14 +50,17 @@ import { EroScriptsPanel } from '../components/eroscripts-panel.js';
 import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
   EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles,
-  Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-  Pencil, FileCheck, Captions, RotateCcw, Columns2,
+  Maximize, Maximize2, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
+  Pencil, FileCheck, Captions, RotateCcw, Columns2, X,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { installConsoleForwarding } from './logger.js';
 import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
+import { shouldEnterMiniplayer } from './miniplayer.js';
 import { classifyStereoFormat, isFlattenableStereo, isVRVideo } from './vr-detect.js';
 import { HandyHdspSync } from './handy-hdsp-sync.js';
+import { OrgasmSwitch } from './orgasm-switch.js';
+import { shuffle as shuffleArray, reshuffleAvoidingRepeat } from './shuffle.js';
 import { initI18n, setLocale, translatePage, t, LOCALE_LABELS } from './i18n.js';
 
 class App {
@@ -95,6 +99,7 @@ class App {
     this._playQueueIndex = -1;
     this._playQueueSource = null; // { sourceLabel, sourceContext } — captured at Play All start
     this._playQueueLoop = false;  // when true, queue wraps after the last item (per-playlist preference)
+    this._playQueueShuffle = false; // when true, _playQueue was shuffled at Play All; reshuffle on loop wrap
 
     // Queue panel state (SCOPE-queue-panel.md). History is session-
     // bounded and resets when the panel is closed; user queue persists
@@ -107,6 +112,7 @@ class App {
     this._userQueue = []; // hydrated from settings on boot
 
     this._navStack = ['library']; // navigation history stack — current view is last element
+    this._miniActive = false; // mini-player docked (video plays in a corner overlay while browsing)
     this._scriptCloudUrl = null; // cloud URL of the last uploaded script (for re-setup after HDSP)
     // Cloud-upload gate. `_pendingUploads` is the set of devices whose
     // funscript upload is currently in flight; `_waitingForScript` is
@@ -177,6 +183,9 @@ class App {
         Gauge, ChevronDown, Goggles,
         // Queue panel toggle icon (Android Auto split-screen look).
         Columns2,
+        // 'maximize-2' for the "Pop out player" overflow item (detached
+        // player window, SCOPE-separate-player-window.md).
+        Maximize2,
       },
       attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
     });
@@ -296,6 +305,14 @@ class App {
         if (this.buttplugSync) this.buttplugSync.setRangeExtenderEnabled(enabled);
         if (this.tcodeSync) this.tcodeSync.setRangeExtenderEnabled(enabled);
       },
+      // Orgasm Switch (hold X) — pick / clear / display the global script.
+      onPickOrgasmScript: () => this._pickOrgasmScript(),
+      onClearOrgasmScript: () => this._clearOrgasmScript(),
+      getOrgasmScriptName: () => {
+        const p = this.settings?.get?.('player.orgasmScript');
+        if (!p) return null;
+        return p.split(/[\\/]/).pop();  // basename, cross-platform
+      },
       // Snapshot device-connection flags for the "Report a problem"
       // diagnostics bundle. Read defensively — managers may be null
       // (Handy SDK can fail to import; Buttplug isn't always inited).
@@ -322,6 +339,8 @@ class App {
           mod.openVRModal({ settings: this.settings, vrBridge: this.vrBridge });
         });
       },
+      // TEMP DISABLED (2026-07-30): Load-from-URL — see notes/SCRATCHPAD.md.
+      // onLoadUrlClick: () => this._openLoadUrlModal(),
       onEroScriptsClick: () => {
         if (!this.eroscriptsPanel) return;
         if (this._currentVideoName && !this.funscriptEngine.isLoaded && !this.eroscriptsPanel._visible) {
@@ -357,6 +376,8 @@ class App {
       detectEmbeddedAxesForPath: (path) => this.detectEmbeddedAxesForPath(path),
       onExtractEmbeddedAxes: (video) => this._extractEmbeddedAxesToCompanions(video),
       onAddToQueue: (path, position) => this.addToUserQueue(path, position),
+      onPlayAll: (videoList, opts) => this._playAll(videoList, opts),
+      onToggleQueue: () => this._toggleQueuePanel(),
       settings: this.settings,
     });
 
@@ -390,11 +411,52 @@ class App {
       btnPlayerBack.addEventListener('click', () => this._navigateBack());
     }
 
+    // Mini-player controls (only interactive while docked as a corner
+    // overlay). Icons are injected programmatically — the shared
+    // `createIcons()` registry doesn't include X / Maximize2, so
+    // data-lucide placeholders for those would render blank.
+    const miniExpand = document.getElementById('miniplayer-expand');
+    if (miniExpand) {
+      miniExpand.replaceChildren(icon(Maximize2, { width: 16, height: 16 }));
+      miniExpand.addEventListener('click', () => this._expandMiniplayer());
+    }
+    const miniClose = document.getElementById('miniplayer-close');
+    if (miniClose) {
+      miniClose.replaceChildren(icon(X, { width: 16, height: 16 }));
+      miniClose.addEventListener('click', () => this._closeMiniplayer());
+    }
+    // Detached player window (Phase 2). 2a: open/close + READY handshake.
+    document.getElementById('btn-popout-player')?.addEventListener('click', () => {
+      this._togglePlayerWindow();
+    });
+    this._initPlayerWindow();
+
+    const miniPlayPause = document.getElementById('miniplayer-playpause');
+    if (miniPlayPause) {
+      miniPlayPause.addEventListener('click', () => this.videoPlayer?.togglePlay?.());
+      // Keep the icon in sync with the ACTUAL play state. Bind to the
+      // stable <video> element by id (survives init order); play/pause
+      // events fire from any control (mini button, keyboard, main player).
+      const videoEl = document.getElementById('video');
+      if (videoEl) {
+        videoEl.addEventListener('play', () => this._updateMiniPlayPauseIcon());
+        videoEl.addEventListener('pause', () => this._updateMiniPlayPauseIcon());
+      }
+      this._updateMiniPlayPauseIcon();
+    }
+
     // Quick-add to playlist button in player top bar
     const btnAddToPlaylist = document.getElementById('btn-add-to-playlist');
     if (btnAddToPlaylist) {
       btnAddToPlaylist.addEventListener('click', () => this._quickAddToPlaylist());
     }
+
+    // TEMP DISABLED (2026-07-30): Load-from-URL hidden until it works reliably.
+    // Restore alongside the nav-bar button + #btn-load-url in index.html + the
+    // onLoadUrlClick nav wiring. See notes/SCRATCHPAD.md.
+    // Load from URL — also reachable from the player top bar (for switching
+    // to another remote video mid-session). Primary entry is the nav bar.
+    // document.getElementById('btn-load-url')?.addEventListener('click', () => this._openLoadUrlModal());
 
     // Queue navigation (prev/next)
     document.getElementById('btn-prev')?.addEventListener('click', () => this._playPrev());
@@ -479,6 +541,11 @@ class App {
 
     // Redraw heatmap on resize
     window.addEventListener('resize', () => this.progressBar.redraw());
+    // Keep the library-view queue panel anchored to the filter/sort bar as
+    // the window (and thus the header height) changes while it's open.
+    window.addEventListener('resize', () => {
+      if (this.queuePanel?.visible) this._positionQueuePanelForLibrary();
+    });
 
     // Gate library hover preview when main video is playing — and
     // refresh the player top-bar sync chip on every play/pause/ended
@@ -667,6 +734,19 @@ class App {
         settings: this.settings,
         audienceBridge: this.audienceBridge,
         onResyncComplete: () => this._restoreHssspAfterResync(),
+        // Buttplug "Reload script" — manual re-arm for the reported
+        // post-dropout state where the device stays connected but the
+        // sync engine sits idle ("ready" but nothing moves) until the
+        // user swaps videos. Returns true if a device was available to
+        // re-arm so the panel can show success/failure feedback.
+        onButtplugResync: () => this._resyncButtplug(),
+        // Push a live Handy output-limits (cutoff) change into the per-tick
+        // HDSP engine. HSSP bakes the clamp into the next uploaded script,
+        // so it applies on the next load / variant switch (Range Extender
+        // model) — no disruptive mid-playback re-upload.
+        onHandyCutoffChanged: () => {
+          this.handyHdspSync?.setCutoff(this._cutoffFromSettings('handy'));
+        },
       });
 
       // Keep the Audience tab's LED in lockstep with the bridge's
@@ -719,6 +799,10 @@ class App {
       if (this.tcodeSync) {
         const savedTcOffset = this.settings.get('tcode.defaultOffset');
         if (savedTcOffset != null) this.tcodeSync.setOffsetMs(savedTcOffset);
+        // Output rate (advanced) — apply the saved Hz on boot so it's active
+        // even if the connection panel is never opened this session.
+        const savedTcRate = Number(this.settings.get('tcode.updateRateHz')) || 25;
+        this.tcodeSync.setUpdateRate(savedTcRate);
       }
 
       // Wire command activity indicator (throttled to avoid DOM thrashing)
@@ -1061,7 +1145,52 @@ class App {
       this._keyboard.onVRPan = (yawDelta, pitchDelta) => {
         this._stepVRPan(yawDelta, pitchDelta);
       };
+      // Orgasm Switch (hold X) — wired below once the controller exists.
+      this._keyboard.onOrgasmHold = (active) => this._onOrgasmHold(active);
     }
+
+    // --- Orgasm Switch ---
+    // Hold X → swap the device(s) onto a short looping orgasm script without
+    // pausing the video; release → snap back. The controller drives devices
+    // directly while held; onActivate/onDeactivate stop and restart the
+    // normal sync engines so the two never both drive a device.
+    //
+    // Handy: driven via HDSP per-tick (mode 2) while held — same model
+    // MultiFunPlayer uses for the Handy, and inherently swap/seek-robust
+    // (no cloud re-upload during the loop). HDSP clears HSSP's scriptSet,
+    // so on release we re-establish HSSP from scratch (_restoreHandyAfterOrgasm).
+    this.orgasmSwitch = new OrgasmSwitch({
+      buttplugManager: this.buttplugManager,
+      tcodeManager: this.tcodeManager,
+      handyManager: this.handyManager,
+      onActivate: () => {
+        this._orgasmStoppedEngines = [];
+        if (this.buttplugSync?._active) { this.buttplugSync.stop(); this._orgasmStoppedEngines.push('buttplug'); }
+        if (this.tcodeSync?._active) { this.tcodeSync.stop(); this._orgasmStoppedEngines.push('tcode'); }
+        // Handy: stop both HSSP + the rate-change HDSP engine so neither
+        // fights the orgasm loop, and halt cloud playback before HDSP takes
+        // over. The controller then drives hdspMove on the loop clock.
+        if (this.handyManager?.connected) {
+          this._orgasmHandyEngaged = true;
+          if (this.syncEngine?._active) this.syncEngine.stop();
+          if (this.handyHdspSync?.active) this.handyHdspSync.stop();
+          this.handyManager.hsspStop?.().catch?.(() => {});
+        }
+      },
+      onDeactivate: () => {
+        // Restart whichever local engines we stopped — they re-anchor at
+        // the current video time automatically on their next tick.
+        if (this._orgasmStoppedEngines?.includes('buttplug')) this.buttplugSync.start();
+        if (this._orgasmStoppedEngines?.includes('tcode')) this.tcodeSync.start();
+        this._orgasmStoppedEngines = [];
+        if (this._orgasmHandyEngaged) {
+          this._orgasmHandyEngaged = false;
+          this._restoreHandyAfterOrgasm();
+        }
+      },
+    });
+    // Load the saved global orgasm script (if any) into the controller.
+    this._loadOrgasmScriptFromSettings();
 
     // Editor toggle button
     const btnEditor = document.getElementById('btn-editor');
@@ -1142,7 +1271,14 @@ class App {
         if (dropdown && !dropdown.hidden) {
           dropdown.hidden = true;
         } else {
+          // Render immediately from cache, then refresh from disk in the
+          // background and re-render if the folder gained/lost variants
+          // since the last scan (added files, or a reconnected drive).
           this._showVariantDropdown();
+          this._refreshCurrentVariantsFromDisk().then((changed) => {
+            const dd = document.getElementById('variant-dropdown');
+            if (changed && dd && !dd.hidden) this._showVariantDropdown();
+          });
         }
       });
     }
@@ -3075,6 +3211,30 @@ class App {
     this.buttplugSync.start();
   }
 
+  /**
+   * Force a clean re-arm of the Buttplug sync engine at the current
+   * playback position. Fixes the community-reported state (VacuGlide2,
+   * post internet-dropout) where the device stays connected and the
+   * script loads showing "ready", but sits idle until the user swaps
+   * videos or reconnects.
+   *
+   * A plain reloadActions() only resets action indices — it does NOT
+   * restart the scheduler, so an engine stuck `_active` with a dead
+   * scheduler wouldn't recover. Stopping first guarantees start() takes
+   * the fresh-arm path (reset indices + restart scheduler when playing).
+   * The engine reads player.currentTime live each tick, so no seek is
+   * needed — it re-engages at the current position.
+   *
+   * @returns {boolean} true if a connected device was available to re-arm.
+   */
+  _resyncButtplug() {
+    if (!this.buttplugSync || !this.buttplugManager?.connected) return false;
+    if ((this.buttplugManager.devices?.length || 0) === 0) return false;
+    if (this.buttplugSync._active) this.buttplugSync.stop();
+    this._tryStartButtplugSync();
+    return true;
+  }
+
   _tryStartTCodeSync() {
     if (!this.tcodeSync || !this.tcodeManager?.connected) return;
     if (!this.funscriptEngine.isLoaded) return;
@@ -3110,10 +3270,14 @@ class App {
         this._resolveCloudUpload('autoblow');
         return;
       }
-      // Apply Range Extender at upload time for Autoblow. Same reason
-      // as Handy HSSP: cloud-script-upload model, no per-tick hook.
+      // Apply Range Extender + output cutoff at upload time for Autoblow.
+      // Same reason as Handy HSSP: cloud-script-upload model, no per-tick
+      // hook. Extender stretches first, then the cutoff clamps.
       const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
-      const uploadContent = extendRawScriptContent(rawContent, extenderEnabled);
+      const uploadContent = clampRawScriptContent(
+        extendRawScriptContent(rawContent, extenderEnabled),
+        this._cutoffFromSettings('autoblow'),
+      );
       const ok = await this.autoblowSync.uploadScript(uploadContent);
       if (!ok) {
         this._resolveCloudUpload('autoblow');
@@ -3179,6 +3343,151 @@ class App {
   /**
    * Upload the current funscript to the Handy cloud and start HSSP sync.
    */
+  /**
+   * Read a single-device output cutoff {min,max} from settings, or null if
+   * unset / a no-op (0-100). Used for cloud devices (Handy, Autoblow) that
+   * clamp script content pre-upload, and to feed the Handy HDSP per-tick
+   * engine. `key` is the settings namespace, e.g. 'handy' or 'autoblow'.
+   */
+  _cutoffFromSettings(key) {
+    const c = this.settings?.get?.(`${key}.cutoff`);
+    if (!c || !Number.isFinite(c.min) || !Number.isFinite(c.max)) return null;
+    if (c.min === 0 && c.max === 100) return null;  // no-op
+    return { min: c.min, max: c.max };
+  }
+
+  /**
+   * Orgasm Switch hold callback (keyboard X). active=true on press,
+   * false on release. Toasts a hint if no orgasm script is configured.
+   */
+  _onOrgasmHold(active) {
+    if (!this.orgasmSwitch) return;
+    if (active) {
+      const result = this.orgasmSwitch.activate();
+      if (result === 'not-configured') {
+        showToast(t('toast.orgasmNotConfigured'), 'info', 3500);
+      }
+    } else {
+      this.orgasmSwitch.deactivate();
+    }
+  }
+
+  /** Load the saved global orgasm script into the controller (startup). */
+  async _loadOrgasmScriptFromSettings() {
+    const path = this.settings?.get?.('player.orgasmScript');
+    if (!path || !this.orgasmSwitch) return;
+    try {
+      const content = await window.funsync.readFunscript(path);
+      if (!this.orgasmSwitch.loadScript(content)) {
+        console.warn('[OrgasmSwitch] saved script failed to load:', path);
+      }
+    } catch (err) {
+      console.warn('[OrgasmSwitch] could not read saved script:', err?.message || err);
+    }
+  }
+
+  /**
+   * Pick a global orgasm script via the native dialog, validate + load it
+   * into the controller, and persist the path. Returns the path or null.
+   * Wired to the Settings panel.
+   */
+  async _pickOrgasmScript() {
+    const result = await window.funsync.selectFunscript();
+    const path = result?.path;
+    if (!path) return null;
+    try {
+      const content = await window.funsync.readFunscript(path);
+      if (!this.orgasmSwitch?.loadScript(content)) {
+        showToast(t('toast.orgasmInvalidScript'), 'error');
+        return null;
+      }
+    } catch {
+      showToast(t('toast.orgasmInvalidScript'), 'error');
+      return null;
+    }
+    this.settings.set('player.orgasmScript', path);
+    showToast(t('toast.orgasmScriptSet', { name: result.name || '' }), 'info', 2500);
+    return path;
+  }
+
+  /** Clear the configured orgasm script. */
+  _clearOrgasmScript() {
+    this.settings.set('player.orgasmScript', null);
+    if (this.orgasmSwitch) this.orgasmSwitch.loadScript('');
+  }
+
+  /** Open the Load-from-URL (remote video) modal. Shared by the nav-bar
+   *  action and the player top-bar button. */
+  _openLoadUrlModal() {
+    import('../components/remote-video-modal.js').then((mod) => {
+      mod.openRemoteVideoModal({ onPlay: (result, scriptPath) => this._loadRemoteVideo(result, scriptPath) });
+    });
+  }
+
+  /**
+   * Play a yt-dlp-resolved remote video (from the Load-from-URL dialog), with
+   * an optional manually-attached local funscript. Reuses loadVideo's sync /
+   * autoplay / error handling via the `_remote` descriptor; the script (if
+   * any) loads onto the now-current video exactly like an EroScripts download.
+   *
+   * @param {{proxyUrl:string, title?:string, isHls?:boolean}} result
+   * @param {string|null} [scriptPath] — local funscript to pair (v1: manual)
+   */
+  async _loadRemoteVideo(result, scriptPath = null) {
+    if (!result?.proxyUrl) return;
+    this.loadVideo({
+      name: result.title || t('remoteVideo.untitled'),
+      path: result.proxyUrl,
+      _remote: true,
+      isHls: !!result.isHls,
+    });
+    if (scriptPath) {
+      try {
+        const content = await window.funsync.readFunscript(scriptPath);
+        if (content) {
+          const name = scriptPath.split(/[\\/]/).pop() || 'script.funscript';
+          this.loadFunscript({ name, textContent: content, path: scriptPath });
+        }
+      } catch (err) {
+        showToast(t('toast.downloadAutoLoadFailed', { error: err?.message || err }), 'error', 5000);
+      }
+    }
+  }
+
+  /**
+   * Restore the Handy after an orgasm-switch hold ends. The orgasm loop drove
+   * HDSP (mode 2), which clears HSSP's scriptSet, so we can't just hsspPlay.
+   *   - At non-1× playback the normal Handy mode IS HDSP, so just restart the
+   *     polled engine — it re-drives hdspMove at video time (no scriptSet needed).
+   *   - At 1× we re-establish HSSP: re-set the cached cloud script (fast,
+   *     USING_CACHED) then resume at the current video time. Falls back to a
+   *     full re-upload if no cached URL exists.
+   */
+  async _restoreHandyAfterOrgasm() {
+    if (!this.handyManager?.connected) return;
+    const rate = this.videoPlayer?.playbackRate || 1;
+    if (rate !== 1) {
+      if (this.handyHdspSync && !this.handyHdspSync.active) this.handyHdspSync.start();
+      return;
+    }
+    if (!this.funscriptEngine?.isLoaded) return;  // no script → leave device idle
+    try {
+      let ok = false;
+      if (this._scriptCloudUrl) {
+        ok = await this.handyManager.setupScript(this._scriptCloudUrl);
+      }
+      if (ok) {
+        this.syncEngine._scriptReady = true;
+        this.syncEngine.start();  // _handlePlaying → hsspPlay at current video time
+      } else {
+        // No cached URL (script never uploaded this session) → full path.
+        await this._uploadAndStartSync();
+      }
+    } catch (err) {
+      console.warn('[OrgasmSwitch] Handy HSSP restore failed:', err?.message || err);
+    }
+  }
+
   async _uploadAndStartSync() {
     if (!this.handyManager?.connected) {
       console.log('[Handy] Not connected, skipping script upload');
@@ -3199,7 +3508,14 @@ class App {
     // original content if extender is off or the script is already
     // wide (no-op short-circuit inside the helper).
     const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
-    const uploadContent = extendRawScriptContent(rawContent, extenderEnabled);
+    // Extender stretches first, then the hard floor/ceiling cutoff clamps —
+    // same order as the per-tick stack (extender → … → cutoff). HSSP plays
+    // server-side, so both must be baked into the uploaded content.
+    const cutoff = this._cutoffFromSettings('handy');
+    const uploadContent = clampRawScriptContent(
+      extendRawScriptContent(rawContent, extenderEnabled),
+      cutoff,
+    );
 
     console.log('[Handy] Uploading funscript to cloud...');
     const setupOk = await this.handyManager.uploadAndSetScript(uploadContent);
@@ -3229,6 +3545,9 @@ class App {
     // reflects the outgoing video at this point.
     this._maybePushCurrentToHistory();
     this._queueHistoryPushedForCurrent = false;
+    // Fresh load — allow a remux fallback for this video if its container
+    // turns out to be unplayable (see _tryRemuxFallback).
+    this._remuxAttemptedForPath = null;
 
     // Clean up previous video
     if (this._currentVideoUrl) {
@@ -3277,10 +3596,10 @@ class App {
       fsBadge.hidden = true;
       fsBadge.innerHTML = '';
     }
-    const subBadge = document.getElementById('subtitle-badge');
-    if (subBadge) {
-      subBadge.hidden = true;
-    }
+    // Tear down any subtitle track from the previous video. Without this,
+    // a <track> attached by loadSubtitles() keeps rendering after switching
+    // to a video that has no subtitle of its own (persisted until restart).
+    if (this.videoPlayer) this.videoPlayer.clearSubtitles();
     // Reset variant selector
     const variantSelector = document.getElementById('variant-selector');
     if (variantSelector) variantSelector.hidden = true;
@@ -3303,9 +3622,17 @@ class App {
       this._navigateTo('player');
     }
 
-    // Set video source — use file:// URL for local paths, blob URL for File objects
+    // Set video source — use file:// URL for local paths, blob URL for File
+    // objects, or the localhost proxy URL as-is for remote (yt-dlp-resolved)
+    // streams.
     let videoUrl;
-    if (file._isPathBased && file.path) {
+    let loadOpts = {};
+    if (file._remote && file.path) {
+      // file.path is already the playable proxy URL (http://127.0.0.1/...).
+      // HLS goes through hls.js (MSE); progressive plays directly.
+      videoUrl = file.path;
+      loadOpts = { isHls: !!file.isHls, remote: true };
+    } else if (file._isPathBased && file.path) {
       // pathToFileURL percent-encodes `#`, `?`, `%`, spaces etc. — without
       // this, filenames like "Your Step-sister #1.mp4" truncate at the
       // `#` and load fails with "format not supported".
@@ -3316,8 +3643,11 @@ class App {
     }
 
     this._currentVideoName = file.name;
-    this._currentVideoPath = file.path || null;
-    this.videoPlayer.loadSource(videoUrl, file.name);
+    // Remote streams have no local path — keep _currentVideoPath null so
+    // local-only paths (remux-on-error, recent files, library lookup) stay off.
+    this._currentVideoPath = file._remote ? null : (file.path || null);
+    this._currentIsRemote = !!file._remote;
+    this.videoPlayer.loadSource(videoUrl, file.name, loadOpts);
     this.progressBar.setVideoSource(videoUrl);
     this._updateCategoryDots();
     // Refresh the queue panel state so the "Now playing" row updates
@@ -3362,6 +3692,19 @@ class App {
       const src = this.videoPlayer.video.src || '';
       const isFileUrl = src.startsWith('file:');
 
+      // Unsupported container (code 4 = MEDIA_ERR_SRC_NOT_SUPPORTED). The
+      // common case is a .mkv holding H.264/AAC — Chromium can't demux
+      // Matroska even though it can decode the codecs. Before surfacing any
+      // error, try a one-time ffmpeg stream-copy remux to MP4 and reload.
+      // Guarded so it only fires for the CURRENT video and only once per
+      // load (stale accumulated listeners + a failed re-load can't loop).
+      if (code === 4 && isFileUrl && this._currentVideoPath
+          && this._currentVideoPath === (file.path || null)
+          && this._remuxAttemptedForPath !== this._currentVideoPath) {
+        this._tryRemuxFallback(this._currentVideoPath, file.name);
+        return;
+      }
+
       // Stop all sync engines and devices immediately
       if (this.syncEngine) this.syncEngine.stop();
       if (this.buttplugSync?._active) this.buttplugSync.stop();
@@ -3377,6 +3720,13 @@ class App {
         showToast(t('toast.sourceDisconnectedFile'), 'error', 5000);
         // Invalidate library cache so re-scan catches the change
         if (this.library) this.library._lastScanKey = null;
+      } else if (code === 3 && isFileUrl && file.path) {
+        // Decode failure on a local file. Most often a codec/profile the
+        // OS Chromium build can't decode (e.g. H.264 "High 10" / 4:2:2 /
+        // 4:4:4 on Linux) — while a plain 8-bit 4:2:0 file of the same
+        // codec plays fine. Name the actual codec via ffprobe so the user
+        // knows exactly what to transcode instead of a guess.
+        this._showDecodeErrorWithCodec(file.path);
       } else {
         const msgs = {
           1: t('toast.videoErrorAborted'),
@@ -3392,19 +3742,98 @@ class App {
     const titleEl = document.getElementById('video-title');
     titleEl.textContent = file.name.replace(/\.[^/.]+$/, '');
 
-    // Track recent file
-    if (file.path) {
+    // Track recent file (local only — a localhost proxy URL isn't re-openable).
+    if (file.path && !file._remote) {
       this.settings.addRecentFile(file.path);
     }
 
-    // Auto-pair: check pending funscripts for matching name
-    const match = this._pendingFunscripts.find((f) => isAutoMatch(file.name, f.name));
-    if (match) {
-      this._pendingFunscripts = this._pendingFunscripts.filter((f) => f !== match);
-      this.loadFunscript(match);
-    } else if (!this.funscriptEngine.isLoaded) {
-      // No funscript found locally — try auto-matching on EroScripts (background, non-blocking)
-      this._autoMatchEroScripts(file.name);
+    // Auto-pair: check pending funscripts for matching name. Skipped for
+    // remote streams in v1 (script is attached manually in the Load-from-URL
+    // dialog; EroScripts auto-match is a planned follow-up).
+    if (!file._remote) {
+      const match = this._pendingFunscripts.find((f) => isAutoMatch(file.name, f.name));
+      if (match) {
+        this._pendingFunscripts = this._pendingFunscripts.filter((f) => f !== match);
+        this.loadFunscript(match);
+      } else if (!this.funscriptEngine.isLoaded) {
+        // No funscript found locally — try auto-matching on EroScripts (background, non-blocking)
+        this._autoMatchEroScripts(file.name);
+      }
+    }
+  }
+
+  /**
+   * Turn a bare MEDIA_ERR_DECODE into an actionable message by naming the
+   * codec/profile/pixel-format via the backend's ffprobe. This is the
+   * difference between "Video decoding failed — unsupported codec?" and
+   * "Video decoding failed: H264 High 10 yuv422p — not supported on this
+   * system". Community-reported by a Fedora user whose H.264 files played
+   * inconsistently (some High 10 / 4:2:2, some 8-bit 4:2:0). Best-effort:
+   * falls back to the generic message if ffprobe is unavailable.
+   *
+   * @param {string} path  local video path that failed to decode
+   */
+  async _showDecodeErrorWithCodec(path) {
+    let detail = '';
+    try {
+      const meta = await window.funsync.fetchMetadata?.(path);
+      if (meta) {
+        const parts = [];
+        if (meta.codec && meta.codec !== 'unknown') parts.push(String(meta.codec).toUpperCase());
+        if (meta.profile) parts.push(String(meta.profile));
+        if (meta.pixFmt) parts.push(String(meta.pixFmt));
+        detail = parts.join(' ').trim();
+      }
+    } catch { /* fall through to the generic message */ }
+    if (detail) {
+      showToast(t('toast.videoErrorDecodeCodec', { codec: detail }), 'error', 8000);
+    } else {
+      showToast(t('toast.videoErrorDecode'), 'error');
+    }
+  }
+
+  /**
+   * Container-remux fallback. When a local video fails to load with
+   * MEDIA_ERR_SRC_NOT_SUPPORTED (code 4) — typically a .mkv that Chromium
+   * can't demux even though it supports the H.264/AAC inside — repackage it
+   * to MP4 via the backend's ffmpeg (stream copy, lossless, cached) and
+   * reload from the remuxed file. The armed `loadeddata` autoplay listener
+   * from loadVideo survives the re-load (same <video> element), so playback
+   * resumes automatically.
+   *
+   * @param {string} originalPath  source path that failed to play
+   * @param {string} name          display name for loadSource
+   */
+  async _tryRemuxFallback(originalPath, name) {
+    // One attempt per path — set the guard up front so accumulated/stale
+    // error listeners calling in can't double-trigger a remux.
+    this._remuxAttemptedForPath = originalPath;
+
+    const ext = (originalPath.split('.').pop() || 'video').toUpperCase();
+    const toast = showToast(t('toast.remuxPreparing', { format: ext }), 'info', 0);
+
+    try {
+      const result = await window.funsync.remuxVideo?.(originalPath);
+      // The user may have loaded a different video while we were remuxing —
+      // don't hijack their new playback.
+      if (this._currentVideoPath !== originalPath) {
+        toast?.dismiss?.();
+        return;
+      }
+      if (!result?.path) throw new Error('remux returned no file');
+
+      const url = pathToFileURL(result.path);
+      // Point playback at the remuxed MP4. Same <video> element is reused,
+      // so loadVideo's armed loadeddata→autoplay listener fires.
+      this.videoPlayer.loadSource(url, name);
+      this.progressBar.setVideoSource(url);
+      console.log(`[Remux] playing remuxed copy of ${originalPath}`);
+      toast?.dismiss?.();
+    } catch (err) {
+      toast?.dismiss?.();
+      console.warn('[Remux] fallback failed:', err?.message || err);
+      // Fall back to the normal "format not supported" message.
+      showToast(t('toast.videoErrorFormat'), 'error');
     }
   }
 
@@ -3490,6 +3919,9 @@ class App {
       // script-editor.js), so this is a cheap cache.
       if (this.handyHdspSync) {
         this.handyHdspSync.setActions(this.funscriptEngine.getActions());
+        // HDSP is per-tick, so the cutoff clamps live (HSSP bakes it into
+        // the uploaded content instead). Same 'handy' setting drives both.
+        this.handyHdspSync.setCutoff(this._cutoffFromSettings('handy'));
       }
 
       // Render heatmap if video duration is known
@@ -3630,8 +4062,12 @@ class App {
     // Run leave hook for current view
     this._onLeaveView(current);
 
-    // Hide all view elements
+    // Hide all view elements. Exception: when the mini-player is docked,
+    // keep the player container visible (it floats as a fixed corner
+    // overlay over the target view) unless we're navigating INTO the
+    // player, which expands it back to full and clears mini mode.
     for (const vid of ['library', 'player', 'playlists', 'categories']) {
+      if (vid === 'player' && this._miniActive && viewId !== 'player') continue;
       const el = this._getViewEl(vid);
       if (el) el.hidden = true;
     }
@@ -3667,7 +4103,9 @@ class App {
 
     const leavingEl = this._getViewEl(leaving);
     const targetEl = this._getViewEl(target);
-    if (leavingEl) leavingEl.hidden = true;
+    // Keep the docked mini-player visible when backing out of the player
+    // (it floats over the target view); other leaves hide normally.
+    if (leavingEl && !(leaving === 'player' && this._miniActive)) leavingEl.hidden = true;
     if (targetEl) targetEl.hidden = false;
 
     this._onEnterView(target);
@@ -3675,8 +4113,16 @@ class App {
 
   /** Hook called when entering a view. */
   _onEnterView(viewId) {
+    // Reflect the active view on #app so CSS can adapt (e.g. the queue panel
+    // clears the library filter/sort bar in library view but not in player).
+    const appEl = document.getElementById('app');
+    if (appEl) appEl.dataset.view = viewId;
+
     // Show/hide nav bar (hidden during player)
     if (viewId === 'player') {
+      // Entering the full player always clears the docked mini-player
+      // (whether via Expand or by loading a new video from the library).
+      this._clearMiniplayer();
       this.navBar.hide();
       // If a deferred PiP teardown is pending (user navigated away with PiP
       // open and now they're back), signal the leavepictureinpicture handler
@@ -3693,6 +4139,9 @@ class App {
       // Recheck source availability before showing (drive may have been disconnected)
       this._refreshCollectionsUI().then(() => {
         this.library.show(this._getViewEl('library'));
+        // Re-anchor the queue panel below the (now-rendered) filter/sort bar
+        // if it's open (e.g. returning to library from the player).
+        if (this.queuePanel?.visible) this._positionQueuePanelForLibrary();
       });
       return;
     } else if (viewId === 'playlists') {
@@ -3714,6 +4163,14 @@ class App {
       // back to the player view first, the deferred teardown is cancelled.
       if (this._isOurVideoInPip()) {
         this._beginDeferredPipTeardown();
+        return;
+      }
+      // Mini-player: if a video is actively playing, keep it alive as a
+      // docked corner overlay instead of tearing playback down, so the
+      // user can browse the library while it plays (community #181).
+      // Phase 1 of SCOPE-separate-player-window.md.
+      if (this._shouldEnterMiniplayer()) {
+        this._enterMiniplayer();
         return;
       }
       this._teardownPlayback();
@@ -3786,6 +4243,463 @@ class App {
   /** Thin App method delegating to the pure pip-guard helper. */
   _beginDeferredPipTeardown() {
     beginDeferredPipTeardown(this, this);
+  }
+
+  // --- Mini-player (Phase 1 of SCOPE-separate-player-window.md) ---
+  //
+  // Keeps the video playing in a docked corner overlay while the user
+  // browses the library, instead of tearing playback down on leave. No
+  // second window, no IPC — the <video> element never moves, so sync
+  // engines and every playback feature keep running untouched. Community
+  // #181 (belgriffinite) / #189 (deaf).
+
+  /** Decide whether leaving the player should dock into the mini-player. */
+  _shouldEnterMiniplayer() {
+    const v = this.videoPlayer?.video;
+    return shouldEnterMiniplayer({
+      enabled: this.settings?.get?.('player.miniPlayer') !== false,
+      hasVideo: !!(v && (v.currentSrc || v.src)),
+      paused: !!v?.paused,
+      ended: !!v?.ended,
+    });
+  }
+
+  /** Dock the player as a fixed corner overlay (playback continues). */
+  _enterMiniplayer() {
+    const el = this._getViewEl('player');
+    if (!el) { this._teardownPlayback(); return; }
+    this._miniActive = true;
+    el.hidden = false;
+    el.classList.add('player-container--mini');
+    this.upNextCard?.setMini(true); // compact "Next video starts in Ns" strip
+    this._updateMiniPlayPauseIcon();
+  }
+
+  /** Point the mini play/pause button icon at the video's actual state. */
+  _updateMiniPlayPauseIcon() {
+    const btn = document.getElementById('miniplayer-playpause');
+    if (!btn) return;
+    const paused = !!(this.videoPlayer?.video?.paused ?? true);
+    btn.replaceChildren(icon(paused ? Play : Pause, { width: 16, height: 16 }));
+  }
+
+  // --- Detached player window (Phase 2 of SCOPE-separate-player-window.md) ---
+  //
+  // Phase 2a: window lifecycle only — open/close + the READY → INITIAL_STATE
+  // handshake (theme + locale). The <video> move (2b) and the IPC playback
+  // proxy that keeps device sync following the detached clock (2c) build on
+  // this. The window is treated like an external playback source, à la VR.
+
+  _initPlayerWindow() {
+    this._playerWindowOpen = false;
+    this._playerWindowActive = false; // sync take-over engaged
+    this._playerWinProxy = null;
+    window.funsync?.onPlayerPopoutEvent?.((evt) => {
+      if (!evt) return;
+      if (evt.type === 'opened') {
+        this._playerWindowOpen = true;
+        this._updatePlayerWindowButton();
+        return;
+      }
+      if (evt.type === 'closed') {
+        this._playerWindowOpen = false;
+        this._updatePlayerWindowButton();
+        this._deactivatePlayerWindow(); // fold playback back to the inline player
+        return;
+      }
+      if (evt.type === 'message') this._onPlayerWindowMessage(evt.payload);
+    });
+  }
+
+  _onPlayerWindowMessage(payload) {
+    const type = PLAYERWIN.classifyMessage(payload);
+    if (type === PLAYERWIN.READY) {
+      // Pop-out finished loading → take over sync, then hand it the video.
+      this._sendPlayerWindowInitialState(); // theme + locale (video via LOAD_VIDEO)
+      this._activatePlayerWindow();
+      this._sendLoadVideoToPopout(this._popoutWasPlaying !== false);
+      return;
+    }
+    if (type === PLAYERWIN.SWITCH_VARIANT) {
+      // Variant clicked in the pop-out → do the real switch in main (loads
+      // script + re-uploads to cloud devices), then re-stream fresh data.
+      this._handlePhoneSwitchVariant(payload.label)
+        .then(() => this._streamPlayerWindowData())
+        .catch((err) => console.warn('[PlayerWindow] variant switch failed:', err));
+      return;
+    }
+    if (type === PLAYERWIN.LOAD_PREV) { this._playPrev(); return; }
+    if (type === PLAYERWIN.LOAD_NEXT) { this._playNext(); return; }
+    if (type === PLAYERWIN.UP_NEXT_ACTION) { this._handlePopoutUpNextAction(payload.action); return; }
+    if (!this._playerWindowActive || !this._playerWinProxy) return;
+    // The pop-out's <video> is the authority; its clock drives the proxy,
+    // which the sync engines read (exactly as the web-remote phone does).
+    if (type === PLAYERWIN.TIME_TICK) {
+      this._playerWinProxy.updateState({
+        at: payload.timeMs, paused: payload.paused, rate: payload.rate,
+      });
+      // Drive the Up Next engine off the pop-out's clock (its inline event
+      // hooks are dead while detached). Looping in the pop-out suppresses
+      // it — a looped video should never auto-advance. Editor-open in main
+      // still suppresses too.
+      if (this.upNextEngine) {
+        const editorOpen = !!this.scriptEditor?.isOpen;
+        this.upNextEngine.setSuppressed(editorOpen || !!payload.loop);
+        this.upNextEngine.check();
+      }
+    } else if (type === PLAYERWIN.VIDEO_EVENT) {
+      switch (payload.event) {
+        case 'play': this._playerWinProxy.handlePlay(); break;
+        case 'pause': this._playerWinProxy.handlePause(); break;
+        case 'seeked': this._playerWinProxy.seek(payload.timeMs); break;
+        case 'ended': this._playerWinProxy.handleEnded(); this._onPopoutVideoEnded(); break;
+        default: break;
+      }
+    } else if (type === PLAYERWIN.VIDEO_META && payload.durationMs) {
+      // Proxy duration is in seconds (see _activatePlayerWindow).
+      this._playerWinProxy.updateState({ duration: payload.durationMs / 1000 });
+    }
+  }
+
+  /**
+   * The pop-out's <video> finished. Mirror the inline dual-path advance:
+   * Up Next (auto/on) drives the countdown + advance via its own timer;
+   * when it's off (or has no next), fall back to the Play-All queue advance
+   * (the inline `queueEndedListener` equivalent). A recent-advance timestamp
+   * (`_lastUpNextAdvanceAt`, stamped when the engine fires onPlayNext)
+   * prevents a double advance when both would fire on the same end.
+   */
+  _onPopoutVideoEnded() {
+    // A zero-length trailing zone makes check() fire onPlayNext synchronously.
+    this.upNextEngine?.check();
+    // Up Next (auto) may have just advanced via its own wall-clock countdown
+    // timer a beat before this end arrived over IPC — a timestamp (not a
+    // per-call latch) is what survives that cross-renderer window and stops
+    // a double-skip. If a card is still counting down, its timer will fire.
+    const advancedRecently = this._lastUpNextAdvanceAt
+      && (Date.now() - this._lastUpNextAdvanceAt) < 1000;
+    const upNextDriving = advancedRecently
+      || (this.upNextEngine?.visible && this.upNextEngine?.mode !== 'off');
+    if (!upNextDriving) this._advanceQueueOnEnded();
+  }
+
+  /** Relay an Up Next card interaction from the pop-out to the one engine. */
+  _handlePopoutUpNextAction(action) {
+    const eng = this.upNextEngine;
+    if (!eng) return;
+    switch (action) {
+      case 'play': eng.playNext(); break;
+      case 'dismiss': eng.dismiss(); break;
+      case 'pause': eng.pauseCountdown(); break;
+      case 'resume': eng.resumeCountdown(); break;
+      case 'back': eng.dismiss(); break; // end-of-list CTA: just dismiss (source-nav is a main-window concern, §9.3)
+      default: break;
+    }
+  }
+
+  /** Build the LOAD_VIDEO payload for the pop-out, or null if unsupported. */
+  _currentPopoutVideo() {
+    const vid = this.videoPlayer?.video;
+    if (!vid) return null;
+    // Prefer the path we set synchronously in loadVideo — `vid.currentSrc`
+    // lags a source swap (the browser's resource-selection is async), so on
+    // a queue advance it still points at the PREVIOUS video for a beat,
+    // which made the pop-out replay the same file (title was already new).
+    let src = '';
+    if (this._currentVideoPath && !this._currentIsRemote) {
+      src = pathToFileURL(this._currentVideoPath);
+    } else {
+      src = vid.currentSrc || vid.src || '';
+    }
+    // 2b supports local library files (file://). blob: URLs (drag-drop) are
+    // per-renderer and remote/HLS needs the proxy pipeline — both fall back
+    // to keeping the inline player (no pop-out take-over).
+    if (!src.startsWith('file:')) return null;
+    return {
+      src,
+      title: this._currentVideoName || '',
+      timeMs: Math.round((vid.currentTime || 0) * 1000),
+      autoplay: !vid.paused,
+    };
+  }
+
+  _sendPlayerWindowInitialState() {
+    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.INITIAL_STATE, {
+      theme: document.documentElement.dataset.theme || 'dark',
+      uiStyle: document.documentElement.dataset.style || 'classic',
+      locale: this.settings?.get?.('player.language') || 'en',
+      backendPort: this.backendPort || null,
+      video: null, // sent separately via LOAD_VIDEO (unified first-open + re-route)
+    }));
+  }
+
+  /**
+   * Send the current video to the pop-out. `fromStart` forces position 0 —
+   * used for a fresh load (queue advance / library click) where the inline
+   * <video>'s currentTime still reads the PREVIOUS clip's end for a beat
+   * (async resource selection); the first-open take-over preserves position.
+   */
+  _sendLoadVideoToPopout(autoplay, fromStart = false) {
+    const v = this._currentPopoutVideo();
+    if (!v) return;
+    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.LOAD_VIDEO, {
+      ...v, timeMs: fromStart ? 0 : v.timeMs, autoplay: autoplay !== false,
+    }));
+    this._streamPlayerWindowData();
+  }
+
+  /**
+   * Route a freshly-loaded video into the open pop-out. The load path set
+   * up the inline <video> (hidden) + funscript + cloud uploads with engines
+   * on the local player; re-activating rebinds them onto the proxy and
+   * hands the video to the pop-out. Unsupported srcs (blob/HLS) fold the
+   * pop-out back and play inline so we never strand it. Shared by the
+   * library-click and queue-navigation paths.
+   */
+  async _routeLoadedVideoToPlayerWindow(autoplay = true) {
+    if (!this._playerWindowActive) return;
+    if (this._currentPopoutVideo()) {
+      this._activatePlayerWindow();
+      this._sendLoadVideoToPopout(autoplay, true); // fresh clip → start at 0
+    } else {
+      await window.funsync?.playerPopoutClose?.(); // triggers fold-back
+      this._navigateTo('player');
+      this.videoPlayer?.video?.play?.().catch(() => {});
+    }
+  }
+
+  /**
+   * Stream the funscript-driven overlay data (heatmap, chapters/bookmarks,
+   * variant list) to the pop-out so its reused ProgressBar + variant
+   * selector render exactly like the inline player. The data lives here in
+   * main with the devices; the pop-out is a display of it.
+   */
+  _streamPlayerWindowData() {
+    if (!this._playerWindowOpen) return;
+    const relay = (payload) => window.funsync?.playerPopoutRelay?.('to-popout', payload);
+    const durationMs = Math.round((this.videoPlayer?.duration || 0) * 1000);
+    if (this.funscriptEngine?.isLoaded) {
+      relay(PLAYERWIN.makeMessage(PLAYERWIN.HEATMAP, {
+        actions: this.funscriptEngine.getActions(), durationMs,
+      }));
+      relay(PLAYERWIN.makeMessage(PLAYERWIN.CHAPTERS, {
+        chapters: this.funscriptEngine.getChapters(),
+        bookmarks: this.funscriptEngine.getBookmarks(),
+        durationMs,
+      }));
+    }
+    const list = (this._allVariantsWithManual || []).map((v) => ({ label: v.label, path: v.path }));
+    const activeLabel = list[this._activeVariantIndex || 0]?.label || '';
+    relay(PLAYERWIN.makeMessage(PLAYERWIN.VARIANTS, { list, activeLabel }));
+  }
+
+  /** Send one Up Next card sub-event to the pop-out (no-op if not detached). */
+  _relayUpNext(fields) {
+    if (!this._playerWindowActive) return;
+    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.UP_NEXT, fields));
+  }
+
+  /**
+   * Mirror the Up Next "show" into the pop-out with the metadata its reused
+   * UpNextCard needs (title/duration/funscript live here with the library,
+   * not in the detached renderer), then stream the thumbnail once captured.
+   */
+  _relayUpNextShow(path, countdownSec) {
+    if (!this._playerWindowActive) return;
+    const v = this.library?.getVideoByPath?.(path);
+    const name = v?.name || String(path || '').split(/[\\/]/).pop() || '';
+    this._relayUpNext({
+      action: 'show', path, countdownSec, name,
+      duration: v?.duration || 0, hasFunscript: !!v?.hasFunscript,
+    });
+    // Cache-first thumbnail (usually instant); stream it when ready as long
+    // as the same card is still up.
+    this._captureUpNextThumb(path).then((r) => {
+      if (r?.dataUrl && this._playerWindowActive && this._upNextCurrentPath === path) {
+        this._relayUpNext({ action: 'thumb', path, thumbDataUrl: r.dataUrl });
+      }
+    }).catch(() => { /* skeleton stays */ });
+  }
+
+  /**
+   * Engage the pop-out as the playback authority. Modeled on the web-remote
+   * take-over (`_onRemotePhoneConnected`) but lighter: the SAME video/script
+   * is already loaded + uploaded, so we only pause the inline <video> and
+   * rebind the sync engines to a RemotePlaybackProxy. The proxy is seeded
+   * PAUSED so devices idle until the pop-out's <video> actually starts
+   * playing (its VIDEO_EVENT 'play' drives the proxy from there).
+   *
+   * ⚠ HARDWARE-TEST REQUIRED (Handy HSSP re-anchor). SCOPE §9.5.
+   */
+  _activatePlayerWindow() {
+    // Idempotent: safe to call again to re-bind onto a newly-loaded video
+    // (library click while the pop-out is already open).
+    const vid = this.videoPlayer?.video;
+    if (!vid || !this._currentPopoutVideo()) return; // unsupported src — stay inline
+    // Don't fight another external source. If VR / web-remote is driving,
+    // the local <video> isn't the sync source, so there's nothing to hand off.
+    if (this._remoteActive || this.vrBridge?.connected) return;
+
+    const startMs = Math.round((vid.currentTime || 0) * 1000);
+    if (!vid.paused) vid.pause(); // pop-out becomes the audio + clock source
+    if (this._miniActive) this._clearMiniplayer(); // no redundant corner overlay
+
+    if (!this._playerWinProxy) this._playerWinProxy = new RemotePlaybackProxy();
+    this._playerWinProxy.reset();
+    // Proxy `duration` is in SECONDS (its internal end-guard compares against
+    // currentTime-in-seconds); only `at` is ms. Seeding it in ms broke the
+    // Up Next trailing-zone math (card never showed).
+    this._playerWinProxy.updateState({ at: startMs, paused: true, duration: vid.duration || 0 });
+    const proxyPlayer = this._playerWinProxy.asVideoPlayerWrapper();
+
+    // Stop engines, repoint to the proxy, restart (idle until proxy plays).
+    // Same script already set on cloud devices — no re-upload needed.
+    if (this.syncEngine?._active) this.syncEngine.stop();
+    if (this.buttplugSync?._active) this.buttplugSync.stop();
+    if (this.tcodeSync?._active) this.tcodeSync.stop();
+    if (this.autoblowSync?._active) this.autoblowSync.stop();
+    if (this.handyHdspSync?.active) this.handyHdspSync.stop();
+
+    if (this.buttplugSync && this.buttplugManager?.connected) {
+      this.buttplugSync.player = proxyPlayer; this.buttplugSync.reloadActions(); this.buttplugSync.start();
+    }
+    if (this.tcodeSync && this.tcodeManager?.connected) {
+      this.tcodeSync.player = proxyPlayer; this.tcodeSync.reloadActions(); this.tcodeSync.start();
+    }
+    if (this.syncEngine && this.handyManager?.connected) {
+      this.syncEngine.player = proxyPlayer; this.syncEngine.start();
+    }
+    if (this.autoblowSync && this.autoblowManager?.connected) {
+      this.autoblowSync.player = proxyPlayer; this.autoblowSync.start();
+    }
+
+    // Repoint Up Next onto the proxy so its countdown + auto-advance track
+    // the POP-OUT's clock (the inline <video> is paused — it never reaches
+    // the trailing zone). The card is streamed to the pop-out; the engine
+    // fires onPlayNext → _playUpNext which re-routes the next video into it.
+    if (this.upNextEngine) this.upNextEngine.player = proxyPlayer;
+
+    this._playerWindowActive = true;
+    // Main window returns to the library so it stays browseable (deaf #189).
+    if (this._currentView() === 'player') this._navigateTo('library');
+  }
+
+  /**
+   * Fold playback back into the main window when the pop-out closes. Mirror
+   * of the web-remote disconnect: stop engines, rebind to the local player,
+   * resume the inline <video> at the pop-out's last position.
+   */
+  _deactivatePlayerWindow() {
+    if (!this._playerWindowActive) return;
+    const proxyMs = Math.round((this._playerWinProxy?.currentTime || 0) * 1000);
+    const wasPlaying = !!(this._playerWinProxy && !this._playerWinProxy.paused);
+
+    if (this.syncEngine?._active) this.syncEngine.stop();
+    if (this.buttplugSync?._active) this.buttplugSync.stop();
+    if (this.tcodeSync?._active) this.tcodeSync.stop();
+    if (this.autoblowSync?._active) this.autoblowSync.stop();
+    if (this.handyManager?.connected) this.handyManager.hsspStop();
+
+    const localPlayer = this.videoPlayer;
+    if (this.buttplugSync) this.buttplugSync.player = localPlayer;
+    if (this.tcodeSync) this.tcodeSync.player = localPlayer;
+    if (this.syncEngine) this.syncEngine.player = localPlayer;
+    if (this.autoblowSync) this.autoblowSync.player = localPlayer;
+    // Rebind Up Next to the inline player and drop any card that was
+    // streamed to the (now closed) pop-out; check() re-shows it inline if
+    // the inline playhead is still in the trailing zone.
+    if (this.upNextEngine) { this.upNextEngine.player = localPlayer; this.upNextEngine.hide(); }
+
+    this._playerWinProxy?.reset();
+    this._playerWindowActive = false;
+
+    // Restart every CONNECTED engine against the local <video>, mirroring the
+    // take-over in _activatePlayerWindow. This MUST run before vid.play() so
+    // the Handy's 'playing'-driven re-anchor (hsspPlay) fires and the per-tick
+    // engines pick up the resumed clock. The previous code restarted ONLY
+    // Buttplug + T-Code, and only in vid.play()'s .then() — so the Handy
+    // (syncEngine) and Autoblow were never restarted and their devices went
+    // silent as soon as the pop-out closed.
+    if (this.buttplugSync && this.buttplugManager?.connected) {
+      this.buttplugSync.reloadActions();
+      this.buttplugSync.start();
+    }
+    if (this.tcodeSync && this.tcodeManager?.connected) {
+      this.tcodeSync.reloadActions();
+      this.tcodeSync.start();
+    }
+    if (this.syncEngine && this.handyManager?.connected) this.syncEngine.start();
+    if (this.autoblowSync && this.autoblowManager?.connected) this.autoblowSync.start();
+
+    // Resume inline playback where the pop-out left off. The engines are now
+    // active + bound to the local player, so the resulting 'playing' event
+    // re-anchors the Handy and the per-tick engines follow immediately.
+    const vid = this.videoPlayer?.video;
+    if (vid && (vid.currentSrc || vid.src)) {
+      try { vid.currentTime = proxyMs / 1000; } catch { /* ignore */ }
+      if (wasPlaying) {
+        this._navigateTo('player');
+        vid.play().catch(() => { /* autoplay blocked — user resumes */ });
+      }
+    }
+  }
+
+  async _togglePlayerWindow() {
+    if (this._playerWindowOpen) {
+      await window.funsync?.playerPopoutClose?.();
+      return;
+    }
+    // Guard: only offer pop-out for local library videos driven by the local
+    // player (not while VR / web-remote is the source).
+    if (this._remoteActive || this.vrBridge?.connected) {
+      showToast(t('player.popOutUnavailableRemote'), 'info', 3500);
+      return;
+    }
+    if (!this._currentPopoutVideo()) {
+      showToast(t('player.popOutUnavailableSrc'), 'info', 3500);
+      return;
+    }
+    // Pause the inline video BEFORE the pop-out opens so we don't briefly
+    // decode the same file in both windows (the startup-jitter cause).
+    // Remember whether it was playing so the pop-out autoplays to match.
+    const vid = this.videoPlayer?.video;
+    this._popoutWasPlaying = !!(vid && !vid.paused);
+    if (vid && !vid.paused) vid.pause();
+    showToast(t('player.popOutOpening'), 'info', 2500);
+    await window.funsync?.playerPopoutOpen?.();
+  }
+
+  _updatePlayerWindowButton() {
+    const btn = document.getElementById('btn-popout-player');
+    if (!btn) return;
+    const labelText = this._playerWindowOpen ? t('player.popIn') : t('player.popOut');
+    const span = btn.querySelector('span');
+    if (span) span.textContent = labelText;
+    btn.setAttribute('aria-label', labelText);
+  }
+
+  /** Expand the mini-player back to the full player view. */
+  _expandMiniplayer() {
+    if (!this._miniActive) return;
+    // _onEnterView('player') clears the mini class + flag; navigating in
+    // pushes 'player' back onto the stack so Back works again.
+    this._navigateTo('player');
+  }
+
+  /** Close the mini-player: stop playback and hide the player entirely. */
+  _closeMiniplayer() {
+    this._clearMiniplayer();
+    const el = this._getViewEl('player');
+    if (el) el.hidden = true;
+    this._teardownPlayback();
+  }
+
+  /** Remove mini-player styling/state (does NOT stop playback). */
+  _clearMiniplayer() {
+    if (!this._miniActive) return;
+    this._miniActive = false;
+    this._getViewEl('player')?.classList.remove('player-container--mini');
+    this.upNextCard?.setMini(false); // back to the full card in the player view
   }
 
   // --- VR-as-flat playback (community ask: Monoinc 2026-05-17) ---
@@ -4201,6 +5115,7 @@ class App {
       viewers: this.audienceBridge.viewers,
       hideKeys: !!this.settings?.get?.('audience.hideKeys'),
       theme: document.documentElement.dataset.theme || 'dark',
+      uiStyle: document.documentElement.dataset.style || 'classic',
       // Pop-out renderer has its own module-level i18n state. Pass the
       // streamer's chosen locale so the pop-out shows translated UI
       // instead of raw key constants like "audience.room.empty".
@@ -4398,11 +5313,19 @@ class App {
   }
 
   async _playFromLibrary(videoData, funscriptData, subtitleData, variants) {
-    this._navigateTo('player');
+    // When the detached player window is open, the new video loads into IT,
+    // not the main window — main stays on the library so it keeps being
+    // browseable (deaf #189). Otherwise, switch to the inline player view —
+    // UNLESS an Up Next / queue auto-advance fired while docked in the
+    // mini-player, in which case the next video should keep playing in the
+    // corner (navigating to the player would expand it to full-screen).
+    const keepMini = this._miniActive && this._autoAdvancing;
+    if (!this._playerWindowActive && !keepMini) this._navigateTo('player');
     this._playQueue = [];
     this._playQueueIndex = -1;
     this._playQueueSource = null;
     this._playQueueLoop = false;
+    this._playQueueShuffle = false;
     this._updateQueueUI();
 
     // Capture the play context attached by library/playlists/categories
@@ -4499,6 +5422,14 @@ class App {
     if (subtitleData) {
       this._loadSubtitleFromLibrary(subtitleData);
     }
+    // Honor a per-video pinned default variant (lr_x3 request): once the
+    // auto-default has loaded, swap to the user's preferred variant for
+    // this video if one is set. Falls back silently to the auto-default.
+    await this._applyPreferredVariant();
+
+    // Detached player is open → route this freshly-loaded video into it.
+    await this._routeLoadedVideoToPlayerWindow();
+
     // Final queue panel refresh — `loadVideo` already fired one, but
     // by now `_currentPlayContext` is set so `_getUpcoming` can derive
     // the library-context upcoming list correctly. Without this final
@@ -5178,22 +6109,39 @@ class App {
       // Up Next supersedes gap-skip's trailing overlay (SCOPE §3.4).
       const gapEl = document.getElementById('gap-skip-overlay');
       if (gapEl) gapEl.hidden = true;
+      this._relayUpNextShow(path, countdownSec); // mirror into the pop-out
     };
     this.upNextEngine.onShowEndOfList = (sourceLabel, sourceContext) => {
       this.upNextCard.showEndOfList(sourceLabel, sourceContext);
+      this._relayUpNext({ action: 'end', sourceLabel });
     };
     this.upNextEngine.onTick = (remaining) => {
       this.upNextCard.tick(remaining);
       if (this._upNextCurrentPath) {
         this.queuePanel?.setAutoAdvanceCountdown(this._upNextCurrentPath, remaining);
       }
+      this._relayUpNext({ action: 'tick', remaining });
     };
     this.upNextEngine.onHide = () => {
       this.upNextCard.hide();
       this._upNextCurrentPath = null;
       this.queuePanel?.clearAutoAdvance();
+      this._relayUpNext({ action: 'hide' });
     };
-    this.upNextEngine.onPlayNext = (path) => this._playUpNext(path);
+    this.upNextEngine.onPlayNext = (path) => {
+      // Stamp the advance so the pop-out end-handler knows Up Next consumed
+      // this end and doesn't also run the Play-All queue advance. A timestamp
+      // (not a boolean) survives the onPlayNext→stray-'ended' IPC race.
+      this._lastUpNextAdvanceAt = Date.now();
+      this._playUpNext(path);
+    };
+    // Your own queue (foobar2000-style insert) plays before the context's
+    // next, so it IS the real next-up — the engine targets its head for the
+    // countdown card + queue-panel chip. `_playUpNext` already honors this
+    // priority on advance; this keeps the display in agreement.
+    this.upNextEngine.getPriorityNext = () => (
+      this._userQueue && this._userQueue.length > 0 ? this._userQueue[0] : null
+    );
 
     // Video events → engine.check(). The engine is idempotent, so it's
     // safe to fire on every event — show/hide transitions are
@@ -5250,6 +6198,20 @@ class App {
    */
   async _playUpNext(path) {
     if (!path) return;
+    // Mark this whole advance as an auto-advance so the downstream load paths
+    // keep the mini-player docked instead of expanding to the full player.
+    // try/finally keeps the flag set across the async load (during which the
+    // navigate decision in _playFromLibrary reads it), then always clears it.
+    const prevAuto = this._autoAdvancing;
+    this._autoAdvancing = true;
+    try {
+      return await this._playUpNextInner(path);
+    } finally {
+      this._autoAdvancing = prevAuto || false;
+    }
+  }
+
+  async _playUpNextInner(path) {
     // User queue priority — if the panel's user queue has items, play
     // the head before falling through to library / playlist context.
     // Mirrors foobar2000's queue priority insert (SCOPE §3.2 #3).
@@ -5265,6 +6227,13 @@ class App {
     if (this._currentPlayContext?.source === 'queue') {
       const rawNext = (this._currentPlayContext.index || 0) + 1;
       const looping = !!this._playQueueLoop;
+      const isWrap = looping && this._playQueue.length > 0 && rawNext >= this._playQueue.length;
+      if (isWrap && this._playQueueShuffle && this._playQueue.length > 1) {
+        // New loop cycle on a shuffled queue → reshuffle for variety, avoiding
+        // an immediate repeat of the item that just played (the last one).
+        const justPlayed = this._playQueue[this._playQueueIndex];
+        this._playQueue = reshuffleAvoidingRepeat(this._playQueue, justPlayed);
+      }
       const wrappedIdx = looping && this._playQueue.length > 0
         ? rawNext % this._playQueue.length
         : rawNext;
@@ -5328,6 +6297,7 @@ class App {
       onRemoveFromQueue: (path) => this._removeFromUserQueue(path),
       onReorderQueue: (fromIdx, toIdx) => this._reorderUserQueue(fromIdx, toIdx),
       onClearQueue: () => this._clearUserQueue(),
+      onShuffleUpcoming: () => this._shuffleUpcoming(),
       onClose: () => this._toggleQueuePanel(),
       onOpenLibrary: () => this._navigateTo('library'),
       onCancelAutoAdvance: () => this.upNextEngine?.dismiss(),
@@ -5394,15 +6364,105 @@ class App {
   }
 
   /**
+   * Shuffle the not-yet-played "Up next" tail from the queue panel.
+   * History and the currently-playing item stay put — only what comes
+   * next is re-rolled. Handles both drivers of the upcoming list:
+   *   1. An explicit Play-All / playlist / shuffle queue (`_playQueue`) —
+   *      shuffle the slice after the current index in place.
+   *   2. A passive library-browse context — materialise an explicit
+   *      shuffled queue from the current filtered list (current stays at
+   *      the head) so "up next" becomes random without reloading the
+   *      video that's already playing.
+   * @returns {boolean} true if something was shuffled.
+   */
+  _shuffleUpcoming() {
+    // Case 1 — explicit queue is active.
+    if (this._playQueue && this._playQueue.length > 1) {
+      const idx = (this._playQueueIndex ?? -1) + 1;
+      if (idx >= this._playQueue.length) return false; // nothing upcoming
+      const tail = shuffleArray(this._playQueue.slice(idx));
+      this._playQueue = [...this._playQueue.slice(0, idx), ...tail];
+      this._playQueueShuffle = true;
+      if (this._currentPlayContext) {
+        this._currentPlayContext.list = this._playQueue.map((v) => v.path);
+        this._setUpNextContext(this._currentPlayContext);
+      }
+      this._updateQueueUI();
+      this._updateQueuePanelState();
+      return true;
+    }
+
+    // Case 2 — passive library context: build a queue from the filtered
+    // list with the current video pinned to the head.
+    if (this._currentPlayContext?.source === 'library'
+        && this.library?._filteredVideos?.length > 1
+        && this._currentVideoPath) {
+      const filtered = this.library._filteredVideos;
+      const curIdx = filtered.findIndex((v) => v?.path === this._currentVideoPath);
+      if (curIdx < 0) return false;
+      const toEntry = (v) => ({
+        name: v.name || (v.path ? v.path.split(/[\\/]/).pop() : ''),
+        path: v.path,
+        funscriptPath: v.funscriptPath || null,
+      });
+      const rest = shuffleArray(filtered.filter((_, i) => i !== curIdx));
+      this._playQueue = [toEntry(filtered[curIdx]), ...rest.map(toEntry)];
+      this._playQueueIndex = 0;
+      this._playQueueShuffle = true;
+      this._playQueueLoop = false;
+      this._playQueueSource = {
+        sourceLabel: this.library._headerTitle || t('nav.library'),
+        sourceContext: { kind: 'library-shuffle' },
+      };
+      this._currentPlayContext = {
+        source: 'queue',
+        sourceLabel: this._playQueueSource.sourceLabel,
+        sourceContext: this._playQueueSource.sourceContext,
+        list: this._playQueue.map((v) => v.path),
+        index: 0,
+        loop: false,
+      };
+      this._setUpNextContext(this._currentPlayContext);
+      this._updateQueueUI();
+      this._updateQueuePanelState();
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Show / hide the panel. History resets on close per SCOPE §3.5.
    * Panel open/closed state is intentionally session-only — not
    * persisted to settings (see _initQueuePanel comment).
    */
+  /**
+   * In library view the queue panel starts below the filter/sort bar (so
+   * those controls stay usable) and runs to the bottom of the window. The
+   * header height isn't fixed, so measure its bottom edge (viewport-relative
+   * — the panel's containing block is the viewport) into a CSS var the
+   * library-scoped rule reads. No-op outside library view (the player-view
+   * rule keeps the default top:0 / above-controls layout).
+   */
+  _positionQueuePanelForLibrary() {
+    const panel = document.getElementById('queue-panel');
+    if (!panel) return;
+    if (this._currentView() !== 'library') {
+      panel.style.removeProperty('--queue-lib-top');
+      return;
+    }
+    const header = document.querySelector('#library-container .library__header');
+    if (!header) return;
+    const top = Math.max(0, Math.round(header.getBoundingClientRect().bottom));
+    panel.style.setProperty('--queue-lib-top', `${top}px`);
+  }
+
   _toggleQueuePanel() {
     if (!this.queuePanel) return;
     const opening = !this.queuePanel.visible;
     if (opening) {
       this._updateQueuePanelState();
+      this._positionQueuePanelForLibrary();
       this.queuePanel.open();
     } else {
       // History resets on close. Re-render is implicit because the
@@ -5413,10 +6473,14 @@ class App {
     // Sync toggle button aria-pressed + aria-expanded. The CSS uses
     // [aria-pressed="true"] to slide the button left by the panel
     // width so it lands flush with the panel's left edge.
-    const btn = document.getElementById('btn-queue-toggle');
-    if (btn) {
-      btn.setAttribute('aria-pressed', String(opening));
-      btn.setAttribute('aria-expanded', String(opening));
+    for (const btn of [
+      document.getElementById('btn-queue-toggle'),        // player top-bar
+      document.querySelector('.library__queue-toggle'),   // library header
+    ]) {
+      if (btn) {
+        btn.setAttribute('aria-pressed', String(opening));
+        btn.setAttribute('aria-expanded', String(opening));
+      }
     }
   }
 
@@ -6233,6 +7297,95 @@ class App {
     this._allVariantsWithManual = allVariants;
   }
 
+  /**
+   * Re-scan the CURRENT video's own folder for script variants and refresh
+   * `_currentVariants` if the set changed. Auto-detected variants are
+   * otherwise captured once at library-scan time and cached for the whole
+   * session — so a variant dropped in later, or a source drive that came
+   * back online after being disconnected, wouldn't show until an app
+   * restart / full library refresh. Called on dropdown open (background,
+   * non-blocking). Reuses the exact `scan-directory` variant parsing
+   * scoped to a single folder — no duplicated filename logic.
+   *
+   * @returns {Promise<boolean>} true if the variant set changed.
+   */
+  async _refreshCurrentVariantsFromDisk() {
+    const videoPath = this._currentVideoPath;
+    if (!videoPath || !window.funsync?.scanDirectory) return false;
+    const dir = videoPath.replace(/[\\/][^\\/]*$/, '');
+    if (!dir || dir === videoPath) return false;
+    try {
+      const result = await window.funsync.scanDirectory(dir, this.library?._sourceMap || {});
+      const match = result?.videos?.find((v) => v.path === videoPath);
+      if (!match) return false; // folder unreadable (offline) — keep cache
+      const fresh = match.variants || [];
+      const cur = this._currentVariants || [];
+      const changed = fresh.length !== cur.length
+        || fresh.some((v, i) => v.path !== cur[i]?.path);
+      if (changed) {
+        this._currentVariants = fresh;
+        this._updateVariantSelector();
+        return true;
+      }
+    } catch (err) {
+      console.warn('[Variants] refresh-on-open failed:', err?.message || err);
+    }
+    return false;
+  }
+
+  /**
+   * Read this video's pinned-default variant label, if any. Stored in
+   * `library.preferredVariants` keyed by video path → variant label.
+   * Label (not path) is the key so a moved drive / renamed script still
+   * resolves — mirrors how the variant chip and manualVariants behave.
+   * Includes the same filename-fallback rehoming as manualVariants.
+   */
+  _getPreferredVariantLabel(videoPath) {
+    if (!videoPath) return null;
+    const map = this.settings.get('library.preferredVariants') || {};
+    if (map[videoPath]) return map[videoPath];
+    const videoName = videoPath.split(/[\\/]/).pop().toLowerCase();
+    for (const [oldPath, label] of Object.entries(map)) {
+      if (oldPath === videoPath) continue;
+      if (oldPath.split(/[\\/]/).pop().toLowerCase() === videoName && label) {
+        // Rehome onto the current path so future lookups are direct.
+        map[videoPath] = label;
+        delete map[oldPath];
+        this.settings.set('library.preferredVariants', map);
+        return label;
+      }
+    }
+    return null;
+  }
+
+  /** Pin (label) or clear (null) this video's preferred default variant. */
+  _setPreferredVariantLabel(videoPath, label) {
+    if (!videoPath) return;
+    const map = this.settings.get('library.preferredVariants') || {};
+    if (label) map[videoPath] = label;
+    else delete map[videoPath];
+    this.settings.set('library.preferredVariants', map);
+  }
+
+  /**
+   * After a video loads its auto-default script, switch to the user's
+   * pinned variant for this video if one is set and present. No-op when
+   * none is pinned, when it's already the active default, or when the
+   * pinned script is missing (file moved/renamed → not in the detected
+   * list) — in which case the auto-default that already loaded stands.
+   */
+  async _applyPreferredVariant() {
+    const videoPath = this._currentVideoPath;
+    if (!videoPath) return;
+    const variants = this._allVariantsWithManual || [];
+    if (variants.length < 2) return;
+    const preferred = this._getPreferredVariantLabel(videoPath);
+    if (!preferred) return;
+    const idx = variants.findIndex(v => (v.label || '').trim() === preferred.trim());
+    if (idx <= 0) return; // not found, or already the active default (index 0)
+    await this._switchVariant(idx);
+  }
+
   _showVariantDropdown() {
     const dropdown = document.getElementById('variant-dropdown');
     if (!dropdown) return;
@@ -6241,6 +7394,10 @@ class App {
     dropdown.hidden = false;
 
     const variants = this._allVariantsWithManual || [];
+    // Per-video pinned default (only meaningful with 2+ variants to pick from).
+    const preferredLabel = variants.length > 1
+      ? this._getPreferredVariantLabel(this._currentVideoPath)
+      : null;
     for (let i = 0; i < variants.length; i++) {
       const v = variants[i];
       const item = document.createElement('button');
@@ -6251,6 +7408,37 @@ class App {
       label.className = 'variant-selector__item-label';
       label.textContent = v.label;
       item.appendChild(label);
+
+      // Pin-as-default star. Lives inside the (flex) item; clicking it
+      // toggles this video's remembered default WITHOUT switching to the
+      // variant. Only shown when there's a real choice (2+ variants).
+      if (variants.length > 1) {
+        const isPreferred = !!preferredLabel && (v.label || '').trim() === preferredLabel.trim();
+        const star = document.createElement('span');
+        star.className = 'variant-selector__star';
+        if (isPreferred) star.classList.add('variant-selector__star--active');
+        star.textContent = isPreferred ? '★' : '☆';
+        star.setAttribute('role', 'button');
+        star.setAttribute('tabindex', '0');
+        star.setAttribute('aria-pressed', isPreferred ? 'true' : 'false');
+        const starTitle = isPreferred ? t('variants.unsetDefault') : t('variants.setDefault');
+        star.title = starTitle;
+        star.setAttribute('aria-label', starTitle);
+        const toggleStar = () => {
+          const newLabel = isPreferred ? null : v.label;
+          this._setPreferredVariantLabel(this._currentVideoPath, newLabel);
+          showToast(
+            newLabel ? t('variants.defaultSet', { label: v.label }) : t('variants.defaultCleared'),
+            'info', 2500,
+          );
+          this._showVariantDropdown(); // re-render so star states refresh
+        };
+        star.addEventListener('click', (e) => { e.stopPropagation(); toggleStar(); });
+        star.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.stopPropagation(); toggleStar(); }
+        });
+        item.appendChild(star);
+      }
 
       item.addEventListener('click', () => {
         this._switchVariant(i);
@@ -6777,7 +7965,12 @@ class App {
   /** Play a list of videos sequentially (Play All). */
   _playAll(videoList, opts = {}) {
     if (!videoList || videoList.length === 0) return;
-    this._playQueue = videoList;
+    this._playQueueShuffle = !!opts.shuffle;
+    // Bag model: shuffle the whole list ONCE at Play All so there are no
+    // repeats within a cycle (per-track random would produce back-to-back
+    // repeats that read as "broken shuffle"). Reshuffled on each loop wrap
+    // below. SCOPE-playlist-shuffle-reorder.md §7.
+    this._playQueue = this._playQueueShuffle ? shuffleArray(videoList) : videoList;
     this._playQueueIndex = 0;
     this._playQueueLoop = !!opts.loop;
     this._playQueueSource = {
@@ -6825,6 +8018,8 @@ class App {
         if (content) {
           const fsName = item.funscriptPath.split(/[\\/]/).pop();
           this.loadFunscript({ name: fsName, textContent: content });
+          // Re-stream now the funscript is loaded so the pop-out heatmap fills.
+          if (this._playerWindowActive) this._streamPlayerWindowData();
         } else {
           // Silent skip would leave the user wondering why the next
           // video plays with no device sync — surface it.
@@ -6837,6 +8032,8 @@ class App {
     }
 
     this._updateQueueUI();
+    // Queue nav while the pop-out is open → route the new item into it.
+    this._routeLoadedVideoToPlayerWindow();
 
     // Wire auto-advance on ended (remove previous listener if any). The
     // local-var supersede guard prevents a stale in-flight listener from
@@ -6850,29 +8047,45 @@ class App {
       if (this._queueEndedListener !== queueEndedListener) return; // superseded
       this.videoPlayer.video.removeEventListener('ended', queueEndedListener);
       this._queueEndedListener = null;
-      // User queue priority — when present, intercepts Play All
-      // advancement so a queued video plays next rather than the next
-      // playlist item. Mirrors the same priority injection in
-      // _playUpNext (SCOPE §3.2 #3).
-      if (this._userQueue && this._userQueue.length > 0) {
-        const next = this._userQueue[0];
-        this._userQueue = this._userQueue.slice(1);
-        this._persistUserQueue();
-        this._jumpToVideoFromQueue(next);
-        return;
-      }
-      const nextIdx = this._playQueueIndex + 1;
-      if (nextIdx < this._playQueue.length) {
-        this._playQueueItem(nextIdx);
-      } else if (this._playQueueLoop && this._playQueue.length > 0) {
-        // Wrap to the start. Persistent loop on the playlist itself —
-        // user opted in via the playlist's loop toggle; no end-of-list,
-        // just continuous marathon mode until they pause / navigate away.
-        this._playQueueItem(0);
-      }
+      this._advanceQueueOnEnded();
     };
     this._queueEndedListener = queueEndedListener;
     this.videoPlayer.video.addEventListener('ended', queueEndedListener);
+  }
+
+  /**
+   * Play-All advance on natural video end. Shared by the inline
+   * `queueEndedListener` and the pop-out's `_onPopoutVideoEnded` so both
+   * surfaces continue the queue identically. Returns true if it advanced.
+   */
+  _advanceQueueOnEnded() {
+    // User queue priority — when present, intercepts Play All advancement
+    // so a queued video plays next rather than the next playlist item.
+    // Mirrors the same priority injection in _playUpNext (SCOPE §3.2 #3).
+    if (this._userQueue && this._userQueue.length > 0) {
+      const next = this._userQueue[0];
+      this._userQueue = this._userQueue.slice(1);
+      this._persistUserQueue();
+      // Keep the mini-player docked across this auto-advance (see _playUpNext).
+      // _jumpToVideoFromQueue is async; hold the flag until its load settles.
+      this._autoAdvancing = true;
+      Promise.resolve(this._jumpToVideoFromQueue(next))
+        .finally(() => { this._autoAdvancing = false; });
+      return true;
+    }
+    const nextIdx = this._playQueueIndex + 1;
+    if (nextIdx < this._playQueue.length) {
+      this._playQueueItem(nextIdx);
+      return true;
+    }
+    if (this._playQueueLoop && this._playQueue.length > 0) {
+      // Wrap to the start. Persistent loop on the playlist itself — user
+      // opted in via the playlist's loop toggle; no end-of-list, just
+      // continuous marathon mode until they pause / navigate away.
+      this._playQueueItem(0);
+      return true;
+    }
+    return false;
   }
 
   _playPrev() {
@@ -6905,6 +8118,14 @@ class App {
       if (hasQueue) {
         indicator.textContent = `${this._playQueueIndex + 1} / ${this._playQueue.length}`;
       }
+    }
+    // Mirror the queue state into the detached player window.
+    if (this._playerWindowOpen) {
+      window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.QUEUE_STATE, {
+        hasPrev: hasQueue && this._playQueueIndex > 0,
+        hasNext: hasQueue && this._playQueueIndex < this._playQueue.length - 1,
+        label: hasQueue ? `${this._playQueueIndex + 1} / ${this._playQueue.length}` : '',
+      }));
     }
   }
 

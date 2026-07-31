@@ -22,8 +22,11 @@ describe('DragDrop', () => {
   describe('file type routing on drop', () => {
     function dropFiles(files) {
       const event = new Event('drop', { bubbles: true });
+      // Real OS file drops always expose `types: ['Files']`. DragDrop uses
+      // that to ignore INTERNAL element drags (e.g. queue-panel row
+      // reorder), which bubble to document but carry `text/*`, not Files.
       Object.defineProperty(event, 'dataTransfer', {
-        value: { files },
+        value: { files, types: ['Files'] },
       });
       event.preventDefault = vi.fn();
       document.dispatchEvent(event);
@@ -75,6 +78,21 @@ describe('DragDrop', () => {
       ]);
       expect(onVideo).toHaveBeenCalledTimes(1);
       expect(onFunscript).toHaveBeenCalledTimes(1);
+    });
+
+    it('ignores INTERNAL drags (no Files type) — e.g. queue-panel reorder', () => {
+      // An internal HTML5 element drag bubbles to document but carries
+      // text/* data, not Files. DragDrop must not treat it as a file drop
+      // (previously it did → drop-zone overlay covered the queue and the
+      // reorder drop never landed).
+      const event = new Event('drop', { bubbles: true });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { files: [new File([''], 'video.mp4')], types: ['text/plain'] },
+      });
+      event.preventDefault = vi.fn();
+      document.dispatchEvent(event);
+      expect(onVideo).not.toHaveBeenCalled();
+      expect(event.preventDefault).not.toHaveBeenCalled();
     });
   });
 

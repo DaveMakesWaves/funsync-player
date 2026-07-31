@@ -5,6 +5,7 @@ DeoVR: GET /deovr (library), GET /deovr/{id} (scene detail)
 HereSphere: GET /heresphere (library), GET /heresphere/{id} (scene detail)
 """
 
+import asyncio
 import json
 import os
 import re
@@ -189,7 +190,31 @@ _SEP_SPLIT_RE = re.compile(rf'{SEP}+')
 _STUDIO_COMBO_RE = re.compile(r'^([A-Z]{2,8})(\d{2,5})$')
 
 
-def detect_vr_format_for_video(video):
+def _dims_suggest_vr(width, height):
+    """Conservative resolution/aspect fallback for untagged VR files.
+
+    A stereoscopic 180°/360° master is a full frame ~2:1 (each eye is
+    roughly 1:1, placed side-by-side = 2:1) and always high-resolution
+    (VR masters are 4K–8K wide). Requiring BOTH a near-2:1 aspect and a
+    high width keeps ordinary 2D content out:
+      - 16:9  (1.78:1) — excluded by aspect
+      - 2.35:1 cinemascope — excluded by aspect
+      - a 2:1 but low-res clip — excluded by the width floor
+    Community-reported: a user's VR files had no filename tokens (no
+    180/SBS/studio code) so they were served flat and HereSphere played
+    them in 2D. This catches that case without misfiring on 2D libraries.
+    """
+    try:
+        w, h = int(width), int(height)
+    except (TypeError, ValueError):
+        return False
+    if w <= 0 or h <= 0:
+        return False
+    aspect = w / h
+    return w >= 3200 and 1.9 <= aspect <= 2.1
+
+
+def detect_vr_format_for_video(video, dims=None):
     """Return `(screenType, stereoMode, is3d)` for a registered video dict.
 
     Wraps `detect_vr_format` to apply the per-video manual override
@@ -200,6 +225,13 @@ def detect_vr_format_for_video(video):
       - `manualVRType == 'vr'`  uses the heuristic when it already matches a
         VR pattern; otherwise falls back to a sensible default
         (`mkx200` SBS) so HereSphere has a projection to play with.
+
+    `dims` is an optional `(width, height)` tuple. When the filename gives
+    no VR signal AND the user hasn't overridden, a conservative
+    resolution/aspect heuristic (`_dims_suggest_vr`) upgrades the video to
+    VR SBS so an untagged VR master isn't served flat. Callers pass dims
+    from cached ffprobe results — never triggering a probe just to group
+    the library (see the library-listing loops, which use cached-only dims).
     """
     override = (video or {}).get('manualVRType')
     if override == 'flat':
@@ -209,6 +241,12 @@ def detect_vr_format_for_video(video):
     screen, stereo, is_3d = detect_vr_format(name)
 
     if override == 'vr' and not is_3d:
+        return 'mkx200', 'sbs', True
+
+    # Resolution/aspect fallback — only when filename said flat and the
+    # user hasn't set an override either way. Matches the manual 'vr'
+    # default projection (mkx200 SBS).
+    if not is_3d and override is None and dims and _dims_suggest_vr(*dims):
         return 'mkx200', 'sbs', True
 
     return screen, stereo, is_3d
@@ -342,6 +380,26 @@ def _get_cached_video_info(video_id, video):
     return _video_info_cache.get(video_id, (1920, 1080, 'h264'))
 
 
+def _dims_for_detection(video_id, video):
+    """Best-effort `(width, height)` for VR auto-detect WITHOUT probing.
+
+    Prefers dimensions the scan already attached to the video dict, then a
+    previously-probed cache entry. Returns None when neither is available —
+    deliberately: the library-listing loops call this per video and must
+    not kick off an ffprobe storm on large libraries. A file migrates into
+    the VR group once its dimensions are known (e.g. after it's opened once
+    in HereSphere, which primes the cache).
+    """
+    w = (video or {}).get('width')
+    h = (video or {}).get('height')
+    if w and h:
+        return int(w), int(h)
+    cached = _video_info_cache.get(video_id)
+    if cached:
+        return cached[0], cached[1]
+    return None
+
+
 # === DeoVR API ===
 
 @router.api_route("/deovr", methods=["GET", "POST"])
@@ -365,7 +423,7 @@ async def deovr_library(request: Request):
 
     for vid_id, video in registry.items():
         name = video.get('name', '')
-        _, _, is_3d = detect_vr_format_for_video(video)
+        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
         has_script = bool(video.get('funscriptPath'))
 
         # Apply filter
@@ -448,9 +506,19 @@ async def deovr_scene(video_id: str, request: Request):
     base_url = _get_base_url(request)
     name = video.get('name', '')
     title = os.path.splitext(name)[0]
-    screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video)
     duration = _get_duration(video)
     path = video.get('path', '')
+
+    # Prime the resolution cache for THIS scene (off the event loop) so VR
+    # auto-detect sees real dimensions on first open. Only this one video
+    # is probed per request — no library-wide probe storm.
+    if video_id not in _video_info_cache and path and os.path.isfile(path):
+        info = await asyncio.to_thread(_probe_video_info, path)
+        if info:
+            _video_info_cache[video_id] = info
+    width, height, codec = _get_cached_video_info(video_id, video)
+
+    screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video, dims=(width, height))
 
     # Build encodings
     file_size = 0
@@ -460,8 +528,6 @@ async def deovr_scene(video_id: str, request: Request):
         pass
 
     size_label = f'{file_size / (1024**3):.1f} GB' if file_size > 1024**3 else f'{file_size / (1024**2):.0f} MB'
-
-    width, height, codec = _get_cached_video_info(video_id, video)
 
     encodings = [{
         'name': codec,
@@ -546,7 +612,7 @@ async def heresphere_library(request: Request):
 
     for vid_id, video in registry.items():
         name = video.get('name', '')
-        _, _, is_3d = detect_vr_format_for_video(video)
+        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
         has_script = bool(video.get('funscriptPath'))
 
         if vr_filter == 'vr' and not is_3d:
@@ -605,9 +671,20 @@ async def heresphere_scene(video_id: str, request: Request):
     base_url = _get_base_url(request)
     name = video.get('name', '')
     title = os.path.splitext(name)[0]
-    screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video)
     duration = _get_duration(video)
     path = video.get('path', '')
+
+    # Prime the resolution cache for THIS scene (off the event loop) so VR
+    # auto-detect + the media block below see real dimensions on first
+    # open. Only this one video is probed per request — no library-wide
+    # probe storm.
+    if video_id not in _video_info_cache and path and os.path.isfile(path):
+        info = await asyncio.to_thread(_probe_video_info, path)
+        if info:
+            _video_info_cache[video_id] = info
+    width, height, codec = _get_cached_video_info(video_id, video)
+
+    screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video, dims=(width, height))
 
     # Map DeoVR screenType to HereSphere projection
     projection_map = {
@@ -636,8 +713,6 @@ async def heresphere_scene(video_id: str, request: Request):
         pass
 
     size_label = f'{file_size / (1024**3):.1f} GB' if file_size > 1024**3 else f'{file_size / (1024**2):.0f} MB'
-
-    width, height, codec = _get_cached_video_info(video_id, video)
 
     # Media sources
     media = [{

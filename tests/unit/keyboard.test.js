@@ -183,4 +183,47 @@ describe('KeyboardHandler', () => {
     expect(player.togglePlay).not.toHaveBeenCalled();
     input.remove();
   });
+
+  // --- Orgasm Switch hold (X) ---
+
+  it('X keydown fires onOrgasmHold(true) once; keyup fires onOrgasmHold(false)', () => {
+    const onOrgasmHold = vi.fn();
+    handler.onOrgasmHold = onOrgasmHold;
+    fireKey('x');
+    expect(onOrgasmHold).toHaveBeenLastCalledWith(true);
+    // keydown auto-repeats while held — must NOT re-fire activate
+    fireKey('x');
+    fireKey('x');
+    expect(onOrgasmHold).toHaveBeenCalledTimes(1);
+    // release
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', bubbles: true }));
+    expect(onOrgasmHold).toHaveBeenLastCalledWith(false);
+    expect(onOrgasmHold).toHaveBeenCalledTimes(2);
+  });
+
+  it('a fresh press after release activates again', () => {
+    const onOrgasmHold = vi.fn();
+    handler.onOrgasmHold = onOrgasmHold;
+    fireKey('x');
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', bubbles: true }));
+    fireKey('X'); // uppercase, second press
+    expect(onOrgasmHold).toHaveBeenCalledTimes(3);
+    expect(onOrgasmHold).toHaveBeenLastCalledWith(true);
+  });
+
+  it('does not activate the hold while the editor is open', () => {
+    const onOrgasmHold = vi.fn();
+    handler.onOrgasmHold = onOrgasmHold;
+    scriptEditor.isOpen = true;
+    fireKey('x');
+    expect(onOrgasmHold).not.toHaveBeenCalled();
+  });
+
+  it('keyup always releases even if a hold was never registered (no throw)', () => {
+    const onOrgasmHold = vi.fn();
+    handler.onOrgasmHold = onOrgasmHold;
+    // keyup with no prior keydown → no-op, no callback
+    document.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', bubbles: true }));
+    expect(onOrgasmHold).not.toHaveBeenCalled();
+  });
 });

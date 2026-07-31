@@ -24,6 +24,14 @@ import { eventBus } from './event-bus.js';
 const VALID_THEMES = new Set(['system', 'dark', 'light']);
 const DEFAULT_THEME = 'system';
 
+// Interface STYLE is orthogonal to the palette THEME (dark/light). It's
+// applied as `<html data-style="classic|modern">` and only changes the
+// non-colour execution (depth, radius, spacing, motion) via CSS. Classic is
+// the default so nobody's look changes until they opt in.
+// See notes/features/SCOPE-modern-theme.md.
+const VALID_STYLES = new Set(['classic', 'modern']);
+const DEFAULT_STYLE = 'classic';
+
 let _systemQuery = null;
 let _systemListener = null;
 
@@ -56,6 +64,23 @@ export function applyTheme(effective) {
 }
 
 /**
+ * Resolve the user's interface-style preference to a valid value. Pure.
+ * @param {string} setting — value from settings.player.uiStyle
+ * @returns {'classic'|'modern'}
+ */
+export function resolveStyle(setting) {
+  return VALID_STYLES.has(setting) ? setting : DEFAULT_STYLE;
+}
+
+/**
+ * Apply an interface style to <html data-style="...">. Side-effect-only.
+ * @param {'classic'|'modern'} style
+ */
+export function applyStyle(style) {
+  document.documentElement.dataset.style = resolveStyle(style);
+}
+
+/**
  * Initialize on app startup:
  *   1. Resolve the effective theme from setting + OS preference.
  *   2. Apply it.
@@ -72,12 +97,17 @@ export function initTheme(dataService) {
   const setting = dataService?.get?.('player.theme') || DEFAULT_THEME;
   _applyFromSetting(setting);
 
+  // Interface style (Classic/Modern) — applied alongside the palette theme.
+  applyStyle(dataService?.get?.('player.uiStyle') || DEFAULT_STYLE);
+
   // React to settings changes from anywhere (settings panel, IPC, etc.)
   // by re-resolving on each settings:changed event broadcast on the
   // shared event-bus (data-service.js emits this after every set()).
   eventBus.on('settings:changed', ({ path }) => {
     if (path === 'player.theme') {
       _applyFromSetting(dataService.get('player.theme') || DEFAULT_THEME);
+    } else if (path === 'player.uiStyle') {
+      applyStyle(dataService.get('player.uiStyle') || DEFAULT_STYLE);
     }
   });
 

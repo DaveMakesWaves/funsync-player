@@ -1063,13 +1063,12 @@ function createCard(v) {
   thumb.className = 'card__thumb';
   thumb.alt = '';
   thumb.loading = 'lazy';
-  thumb.src = v.thumbUrl;
-  thumb.onerror = () => {
+  wireThumb(thumb, v.thumbUrl, () => {
     const ph = document.createElement('div');
     ph.className = 'card__thumb card__thumb--placeholder';
     ph.appendChild(svgIcon('play', 28));
     thumb.replaceWith(ph);
-  };
+  });
   const thumbWrap = document.createElement('div');
   thumbWrap.style.position = 'relative';
   thumbWrap.appendChild(thumb);
@@ -1161,13 +1160,12 @@ function createRow(v) {
   thumb.className = 'list__thumb';
   thumb.loading = 'lazy';
   thumb.alt = '';
-  thumb.src = v.thumbUrl;
-  thumb.onerror = () => {
+  wireThumb(thumb, v.thumbUrl, () => {
     const ph = document.createElement('div');
     ph.className = 'list__thumb list__thumb--placeholder';
     ph.appendChild(svgIcon('play', 22));
     thumb.replaceWith(ph);
-  };
+  });
   row.appendChild(thumb);
 
   const info = document.createElement('div');
@@ -2239,6 +2237,35 @@ function formatDuration(seconds) {
   const ss = s % 60;
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
   return `${m}:${String(ss).padStart(2, '0')}`;
+}
+
+/**
+ * Point an <img> at a thumbnail URL, re-requesting while the server is still
+ * generating it. `/api/media/thumb/<id>` returns a 1x1 transparent PNG
+ * placeholder for an uncached (e.g. newly-added) video and generates the real
+ * frame in the background. Without a retry the phone shows a black card until
+ * the whole page is reloaded — the reported "takes a few restarts" bug. We
+ * detect the placeholder (naturalWidth <= 1) and re-fetch with a cache-buster
+ * (the placeholder is served `no-cache`, but browsers won't re-load an
+ * identical src) until the real thumbnail lands or we exhaust the retries.
+ * @param {HTMLImageElement} img
+ * @param {string} url
+ * @param {Function} onGiveUp — called if it errors or never generates.
+ */
+function wireThumb(img, url, onGiveUp) {
+  let attempts = 0;
+  const MAX_ATTEMPTS = 8;
+  img.onload = () => {
+    if (img.naturalWidth > 1) return; // real thumbnail arrived
+    if (attempts >= MAX_ATTEMPTS) { if (onGiveUp) onGiveUp(); return; }
+    attempts++;
+    const delay = Math.min(1000 * attempts, 4000); // back off: 1s → 4s cap
+    setTimeout(() => {
+      img.src = url + (url.includes('?') ? '&' : '?') + '_r=' + attempts;
+    }, delay);
+  };
+  img.onerror = () => { if (onGiveUp) onGiveUp(); };
+  img.src = url;
 }
 
 /**

@@ -319,6 +319,41 @@ describe('ButtplugSync', () => {
     });
   });
 
+  describe('per-device output cutoff', () => {
+    it('defaults to no clamp (full 0-100)', () => {
+      expect(sync.getDeviceCutoff(0)).toEqual({ min: 0, max: 100 });
+    });
+
+    it('floor clamps a below-floor linear position', () => {
+      sync.setDeviceCutoff(0, 20, 100);
+      sync._sendToDevices(5, 300, 0); // 5 is below floor 20
+      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(0, 20, 300);
+    });
+
+    it('ceiling clamps an above-ceiling linear position', () => {
+      sync.setDeviceCutoff(0, 0, 80);
+      sync._sendToDevices(95, 300, 0); // 95 is above ceiling 80
+      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(0, 80, 300);
+    });
+
+    it('leaves in-band positions untouched (clamp, not remap)', () => {
+      sync.setDeviceCutoff(0, 20, 80);
+      sync._sendToDevices(50, 300, 0);
+      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(0, 50, 300);
+    });
+
+    it('is independent per device index', () => {
+      mockButtplug.devices = [
+        { index: 0, name: 'A', canLinear: true, canVibrate: false, canRotate: false },
+        { index: 1, name: 'B', canLinear: true, canVibrate: false, canRotate: false },
+      ];
+      sync.setDeviceCutoff(0, 30, 100); // only device 0 has a floor
+      sync._sendToDevices(10, 300, 0);
+      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(0, 30, 300); // clamped
+      expect(mockButtplug.sendLinear).toHaveBeenCalledWith(1, 10, 300); // untouched
+    });
+  });
+
   describe('event handlers', () => {
     it('stopAll on pause', () => {
       sync.start();
@@ -369,6 +404,7 @@ describe('ButtplugSync', () => {
       sync.setRotateMode(0, 'position');
       sync.setMaxIntensity(0, 45);
       sync.setRampUp(0, false);
+      sync.setDeviceCutoff(0, 25, 90);
 
       sync.clearDeviceState(0);
 
@@ -380,6 +416,7 @@ describe('ButtplugSync', () => {
       expect(sync.getRotateMode(0)).toBe('speed');
       expect(sync.getMaxIntensity(0)).toBe(70);
       expect(sync.getRampUp(0)).toBe(true);
+      expect(sync.getDeviceCutoff(0)).toEqual({ min: 0, max: 100 });
 
       // Underlying maps should no longer contain the index either
       expect(sync._axisAssignmentMap.has(0)).toBe(false);
@@ -389,6 +426,7 @@ describe('ButtplugSync', () => {
       expect(sync._rotateModeMap.has(0)).toBe(false);
       expect(sync._maxIntensityMap.has(0)).toBe(false);
       expect(sync._rampUpMap.has(0)).toBe(false);
+      expect(sync._cutoffMap.has(0)).toBe(false);
     });
 
     it('leaves other device indices untouched', () => {

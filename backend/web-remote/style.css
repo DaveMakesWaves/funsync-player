@@ -36,6 +36,29 @@
   --nav-height: 64px;          /* bottom nav height (mobile/tablet) */
   --rail-width: 200px;         /* left rail width (desktop ≥1024px) */
   --tap-min: 44px;             /* WCAG 2.5.5 / Apple HIG minimum */
+
+  /* accent as rgb triple for rgba() focus rings / glows (Modern) */
+  --accent-rgb: 233, 69, 96;
+
+  /* Non-colour scales — mirror renderer/styles/player.css. The web remote
+     ships Modern to everyone (decision A), so these hold the MODERN values;
+     the modern layer below is gated on <html data-style="modern"> (always
+     set) so a "classic remote" stays a one-line flip. See
+     notes/features/SCOPE-modern-theme.md. */
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-pill: 999px;
+
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.40), 0 2px 6px rgba(0, 0, 0, 0.30);
+  --elev-2: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --elev-3: 0 16px 40px rgba(0, 0, 0, 0.50);
+  --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-1: 150ms;
+  --dur-2: 220ms;
 }
 
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -1542,4 +1565,152 @@ body::-webkit-scrollbar {
 @media (orientation: landscape) and (max-height: 500px) {
   .header { padding-top: 6px; padding-bottom: 6px; }
   .player__video { aspect-ratio: auto; height: 60vh; }
+}
+
+/* ========================================================================
+ * MODERN interface layer (web remote)
+ * ========================================================================
+ * Gated on <html data-style="modern"> (always set — the web remote ships
+ * Modern to everyone, decision A of SCOPE-modern-theme.md). Same visual
+ * language as the desktop Modern style: real elevation + a lit top edge,
+ * softer/consistent corners, soft accent focus rings, and press feedback —
+ * all from the EXISTING palette. 44px tap targets + safe-area insets are
+ * preserved. Flipping the html attribute to "classic" reverts to the
+ * previous flat look with zero other changes.
+ * ==================================================================== */
+
+/* --- Shared soft focus ring (replaces hard 2px outlines) ----------------- */
+:root[data-style="modern"] .icon-btn:focus-visible,
+:root[data-style="modern"] .content-actions__btn:focus-visible,
+:root[data-style="modern"] .search-bar__input:focus-visible,
+:root[data-style="modern"] .nav-tabs__tab:focus-visible,
+:root[data-style="modern"] .sheet__option:focus-within,
+:root[data-style="modern"] .sheet__close:focus-visible,
+:root[data-style="modern"] .header__action:focus-visible,
+:root[data-style="modern"] .header__back:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
+}
+
+/* --- Library cards: first real shadows here — depth + lit edge + lift ----- */
+:root[data-style="modern"] .card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1), var(--edge-highlight);
+  transition: background var(--dur-1) var(--ease-out),
+              border-color var(--dur-1) var(--ease-out),
+              box-shadow var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .card__thumb {
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+/* Hover-lift only on real pointers so touch doesn't get sticky hover. */
+@media (hover: hover) {
+  :root[data-style="modern"] .card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--elev-2), var(--edge-highlight);
+  }
+  :root[data-style="modern"] .grouping-row:hover,
+  :root[data-style="modern"] .list__row:hover {
+    transform: translateX(2px);
+  }
+}
+
+/* --- List / grouping rows + thumbs --------------------------------------- */
+:root[data-style="modern"] .list__row,
+:root[data-style="modern"] .grouping-row {
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .list__thumb {
+  border-radius: var(--radius-md);
+}
+
+/* --- Sticky chrome: hairline elevation so it separates from scroll ------- */
+:root[data-style="modern"] .header,
+:root[data-style="modern"] .toolbar {
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.22);
+}
+
+/* --- Search + action buttons + icon buttons ------------------------------ */
+:root[data-style="modern"] .search-bar__input {
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .search-bar__input:focus {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+:root[data-style="modern"] .content-actions__btn,
+:root[data-style="modern"] .icon-btn {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1),
+              border-color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .content-actions__btn:active,
+:root[data-style="modern"] .icon-btn:active {
+  transform: scale(0.94);
+}
+:root[data-style="modern"] .filter-chip:active {
+  transform: scale(0.96);
+}
+
+/* --- Nav tabs / rail: rounder selected surface + accent glow -------------- */
+:root[data-style="modern"] .nav-tabs__tab {
+  transition: color var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .nav-tabs__tab[aria-selected="true"] .nav-tabs__icon {
+  filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.55));
+}
+
+/* --- Bottom sheet / drawer: elevation + lit edge + rounder options -------- */
+:root[data-style="modern"] .sheet__panel {
+  box-shadow: var(--elev-3), var(--edge-highlight);
+}
+:root[data-style="modern"] .sheet__option {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+/* The single-select variant hard-set border-radius:0 — round it back. */
+:root[data-style="modern"] .sheet__options--single .sheet__option {
+  border-radius: var(--radius-md);
+}
+
+/* --- Player: sync pill / variant chip depth + heatmap radius -------------- */
+:root[data-style="modern"] .player__sync-pill,
+:root[data-style="modern"] .player__variant-chip {
+  box-shadow: var(--elev-1);
+  transition: background var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out),
+              box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .player__variant-chip:active {
+  transform: scale(0.97);
+}
+:root[data-style="modern"] .player__heatmap {
+  border-radius: var(--radius-md);
+}
+
+/* --- Skeletons: align corner radius to the new scale --------------------- */
+:root[data-style="modern"] .skeleton__line {
+  border-radius: var(--radius-sm);
+}
+
+/* Reduced-motion — drop the transforms this layer adds. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .card,
+  :root[data-style="modern"] .list__row,
+  :root[data-style="modern"] .grouping-row,
+  :root[data-style="modern"] .content-actions__btn,
+  :root[data-style="modern"] .icon-btn,
+  :root[data-style="modern"] .filter-chip,
+  :root[data-style="modern"] .player__variant-chip {
+    transition: none;
+  }
+  :root[data-style="modern"] .card:hover,
+  :root[data-style="modern"] .list__row:hover,
+  :root[data-style="modern"] .grouping-row:hover,
+  :root[data-style="modern"] .content-actions__btn:active,
+  :root[data-style="modern"] .icon-btn:active,
+  :root[data-style="modern"] .filter-chip:active,
+  :root[data-style="modern"] .player__variant-chip:active {
+    transform: none;
+  }
 }

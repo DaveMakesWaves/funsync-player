@@ -128,4 +128,35 @@ describe('thumbnail-cache', () => {
       expect(cache.size()).toBe(0);
     });
   });
+
+  describe('LRU bound (large-library memory guard)', () => {
+    it('never grows past MAX_ENTRIES', () => {
+      for (let i = 0; i < cache.MAX_ENTRIES + 250; i++) {
+        cache.set(`/v/${i}.mp4`, 1, `data-${i}`);
+      }
+      expect(cache.size()).toBe(cache.MAX_ENTRIES);
+    });
+
+    it('evicts the least-recently-used entry first', () => {
+      // Fill to the cap, then add one more — the very first insert should go.
+      for (let i = 0; i < cache.MAX_ENTRIES; i++) {
+        cache.set(`/v/${i}.mp4`, 1, `data-${i}`);
+      }
+      cache.set('/v/overflow.mp4', 1, 'overflow');
+      expect(cache.get('/v/0.mp4', 1)).toBeNull();          // oldest evicted
+      expect(cache.get('/v/overflow.mp4', 1)).toBe('overflow');
+    });
+
+    it('get() refreshes recency so a hot entry survives eviction', () => {
+      for (let i = 0; i < cache.MAX_ENTRIES; i++) {
+        cache.set(`/v/${i}.mp4`, 1, `data-${i}`);
+      }
+      // Touch the oldest so it becomes the newest.
+      expect(cache.get('/v/0.mp4', 1)).toBe('data-0');
+      // Next insert should now evict entry 1 (the new oldest), not entry 0.
+      cache.set('/v/overflow.mp4', 1, 'overflow');
+      expect(cache.get('/v/0.mp4', 1)).toBe('data-0');       // survived
+      expect(cache.get('/v/1.mp4', 1)).toBeNull();           // evicted instead
+    });
+  });
 });

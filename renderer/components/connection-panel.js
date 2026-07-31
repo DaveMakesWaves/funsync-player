@@ -1,7 +1,7 @@
 // ConnectionPanel — UI for connecting to Handy or Buttplug.io devices
 
 import { icon, X, Info } from '../js/icons.js';
-import { SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, translatePage, getCurrentLocale, t } from '../js/i18n.js';
+import { t } from '../js/i18n.js';
 import {
   classifyTransport,
   computeSuggestedOffset,
@@ -32,7 +32,7 @@ const TCODE_UI_AXES = [
 ];
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete, audienceBridge }) {
+  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete, onButtplugResync, onHandyCutoffChanged, audienceBridge }) {
     this.handy = handyManager;
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
@@ -51,6 +51,14 @@ export class ConnectionPanel {
     // Community-reported bug 2026-06-01: "after Re-sync time, script
     // doesn't pause when video pauses, doesn't switch on new video".
     this.onResyncComplete = onResyncComplete || null;
+    // Called by the Buttplug "Reload script" button. App re-arms the
+    // Buttplug sync engine at the current video position. Returns true
+    // if a device was available to re-arm. Optional.
+    this.onButtplugResync = onButtplugResync || null;
+    // Called when the Handy output-limits (cutoff) sliders change. App
+    // wires this to push the new clamp into the per-tick HDSP engine
+    // (HSSP picks it up on the next upload). Optional.
+    this.onHandyCutoffChanged = onHandyCutoffChanged || null;
     this._panel = null;
     this._visible = false;
     this._activeTab = 'handy'; // 'handy' | 'buttplug'
@@ -104,9 +112,6 @@ export class ConnectionPanel {
         </button>
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-sync" aria-selected="false" aria-controls="tab-sync" data-tab="sync" tabindex="-1">
           <span class="connection-panel__tab-label" data-i18n="connection.tabSync">Sync</span>
-        </button>
-        <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-settings" aria-selected="false" aria-controls="tab-settings" data-tab="settings" tabindex="-1">
-          <span class="connection-panel__tab-label" data-i18n="settings.title">Settings</span>
         </button>
       </div>
 
@@ -192,6 +197,28 @@ export class ConnectionPanel {
         <button id="btn-reset-stroke" class="connection-panel__btn connection-panel__btn--reset" data-i18n="connection.btn.resetStroke">
           ${_esc(t('connection.btn.resetStroke'))}
         </button>
+
+        <!-- Output limits (cutoff): a HARD floor/ceiling clamp, distinct
+             from Stroke range above. Stroke range REMAPS the script into a
+             window; Output limits PIN out-of-band positions to the boundary
+             and leave the rest untouched ("commands below 20 are ignored").
+             Applies on the next video load / variant switch (same as the
+             Range Extender — HSSP bakes it into the uploaded script). -->
+        <label class="connection-panel__section-label" style="margin-top:12px" data-i18n="connection.handy.outputLimits">${_esc(t('connection.handy.outputLimits'))}</label>
+        <div class="connection-panel__device-safety">
+          <span class="connection-panel__tcode-range-label" data-i18n="connection.handy.cutoffMin">${_esc(t('connection.handy.cutoffMin'))}</span>
+          <input type="range" id="handy-cutoff-min-slider" min="0" max="99" value="0"
+                 class="connection-panel__safety-slider"
+                 data-i18n-aria-label="connection.handy.cutoffMinAria"
+                 aria-label="${_esc(t('connection.handy.cutoffMinAria'))}">
+          <span class="connection-panel__tcode-range-label" data-i18n="connection.handy.cutoffMax">${_esc(t('connection.handy.cutoffMax'))}</span>
+          <input type="range" id="handy-cutoff-max-slider" min="1" max="100" value="100"
+                 class="connection-panel__safety-slider"
+                 data-i18n-aria-label="connection.handy.cutoffMaxAria"
+                 aria-label="${_esc(t('connection.handy.cutoffMaxAria'))}">
+          <span class="connection-panel__safety-value" id="handy-cutoff-val">0-100%</span>
+        </div>
+        <div class="connection-panel__setting-hint" data-i18n="connection.handy.cutoffHint">${_esc(t('connection.handy.cutoffHint'))}</div>
       </div>
 
       </div><!-- end tab-handy -->
@@ -223,6 +250,10 @@ export class ConnectionPanel {
         <button id="btn-bp-scan" class="connection-panel__btn connection-panel__btn--secondary" data-i18n="connection.btn.scan">
           ${_esc(t('connection.btn.scan'))}
         </button>
+        <button id="btn-bp-resync" class="connection-panel__btn connection-panel__btn--secondary" data-i18n="connection.btn.reloadScript" data-i18n-title="connection.buttplug.reloadHint" title="${_esc(t('connection.buttplug.reloadHint'))}">
+          ${_esc(t('connection.btn.reloadScript'))}
+        </button>
+        <div class="connection-panel__hint" id="bp-resync-status" aria-live="polite"></div>
       </div>
 
       </div><!-- end tab-buttplug -->
@@ -284,6 +315,17 @@ export class ConnectionPanel {
           <option value="4" data-i18n="settings.tcodePrecision4">${_esc(t('settings.tcodePrecision4'))}</option>
         </select>
 
+        <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.updateRate">${_esc(t('connection.tcode.updateRate'))}</label>
+        <select id="tcode-update-rate-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.updateRateAria" aria-label="${_esc(t('connection.tcode.updateRateAria'))}">
+          <option value="25" selected>25 Hz</option>
+          <option value="33">33 Hz</option>
+          <option value="50">50 Hz</option>
+          <option value="60">60 Hz</option>
+        </select>
+        <div class="connection-panel__hint" style="margin-top:4px;font-size:11px;color:var(--text-secondary)" data-i18n="connection.tcode.updateRateHint">
+          ${_esc(t('connection.tcode.updateRateHint'))}
+        </div>
+
         <div class="connection-panel__input-row" style="margin-top:10px">
           <button id="tcode-connect-btn" class="connection-panel__btn" style="flex:1" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
         </div>
@@ -332,6 +374,25 @@ export class ConnectionPanel {
           <input type="range" id="ab-offset" min="-1000" max="1000" value="0" class="connection-panel__safety-slider" style="flex:1">
           <span id="ab-offset-value" class="connection-panel__setting-value" style="min-width:40px;text-align:right">0ms</span>
         </div>
+
+        <!-- Output limits (cutoff): hard floor/ceiling clamp. Autoblow is a
+             cloud device, so this bakes into the uploaded script — applies
+             on the next video load / variant switch. -->
+        <label class="connection-panel__section-label" style="margin-top:10px" data-i18n="connection.autoblow.outputLimits">${_esc(t('connection.autoblow.outputLimits'))}</label>
+        <div class="connection-panel__device-safety">
+          <span class="connection-panel__tcode-range-label" data-i18n="connection.autoblow.cutoffMin">${_esc(t('connection.autoblow.cutoffMin'))}</span>
+          <input type="range" id="ab-cutoff-min-slider" min="0" max="99" value="0"
+                 class="connection-panel__safety-slider"
+                 data-i18n-aria-label="connection.autoblow.cutoffMinAria"
+                 aria-label="${_esc(t('connection.autoblow.cutoffMinAria'))}">
+          <span class="connection-panel__tcode-range-label" data-i18n="connection.autoblow.cutoffMax">${_esc(t('connection.autoblow.cutoffMax'))}</span>
+          <input type="range" id="ab-cutoff-max-slider" min="1" max="100" value="100"
+                 class="connection-panel__safety-slider"
+                 data-i18n-aria-label="connection.autoblow.cutoffMaxAria"
+                 aria-label="${_esc(t('connection.autoblow.cutoffMaxAria'))}">
+          <span class="connection-panel__safety-value" id="ab-cutoff-val">0-100%</span>
+        </div>
+        <div class="connection-panel__setting-hint" data-i18n="connection.autoblow.cutoffHint">${_esc(t('connection.autoblow.cutoffHint'))}</div>
       </div>
 
       </div><!-- end tab-autoblow -->
@@ -381,13 +442,6 @@ export class ConnectionPanel {
       </div>
 
       </div><!-- end tab-sync -->
-
-      <div class="connection-panel__tab-content" id="tab-settings" role="tabpanel" aria-labelledby="connection-panel__tab-btn-settings" hidden>
-        <div class="connection-panel__form">
-          <label for="settings-language-select" class="connection-panel__label" data-i18n="settings.language">${_esc(t('settings.language'))}</label>
-          <select id="settings-language-select" class="connection-panel__input" data-i18n-aria-label="settings.language" aria-label="${_esc(t('settings.language'))}"></select>
-        </div>
-      </div><!-- end tab-settings -->
 
     `;
 
@@ -557,6 +611,13 @@ export class ConnectionPanel {
     // Reset stroke button
     this._panel.querySelector('#btn-reset-stroke').addEventListener('click', () => this._onResetStroke());
 
+    // Handy output-limits (cutoff) sliders — a hard floor/ceiling clamp,
+    // separate from the stroke-range remap above. Persisted to
+    // `handy.cutoff`; read at upload time by app.js `_cutoffFromSettings`,
+    // so changes take effect on the next video load / variant switch (same
+    // model as the Range Extender — HSSP bakes it into the uploaded script).
+    this._initHandyCutoff();
+
     // Tab switching — click activates a tab; arrow keys move focus
     // within the tablist per WAI-ARIA APG (Left/Right + Home/End,
     // wrapping at edges).
@@ -588,6 +649,7 @@ export class ConnectionPanel {
     if (this.buttplug) {
       this._panel.querySelector('#btn-bp-connect').addEventListener('click', () => this._onButtplugConnect());
       this._panel.querySelector('#btn-bp-scan').addEventListener('click', () => this._onButtplugScan());
+      this._panel.querySelector('#btn-bp-resync').addEventListener('click', () => this._onButtplugResync());
 
       this.buttplug.onConnect = () => this._updateButtplugStatus('connected');
       this.buttplug.onDisconnect = () => this._updateButtplugStatus('disconnected');
@@ -634,6 +696,19 @@ export class ConnectionPanel {
           this.settings.set('tcode.precision', digits);
         });
       }
+      // Output rate (advanced) — smoother wired motion at higher Hz. Applies
+      // live to the sync engine (restarts its scheduler) and persists.
+      const rateSelect = this._panel.querySelector('#tcode-update-rate-select');
+      if (rateSelect) {
+        const savedRate = Number(this.settings.get('tcode.updateRateHz')) || 25;
+        rateSelect.value = String(savedRate);
+        this.tcodeSync?.setUpdateRate?.(savedRate);
+        rateSelect.addEventListener('change', () => {
+          const hz = parseInt(rateSelect.value, 10) || 25;
+          this.tcodeSync?.setUpdateRate?.(hz);
+          this.settings.set('tcode.updateRateHz', hz);
+        });
+      }
       this._onTCodeTransportChange();
 
       this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
@@ -648,7 +723,6 @@ export class ConnectionPanel {
     }
 
     // Settings tab — language dropdown (Phase 4 of the i18n rollout)
-    this._wireSettingsTab();
 
     // Autoblow callbacks + events
     if (this.autoblowManager) {
@@ -670,6 +744,8 @@ export class ConnectionPanel {
         this.settings.set('autoblow.offset', v);
         if (this.autoblowManager?.connected) this.autoblowManager.syncOffset(v);
       });
+
+      this._initAutoblowCutoff();
 
       this._panel.querySelector('#ab-latency-btn')?.addEventListener('click', async () => {
         const btn = this._panel.querySelector('#ab-latency-btn');
@@ -789,6 +865,24 @@ export class ConnectionPanel {
     }
   }
 
+  /**
+   * Buttplug "Reload script" — re-arm the sync engine at the current
+   * video position. For the post-dropout state where the device is
+   * connected and the script shows "ready" but nothing moves. App does
+   * the actual re-arm; we just relay the outcome to the user.
+   */
+  _onButtplugResync() {
+    const status = this._panel.querySelector('#bp-resync-status');
+    const ok = this.onButtplugResync ? this.onButtplugResync() : false;
+    if (status) {
+      status.textContent = ok
+        ? t('connection.buttplug.reloadDone')
+        : t('connection.buttplug.reloadFailed');
+      clearTimeout(this._bpResyncMsgTimer);
+      this._bpResyncMsgTimer = setTimeout(() => { status.textContent = ''; }, 4000);
+    }
+  }
+
   _updateStatus(status) {
     const led = this._panel.querySelector('#connection-led');
     const text = this._panel.querySelector('#connection-status-text');
@@ -899,6 +993,78 @@ export class ConnectionPanel {
       fill.style.left = `${min}%`;
       fill.style.width = `${max - min}%`;
     }
+  }
+
+  /**
+   * Wire the Handy output-limits (cutoff) sliders. Loads the saved
+   * `handy.cutoff` and commits changes back to settings with a min<max
+   * guard. Unlike the stroke-range remap (live via setStrokeZone), the
+   * cutoff is baked into the uploaded HSSP script, so it applies on the
+   * next video load / variant switch — matching the Range Extender model.
+   */
+  _initHandyCutoff() {
+    const minS = this._panel.querySelector('#handy-cutoff-min-slider');
+    const maxS = this._panel.querySelector('#handy-cutoff-max-slider');
+    const readout = this._panel.querySelector('#handy-cutoff-val');
+    if (!minS || !maxS || !readout) return;
+
+    const saved = this.settings.get('handy.cutoff');
+    const sMin = (saved && Number.isFinite(saved.min)) ? saved.min : 0;
+    const sMax = (saved && Number.isFinite(saved.max)) ? saved.max : 100;
+    minS.value = String(sMin);
+    maxS.value = String(sMax);
+    readout.textContent = `${sMin}-${sMax}%`;
+
+    const commit = () => {
+      let mn = parseInt(minS.value, 10);
+      let mx = parseInt(maxS.value, 10);
+      if (mn >= mx) {  // prevent collapsed window
+        if (document.activeElement === minS) { mn = mx - 1; minS.value = String(mn); }
+        else { mx = mn + 1; maxS.value = String(mx); }
+      }
+      readout.textContent = `${mn}-${mx}%`;
+      // Persist only if non-default, so an absent key reliably means "no clamp".
+      if (mn === 0 && mx === 100) this.settings.set('handy.cutoff', null);
+      else this.settings.set('handy.cutoff', { min: mn, max: mx });
+      // Update the per-tick HDSP engine live (HSSP picks it up on next upload).
+      if (this.onHandyCutoffChanged) this.onHandyCutoffChanged();
+    };
+    minS.addEventListener('input', commit);
+    maxS.addEventListener('input', commit);
+  }
+
+  /**
+   * Wire the Autoblow output-limits (cutoff) sliders. Persists to
+   * `autoblow.cutoff`; read at upload time by app.js `_cutoffFromSettings`,
+   * so it applies on the next video load / variant switch (Autoblow is a
+   * cloud device — the clamp is baked into the uploaded script).
+   */
+  _initAutoblowCutoff() {
+    const minS = this._panel.querySelector('#ab-cutoff-min-slider');
+    const maxS = this._panel.querySelector('#ab-cutoff-max-slider');
+    const readout = this._panel.querySelector('#ab-cutoff-val');
+    if (!minS || !maxS || !readout) return;
+
+    const saved = this.settings.get('autoblow.cutoff');
+    const sMin = (saved && Number.isFinite(saved.min)) ? saved.min : 0;
+    const sMax = (saved && Number.isFinite(saved.max)) ? saved.max : 100;
+    minS.value = String(sMin);
+    maxS.value = String(sMax);
+    readout.textContent = `${sMin}-${sMax}%`;
+
+    const commit = () => {
+      let mn = parseInt(minS.value, 10);
+      let mx = parseInt(maxS.value, 10);
+      if (mn >= mx) {
+        if (document.activeElement === minS) { mn = mx - 1; minS.value = String(mn); }
+        else { mx = mn + 1; maxS.value = String(mx); }
+      }
+      readout.textContent = `${mn}-${mx}%`;
+      if (mn === 0 && mx === 100) this.settings.set('autoblow.cutoff', null);
+      else this.settings.set('autoblow.cutoff', { min: mn, max: mx });
+    };
+    minS.addEventListener('input', commit);
+    maxS.addEventListener('input', commit);
   }
 
   async _applySavedDeviceSettings() {
@@ -1310,6 +1476,65 @@ export class ConnectionPanel {
       rangeRow.appendChild(rangeReadout);
       row.appendChild(rangeRow);
 
+      // Per-device output limits (cutoff) — a HARD floor/ceiling clamp,
+      // distinct from Range above. Range RESCALES the stroke into a window;
+      // Output limits PIN out-of-band values to the boundary and leave the
+      // rest untouched (community request: "commands below 20 are ignored").
+      // Same dual-slider shape so the control surface is familiar.
+      const cutoffRow = document.createElement('div');
+      cutoffRow.className = 'connection-panel__device-safety';
+      const cutoffMinLabel = document.createElement('span');
+      cutoffMinLabel.className = 'connection-panel__tcode-range-label';
+      cutoffMinLabel.textContent = t('connection.buttplug.cutoffMin');
+      const cutoffMinSlider = document.createElement('input');
+      cutoffMinSlider.type = 'range';
+      cutoffMinSlider.min = '0';
+      cutoffMinSlider.max = '99';
+      cutoffMinSlider.className = 'connection-panel__safety-slider';
+      cutoffMinSlider.setAttribute('aria-label', t('connection.buttplug.cutoffMinAria'));
+      const cutoffMaxLabel = document.createElement('span');
+      cutoffMaxLabel.className = 'connection-panel__tcode-range-label';
+      cutoffMaxLabel.textContent = t('connection.buttplug.cutoffMax');
+      const cutoffMaxSlider = document.createElement('input');
+      cutoffMaxSlider.type = 'range';
+      cutoffMaxSlider.min = '1';
+      cutoffMaxSlider.max = '100';
+      cutoffMaxSlider.className = 'connection-panel__safety-slider';
+      cutoffMaxSlider.setAttribute('aria-label', t('connection.buttplug.cutoffMaxAria'));
+      const cutoffReadout = document.createElement('span');
+      cutoffReadout.className = 'connection-panel__safety-value';
+
+      const currentCutoff = this.buttplugSync?.getDeviceCutoff(dev.index) || { min: 0, max: 100 };
+      cutoffMinSlider.value = String(currentCutoff.min);
+      cutoffMaxSlider.value = String(currentCutoff.max);
+      cutoffReadout.textContent = `${currentCutoff.min}-${currentCutoff.max}%`;
+
+      const commitCutoff = () => {
+        let mn = parseInt(cutoffMinSlider.value, 10);
+        let mx = parseInt(cutoffMaxSlider.value, 10);
+        if (mn >= mx) {  // prevent collapsed window (same pattern as Range)
+          if (document.activeElement === cutoffMinSlider) {
+            mn = mx - 1;
+            cutoffMinSlider.value = String(mn);
+          } else {
+            mx = mn + 1;
+            cutoffMaxSlider.value = String(mx);
+          }
+        }
+        cutoffReadout.textContent = `${mn}-${mx}%`;
+        if (this.buttplugSync) this.buttplugSync.setDeviceCutoff(dev.index, mn, mx);
+        this._saveButtplugDeviceSettings();
+      };
+      cutoffMinSlider.addEventListener('input', commitCutoff);
+      cutoffMaxSlider.addEventListener('input', commitCutoff);
+
+      cutoffRow.appendChild(cutoffMinLabel);
+      cutoffRow.appendChild(cutoffMinSlider);
+      cutoffRow.appendChild(cutoffMaxLabel);
+      cutoffRow.appendChild(cutoffMaxSlider);
+      cutoffRow.appendChild(cutoffReadout);
+      row.appendChild(cutoffRow);
+
       // E-stim safety section (only for scalar devices)
       if (dev.canScalar) {
         const safetySection = document.createElement('div');
@@ -1497,6 +1722,11 @@ export class ConnectionPanel {
       if (range && (range.min !== 0 || range.max !== 100)) {
         settings.range = { min: range.min, max: range.max };
       }
+      // Per-device output cutoff (hard clamp): persist only if non-default.
+      const cutoff = this.buttplugSync.getDeviceCutoff(dev.index);
+      if (cutoff && (cutoff.min !== 0 || cutoff.max !== 100)) {
+        settings.cutoff = { min: cutoff.min, max: cutoff.max };
+      }
       if (Object.keys(settings).length > 0) {
         // Key by index:name — stable across sessions (Intiface preserves device indices)
         // Allows two identical devices to have separate settings
@@ -1548,6 +1778,12 @@ export class ConnectionPanel {
           && Number.isFinite(saved.range.min)
           && Number.isFinite(saved.range.max)) {
           this.buttplugSync.setDeviceRange(dev.index, saved.range.min, saved.range.max);
+        }
+        // Per-device output cutoff (hard clamp). Same defensive guard.
+        if (saved.cutoff
+          && Number.isFinite(saved.cutoff.min)
+          && Number.isFinite(saved.cutoff.max)) {
+          this.buttplugSync.setDeviceCutoff(dev.index, saved.cutoff.min, saved.cutoff.max);
         }
       }
     }
@@ -1618,42 +1854,6 @@ export class ConnectionPanel {
   }
 
   // --- Settings tab (Phase 4 of i18n rollout) ---
-
-  /**
-   * Populate the language dropdown and wire its change handler. Called
-   * once during constructor wiring; the dropdown content is the
-   * SUPPORTED_LOCALES list with each locale displayed in its OWN script
-   * (so a Chinese user sees "中文" rather than "Chinese") — Norman:
-   * speak the user's language.
-   *
-   * On change: setLocale → translatePage → persist → toast confirmation.
-   */
-  _wireSettingsTab() {
-    const select = this._panel?.querySelector('#settings-language-select');
-    if (!select) return;
-    // Defensive: clear any pre-existing options (in case the panel is
-    // rebuilt during a hot reload).
-    select.innerHTML = '';
-    for (const code of SUPPORTED_LOCALES) {
-      const opt = document.createElement('option');
-      opt.value = code;
-      opt.textContent = LOCALE_LABELS[code] || code;
-      select.appendChild(opt);
-    }
-    select.value = getCurrentLocale();
-    select.addEventListener('change', async () => {
-      const next = select.value;
-      await setLocale(next);
-      translatePage(document);
-      this.settings.set('player.language', next);
-      // Mark the offer-toast as already shown for this locale — flipping
-      // via the dropdown is an explicit acceptance.
-      this.settings.set('player._localeOfferedFor', next);
-      const langName = LOCALE_LABELS[next] || next;
-      const { showToast } = await import('../js/toast.js');
-      showToast(t('i18n.switched', { language: langName }), 'success', 2000);
-    });
-  }
 
   // --- TCode (serial / UDP / WebSocket) ---
 
@@ -1805,9 +2005,12 @@ export class ConnectionPanel {
       const min = Number.isFinite(cfg.min) ? cfg.min : 0;
       const max = Number.isFinite(cfg.max) ? cfg.max : 100;
       const inverted = cfg.inverted === true;  // default false; missing → false
+      const cutMin = Number.isFinite(cfg.cutoffMin) ? cfg.cutoffMin : 0;
+      const cutMax = Number.isFinite(cfg.cutoffMax) ? cfg.cutoffMax : 100;
       this.tcodeSync.setAxisEnabled(tcode, enabled);
       this.tcodeSync.setAxisRange(tcode, min, max);
       this.tcodeSync.setAxisInverted(tcode, inverted);
+      this.tcodeSync.setAxisCutoff(tcode, cutMin, cutMax);
     }
   }
 
@@ -1832,6 +2035,8 @@ export class ConnectionPanel {
       const min = Number.isFinite(cfg.min) ? cfg.min : 0;
       const max = Number.isFinite(cfg.max) ? cfg.max : 100;
       const inverted = cfg.inverted === true;
+      const cutMin = Number.isFinite(cfg.cutoffMin) ? cfg.cutoffMin : 0;
+      const cutMax = Number.isFinite(cfg.cutoffMax) ? cfg.cutoffMax : 100;
 
       const row = document.createElement('div');
       row.className = 'connection-panel__tcode-axis-row';
@@ -1967,13 +2172,73 @@ export class ConnectionPanel {
       rangeRow.appendChild(valReadout);
       row.appendChild(rangeRow);
 
+      // Output limits (cutoff): a hard floor/ceiling clamp, distinct from
+      // Range above. Range RESCALES into a window; cutoff PINS out-of-band
+      // values to the boundary and leaves the rest untouched.
+      const cutoffRow = document.createElement('div');
+      cutoffRow.className = 'connection-panel__device-safety';
+
+      const cMinLabel = document.createElement('span');
+      cMinLabel.textContent = t('connection.tcode.cutoffMin');
+      cMinLabel.className = 'connection-panel__tcode-range-label';
+      const cMinSlider = document.createElement('input');
+      cMinSlider.type = 'range';
+      cMinSlider.min = '0';
+      cMinSlider.max = '99';
+      cMinSlider.value = String(cutMin);
+      cMinSlider.className = 'connection-panel__safety-slider';
+      if (!enabled) cMinSlider.disabled = true;
+
+      const cMaxLabel = document.createElement('span');
+      cMaxLabel.textContent = t('connection.tcode.cutoffMax');
+      cMaxLabel.className = 'connection-panel__tcode-range-label';
+      const cMaxSlider = document.createElement('input');
+      cMaxSlider.type = 'range';
+      cMaxSlider.min = '1';
+      cMaxSlider.max = '100';
+      cMaxSlider.value = String(cutMax);
+      cMaxSlider.className = 'connection-panel__safety-slider';
+      if (!enabled) cMaxSlider.disabled = true;
+
+      const cReadout = document.createElement('span');
+      cReadout.className = 'connection-panel__safety-value';
+      cReadout.textContent = `${cutMin}-${cutMax}%`;
+
+      const commitCutoff = () => {
+        let mn = parseInt(cMinSlider.value, 10);
+        let mx = parseInt(cMaxSlider.value, 10);
+        if (mn >= mx) {  // prevent collapsed window
+          if (document.activeElement === cMinSlider) { mn = mx - 1; cMinSlider.value = String(mn); }
+          else { mx = mn + 1; cMaxSlider.value = String(mx); }
+        }
+        cReadout.textContent = `${mn}-${mx}%`;
+        if (this.tcodeSync) this.tcodeSync.setAxisCutoff(tcode, mn, mx);
+        this._saveTCodeAxis(tcode, { cutoffMin: mn, cutoffMax: mx });
+      };
+      cMinSlider.addEventListener('input', commitCutoff);
+      cMaxSlider.addEventListener('input', commitCutoff);
+      // Keep cutoff sliders in lockstep with the axis enable toggle.
+      toggle.addEventListener('change', () => {
+        cMinSlider.disabled = !toggle.checked;
+        cMaxSlider.disabled = !toggle.checked;
+      });
+
+      cutoffRow.appendChild(cMinLabel);
+      cutoffRow.appendChild(cMinSlider);
+      cutoffRow.appendChild(cMaxLabel);
+      cutoffRow.appendChild(cMaxSlider);
+      cutoffRow.appendChild(cReadout);
+      row.appendChild(cutoffRow);
+
       list.appendChild(row);
     }
   }
 
   _saveTCodeAxis(tcode, cfg) {
     const all = { ...(this.settings.get('tcode.axes') || {}) };
-    all[tcode] = cfg;
+    // MERGE, don't replace — the range/enable/invert and cutoff controls
+    // each save only their own fields, so a replace would drop the other's.
+    all[tcode] = { ...all[tcode], ...cfg };
     this.settings.set('tcode.axes', all);
   }
 

@@ -488,3 +488,87 @@
 .playlists__list-item:hover .playlists__list-actions {
   opacity: 1;
 }
+
+/* === Reorder (list view): drag handle + Move ↑/↓ + DnD insertion line === */
+
+/* Visually-hidden live region for screen-reader reorder announcements. */
+.playlists__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Drag handle — signifier only (cursor + grip glyph). Dimmed until row hover. */
+.playlists__drag-handle {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  color: var(--text-muted);
+  cursor: grab;
+  opacity: 0.5;
+  transition: opacity 150ms, color 150ms;
+}
+.playlists__list-item:hover .playlists__drag-handle {
+  opacity: 1;
+  color: var(--text-secondary);
+}
+.playlists__list-item--dragging .playlists__drag-handle { cursor: grabbing; }
+
+/* Move ↑/↓ buttons — the accessible single-pointer + keyboard reorder path. */
+.playlists__move-group {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 150ms;
+}
+.playlists__list-item:hover .playlists__move-group,
+.playlists__move-btn:focus-visible {
+  opacity: 1;
+}
+/* Keep the group visible whenever a move button inside it has focus
+   (keyboard users never see a 0-opacity control they've tabbed to). */
+.playlists__move-group:focus-within { opacity: 1; }
+.playlists__move-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 5px;
+  cursor: pointer;
+  transition: background 150ms, color 150ms, border-color 150ms;
+}
+.playlists__move-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+  background: var(--surface-overlay);
+}
+.playlists__move-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* Dragging row = muted placeholder so its "absence" reads as intentional. */
+.playlists__list-item--dragging {
+  opacity: 0.4;
+}
+
+/* Insertion line — a 2px accent bar on the edge the item will drop onto
+   (NN/g: a line signals relative placement better than a row highlight). */
+.playlists__list-item--drop-before {
+  box-shadow: inset 0 2px 0 0 var(--accent);
+}
+.playlists__list-item--drop-after {
+  box-shadow: inset 0 -2px 0 0 var(--accent);
+}

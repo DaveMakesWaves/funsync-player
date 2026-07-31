@@ -17,6 +17,10 @@ const DEFAULTS = {
     player: {
       volume: 80,
       theme: 'dark',
+      // Interface style — 'classic' (current look) or 'modern' (same palette,
+      // modernised depth/spacing/motion). Orthogonal to `theme`. See
+      // notes/features/SCOPE-modern-theme.md.
+      uiStyle: 'classic',
       recentFiles: [],
       gapSkip: {
         mode: 'off',
@@ -29,6 +33,9 @@ const DEFAULTS = {
       preferMultiAxis: 'single',
       smoothing: 'linear',
       speedLimit: 0,
+      // Keep the video playing in a docked corner overlay while browsing
+      // the library, instead of stopping on leave (mini-player). Default on.
+      miniPlayer: true,
       // i18n — locked decisions in notes/features/IMPL-multi-language.md
       // #2: default is English, not 'auto'.
       // #3: _localeOfferedFor tracks the locale that's already been
@@ -66,6 +73,10 @@ const DEFAULTS = {
       // Non-planar projections (fisheye/equirect/MKX/RF52/EAC) reserved
       // for Phase 2a/2b — they appear disabled in the panel dropdown.
       vrFormat: {},
+      // Per-path custom thumbnail override. Value is `{ seekPct: 0..1 }` —
+      // the user picked a specific frame for the library tile instead of
+      // the auto-generated 10%-mark frame. Absent means auto.
+      customThumbnails: {},
       collections: [],
       activeCollectionId: null,
     },
@@ -89,6 +100,7 @@ const DEFAULTS = {
       udpPort: 0,
       wsUrl: '',            // ws://device.local:81  (also restim/MFP-consumer URLs)
       precision: 3,         // 3 = TCode-0.2 (L0500), 4 = TCode-0.3 (L05000)
+      updateRateHz: 25,     // output rate; higher = smoother on wired OSR2+/SR6 (advanced)
       axisRanges: {},
       axisEnabled: {},
     },
@@ -198,6 +210,15 @@ function setPlaylistLoop(id, loop) {
   }
 }
 
+function setPlaylistShuffle(id, shuffle) {
+  const playlists = getPlaylists();
+  const playlist = playlists.find((p) => p.id === id);
+  if (playlist) {
+    playlist.shuffle = !!shuffle;
+    conf.set('playlists', playlists);
+  }
+}
+
 function addVideoToPlaylist(id, videoPath) {
   const playlists = getPlaylists();
   const playlist = playlists.find((p) => p.id === id);
@@ -205,6 +226,25 @@ function addVideoToPlaylist(id, videoPath) {
     playlist.videoPaths.push(videoPath);
     conf.set('playlists', playlists);
   }
+}
+
+/**
+ * Replace a playlist's videoPaths with a new ordering. Used by drag/Move
+ * reorder. Validates that `newVideoPaths` is the same SET as the current
+ * paths (a reorder, not an add/remove) — defends against a stale renderer
+ * array silently dropping or duplicating entries.
+ */
+function setPlaylistVideoPaths(id, newVideoPaths) {
+  const playlists = getPlaylists();
+  const playlist = playlists.find((p) => p.id === id);
+  if (!playlist || !Array.isArray(newVideoPaths)) return;
+  const before = [...playlist.videoPaths].sort();
+  const after = [...newVideoPaths].sort();
+  if (before.length !== after.length || before.some((p, i) => p !== after[i])) {
+    return; // not a pure reorder — refuse rather than corrupt the playlist
+  }
+  playlist.videoPaths = [...newVideoPaths];
+  conf.set('playlists', playlists);
 }
 
 function removeVideoFromPlaylist(id, videoPath) {
@@ -361,8 +401,10 @@ module.exports = {
   deletePlaylist,
   renamePlaylist,
   setPlaylistLoop,
+  setPlaylistShuffle,
   addVideoToPlaylist,
   removeVideoFromPlaylist,
+  setPlaylistVideoPaths,
   getCategories,
   addCategory,
   deleteCategory,

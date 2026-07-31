@@ -63,6 +63,16 @@ def run_silent(*args, **kwargs):
 # growth — entries are tiny dicts and a library of 10k videos is < 1MB.
 _metadata_cache: dict[str, dict[str, Any]] = {}
 
+# Per-thumbnail ffmpeg decode budget. With the `-skip_frame nokey` strategy a
+# single frame decodes in ~1s (5.7s max in the 8K-HEVC benchmark), stretching
+# to ~15-20s only under heavy sibling contention. 25s clears that legitimate
+# worst case with headroom, but is 2.4× faster than the old 60s at giving up
+# on a slow/disconnected/hung drive (NAS dropout, spun-down HDD) — the report
+# was a large multi-drive library freezing, where doomed reads held all four
+# worker slots for a full minute each. Tune here if VR/8K thumbnails on very
+# slow storage start timing out.
+THUMBNAIL_TIMEOUT_SEC = 25
+
 
 def get_metadata(video_path: str) -> dict[str, Any]:
     """Extract video metadata using ffprobe.
@@ -71,7 +81,8 @@ def get_metadata(video_path: str) -> dict[str, Any]:
         video_path: Absolute path to the video file.
 
     Returns:
-        Dict with keys: duration, width, height, codec, format, bitrate, fps.
+        Dict with keys: duration, width, height, codec, profile, pixFmt,
+        format, bitrate, fps.
 
     Raises:
         FileNotFoundError: If video file doesn't exist.
@@ -138,6 +149,14 @@ def get_metadata(video_path: str) -> dict[str, Any]:
             "width": int(video_stream.get("width", 0)),
             "height": int(video_stream.get("height", 0)),
             "codec": video_stream.get("codec_name", "unknown"),
+            # profile + pixel format distinguish the variants Chromium
+            # can't decode (e.g. H.264 "High 10" / yuv422p / yuv444p) from
+            # the ones it can (8-bit "High"/"Main" yuv420p). Surfaced in the
+            # renderer's decode-error message so a Linux user sees exactly
+            # why one H.264 file plays and another doesn't. Empty string
+            # when ffprobe doesn't report them.
+            "profile": video_stream.get("profile", "") or "",
+            "pixFmt": video_stream.get("pix_fmt", "") or "",
             "fps": _parse_fps(video_stream.get("r_frame_rate", "0/1")),
         })
 
@@ -266,6 +285,155 @@ def generate_thumbnails(
         json.dump(manifest, f)
 
     return manifest
+
+
+# ---------------------------------------------------------------------------
+# Container remux (MKV → MP4)
+#
+# Chromium's <video> element can't demux the Matroska (.mkv) container even
+# when the streams inside are formats it fully supports (H.264 + AAC). The
+# user just gets "format not supported". The fix is to repackage the streams
+# into an MP4 container WITHOUT re-encoding (`-c copy`) — instant, lossless —
+# and play that instead. Only an audio track in a codec MP4/Chromium can't
+# carry (AC3/DTS/FLAC/Opus/…) needs a cheap AAC transcode.
+#
+# Community-reported (2026-06): every H.264/AAC .mkv failed; converting to
+# .mp4 by hand fixed it. This makes the app do that automatically on load.
+# ---------------------------------------------------------------------------
+
+# Video codecs we can stream-copy into MP4 AND Chromium can then decode.
+# Deliberately conservative: e.g. mpeg4 (DivX/Xvid) would copy fine but
+# Chromium can't decode it, so remuxing wouldn't actually help — better to
+# fail clearly than produce a still-unplayable file.
+_REMUX_VIDEO_COPYABLE = {"h264", "hevc", "h265", "av1"}
+# Audio codecs already MP4/Chromium-friendly → copy as-is. Everything else
+# (ac3, eac3, dts, truehd, flac, opus, vorbis, pcm_*) → transcode to AAC.
+_REMUX_AUDIO_COPYABLE = {"aac", "mp3"}
+
+
+def _probe_audio_codec(video_path: str) -> str | None:
+    """Return the first audio stream's codec name (lowercase), or None if
+    the file has no audio track. Best-effort — returns None on probe error
+    so the caller treats it as 'no audio' rather than crashing the remux."""
+    try:
+        result = run_silent(
+            [
+                FFPROBE,
+                "-v", "quiet",
+                "-select_streams", "a:0",
+                "-show_entries", "stream=codec_name",
+                "-of", "default=nokey=1:noprint_wrappers=1",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    name = (result.stdout or "").strip().lower()
+    return name or None
+
+
+def remux_to_mp4(video_path: str) -> dict[str, Any]:
+    """Repackage a video into an MP4 container for browser playback.
+
+    Stream-copies the video (and audio, when already MP4-friendly); only an
+    incompatible audio track is transcoded to AAC. Output is cached on disk
+    by content hash so re-opening the same file is instant.
+
+    Args:
+        video_path: Absolute path to the source video (typically .mkv).
+
+    Returns:
+        Dict with keys:
+            path:   absolute path to the remuxed MP4
+            cached: True if a prior remux was reused
+            vcodec / acodec: detected source codecs (for logging)
+
+    Raises:
+        FileNotFoundError: source missing or empty.
+        RuntimeError: ffmpeg failed, or the video codec can't be made
+            playable by remuxing (caller should surface "unsupported").
+    """
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    if os.path.getsize(video_path) == 0:
+        raise FileNotFoundError(f"Video is empty (0 bytes): {video_path}")
+
+    out_dir = os.path.join(tempfile.gettempdir(), "funsync_remux")
+    os.makedirs(out_dir, exist_ok=True)
+    # Hash includes size+mtime (via _get_video_hash) so an edited/replaced
+    # source re-remuxes instead of serving a stale MP4.
+    out_path = os.path.join(out_dir, f"{_get_video_hash(video_path)}.mp4")
+
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+        return {"path": out_path, "cached": True}
+
+    meta = get_metadata(video_path)
+    vcodec = (meta.get("codec") or "").lower()
+    if vcodec not in _REMUX_VIDEO_COPYABLE:
+        raise RuntimeError(
+            f"video codec '{vcodec or 'unknown'}' can't be remuxed to a "
+            f"browser-playable MP4 (would need a full transcode)"
+        )
+
+    acodec = _probe_audio_codec(video_path)
+
+    args = [
+        FFMPEG, "-y",
+        "-i", video_path,
+        # First video + first audio (if any). `?` makes the audio map
+        # optional so audio-less files don't fail the whole command.
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", "copy",
+    ]
+    if acodec is None:
+        pass  # no audio track
+    elif acodec in _REMUX_AUDIO_COPYABLE:
+        args += ["-c:a", "copy"]
+    else:
+        args += ["-c:a", "aac", "-b:a", "192k"]
+    # +faststart relocates the moov atom to the front so the file is
+    # seekable/streamable immediately (matters when the same MP4 is later
+    # served over HTTP to the VR / web-remote clients).
+    args += ["-movflags", "+faststart", out_path]
+
+    try:
+        result = run_silent(
+            args,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            # Stream-copy is I/O-bound and fast even for multi-GB files, but
+            # a large file on slow/NAS storage (plus an AAC audio transcode)
+            # can take a while. Generous ceiling; normal case is seconds.
+            timeout=600,
+        )
+    except FileNotFoundError:
+        raise RuntimeError("ffmpeg not found. Install ffmpeg to play this format.")
+    except subprocess.TimeoutExpired:
+        _safe_unlink(out_path)
+        raise RuntimeError("remux timed out")
+
+    if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
+        _safe_unlink(out_path)  # don't leave a half-written file in the cache
+        tail = (result.stderr or "")[-500:]
+        raise RuntimeError(f"ffmpeg remux failed: {tail}")
+
+    return {"path": out_path, "cached": False, "vcodec": vcodec, "acodec": acodec}
+
+
+def _safe_unlink(path: str) -> None:
+    """Remove a file, swallowing errors (used to clean up partial output)."""
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except OSError:
+        pass
 
 
 def generate_single_thumbnail(
@@ -414,14 +582,12 @@ def generate_single_thumbnail(
             text=True,
             encoding="utf-8",
             errors="replace",
-            # 60s timeout (was 30s). Single-frame decode of 8K HEVC takes
-            # ~3s standalone but can stretch to ~15-20s under contention
-            # from sibling thumbnail processes, even with the renderer's
-            # concurrency throttle. 60s is generous enough that genuine
-            # progress always finishes; truly-broken files (corrupt
-            # streams, hung NAS reads) still time out instead of hanging
-            # the queue forever.
-            timeout=60,
+            # Lowered from 60s so a slow/disconnected drive frees its worker
+            # slot sooner (see THUMBNAIL_TIMEOUT_SEC). Genuine 8K-HEVC decode
+            # finishes well inside this; truly-broken files (corrupt streams,
+            # hung NAS reads, spun-down HDDs) time out ~2.4× faster instead of
+            # holding the queue for a full minute.
+            timeout=THUMBNAIL_TIMEOUT_SEC,
         )
     except FileNotFoundError:
         raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")

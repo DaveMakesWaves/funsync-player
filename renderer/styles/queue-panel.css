@@ -134,6 +134,17 @@
   transform: translateX(0);
 }
 
+/* Library view: start below the filter/sort bar so those controls stay
+   usable while the panel is open, and run to the bottom of the window
+   (no playback-controls bar to clear here). `--queue-lib-top` is measured
+   in app.js (`_positionQueuePanelForLibrary`) since the header height isn't
+   fixed. Player view keeps the default top:0 / bottom:100px above the
+   controls bar. */
+#app[data-view="library"] .queue-panel {
+  top: var(--queue-lib-top, 106px);
+  bottom: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .queue-panel { transition: none; }
 }
@@ -283,6 +294,16 @@
 .queue-panel__section-action:hover {
   background: var(--video-overlay-control-hover);
   color: var(--video-overlay-text);
+}
+
+/* Icon-only variant (Clear = trash, Shuffle) — compact square tap target. */
+.queue-panel__section-action--icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
 }
 
 /* List */

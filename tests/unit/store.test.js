@@ -140,6 +140,36 @@ describe('store', () => {
       store.removeVideoFromPlaylist(pl.id, '/a.mp4');
       expect(store.getPlaylist(pl.id).videoPaths).toEqual(['/b.mp4']);
     });
+
+    it('setPlaylistShuffle toggles the flag', () => {
+      const pl = store.addPlaylist('Test');
+      store.setPlaylistShuffle(pl.id, true);
+      expect(store.getPlaylist(pl.id).shuffle).toBe(true);
+      store.setPlaylistShuffle(pl.id, false);
+      expect(store.getPlaylist(pl.id).shuffle).toBe(false);
+    });
+
+    it('setPlaylistVideoPaths reorders when the set matches', () => {
+      const pl = store.addPlaylist('Test');
+      store.addVideoToPlaylist(pl.id, '/a.mp4');
+      store.addVideoToPlaylist(pl.id, '/b.mp4');
+      store.addVideoToPlaylist(pl.id, '/c.mp4');
+      store.setPlaylistVideoPaths(pl.id, ['/c.mp4', '/a.mp4', '/b.mp4']);
+      expect(store.getPlaylist(pl.id).videoPaths).toEqual(['/c.mp4', '/a.mp4', '/b.mp4']);
+    });
+
+    it('setPlaylistVideoPaths REFUSES a non-reorder (add/remove/dup) to avoid corruption', () => {
+      const pl = store.addPlaylist('Test');
+      store.addVideoToPlaylist(pl.id, '/a.mp4');
+      store.addVideoToPlaylist(pl.id, '/b.mp4');
+      const before = store.getPlaylist(pl.id).videoPaths.slice();
+      store.setPlaylistVideoPaths(pl.id, ['/a.mp4']);                 // dropped one
+      expect(store.getPlaylist(pl.id).videoPaths).toEqual(before);
+      store.setPlaylistVideoPaths(pl.id, ['/a.mp4', '/b.mp4', '/c.mp4']); // added one
+      expect(store.getPlaylist(pl.id).videoPaths).toEqual(before);
+      store.setPlaylistVideoPaths(pl.id, ['/a.mp4', '/a.mp4']);       // duplicate
+      expect(store.getPlaylist(pl.id).videoPaths).toEqual(before);
+    });
   });
 
   describe('categories', () => {

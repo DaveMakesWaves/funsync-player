@@ -1,6 +1,14 @@
 # -*- mode: python ; coding: utf-8 -*-
 # PyInstaller spec for FunSync backend
 
+from PyInstaller.utils.hooks import collect_submodules
+
+# yt-dlp loads its hundreds of site extractors LAZILY via importlib, so they're
+# invisible to PyInstaller's static analysis. collect_submodules pulls the whole
+# package (incl. yt_dlp.extractor.*) into the frozen build — without this the
+# remote-video resolve would ImportError in production. See SCOPE-remote-video-url.
+_ytdlp_submodules = collect_submodules('yt_dlp')
+
 a = Analysis(
     ['main.py'],
     pathex=[],
@@ -32,7 +40,7 @@ a = Analysis(
         'websockets',
         'websockets.legacy',
         'websockets.legacy.server',
-    ],
+    ] + _ytdlp_submodules,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

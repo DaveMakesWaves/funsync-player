@@ -2632,10 +2632,10 @@ export class ScriptEditor {
     // the pop-out while it's open. Unsubscribe on stop.
     if (eventBus && !this._popoutThemeUnsub) {
       this._popoutThemeUnsub = eventBus.on('settings:changed', ({ path } = {}) => {
-        if (path === 'player.theme') {
-          // Defer one tick — `theme-manager` writes the `data-theme`
-          // attribute on settings:changed; we want to read it AFTER
-          // that write so the broadcast carries the new value.
+        if (path === 'player.theme' || path === 'player.uiStyle') {
+          // Defer one tick — `theme-manager` writes the `data-theme` /
+          // `data-style` attribute on settings:changed; we want to read it
+          // AFTER that write so the broadcast carries the new value.
           setTimeout(() => this._broadcastTheme(), 0);
         }
       });
@@ -2912,6 +2912,7 @@ export class ScriptEditor {
       // the pop-out is hardcoded dark, which regresses light-theme
       // users (DESIGN.md §2.1 — semantic tokens, not named colours).
       theme: document.documentElement.dataset.theme || 'dark',
+      uiStyle: document.documentElement.dataset.style || 'classic',
       // Frame duration for the pop-out's snap-to-frame logic. Matches
       // `_frameDurationMs()` in the docked editor — 30 fps standard.
       frameDurationMs: this._frameDurationMs?.() || (1000 / 30),
@@ -2926,6 +2927,7 @@ export class ScriptEditor {
     this._relayToPopout({
       type: 'theme',
       theme: document.documentElement.dataset.theme || 'dark',
+      uiStyle: document.documentElement.dataset.style || 'classic',
     });
   }
 

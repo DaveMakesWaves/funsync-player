@@ -220,6 +220,56 @@ describe('HandyHdspSync — tick → hdspMove dispatch', () => {
   });
 });
 
+describe('HandyHdspSync — output cutoff clamp', () => {
+  let handyManager;
+  let player;
+  let sync;
+
+  beforeEach(() => {
+    handyManager = { hdspMove: vi.fn() };
+    player = { currentTime: 0 };
+    sync = new HandyHdspSync({ handyManager, player });
+    sync.setTimerImpl((cb, ms) => 1, () => {});
+    sync.setActions([{ at: 0, pos: 0 }, { at: 1000, pos: 100 }]);
+    sync.start();
+  });
+
+  it('no cutoff by default → raw interpolated position', () => {
+    player.currentTime = 0.0; // pos 0
+    sync._tick();
+    expect(handyManager.hdspMove).toHaveBeenCalledWith(0, 100);
+  });
+
+  it('floor clamps positions below the floor', () => {
+    sync.setCutoff({ min: 20, max: 100 });
+    player.currentTime = 0.0; // interpolates to 0 → clamped up to 20
+    sync._tick();
+    expect(handyManager.hdspMove).toHaveBeenCalledWith(20, 100);
+  });
+
+  it('ceiling clamps positions above the ceiling', () => {
+    sync.setCutoff({ min: 0, max: 80 });
+    player.currentTime = 1.0; // pos 100 → clamped down to 80
+    sync._tick();
+    expect(handyManager.hdspMove).toHaveBeenCalledWith(80, 100);
+  });
+
+  it('in-band positions pass through untouched (clamp, not remap)', () => {
+    sync.setCutoff({ min: 20, max: 80 });
+    player.currentTime = 0.5; // pos 50 → untouched
+    sync._tick();
+    expect(handyManager.hdspMove).toHaveBeenCalledWith(50, 100);
+  });
+
+  it('setCutoff(null) clears the clamp', () => {
+    sync.setCutoff({ min: 20, max: 100 });
+    sync.setCutoff(null);
+    player.currentTime = 0.0;
+    sync._tick();
+    expect(handyManager.hdspMove).toHaveBeenCalledWith(0, 100);
+  });
+});
+
 describe('HandyHdspSync — setActions filters + sorts', () => {
   it('filters out non-action entries', () => {
     const sync = new HandyHdspSync({ handyManager: { hdspMove: vi.fn() }, player: { currentTime: 0 } });

@@ -1,7 +1,7 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, GripVertical, ChevronUp, ChevronDown } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { computeSpeedStats } from '../js/library-search.js';
@@ -241,6 +241,33 @@ export class Playlists {
         setLoopVisualState(next);
       });
       header.appendChild(loopBtn);
+
+      // Shuffle toggle — grouped with Loop (both are play-behaviour
+      // modifiers; users expect them adjacent). Per-playlist preference,
+      // same persist + aria-pressed + .is-on pattern as Loop. Active state
+      // must be obvious (Nielsen #1) — accent fill via .is-on + tooltip
+      // naming the state. Shuffle order is decided at Play All time (bag
+      // model: shuffle once, reshuffle on loop wrap) — see app._playAll.
+      const shuffleBtn = document.createElement('button');
+      shuffleBtn.type = 'button';
+      shuffleBtn.className = 'playlists__loop-btn playlists__shuffle-btn';
+      shuffleBtn.appendChild(icon(Shuffle, { width: 14, height: 14 }));
+      const setShuffleVisualState = (on) => {
+        shuffleBtn.classList.toggle('is-on', !!on);
+        shuffleBtn.setAttribute('aria-pressed', String(!!on));
+        shuffleBtn.title = on
+          ? t('playlists.shuffleOnTitle')
+          : t('playlists.shuffleOffTitle');
+        shuffleBtn.setAttribute('aria-label', shuffleBtn.title);
+      };
+      setShuffleVisualState(!!pl.shuffle);
+      shuffleBtn.addEventListener('click', () => {
+        const next = !pl.shuffle;
+        pl.shuffle = next;
+        this._settings.setPlaylistShuffle(pl.id, next);
+        setShuffleVisualState(next);
+      });
+      header.appendChild(shuffleBtn);
     }
 
     this._addViewToggle(header);
@@ -294,7 +321,54 @@ export class Playlists {
     }
 
     wrapper.appendChild(grid);
+
+    // Visually-hidden polite live region — announces reorder moves to screen
+    // readers (native HTML5 DnD is silent to them). SCOPE §7 / WCAG.
+    const live = document.createElement('div');
+    live.className = 'playlists__sr-only';
+    live.setAttribute('aria-live', 'polite');
+    live.setAttribute('aria-atomic', 'true');
+    wrapper.appendChild(live);
+    this._reorderLive = live;
+
     this._container.appendChild(wrapper);
+  }
+
+  /** Announce a reorder to the aria-live region (screen-reader feedback). */
+  _announceReorder(name, pos, total) {
+    if (this._reorderLive) {
+      this._reorderLive.textContent = t('playlists.reorderAnnounce', { name, pos, total });
+    }
+  }
+
+  /** Persist the playlist's order from the current DOM row order (no re-render). */
+  _persistOrderFromDom(grid, playlistId) {
+    const order = [...grid.children]
+      .map((r) => r.dataset.videoPath)
+      .filter(Boolean);
+    if (order.length) this._settings.setPlaylistVideoPaths(playlistId, order);
+  }
+
+  /**
+   * Move a list-item row up (-1) or down (+1) in the DOM, persist the new
+   * order, and announce it. No-op at the edges. Doesn't re-render, so focus
+   * stays on the move button (keyboard reorder stays fluid) and heatmaps
+   * aren't re-read. Single-pointer + keyboard path (WCAG 2.5.7).
+   */
+  _moveRow(row, dir, playlistId) {
+    const grid = row.parentElement;
+    if (!grid) return;
+    if (dir < 0 && row.previousElementSibling) {
+      grid.insertBefore(row, row.previousElementSibling);
+    } else if (dir > 0 && row.nextElementSibling) {
+      grid.insertBefore(row.nextElementSibling, row);
+    } else {
+      return; // already at the edge
+    }
+    this._persistOrderFromDom(grid, playlistId);
+    const name = (row.dataset.videoName || '').trim();
+    const pos = [...grid.children].indexOf(row) + 1;
+    this._announceReorder(name, pos, grid.children.length);
   }
 
   _createVideoCard(videoPath, playlist, playContext) {
@@ -649,6 +723,7 @@ export class Playlists {
       sourceLabel: pl.name,
       sourceContext: { kind: 'playlist', id: pl.id },
       loop: !!pl.loop,
+      shuffle: !!pl.shuffle,
     });
   }
 
@@ -728,12 +803,86 @@ export class Playlists {
 
   _createVideoListItem(videoPath, playlist, playContext) {
     const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
+    const displayName = fileName.replace(/\.[^/.]+$/, '');
     const row = document.createElement('div');
     row.className = 'playlists__list-item';
+    // Identity for reorder: derive order from the DOM, key by path.
+    row.dataset.videoPath = videoPath;
+    row.dataset.videoName = displayName;
+
+    // --- Reorder controls (list view only — natural for an ordered list) ---
+    // Drag handle = visual signifier (decorative; keyboard uses the buttons).
+    const handle = document.createElement('span');
+    handle.className = 'playlists__drag-handle';
+    handle.appendChild(icon(GripVertical, { width: 16, height: 16 }));
+    handle.setAttribute('aria-hidden', 'true');
+    handle.title = t('playlists.dragToReorder');
+
+    // Move ↑/↓ buttons — the accessible, single-pointer + keyboard path
+    // (WCAG 2.5.7). No-op at edges; no re-render so focus stays put.
+    const moveUp = document.createElement('button');
+    moveUp.type = 'button';
+    moveUp.className = 'playlists__move-btn playlists__move-up';
+    moveUp.appendChild(icon(ChevronUp, { width: 14, height: 14 }));
+    moveUp.title = t('playlists.moveUp');
+    moveUp.setAttribute('aria-label', t('playlists.moveUpNamed', { name: displayName }));
+    moveUp.addEventListener('click', (e) => { e.stopPropagation(); this._moveRow(row, -1, playlist.id); });
+
+    const moveDown = document.createElement('button');
+    moveDown.type = 'button';
+    moveDown.className = 'playlists__move-btn playlists__move-down';
+    moveDown.appendChild(icon(ChevronDown, { width: 14, height: 14 }));
+    moveDown.title = t('playlists.moveDown');
+    moveDown.setAttribute('aria-label', t('playlists.moveDownNamed', { name: displayName }));
+    moveDown.addEventListener('click', (e) => { e.stopPropagation(); this._moveRow(row, +1, playlist.id); });
+
+    // Native HTML5 drag-and-drop on the row (mouse power-user layer). A drag
+    // suppresses the row's click, so click-to-play still works. Insertion is
+    // decided by whether the pointer is past the target row's centre (NN/g).
+    row.draggable = true;
+    row.addEventListener('dragstart', (e) => {
+      this._dragRow = row;
+      row.classList.add('playlists__list-item--dragging');
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', videoPath); // Firefox needs data set
+      }
+    });
+    row.addEventListener('dragover', (e) => {
+      if (!this._dragRow || this._dragRow === row) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const rect = row.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      row.classList.toggle('playlists__list-item--drop-after', after);
+      row.classList.toggle('playlists__list-item--drop-before', !after);
+    });
+    row.addEventListener('dragleave', () => {
+      row.classList.remove('playlists__list-item--drop-before', 'playlists__list-item--drop-after');
+    });
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('playlists__list-item--drop-before', 'playlists__list-item--drop-after');
+      const dragged = this._dragRow;
+      if (!dragged || dragged === row) return;
+      const grid = row.parentElement;
+      const rect = row.getBoundingClientRect();
+      const after = e.clientY > rect.top + rect.height / 2;
+      grid.insertBefore(dragged, after ? row.nextElementSibling : row);
+      this._persistOrderFromDom(grid, playlist.id);
+      const pos = [...grid.children].indexOf(dragged) + 1;
+      this._announceReorder(dragged.dataset.videoName || '', pos, grid.children.length);
+    });
+    row.addEventListener('dragend', () => {
+      this._dragRow?.classList.remove('playlists__list-item--dragging');
+      this._dragRow = null;
+      row.parentElement?.querySelectorAll('.playlists__list-item--drop-before, .playlists__list-item--drop-after')
+        .forEach((r) => r.classList.remove('playlists__list-item--drop-before', 'playlists__list-item--drop-after'));
+    });
 
     const title = document.createElement('span');
     title.className = 'playlists__list-name';
-    title.textContent = fileName.replace(/\.[^/.]+$/, '');
+    title.textContent = displayName;
     title.title = fileName;
 
     const heatmap = document.createElement('canvas');
@@ -758,7 +907,11 @@ export class Playlists {
       this._renderDetail(playlist.id);
     });
 
-    row.append(title, heatmap, badges, removeBtn);
+    const moveGroup = document.createElement('div');
+    moveGroup.className = 'playlists__move-group';
+    moveGroup.append(moveUp, moveDown);
+
+    row.append(handle, title, heatmap, badges, moveGroup, removeBtn);
 
     row.addEventListener('click', () => {
       this._playVideoByPath(videoPath, playContext);

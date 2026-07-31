@@ -15,7 +15,7 @@
 // We mock matchMedia so the tests are deterministic across environments.
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { resolveEffectiveTheme, applyTheme, initTheme, _resetForTests } from '../../renderer/js/theme-manager.js';
+import { resolveEffectiveTheme, applyTheme, resolveStyle, applyStyle, initTheme, _resetForTests } from '../../renderer/js/theme-manager.js';
 import { eventBus } from '../../renderer/js/event-bus.js';
 
 function mockMatchMedia(prefersDark) {
@@ -42,6 +42,7 @@ function makeDataService(initial = {}) {
 beforeEach(() => {
   _resetForTests();
   document.documentElement.removeAttribute('data-theme');
+  document.documentElement.removeAttribute('data-style');
   // Reset eventBus listeners between tests so theme-manager re-init
   // doesn't accumulate handlers from prior runs.
   if (eventBus._events) eventBus._events.clear();
@@ -91,6 +92,68 @@ describe('applyTheme', () => {
     applyTheme('invalid');
     // Stays as the previous valid value — no clobber to undefined.
     expect(document.documentElement.dataset.theme).toBe('dark');
+  });
+});
+
+describe('resolveStyle', () => {
+  it('returns the value for valid styles', () => {
+    expect(resolveStyle('classic')).toBe('classic');
+    expect(resolveStyle('modern')).toBe('modern');
+  });
+
+  it('defaults to classic on garbage / missing', () => {
+    expect(resolveStyle('fancy')).toBe('classic');
+    expect(resolveStyle(undefined)).toBe('classic');
+    expect(resolveStyle(null)).toBe('classic');
+  });
+});
+
+describe('applyStyle', () => {
+  it('sets data-style on <html>', () => {
+    applyStyle('modern');
+    expect(document.documentElement.dataset.style).toBe('modern');
+    applyStyle('classic');
+    expect(document.documentElement.dataset.style).toBe('classic');
+  });
+
+  it('coerces invalid input to classic (never leaves undefined)', () => {
+    applyStyle('bogus');
+    expect(document.documentElement.dataset.style).toBe('classic');
+  });
+});
+
+describe('initTheme — interface style', () => {
+  it('applies the stored uiStyle on init', () => {
+    mockMatchMedia(true);
+    const ds = makeDataService({ 'player.theme': 'dark', 'player.uiStyle': 'modern' });
+    initTheme(ds);
+    expect(document.documentElement.dataset.style).toBe('modern');
+  });
+
+  it('defaults to classic when uiStyle is unset', () => {
+    mockMatchMedia(true);
+    const ds = makeDataService({ 'player.theme': 'dark' });
+    initTheme(ds);
+    expect(document.documentElement.dataset.style).toBe('classic');
+  });
+
+  it('reapplies on settings:changed when path is player.uiStyle', () => {
+    mockMatchMedia(true);
+    const ds = makeDataService({ 'player.theme': 'dark', 'player.uiStyle': 'classic' });
+    initTheme(ds);
+    expect(document.documentElement.dataset.style).toBe('classic');
+
+    ds.set('player.uiStyle', 'modern');
+    eventBus.emit('settings:changed', { path: 'player.uiStyle', value: 'modern' });
+    expect(document.documentElement.dataset.style).toBe('modern');
+  });
+
+  it('does not touch data-style on unrelated settings changes', () => {
+    mockMatchMedia(true);
+    const ds = makeDataService({ 'player.theme': 'dark', 'player.uiStyle': 'modern' });
+    initTheme(ds);
+    eventBus.emit('settings:changed', { path: 'player.volume', value: 30 });
+    expect(document.documentElement.dataset.style).toBe('modern');
   });
 });
 

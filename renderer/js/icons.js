@@ -19,6 +19,7 @@ export { default as Smartphone } from '../../node_modules/lucide/dist/esm/icons/
 export { default as Goggles } from '../../node_modules/lucide/dist/esm/icons/rectangle-goggles.js';
 export { default as Bluetooth } from '../../node_modules/lucide/dist/esm/icons/bluetooth.js';
 export { default as Maximize } from '../../node_modules/lucide/dist/esm/icons/maximize.js';
+export { default as Maximize2 } from '../../node_modules/lucide/dist/esm/icons/maximize-2.js';
 export { default as Minimize } from '../../node_modules/lucide/dist/esm/icons/minimize.js';
 export { default as ArrowLeft } from '../../node_modules/lucide/dist/esm/icons/arrow-left.js';
 export { default as Plus } from '../../node_modules/lucide/dist/esm/icons/plus.js';
@@ -71,6 +72,9 @@ export { default as SlidersHorizontal } from '../../node_modules/lucide/dist/esm
 // ChevronDown — replaces the raw `▾` text used in the nav-bar library
 // arrow. Real semantic icon, not a unicode glyph.
 export { default as ChevronDown } from '../../node_modules/lucide/dist/esm/icons/chevron-down.js';
+// ChevronUp + Shuffle — playlist reorder (Move up) + shuffle toggle.
+export { default as ChevronUp } from '../../node_modules/lucide/dist/esm/icons/chevron-up.js';
+export { default as Shuffle } from '../../node_modules/lucide/dist/esm/icons/shuffle.js';
 // Search — visible affordance in the library search input (left-side
 // icon, complements the placeholder which disappears on focus).
 export { default as Search } from '../../node_modules/lucide/dist/esm/icons/search.js';
@@ -95,6 +99,8 @@ export { default as Languages } from '../../node_modules/lucide/dist/esm/icons/l
 // Standard convention for "this opens elsewhere"; matches the docked vs
 // popped-out mental model better than Maximize (which implies fullscreen).
 export { default as ExternalLink } from '../../node_modules/lucide/dist/esm/icons/external-link.js';
+// Link — "Load from URL" (remote video) nav-bar action.
+export { default as Link } from '../../node_modules/lucide/dist/esm/icons/link.js';
 
 // Audience-broadcast feature (SCOPE-audience-broadcast.md)
 export { default as Eye } from '../../node_modules/lucide/dist/esm/icons/eye.js';

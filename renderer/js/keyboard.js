@@ -21,6 +21,21 @@ export class KeyboardHandler {
 
   _bindEvents() {
     document.addEventListener('keydown', (e) => this._onKeyDown(e));
+    document.addEventListener('keyup', (e) => this._onKeyUp(e));
+  }
+
+  /**
+   * Key-up handler — currently only the Orgasm Switch hold key. Deliberately
+   * does NOT gate on focus/editor: if a hold was started we must always
+   * release it, even if focus moved to an input mid-hold (otherwise the
+   * device would be stuck driving the orgasm loop). The hold itself is gated
+   * in _onKeyDown.
+   */
+  _onKeyUp(e) {
+    if ((e.key === 'x' || e.key === 'X') && this._orgasmHoldActive) {
+      this._orgasmHoldActive = false;
+      if (this.onOrgasmHold) this.onOrgasmHold(false);
+    }
   }
 
   _onKeyDown(e) {
@@ -272,6 +287,21 @@ export class KeyboardHandler {
       case 'O':
         e.preventDefault();
         if (this.onOpenFile) this.onOpenFile();
+        break;
+
+      case 'x':
+      case 'X':
+        // Orgasm Switch — HOLD to swap the device(s) onto a short, looping
+        // "orgasm" script; release to snap back to the main script (handled
+        // in _onKeyUp). Gated against the editor so it doesn't fire during
+        // authoring. keydown auto-repeats while held, so the _orgasmHoldActive
+        // flag makes activation fire exactly once per physical press.
+        if (this.scriptEditor?.isOpen) break;
+        e.preventDefault();
+        if (!this._orgasmHoldActive) {
+          this._orgasmHoldActive = true;
+          if (this.onOrgasmHold) this.onOrgasmHold(true);
+        }
         break;
 
       case 'Escape':

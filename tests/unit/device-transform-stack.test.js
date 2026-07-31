@@ -16,11 +16,13 @@ import {
   applyExtender,
   applyInvert,
   applyRange,
+  applyCutoff,
   applySafetyCap,
   applyDeviceStack,
   clamp01,
   computeNaturalRange,
   extendRawScriptContent,
+  clampRawScriptContent,
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from '../../renderer/js/device-transform-stack.js';
 
@@ -188,6 +190,63 @@ describe('applyRange', () => {
   });
 });
 
+describe('applyCutoff', () => {
+  it('no-op when cutoff is null/undefined/non-object', () => {
+    expect(applyCutoff(50, null)).toBe(50);
+    expect(applyCutoff(50, undefined)).toBe(50);
+    expect(applyCutoff(50, 'foo')).toBe(50);
+  });
+
+  it('no-op when min/max non-finite', () => {
+    expect(applyCutoff(50, { min: NaN, max: 80 })).toBe(50);
+    expect(applyCutoff(50, { min: 20, max: NaN })).toBe(50);
+    expect(applyCutoff(50, { min: undefined, max: 80 })).toBe(50);
+  });
+
+  it('no-op at full-range defaults', () => {
+    expect(applyCutoff(0, { min: 0, max: 100 })).toBe(0);
+    expect(applyCutoff(50, { min: 0, max: 100 })).toBe(50);
+    expect(applyCutoff(100, { min: 0, max: 100 })).toBe(100);
+  });
+
+  it('CLAMPS (pins) out-of-band values, leaves in-band untouched', () => {
+    // floor 20, ceiling 80 — the defining behaviour vs applyRange's remap
+    expect(applyCutoff(10, { min: 20, max: 80 })).toBe(20); // below floor → floor
+    expect(applyCutoff(0,  { min: 20, max: 80 })).toBe(20);
+    expect(applyCutoff(50, { min: 20, max: 80 })).toBe(50); // in band → untouched
+    expect(applyCutoff(90, { min: 20, max: 80 })).toBe(80); // above ceil → ceil
+    expect(applyCutoff(100, { min: 20, max: 80 })).toBe(80);
+  });
+
+  it('contrasts with applyRange: clamp does NOT rescale', () => {
+    // Same window 20-100. Range REMAPS 10 → 28; cutoff CLAMPS 10 → 20.
+    expect(applyRange(10, { min: 20, max: 100 })).toBe(28);
+    expect(applyCutoff(10, { min: 20, max: 100 })).toBe(20);
+    // And an in-band value: range rescales it, cutoff leaves it.
+    expect(applyRange(50, { min: 20, max: 100 })).toBe(60);
+    expect(applyCutoff(50, { min: 20, max: 100 })).toBe(50);
+  });
+
+  it('floor-only (ceiling 100)', () => {
+    expect(applyCutoff(5,  { min: 30, max: 100 })).toBe(30);
+    expect(applyCutoff(70, { min: 30, max: 100 })).toBe(70);
+  });
+
+  it('refuses degenerate min >= max (no-op)', () => {
+    expect(applyCutoff(50, { min: 80, max: 20 })).toBe(50);
+    expect(applyCutoff(50, { min: 50, max: 50 })).toBe(50);
+  });
+
+  it('clamps an out-of-[0,100] cutoff config before applying', () => {
+    expect(applyCutoff(5, { min: -10, max: 80 })).toBe(5);   // floor clamps to 0 → no floor effect
+    expect(applyCutoff(90, { min: 20, max: 150 })).toBe(90); // ceil clamps to 100 → no ceil effect
+  });
+
+  it('NaN input → 0 → floor', () => {
+    expect(applyCutoff(NaN, { min: 20, max: 80 })).toBe(20);
+  });
+});
+
 describe('applySafetyCap', () => {
   it('cap undefined / NaN → identity', () => {
     expect(applySafetyCap(80, undefined)).toBe(80);
@@ -269,6 +328,26 @@ describe('applyDeviceStack — composition', () => {
     expect(applyDeviceStack(50, { range: { min: 30, max: 70 } })).toBe(50);
     expect(applyDeviceStack(0,  { range: { min: 30, max: 70 } })).toBe(30);
     expect(applyDeviceStack(100, { range: { min: 30, max: 70 } })).toBe(70);
+  });
+
+  it('cutoff clamps after range remap (order: range → cutoff)', () => {
+    // input 0 → range [0,100] no-op → cutoff floor 20 → 20
+    expect(applyDeviceStack(0, { cutoff: { min: 20, max: 80 } })).toBe(20);
+    // input 100 → cutoff ceiling 80 → 80
+    expect(applyDeviceStack(100, { cutoff: { min: 20, max: 80 } })).toBe(80);
+    // range remaps 10 → 28 (window 20-100), THEN cutoff floor 30 pins to 30
+    expect(applyDeviceStack(10, {
+      range: { min: 20, max: 100 },
+      cutoff: { min: 30, max: 100 },
+    })).toBe(30);
+  });
+
+  it('safety cap wins over cutoff floor', () => {
+    // cutoff floor 40, but e-stim safety cap 30 → device sees 30 (safety last)
+    expect(applyDeviceStack(0, {
+      cutoff: { min: 40, max: 100 },
+      maxIntensity: 30,
+    })).toBe(30);
   });
 
   it('safety cap clips even when range output is high', () => {
@@ -494,6 +573,58 @@ describe('extendRawScriptContent', () => {
     // Decision: fixed at 80%. Pinning the constant so a future change
     // to it is visible in PR review.
     expect(RANGE_EXTENDER_THRESHOLD_PCT).toBe(80);
+  });
+});
+
+describe('clampRawScriptContent', () => {
+  const SCRIPT = JSON.stringify({
+    version: '1.0',
+    actions: [
+      { at: 0, pos: 5 }, { at: 100, pos: 50 }, { at: 200, pos: 95 },
+    ],
+  });
+
+  it('no-op cutoff (0/100) → returns original string unchanged', () => {
+    expect(clampRawScriptContent(SCRIPT, { min: 0, max: 100 })).toBe(SCRIPT);
+  });
+
+  it('null / non-finite cutoff → returns original unchanged', () => {
+    expect(clampRawScriptContent(SCRIPT, null)).toBe(SCRIPT);
+    expect(clampRawScriptContent(SCRIPT, { min: NaN, max: 80 })).toBe(SCRIPT);
+  });
+
+  it('floor/ceiling → pins out-of-band action positions', () => {
+    const out = clampRawScriptContent(SCRIPT, { min: 20, max: 80 });
+    expect(out).not.toBe(SCRIPT);
+    const parsed = JSON.parse(out);
+    expect(parsed.actions[0].pos).toBe(20);  // 5  → floor
+    expect(parsed.actions[1].pos).toBe(50);  // 50 → untouched
+    expect(parsed.actions[2].pos).toBe(80);  // 95 → ceiling
+  });
+
+  it('preserves timestamps + other fields', () => {
+    const content = JSON.stringify({
+      version: '1.2',
+      metadata: { creator: 'test' },
+      actions: [{ at: 0, pos: 5, custom: 'x' }, { at: 500, pos: 95, custom: 'y' }],
+    });
+    const parsed = JSON.parse(clampRawScriptContent(content, { min: 20, max: 80 }));
+    expect(parsed.version).toBe('1.2');
+    expect(parsed.metadata).toEqual({ creator: 'test' });
+    expect(parsed.actions[0]).toEqual({ at: 0, pos: 20, custom: 'x' });
+    expect(parsed.actions[1]).toEqual({ at: 500, pos: 80, custom: 'y' });
+  });
+
+  it('degenerate min >= max → returns original unchanged', () => {
+    expect(clampRawScriptContent(SCRIPT, { min: 80, max: 20 })).toBe(SCRIPT);
+  });
+
+  it('invalid JSON / non-string / no-actions → returned unchanged', () => {
+    const bad = 'not json {';
+    expect(clampRawScriptContent(bad, { min: 20, max: 80 })).toBe(bad);
+    expect(clampRawScriptContent(null, { min: 20, max: 80 })).toBe(null);
+    const noActions = JSON.stringify({ version: '1.0' });
+    expect(clampRawScriptContent(noActions, { min: 20, max: 80 })).toBe(noActions);
   });
 });
 

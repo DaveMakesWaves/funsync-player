@@ -44,6 +44,13 @@ export class UpNextEngine {
     this._pauseEnteredAt = 0;
     this._tickTimer = null;
 
+    // Optional resolver for a "priority next" — a user-queued item that
+    // plays before the context's own next (foobar2000-style queue insert).
+    // When it returns a path, that's the real next-up: the card, the
+    // queue-panel countdown chip, and playNext() all target it, and the
+    // context is never treated as end-of-list (a queued item follows).
+    this.getPriorityNext = null;    // () => path | null
+
     // Callbacks
     this.onShowNext = null;         // (nextPath, countdownSec) => {}
     this.onShowEndOfList = null;    // (sourceLabel, sourceContext) => {}
@@ -163,7 +170,14 @@ export class UpNextEngine {
 
   // --- Internal ---
 
+  _priorityNext() {
+    try { return this.getPriorityNext?.() || null; } catch { return null; }
+  }
+
   _nextPath() {
+    // A user-queued item takes priority over the context's own next.
+    const priority = this._priorityNext();
+    if (priority) return priority;
     if (!this._playContext) return null;
     const list = this._playContext.list;
     if (!list || list.length === 0) return null;
@@ -176,6 +190,9 @@ export class UpNextEngine {
   }
 
   _isLastInList() {
+    // A queued item plays next, so the context is never "last" here — show
+    // the next-up card for the queued item, not the end-of-list state.
+    if (this._priorityNext()) return false;
     if (!this._playContext?.list) return false;
     // When loop is on, there's no "last" — the queue wraps. Always
     // show the next-up card with the looped-around item, never the

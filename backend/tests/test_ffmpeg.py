@@ -129,10 +129,11 @@ class TestGenerateSingleThumbnail:
             type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
         )
 
-        captured = {"args": None}
+        captured = {"args": None, "kwargs": None}
 
-        def fake_run(args, **_kw):
+        def fake_run(args, **kw):
             captured["args"] = args
+            captured["kwargs"] = kw
             # Materialise the output file so the post-call existence check passes.
             out_path = args[args.index("-y") + 1]
             with open(out_path, "wb") as f:
@@ -169,6 +170,20 @@ class TestGenerateSingleThumbnail:
         generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
         seek_arg = captured["args"][captured["args"].index("-ss") + 1]
         assert float(seek_arg) == 10.0
+
+    def test_thumbnail_uses_lowered_timeout_for_slow_drives(self, monkeypatch, tmp_path):
+        """The single-thumbnail decode runs with the reduced budget so a
+        slow/disconnected drive frees its worker slot quickly instead of
+        holding the queue for a full minute."""
+        from services.ffmpeg import generate_single_thumbnail, THUMBNAIL_TIMEOUT_SEC
+
+        assert THUMBNAIL_TIMEOUT_SEC <= 30  # meaningfully below the old 60s
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"placeholder")
+        captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=120.0)
+
+        generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+        assert captured["kwargs"]["timeout"] == THUMBNAIL_TIMEOUT_SEC
 
     def test_short_clip_uses_raw_percentage(self, monkeypatch, tmp_path):
         """For clips under 60s the 10s clamp is skipped — we don't want
@@ -265,13 +280,12 @@ class TestGenerateSingleThumbnail:
             generate_single_thumbnail(str(empty))
         assert ffmpeg_called["yes"] is False
 
-    def test_subprocess_timeout_is_60_seconds(self, monkeypatch, tmp_path):
-        """The subprocess timeout must be 60s (was 30s). 8K HEVC files
-        under thumbnail-queue contention can take 15-20s for a single
-        frame decode; 30s left no headroom and timed out reliably for
-        VR users. 60s gives margin for genuine progress while still
-        catching truly-broken files."""
-        from services.ffmpeg import generate_single_thumbnail
+    def test_subprocess_timeout_matches_thumbnail_budget(self, monkeypatch, tmp_path):
+        """The single-thumbnail subprocess timeout tracks THUMBNAIL_TIMEOUT_SEC.
+        Lowered from 60s so a slow/disconnected drive frees its worker slot
+        quickly; still comfortably above the ~15-20s worst case for genuine
+        8K HEVC decode under thumbnail-queue contention."""
+        from services.ffmpeg import generate_single_thumbnail, THUMBNAIL_TIMEOUT_SEC
 
         video = tmp_path / "v.mp4"
         video.write_bytes(b"placeholder")  # non-zero so size guard passes
@@ -296,7 +310,8 @@ class TestGenerateSingleThumbnail:
         )
 
         generate_single_thumbnail(str(video))
-        assert captured_kwargs.get("timeout") == 60
+        assert captured_kwargs.get("timeout") == THUMBNAIL_TIMEOUT_SEC
+        assert THUMBNAIL_TIMEOUT_SEC < 60  # meaningfully lowered for slow drives
 
     def test_cache_key_uses_v4_prefix(self, monkeypatch, tmp_path):
         """Bumping the cache prefix to `v4` evicts every prior generation:
@@ -313,3 +328,143 @@ class TestGenerateSingleThumbnail:
 
         result = generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
         assert "single_v4_" in os.path.basename(result["path"])
+
+
+# --- Container remux (MKV → MP4) ---
+#
+# Chromium can't demux .mkv even with H.264/AAC inside; remux_to_mp4
+# repackages the streams into MP4 (stream-copy, lossless) so playback
+# works. These tests pin the codec-decision logic (copy vs transcode vs
+# refuse) and the caching, all without invoking real ffmpeg.
+
+class TestRemuxToMp4:
+    def _patch(self, monkeypatch, tmp_path, vcodec="h264", acodec="aac"):
+        """Stub get_metadata + _probe_audio_codec + run_silent. Returns the
+        captured ffmpeg arg list. run_silent materialises the output so the
+        post-call existence/size checks pass."""
+        from services import ffmpeg as ffmpeg_mod
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(ffmpeg_mod, "get_metadata", lambda _p: {"codec": vcodec})
+        monkeypatch.setattr(ffmpeg_mod, "_probe_audio_codec", lambda _p: acodec)
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+
+        captured = {"args": None, "called": False}
+
+        def fake_run(args, **_kw):
+            captured["args"] = args
+            captured["called"] = True
+            out_path = args[-1]  # output is always the last arg
+            with open(out_path, "wb") as f:
+                f.write(b"\x00\x00\x00\x20ftyp")  # non-empty MP4-ish
+            return MagicMock(returncode=0, stderr="")
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", fake_run)
+        return captured
+
+    def test_h264_aac_stream_copies_both(self, monkeypatch, tmp_path):
+        from services.ffmpeg import remux_to_mp4
+        video = tmp_path / "in.mkv"
+        video.write_bytes(b"placeholder")
+        captured = self._patch(monkeypatch, tmp_path, vcodec="h264", acodec="aac")
+
+        result = remux_to_mp4(str(video))
+        args = captured["args"]
+        # video + audio both copied
+        assert args[args.index("-c:v") + 1] == "copy"
+        assert args[args.index("-c:a") + 1] == "copy"
+        # faststart for seekable/streamable output, MP4 out
+        assert "+faststart" in args
+        assert result["path"].endswith(".mp4")
+        assert result["cached"] is False
+
+    def test_incompatible_audio_transcodes_to_aac(self, monkeypatch, tmp_path):
+        """AC3/DTS/etc. can't sit in MP4 for Chromium → transcode audio to
+        AAC, but still stream-copy the (H.264) video."""
+        from services.ffmpeg import remux_to_mp4
+        video = tmp_path / "in.mkv"
+        video.write_bytes(b"placeholder")
+        captured = self._patch(monkeypatch, tmp_path, vcodec="h264", acodec="ac3")
+
+        remux_to_mp4(str(video))
+        args = captured["args"]
+        assert args[args.index("-c:v") + 1] == "copy"
+        assert args[args.index("-c:a") + 1] == "aac"
+
+    def test_no_audio_track_omits_audio_codec(self, monkeypatch, tmp_path):
+        from services.ffmpeg import remux_to_mp4
+        video = tmp_path / "in.mkv"
+        video.write_bytes(b"placeholder")
+        captured = self._patch(monkeypatch, tmp_path, vcodec="hevc", acodec=None)
+
+        remux_to_mp4(str(video))
+        args = captured["args"]
+        assert args[args.index("-c:v") + 1] == "copy"
+        assert "-c:a" not in args
+        # optional audio map keeps audio-less files from failing
+        assert "0:a:0?" in args
+
+    def test_unsupported_video_codec_refuses_without_running_ffmpeg(self, monkeypatch, tmp_path):
+        """mpeg4 (DivX/Xvid) etc. would copy fine but Chromium still can't
+        decode it — so remuxing wouldn't help. Refuse clearly instead of
+        producing a still-unplayable file, and never spawn ffmpeg."""
+        import pytest
+        from services.ffmpeg import remux_to_mp4
+        video = tmp_path / "in.avi"
+        video.write_bytes(b"placeholder")
+        captured = self._patch(monkeypatch, tmp_path, vcodec="mpeg4", acodec="mp3")
+
+        with pytest.raises(RuntimeError, match="remux"):
+            remux_to_mp4(str(video))
+        assert captured["called"] is False
+
+    def test_cache_hit_skips_ffmpeg(self, monkeypatch, tmp_path):
+        from services import ffmpeg as ffmpeg_mod
+        from services.ffmpeg import remux_to_mp4, _get_video_hash
+        video = tmp_path / "in.mkv"
+        video.write_bytes(b"placeholder")
+        captured = self._patch(monkeypatch, tmp_path, vcodec="h264", acodec="aac")
+
+        # Pre-create the cached output so the second call is a hit.
+        out_dir = os.path.join(str(tmp_path), "funsync_remux")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{_get_video_hash(str(video))}.mp4")
+        with open(out_path, "wb") as f:
+            f.write(b"\x00\x00\x00\x20ftyp")
+
+        result = remux_to_mp4(str(video))
+        assert result["cached"] is True
+        assert captured["called"] is False
+
+    def test_ffmpeg_failure_raises_and_cleans_partial(self, monkeypatch, tmp_path):
+        import pytest
+        from services import ffmpeg as ffmpeg_mod
+        from services.ffmpeg import remux_to_mp4
+        from unittest.mock import MagicMock
+
+        video = tmp_path / "in.mkv"
+        video.write_bytes(b"placeholder")
+        monkeypatch.setattr(ffmpeg_mod, "get_metadata", lambda _p: {"codec": "h264"})
+        monkeypatch.setattr(ffmpeg_mod, "_probe_audio_codec", lambda _p: "aac")
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+
+        def fake_run(args, **_kw):
+            out_path = args[-1]
+            with open(out_path, "wb") as f:  # write a partial file...
+                f.write(b"partial")
+            return MagicMock(returncode=1, stderr="boom")  # ...then "fail"
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", fake_run)
+
+        with pytest.raises(RuntimeError, match="remux failed"):
+            remux_to_mp4(str(video))
+        # partial output must not linger in the cache
+        out_dir = os.path.join(str(tmp_path), "funsync_remux")
+        leftovers = os.listdir(out_dir) if os.path.isdir(out_dir) else []
+        assert leftovers == []

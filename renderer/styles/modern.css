@@ -1,0 +1,484 @@
+/* === Modern interface style — additive layer ==============================
+ *
+ * Every rule here is gated behind `:root[data-style="modern"]` so the Classic
+ * style (the default, no attribute or data-style="classic") is completely
+ * unaffected. The colour palette is NEVER touched — this layer only changes
+ * execution: elevation/depth, corner radius, borders, spacing, motion, and
+ * interaction states, all driven by the token scales defined in player.css.
+ *
+ * See notes/features/SCOPE-modern-theme.md. Phase 0 ships the plumbing (token
+ * scales, the data-style toggle, the settings control) with this file
+ * intentionally near-empty; the per-surface treatments land in Phases 1–3.
+ *
+ * Must be the LAST stylesheet linked so its gated rules win specificity ties.
+ * ======================================================================== */
+
+/* Heading tracking — subtle, applied where headings live. */
+:root[data-style="modern"] h1,
+:root[data-style="modern"] h2,
+:root[data-style="modern"] .settings-panel__section-header,
+:root[data-style="modern"] .library__title {
+  letter-spacing: var(--tracking-tight);
+}
+
+/* ========================================================================
+ * PHASE 1 — core surfaces: library cards, inputs, modals, nav bar, player
+ * chrome. Elevation + softer radius + hairline borders + hover-lift + press
+ * + soft focus rings + smoother easing. Palette untouched.
+ * ==================================================================== */
+
+/* --- Shared: soft focus ring (WCAG 2.2 — more visible than the old outline) */
+:root[data-style="modern"] .control-btn:focus-visible,
+:root[data-style="modern"] .nav-bar__action:focus-visible,
+:root[data-style="modern"] .nav-bar__item:focus-visible,
+:root[data-style="modern"] .view-toggle:focus-visible,
+:root[data-style="modern"] .library__picker-btn:focus-visible,
+:root[data-style="modern"] .library__queue-toggle:focus-visible,
+:root[data-style="modern"] .library__search-input:focus-visible,
+:root[data-style="modern"] .settings-panel__input:focus-visible,
+:root[data-style="modern"] .modal-panel button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
+}
+
+/* --- Library cards: resting elevation + lit edge, softer corners, lift ---- */
+:root[data-style="modern"] .library__card,
+:root[data-style="modern"] .library__folder-card,
+:root[data-style="modern"] .library__collection-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1), var(--edge-highlight);
+  transition: transform var(--dur-1) var(--ease-out),
+              box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .library__card:hover,
+:root[data-style="modern"] .library__folder-card:hover,
+:root[data-style="modern"] .library__collection-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--elev-2), var(--edge-highlight);
+}
+/* Match the thumbnail's top corners to the softer card radius. */
+:root[data-style="modern"] .library__card-thumbnail {
+  border-top-left-radius: var(--radius-lg);
+  border-top-right-radius: var(--radius-lg);
+}
+/* Reveal-on-hover controls fade in smoothly instead of snapping 0→1. */
+:root[data-style="modern"] .library__kebab-btn {
+  transition: opacity var(--dur-1) var(--ease-out), background var(--dur-1);
+}
+
+/* --- Inputs & search: softer radius + accent ring on focus --------------- */
+:root[data-style="modern"] .settings-panel__input {
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-1) var(--ease-out),
+              box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .settings-panel__input:focus,
+:root[data-style="modern"] .library__search-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+:root[data-style="modern"] .library__search-input {
+  border-radius: var(--radius-md);
+}
+
+/* --- Modal panel: deeper elevation + lit edge + larger radius, hairline --- */
+:root[data-style="modern"] .modal-panel {
+  border-radius: var(--radius-xl);
+  border-color: var(--border-subtle);
+  box-shadow: var(--elev-3), var(--edge-highlight);
+}
+/* Backdrop gets a touch of blur for depth (cheap, one element). */
+:root[data-style="modern"] .modal-overlay {
+  backdrop-filter: blur(3px);
+  -webkit-backdrop-filter: blur(3px);
+}
+/* Theme / interface-style radio cards: rounder + press feedback. */
+:root[data-style="modern"] .settings-panel__theme-option {
+  border-radius: var(--radius-lg);
+  transition: background var(--dur-1) var(--ease-out),
+              border-color var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .settings-panel__theme-option:active {
+  transform: scale(0.99);
+}
+:root[data-style="modern"] .modal-panel button:active {
+  transform: scale(0.97);
+}
+
+/* --- Nav bar: rounder actions, press, active underline → glowing pill ----- */
+:root[data-style="modern"] .nav-bar__action,
+:root[data-style="modern"] .nav-bar__item {
+  border-radius: var(--radius-md);
+  transition: color var(--dur-1) var(--ease-out),
+              background var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .nav-bar__action:active,
+:root[data-style="modern"] .nav-bar__item:active {
+  transform: scale(0.96);
+}
+:root[data-style="modern"] .nav-bar__item--active::after {
+  height: 3px;
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.55);
+}
+
+/* --- Player chrome: control buttons + view toggles + chips ---------------- */
+:root[data-style="modern"] .control-btn {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out),
+              color var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .control-btn:active {
+  transform: scale(0.92);
+}
+:root[data-style="modern"] .view-toggle {
+  transition: background var(--dur-1) var(--ease-out),
+              color var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .view-toggle:active,
+:root[data-style="modern"] .library__picker-btn:active,
+:root[data-style="modern"] .library__queue-toggle:active {
+  transform: scale(0.96);
+}
+:root[data-style="modern"] .library__picker-btn,
+:root[data-style="modern"] .library__queue-toggle {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out),
+              border-color var(--dur-1) var(--ease-out),
+              transform var(--dur-1) var(--ease-out);
+}
+/* Mini-player: softer corner + richer elevation. */
+:root[data-style="modern"] .player-container--mini {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-3), var(--edge-highlight);
+}
+
+/* Respect reduced-motion — drop transforms/transitions this layer adds. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .library__card,
+  :root[data-style="modern"] .library__folder-card,
+  :root[data-style="modern"] .library__collection-card,
+  :root[data-style="modern"] .control-btn,
+  :root[data-style="modern"] .nav-bar__action,
+  :root[data-style="modern"] .nav-bar__item,
+  :root[data-style="modern"] .view-toggle,
+  :root[data-style="modern"] .settings-panel__theme-option,
+  :root[data-style="modern"] .modal-panel button,
+  :root[data-style="modern"] .library__picker-btn,
+  :root[data-style="modern"] .library__queue-toggle {
+    transition: none;
+  }
+  :root[data-style="modern"] .library__card:hover,
+  :root[data-style="modern"] .library__folder-card:hover,
+  :root[data-style="modern"] .library__collection-card:hover,
+  :root[data-style="modern"] .control-btn:active,
+  :root[data-style="modern"] .nav-bar__action:active,
+  :root[data-style="modern"] .nav-bar__item:active,
+  :root[data-style="modern"] .view-toggle:active,
+  :root[data-style="modern"] .settings-panel__theme-option:active,
+  :root[data-style="modern"] .modal-panel button:active,
+  :root[data-style="modern"] .library__picker-btn:active,
+  :root[data-style="modern"] .library__queue-toggle:active {
+    transform: none;
+  }
+}
+
+/* ========================================================================
+ * PHASE 2 — secondary desktop surfaces: playlists, categories, queue panel,
+ * up-next card, eroscripts panel, session card, VR format panel, editor
+ * chrome. Same Modern language (elevation + radius + lift + press + rings).
+ * (Audience pop-out is handled with the other detached windows in Phase 4.)
+ * ==================================================================== */
+
+/* --- Shared soft focus ring for Phase-2 interactive elements ------------- */
+:root[data-style="modern"] .playlists__card-action-btn:focus-visible,
+:root[data-style="modern"] .playlists__play-all-btn:focus-visible,
+:root[data-style="modern"] .playlists__loop-btn:focus-visible,
+:root[data-style="modern"] .categories__card-action-btn:focus-visible,
+:root[data-style="modern"] .queue-panel__close:focus-visible,
+:root[data-style="modern"] .queue-panel__section-action:focus-visible,
+:root[data-style="modern"] .eroscripts-panel__btn:focus-visible,
+:root[data-style="modern"] .eroscripts-panel__input:focus-visible,
+:root[data-style="modern"] .eroscripts-panel__search-input:focus-visible,
+:root[data-style="modern"] .session-card__btn:focus-visible,
+:root[data-style="modern"] .vr-format-panel__seg-btn:focus-visible,
+:root[data-style="modern"] .vr-format-panel__select:focus-visible,
+:root[data-style="modern"] .editor__btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
+}
+
+/* --- Playlists / Categories cards: elevation + lift + softer corners ------ */
+:root[data-style="modern"] .playlists__card,
+:root[data-style="modern"] .playlists__video-card,
+:root[data-style="modern"] .categories__card,
+:root[data-style="modern"] .categories__video-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1), var(--edge-highlight);
+  transition: transform var(--dur-1) var(--ease-out),
+              box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .playlists__card:hover,
+:root[data-style="modern"] .playlists__video-card:hover,
+:root[data-style="modern"] .categories__card:hover,
+:root[data-style="modern"] .categories__video-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--elev-2), var(--edge-highlight);
+}
+/* "Create" tiles stay flat (dashed) but pick up the softer radius + a hover
+   fill that reads as interactive without a heavy shadow. */
+:root[data-style="modern"] .playlists__card--create,
+:root[data-style="modern"] .categories__card--create {
+  border-radius: var(--radius-lg);
+  box-shadow: none;
+  transition: transform var(--dur-1) var(--ease-out), border-color var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .playlists__card--create:hover,
+:root[data-style="modern"] .categories__card--create:hover {
+  transform: translateY(-2px);
+}
+:root[data-style="modern"] .playlists__card-action-btn,
+:root[data-style="modern"] .categories__card-action-btn,
+:root[data-style="modern"] .playlists__play-all-btn,
+:root[data-style="modern"] .playlists__loop-btn {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .playlists__card-action-btn:active,
+:root[data-style="modern"] .categories__card-action-btn:active,
+:root[data-style="modern"] .playlists__play-all-btn:active,
+:root[data-style="modern"] .playlists__loop-btn:active {
+  transform: scale(0.96);
+}
+/* Colour swatches: rounder + a ring on the selected one. */
+:root[data-style="modern"] .categories__color-swatch--selected {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
+}
+
+/* --- Queue panel: lit edge on the panel, subtle row lift, press ---------- */
+:root[data-style="modern"] .queue-panel {
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.4), var(--edge-highlight);
+}
+:root[data-style="modern"] .queue-panel__row {
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .queue-panel__row:hover {
+  transform: translateX(2px);
+}
+:root[data-style="modern"] .queue-panel__close,
+:root[data-style="modern"] .queue-panel__section-action {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .queue-panel__close:active,
+:root[data-style="modern"] .queue-panel__section-action:active {
+  transform: scale(0.94);
+}
+
+/* --- Up Next card: rounder + deeper elevation (video overlay) ------------- */
+:root[data-style="modern"] .up-next {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-2), var(--edge-highlight);
+}
+:root[data-style="modern"] .up-next__meta-chip {
+  border-radius: var(--radius-pill);
+}
+:root[data-style="modern"] .up-next__end-cta,
+:root[data-style="modern"] .up-next__dismiss {
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .up-next__end-cta:active,
+:root[data-style="modern"] .up-next__dismiss:active {
+  transform: scale(0.96);
+}
+
+/* --- EroScripts panel + login modal --------------------------------------- */
+:root[data-style="modern"] .eroscripts-panel {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-3), var(--edge-highlight);
+}
+:root[data-style="modern"] .eroscripts-login-modal {
+  border-radius: var(--radius-xl);
+  box-shadow: var(--elev-3), var(--edge-highlight);
+}
+:root[data-style="modern"] .eroscripts-panel__input,
+:root[data-style="modern"] .eroscripts-panel__search-input {
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .eroscripts-panel__input:focus,
+:root[data-style="modern"] .eroscripts-panel__search-input:focus {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+:root[data-style="modern"] .eroscripts-panel__btn {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .eroscripts-panel__btn:active {
+  transform: scale(0.97);
+}
+
+/* --- Session card (docked status): elevation + lit edge + press ----------- */
+:root[data-style="modern"] .session-card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-2), var(--edge-highlight);
+}
+:root[data-style="modern"] .session-card__btn {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .session-card__btn:active {
+  transform: scale(0.95);
+}
+
+/* --- VR format panel: modern segmented control + select ------------------ */
+:root[data-style="modern"] .vr-format-panel__seg {
+  border-radius: var(--radius-md);
+  box-shadow: var(--edge-highlight);
+}
+:root[data-style="modern"] .vr-format-panel__seg-btn {
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .vr-format-panel__seg-btn:active {
+  transform: scale(0.97);
+}
+:root[data-style="modern"] .vr-format-panel__select {
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .vr-format-panel__select:focus {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+
+/* --- Editor chrome (canvas untouched): toolbar buttons + lane depth ------- */
+:root[data-style="modern"] .editor__btn {
+  border-radius: var(--radius-sm);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .editor__btn:active {
+  transform: scale(0.95);
+}
+/* Lanes read as stacked layers via a hairline lit edge rather than a flat
+   border only. */
+:root[data-style="modern"] .editor__lane {
+  border-radius: var(--radius-sm);
+  box-shadow: var(--edge-highlight);
+}
+
+/* Reduced-motion — drop the Phase-2 transforms/transitions too. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .playlists__card,
+  :root[data-style="modern"] .playlists__video-card,
+  :root[data-style="modern"] .categories__card,
+  :root[data-style="modern"] .categories__video-card,
+  :root[data-style="modern"] .playlists__card--create,
+  :root[data-style="modern"] .categories__card--create,
+  :root[data-style="modern"] .playlists__card-action-btn,
+  :root[data-style="modern"] .categories__card-action-btn,
+  :root[data-style="modern"] .playlists__play-all-btn,
+  :root[data-style="modern"] .playlists__loop-btn,
+  :root[data-style="modern"] .queue-panel__row,
+  :root[data-style="modern"] .queue-panel__close,
+  :root[data-style="modern"] .queue-panel__section-action,
+  :root[data-style="modern"] .up-next__end-cta,
+  :root[data-style="modern"] .up-next__dismiss,
+  :root[data-style="modern"] .eroscripts-panel__btn,
+  :root[data-style="modern"] .session-card__btn,
+  :root[data-style="modern"] .vr-format-panel__seg-btn,
+  :root[data-style="modern"] .editor__btn {
+    transition: none;
+  }
+  :root[data-style="modern"] .playlists__card:hover,
+  :root[data-style="modern"] .playlists__video-card:hover,
+  :root[data-style="modern"] .categories__card:hover,
+  :root[data-style="modern"] .categories__video-card:hover,
+  :root[data-style="modern"] .playlists__card--create:hover,
+  :root[data-style="modern"] .categories__card--create:hover,
+  :root[data-style="modern"] .queue-panel__row:hover,
+  :root[data-style="modern"] .playlists__card-action-btn:active,
+  :root[data-style="modern"] .categories__card-action-btn:active,
+  :root[data-style="modern"] .playlists__play-all-btn:active,
+  :root[data-style="modern"] .playlists__loop-btn:active,
+  :root[data-style="modern"] .queue-panel__close:active,
+  :root[data-style="modern"] .queue-panel__section-action:active,
+  :root[data-style="modern"] .up-next__end-cta:active,
+  :root[data-style="modern"] .up-next__dismiss:active,
+  :root[data-style="modern"] .eroscripts-panel__btn:active,
+  :root[data-style="modern"] .session-card__btn:active,
+  :root[data-style="modern"] .vr-format-panel__seg-btn:active,
+  :root[data-style="modern"] .editor__btn:active {
+    transform: none;
+  }
+}
+
+/* ========================================================================
+ * PHASE 4 — audience pop-out (renderer/audience-room.css, loaded in the
+ * audience-room pop-out which now links modern.css + sets data-style).
+ * ==================================================================== */
+:root[data-style="modern"] .audience-room__card {
+  border-radius: var(--radius-lg);
+  box-shadow: var(--elev-1), var(--edge-highlight);
+}
+:root[data-style="modern"] .audience-room__add-form {
+  border-radius: var(--radius-lg);
+}
+:root[data-style="modern"] .audience-room__add-key {
+  border-radius: var(--radius-md);
+  transition: border-color var(--dur-1) var(--ease-out), box-shadow var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .audience-room__add-key:focus {
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
+}
+:root[data-style="modern"] .audience-room__card-buzz-btn,
+:root[data-style="modern"] .audience-room__card-mute-btn,
+:root[data-style="modern"] .audience-room__card-remove-btn,
+:root[data-style="modern"] .audience-room__card-offset-reset,
+:root[data-style="modern"] .audience-room__hide-keys-btn,
+:root[data-style="modern"] .audience-room__buzz-all-btn,
+:root[data-style="modern"] .audience-room__add-submit {
+  border-radius: var(--radius-md);
+  transition: background var(--dur-1) var(--ease-out), color var(--dur-1),
+              border-color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .audience-room__card-buzz-btn:focus-visible,
+:root[data-style="modern"] .audience-room__card-mute-btn:focus-visible,
+:root[data-style="modern"] .audience-room__card-remove-btn:focus-visible,
+:root[data-style="modern"] .audience-room__hide-keys-btn:focus-visible,
+:root[data-style="modern"] .audience-room__buzz-all-btn:focus-visible,
+:root[data-style="modern"] .audience-room__add-submit:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
+}
+:root[data-style="modern"] .audience-room__card-buzz-btn:active,
+:root[data-style="modern"] .audience-room__card-mute-btn:active,
+:root[data-style="modern"] .audience-room__card-remove-btn:active,
+:root[data-style="modern"] .audience-room__card-offset-reset:active,
+:root[data-style="modern"] .audience-room__hide-keys-btn:active,
+:root[data-style="modern"] .audience-room__buzz-all-btn:active,
+:root[data-style="modern"] .audience-room__add-submit:active {
+  transform: scale(0.96);
+}
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .audience-room__card-buzz-btn,
+  :root[data-style="modern"] .audience-room__card-mute-btn,
+  :root[data-style="modern"] .audience-room__card-remove-btn,
+  :root[data-style="modern"] .audience-room__card-offset-reset,
+  :root[data-style="modern"] .audience-room__hide-keys-btn,
+  :root[data-style="modern"] .audience-room__buzz-all-btn,
+  :root[data-style="modern"] .audience-room__add-submit {
+    transition: none;
+  }
+  :root[data-style="modern"] .audience-room__card-buzz-btn:active,
+  :root[data-style="modern"] .audience-room__card-mute-btn:active,
+  :root[data-style="modern"] .audience-room__card-remove-btn:active,
+  :root[data-style="modern"] .audience-room__card-offset-reset:active,
+  :root[data-style="modern"] .audience-room__hide-keys-btn:active,
+  :root[data-style="modern"] .audience-room__buzz-all-btn:active,
+  :root[data-style="modern"] .audience-room__add-submit:active {
+    transform: none;
+  }
+}

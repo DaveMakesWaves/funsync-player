@@ -755,4 +755,53 @@ describe('UpNextEngine', () => {
       expect(engine._isLastInList()).toBe(false);
     });
   });
+
+  describe('getPriorityNext (user queue insert)', () => {
+    it('_nextPath returns the priority item over the context next', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['a', 'b', 'c'], index: 0 }));
+      expect(engine._nextPath()).toBe('b'); // context next
+      engine.getPriorityNext = () => 'queued.mp4';
+      expect(engine._nextPath()).toBe('queued.mp4'); // user-queue head wins
+    });
+
+    it('falls back to the context next when the resolver returns null', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['a', 'b', 'c'], index: 0 }));
+      engine.getPriorityNext = () => null;
+      expect(engine._nextPath()).toBe('b');
+    });
+
+    it('is never end-of-list on the last context item when a queued item follows', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['a', 'b'], index: 1 })); // last item
+      expect(engine._isLastInList()).toBe(true);
+      engine.getPriorityNext = () => 'queued.mp4';
+      expect(engine._isLastInList()).toBe(false);
+      expect(engine._nextPath()).toBe('queued.mp4');
+    });
+
+    it('onShowNext fires with the priority path so the chip/card target it', () => {
+      const player = mockVideoPlayer({ currentTime: 118, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['a', 'b', 'c'], index: 0 }));
+      engine.getPriorityNext = () => 'queued.mp4';
+      const shown = [];
+      engine.onShowNext = (path) => shown.push(path);
+      engine.check();
+      expect(shown).toEqual(['queued.mp4']);
+    });
+
+    it('swallows a throwing resolver and falls back to the context next', () => {
+      engine = makeEngine();
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['a', 'b', 'c'], index: 0 }));
+      engine.getPriorityNext = () => { throw new Error('boom'); };
+      expect(engine._nextPath()).toBe('b');
+    });
+  });
 });

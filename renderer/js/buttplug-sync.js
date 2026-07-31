@@ -21,6 +21,7 @@
 import { getInterpolator, applySpeedLimit, linearInterpolate } from './interpolation.js';
 import {
   applyRange,
+  applyCutoff,
   applyExtender,
   computeNaturalRange,
   RANGE_EXTENDER_THRESHOLD_PCT,
@@ -73,6 +74,13 @@ export class ButtplugSync {
     // be clipped to a 70% safety ceiling. See device-transform-stack.js
     // §2 for the full composition order.
     this._rangeMap = new Map();             // deviceIndex → {min, max}
+    // Per-device output cutoff: a HARD floor/ceiling clamp applied AFTER
+    // the range remap. Distinct from _rangeMap — range rescales the whole
+    // stroke into a window, cutoff pins out-of-band values to the boundary
+    // and leaves in-band values untouched (F4NTY's "commands below 20 are
+    // ignored"). Default {min:0, max:100} = no-op. See applyCutoff in
+    // device-transform-stack.js and SCOPE-device-cutoff-threshold.md.
+    this._cutoffMap = new Map();            // deviceIndex → {min, max}
 
     // Range Extender state. When enabled, narrow scripts (natural width
     // < threshold) get stretched to 0-100 BEFORE invert/range/safety in
@@ -538,6 +546,7 @@ export class ButtplugSync {
       // Default {0,100} is a true no-op (existing users unaffected).
       // See device-transform-stack.js §2 for composition order rationale.
       pos = applyRange(pos, this._rangeMap.get(dev.index));
+      pos = applyCutoff(pos, this._cutoffMap.get(dev.index));
       this.buttplug.sendLinear(dev.index, pos, durationMs);
     }
   }
@@ -575,12 +584,13 @@ export class ButtplugSync {
 
       const inverted = this._invertedDevices.has(dev.index);
       const range = this._rangeMap.get(dev.index);
-      // Invert then range on BOTH position and prevPosition so derived
-      // calculations (vibe/scalar/rotate velocity, mode logic) see the
-      // same range-aware values. Without ranging prevPos too, the
+      const cutoff = this._cutoffMap.get(dev.index);
+      // Invert then range then cutoff on BOTH position and prevPosition so
+      // derived calculations (vibe/scalar/rotate velocity, mode logic) see
+      // the same transformed values. Without transforming prevPos too, the
       // speed-mode velocity calc would mix raw and ranged units.
-      const pos = applyRange(inverted ? 100 - stretchedPos : stretchedPos, range);
-      const prevPos = applyRange(inverted ? 100 - stretchedPrev : stretchedPrev, range);
+      const pos = applyCutoff(applyRange(inverted ? 100 - stretchedPos : stretchedPos, range), cutoff);
+      const prevPos = applyCutoff(applyRange(inverted ? 100 - stretchedPrev : stretchedPrev, range), cutoff);
 
       if (dev.canLinear && emitLinear) {
         this.buttplug.sendLinear(dev.index, pos, durationMs);
@@ -682,7 +692,10 @@ export class ButtplugSync {
         intensity, this._vibScriptNaturalRange,
         this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
       );
-      const ranged = applyRange(stretchedVib, this._rangeMap.get(dev.index));
+      const ranged = applyCutoff(
+        applyRange(stretchedVib, this._rangeMap.get(dev.index)),
+        this._cutoffMap.get(dev.index),
+      );
       if (dev.canVibrate) {
         this.buttplug.sendVibrate(dev.index, ranged);
       }
@@ -763,10 +776,13 @@ export class ButtplugSync {
         if (assigned !== tcode) continue;
 
         const inverted = this._invertedDevices.has(dev.index);
-        // Invert then range; same composition order as the main stroke
-        // path. Per-device range applies regardless of axis assignment
-        // because the user owns the device, not the axis.
-        const pos = applyRange(inverted ? 100 - stretchedAxis : stretchedAxis, this._rangeMap.get(dev.index));
+        // Invert then range then cutoff; same composition order as the main
+        // stroke path. Per-device transforms apply regardless of axis
+        // assignment because the user owns the device, not the axis.
+        const pos = applyCutoff(
+          applyRange(inverted ? 100 - stretchedAxis : stretchedAxis, this._rangeMap.get(dev.index)),
+          this._cutoffMap.get(dev.index),
+        );
 
         if (featureType === 'C') {
           // Custom route: send based on device capabilities. Linear was
@@ -840,9 +856,12 @@ export class ButtplugSync {
       if (assigned !== tcode) continue;
       if (!dev.canLinear) continue;
       const inverted = this._invertedDevices.has(dev.index);
-      const pos = applyRange(
-        inverted ? 100 - stretchedTarget : stretchedTarget,
-        this._rangeMap.get(dev.index),
+      const pos = applyCutoff(
+        applyRange(
+          inverted ? 100 - stretchedTarget : stretchedTarget,
+          this._rangeMap.get(dev.index),
+        ),
+        this._cutoffMap.get(dev.index),
       );
       this.buttplug.sendLinear(dev.index, pos, duration);
     }
@@ -974,6 +993,21 @@ export class ButtplugSync {
   }
 
   /**
+   * Per-device output cutoff — a HARD floor/ceiling clamp applied AFTER
+   * the range remap. Unlike `setDeviceRange` (which rescales), this pins
+   * out-of-band positions to the boundary and leaves in-band values
+   * untouched. Default {0, 100} = no-op. Degenerate inputs are stored but
+   * no-op'd at apply time (see `applyCutoff`).
+   */
+  setDeviceCutoff(deviceIndex, min, max) {
+    this._cutoffMap.set(deviceIndex, { min, max });
+  }
+
+  getDeviceCutoff(deviceIndex) {
+    return this._cutoffMap.get(deviceIndex) || { min: 0, max: 100 };
+  }
+
+  /**
    * Drop every per-device entry for `deviceIndex` from the in-memory maps.
    * Called from app.js's `onDeviceRemoved` wiring so that if Intiface
    * recycles the index (e.g. after a full disconnect + reconnect), a
@@ -994,6 +1028,7 @@ export class ButtplugSync {
     this._maxIntensityMap.delete(deviceIndex);
     this._rampUpMap.delete(deviceIndex);
     this._rangeMap.delete(deviceIndex);
+    this._cutoffMap.delete(deviceIndex);
   }
 
   setInterpolationMode(mode) {

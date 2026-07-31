@@ -120,6 +120,82 @@ describe('VideoPlayer', () => {
     });
   });
 
+  describe('clearSubtitles', () => {
+    it('removes all attached track elements', () => {
+      const t1 = document.createElement('track');
+      t1.src = 'https://example.test/a.vtt';
+      const t2 = document.createElement('track');
+      t2.src = 'https://example.test/b.vtt';
+      player.video.appendChild(t1);
+      player.video.appendChild(t2);
+      expect(player.video.querySelectorAll('track')).toHaveLength(2);
+
+      player.clearSubtitles();
+      expect(player.video.querySelectorAll('track')).toHaveLength(0);
+    });
+
+    it('revokes blob URLs for removed tracks', () => {
+      const spy = vi.spyOn(URL, 'revokeObjectURL');
+      const track = document.createElement('track');
+      track.src = 'blob:abc123';
+      player.video.appendChild(track);
+
+      player.clearSubtitles();
+      expect(spy).toHaveBeenCalledWith('blob:abc123');
+      spy.mockRestore();
+    });
+
+    it('hides the subtitle badge', () => {
+      const badge = document.createElement('span');
+      badge.id = 'subtitle-badge';
+      badge.hidden = false;
+      document.body.appendChild(badge);
+
+      player.clearSubtitles();
+      expect(badge.hidden).toBe(true);
+      badge.remove();
+    });
+
+    it('is a no-op when no subtitles are attached', () => {
+      expect(() => player.clearSubtitles()).not.toThrow();
+      expect(player.video.querySelectorAll('track')).toHaveLength(0);
+    });
+
+    it('disables lingering TextTracks so subtitles cannot bleed to the next video', () => {
+      // jsdom does not create TextTracks for <track> elements, so simulate the
+      // Chromium quirk: a TextTrack that survives element removal with
+      // mode 'showing'. clearSubtitles must flip it to 'disabled'.
+      const stale = { mode: 'showing', cues: null };
+      Object.defineProperty(player.video, 'textTracks', {
+        value: { length: 1, 0: stale, [Symbol.iterator]: undefined },
+        configurable: true,
+      });
+
+      player.clearSubtitles();
+
+      expect(stale.mode).toBe('disabled');
+    });
+
+    it('removes cues from a lingering track when present', () => {
+      const removed = [];
+      const cueA = {}; const cueB = {};
+      const stale = {
+        mode: 'showing',
+        cues: [cueA, cueB],
+        removeCue(c) { removed.push(c); },
+      };
+      Object.defineProperty(player.video, 'textTracks', {
+        value: { length: 1, 0: stale },
+        configurable: true,
+      });
+
+      player.clearSubtitles();
+
+      expect(stale.mode).toBe('disabled');
+      expect(removed).toEqual([cueA, cueB]);
+    });
+  });
+
   describe('seek', () => {
     it('sets currentTime within bounds', () => {
       Object.defineProperty(player.video, 'duration', { value: 100, configurable: true });

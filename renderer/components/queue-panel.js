@@ -9,7 +9,7 @@
 // lives on dataService. This component is purely a view + interaction
 // surface.
 
-import { icon, X, Trash2, GripVertical, ListVideo, FileCheck, Captions, Gauge, Layers2, Cable } from '../js/icons.js';
+import { icon, X, Trash2, GripVertical, FileCheck, Captions, Gauge, Layers2, Cable, Shuffle } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 
@@ -57,6 +57,7 @@ export class QueuePanel {
     onRemoveFromQueue,
     onReorderQueue,
     onClearQueue,
+    onShuffleUpcoming,
     onClose,
     onOpenLibrary,
     onCancelAutoAdvance,
@@ -69,6 +70,9 @@ export class QueuePanel {
     this.onRemoveFromQueue = onRemoveFromQueue || null;
     this.onReorderQueue = onReorderQueue || null;
     this.onClearQueue = onClearQueue || null;
+    // Shuffle the not-yet-played "Up next" tail. App reorders the queue
+    // in place; current + history stay put. Optional.
+    this.onShuffleUpcoming = onShuffleUpcoming || null;
     this.onClose = onClose || null;
     this.onOpenLibrary = onOpenLibrary || null;
     this.onCancelAutoAdvance = onCancelAutoAdvance || null;
@@ -235,12 +239,21 @@ export class QueuePanel {
       }));
     }
 
-    // Upcoming — only if context exists and there are upcoming items
+    // Upcoming — only if context exists and there are upcoming items.
+    // Shuffle action re-rolls the not-yet-played tail (needs 2+ to be
+    // meaningful).
     if (hasContext && upcoming.length > 0) {
       sections.push(this._renderSection({
         label: t('queuePanel.sectionUpcoming'),
         items: upcoming,
         kind: 'upcoming',
+        action: upcoming.length > 1
+          ? {
+              actionId: 'shuffle-upcoming',
+              label: t('queuePanel.shuffleUpcoming'),
+              handler: () => this.onShuffleUpcoming?.(),
+            }
+          : null,
       }));
     }
 
@@ -271,19 +284,21 @@ export class QueuePanel {
       });
     }
 
-    // Wire section actions (currently just "Clear")
+    // Wire section actions — Clear (user queue) + Shuffle (upcoming tail).
+    // Icons mounted here (icon-only buttons; label is on aria-label/title).
     for (const actionBtn of this._el.querySelectorAll('[data-queue-action="clear"]')) {
+      if (!actionBtn.querySelector('svg')) actionBtn.appendChild(icon(Trash2, { width: 15, height: 15 }));
       actionBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.onClearQueue?.();
       });
     }
-
-    // Wire open-library button on empty state
-    const openLibBtn = this._el.querySelector('[data-queue-action="open-library"]');
-    if (openLibBtn) {
-      openLibBtn.appendChild(icon(ListVideo, { width: 14, height: 14 }));
-      openLibBtn.addEventListener('click', () => this.onOpenLibrary?.());
+    for (const actionBtn of this._el.querySelectorAll('[data-queue-action="shuffle-upcoming"]')) {
+      if (!actionBtn.querySelector('svg')) actionBtn.appendChild(icon(Shuffle, { width: 15, height: 15 }));
+      actionBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.onShuffleUpcoming?.();
+      });
     }
 
     // Wire row click + remove + drag handles
@@ -294,17 +309,16 @@ export class QueuePanel {
     return `
       <div class="queue-panel__empty">
         <p>${_esc(t('queuePanel.emptyNoLibrary'))}</p>
-        <button type="button" class="queue-panel__open-library" data-queue-action="open-library">
-          <span>${_esc(t('queuePanel.openLibrary'))}</span>
-        </button>
       </div>
     `;
   }
 
   _renderSection({ label, items, kind, action }) {
     const rows = items.map((path, idx) => this._renderRow(path, kind, idx)).join('');
+    // Icon-only action buttons (Clear = trash, Shuffle = shuffle). Label
+    // moves to aria-label/title so the button stays compact + scannable.
     const actionMarkup = action
-      ? `<button type="button" class="queue-panel__section-action" data-queue-action="clear">${_esc(action.label)}</button>`
+      ? `<button type="button" class="queue-panel__section-action queue-panel__section-action--icon" data-queue-action="${_esc(action.actionId || 'clear')}" aria-label="${_esc(action.label)}" title="${_esc(action.label)}"></button>`
       : '';
     return `
       <section class="queue-panel__section queue-panel__section--${kind}">
@@ -507,13 +521,6 @@ export class QueuePanel {
       // Lazy thumbnail
       this._loadThumbnail(row, path);
     });
-
-    // Clear remove icon mount in section-action button (Clear)
-    const clearBtn = this._el.querySelector('[data-queue-action="clear"]');
-    if (clearBtn && !clearBtn.querySelector('svg')) {
-      // Section action is text-only per the SCOPE — no icon, keeps the
-      // tap target light. Left here for future iteration.
-    }
   }
 
   _resolveMeta(path) {

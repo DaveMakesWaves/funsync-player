@@ -13,7 +13,7 @@ const normalizeName = (name) =>
   name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
 
 function scanDirectory(entries, dirPath) {
-  const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+  const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
   const FUNSCRIPT_EXT = '.funscript';
 
   const pathJoin = (...parts) => parts.join('/');
@@ -243,7 +243,7 @@ describe('scan-directory', () => {
   });
 
   it('handles all supported video extensions', () => {
-    const exts = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+    const exts = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
     const entries = exts.map((ext) => file(`test${ext}`));
     const result = scanDirectory(entries, '/dir');
     expect(result.videos).toHaveLength(exts.length);

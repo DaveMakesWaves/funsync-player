@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('funsync', {
   platform: process.platform,
   getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
+  getPortableInfo: () => ipcRenderer.invoke('get-portable-info'),
 
   // Backend health monitoring — used by the disconnected-banner.
   getBackendHealth: () => ipcRenderer.invoke('get-backend-health'),
@@ -39,9 +40,11 @@ contextBridge.exposeInMainWorld('funsync', {
   addPlaylist: (name) => ipcRenderer.invoke('add-playlist', name),
   renamePlaylist: (id, name) => ipcRenderer.invoke('rename-playlist', id, name),
   setPlaylistLoop: (id, loop) => ipcRenderer.invoke('set-playlist-loop', id, loop),
+  setPlaylistShuffle: (id, shuffle) => ipcRenderer.invoke('set-playlist-shuffle', id, shuffle),
   deletePlaylist: (id) => ipcRenderer.invoke('delete-playlist', id),
   addVideoToPlaylist: (id, videoPath) => ipcRenderer.invoke('add-video-to-playlist', id, videoPath),
   removeVideoFromPlaylist: (id, videoPath) => ipcRenderer.invoke('remove-video-from-playlist', id, videoPath),
+  setPlaylistVideoPaths: (id, videoPaths) => ipcRenderer.invoke('set-playlist-video-paths', id, videoPaths),
 
   // Categories
   getCategories: () => ipcRenderer.invoke('get-categories'),
@@ -88,6 +91,8 @@ contextBridge.exposeInMainWorld('funsync', {
   fetchMetadata: (videoPath) => ipcRenderer.invoke('fetch-metadata', videoPath),
   generateThumbnails: (videoPath, interval) => ipcRenderer.invoke('generate-thumbnails', videoPath, interval),
   generateSingleThumbnail: (videoPath, opts) => ipcRenderer.invoke('generate-single-thumbnail', videoPath, opts),
+  remuxVideo: (videoPath) => ipcRenderer.invoke('remux-video', videoPath),
+  resolveRemoteVideo: (pageUrl) => ipcRenderer.invoke('resolve-remote-video', pageUrl),
   getSpeedStats: () => ipcRenderer.invoke('get-speed-stats'),
   getDurations: () => ipcRenderer.invoke('get-durations'),
   convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
@@ -174,6 +179,17 @@ contextBridge.exposeInMainWorld('funsync', {
     const handler = (_event, evt) => callback(evt);
     ipcRenderer.on('audience-popout:event', handler);
     return () => ipcRenderer.removeListener('audience-popout:event', handler);
+  },
+
+  // Player pop-out window (SCOPE-separate-player-window.md — detached player)
+  playerPopoutOpen: () => ipcRenderer.invoke('player-popout:open'),
+  playerPopoutClose: () => ipcRenderer.invoke('player-popout:close'),
+  playerPopoutStatus: () => ipcRenderer.invoke('player-popout:status'),
+  playerPopoutRelay: (direction, payload) => ipcRenderer.invoke('player-popout:relay', direction, payload),
+  onPlayerPopoutEvent: (callback) => {
+    const handler = (_event, evt) => callback(evt);
+    ipcRenderer.on('player-popout:event', handler);
+    return () => ipcRenderer.removeListener('player-popout:event', handler);
   },
 
   // Auto-updater

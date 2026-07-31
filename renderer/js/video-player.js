@@ -177,7 +177,59 @@ export class VideoPlayer {
 
   // --- Public API ---
 
-  loadSource(url, filename) {
+  /**
+   * Tear down any active hls.js instance. Called before every loadSource so
+   * switching from a remote HLS stream back to a local file (or another
+   * stream) doesn't leak the MSE pipeline / its event listeners.
+   */
+  _destroyHls() {
+    if (this._hls) {
+      try { this._hls.destroy(); } catch { /* already gone */ }
+      this._hls = null;
+    }
+  }
+
+  /**
+   * Attach a remote HLS (.m3u8) stream via hls.js + Media Source Extensions.
+   * Chromium's <video> can't play HLS natively, but hls.js feeds it through
+   * MSE into the SAME <video> element — so currentTime / play / pause / seek
+   * (and therefore the funscript sync engines) work unchanged. hls.js is
+   * dynamically imported so the ~500KB lib only loads when a user actually
+   * plays a remote stream. See SCOPE-remote-video-url.md §6.
+   */
+  async _attachHls(url) {
+    this._destroyHls();
+    let Hls;
+    try {
+      ({ default: Hls } = await import('../../node_modules/hls.js/dist/hls.mjs'));
+    } catch (err) {
+      console.error('[hls] failed to load hls.js:', err);
+      this.video.dispatchEvent(new Event('error'));
+      return;
+    }
+    if (Hls.isSupported()) {
+      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      this._hls = hls;
+      hls.loadSource(url);
+      hls.attachMedia(this.video);
+      hls.on(Hls.Events.ERROR, (_evt, data) => {
+        if (data?.fatal) {
+          console.error('[hls] fatal error:', data.type, data.details);
+          // Surface to the same <video> 'error' path the app already handles.
+          this.video.dispatchEvent(new Event('error'));
+        }
+      });
+    } else if (this.video.canPlayType('application/vnd.apple.mpegurl')) {
+      // Native HLS (Safari-like) — feed the URL directly.
+      this.video.src = url;
+      this.video.load();
+    } else {
+      console.error('[hls] MSE not supported and no native HLS');
+      this.video.dispatchEvent(new Event('error'));
+    }
+  }
+
+  loadSource(url, filename, opts = {}) {
     // Hide the video element AND any active VR projection canvas while
     // the new source decodes its first frame. Without this, both keep
     // painting the LAST frame of the previous video until the new one
@@ -209,8 +261,20 @@ export class VideoPlayer {
     // the element invisible until the next successful src change.
     this.video.addEventListener('error', revealOnFirstFrame);
 
-    this.video.src = url;
-    this.video.load();
+    // Remote streams are served by our localhost proxy with permissive CORS;
+    // mark the element anonymous so the VR-flatten WebGL path can sample it
+    // (texImage2D taints otherwise). Local file:// sources clear it.
+    this.video.crossOrigin = opts.remote ? 'anonymous' : null;
+
+    if (opts.isHls) {
+      // HLS via hls.js (MSE) — does NOT set video.src; hls.js drives the
+      // element. _attachHls is async (lazy import) and fire-and-forget.
+      this._attachHls(url);
+    } else {
+      this._destroyHls(); // switching away from a prior HLS stream
+      this.video.src = url;
+      this.video.load();
+    }
 
     // Reset progress bar to start position
     this.progressBar.style.width = '0%';
@@ -882,13 +946,44 @@ export class VideoPlayer {
 
   // --- Subtitles ---
 
-  async loadSubtitles(file) {
-    // Remove existing tracks and revoke old blob URLs
+  /**
+   * Remove any attached subtitle <track> elements, revoke their blob URLs,
+   * and hide the subtitle indicator. Safe to call when no subtitle is loaded.
+   * Called on every video load so a previous video's subtitle can't leak
+   * onto the next one (which otherwise persisted until app restart).
+   */
+  clearSubtitles() {
     const existing = this.video.querySelectorAll('track');
     existing.forEach((t) => {
       if (t.src && t.src.startsWith('blob:')) URL.revokeObjectURL(t.src);
       t.remove();
     });
+    // Removing the <track> ELEMENT does not drop the associated TextTrack
+    // from video.textTracks in Chromium — it lingers with mode 'showing' and
+    // keeps painting its cues onto EVERY subsequent video (the long-standing
+    // "subtitles from one video show up on all the next ones" bug). Removing
+    // the element alone never fixed it; force every track to 'disabled' so
+    // no stale cues render, and drop any cues we still have a handle on.
+    const tracks = this.video.textTracks;
+    if (tracks) {
+      for (let i = 0; i < tracks.length; i++) {
+        const tt = tracks[i];
+        try {
+          tt.mode = 'disabled';
+          if (tt.cues) {
+            // Static copy — removeCue mutates the live cue list as we go.
+            Array.from(tt.cues).forEach((cue) => { try { tt.removeCue(cue); } catch { /* ignore */ } });
+          }
+        } catch { /* jsdom / detached track — nothing to disable */ }
+      }
+    }
+    const badge = document.getElementById('subtitle-badge');
+    if (badge) badge.hidden = true;
+  }
+
+  async loadSubtitles(file) {
+    // Remove existing tracks and revoke old blob URLs
+    this.clearSubtitles();
 
     // Read file content
     let text = typeof file.textContent === 'string' ? file.textContent : await file.text();
@@ -910,8 +1005,14 @@ export class VideoPlayer {
     track.default = true;
     this.video.appendChild(track);
 
-    // Enable the track
-    this.video.textTracks[0].mode = 'showing';
+    // Enable ONLY the newly-added track via its own TextTrack handle. Don't
+    // use textTracks[0] — a stale (now-disabled) track from a previous video
+    // can still sit at index 0 in Chromium, so [0].mode = 'showing' would
+    // re-show the WRONG subtitles. `.track` is live once the element is in
+    // the DOM; the load listener is a belt-and-suspenders fallback.
+    const enableNew = () => { if (track.track) track.track.mode = 'showing'; };
+    enableNew();
+    track.addEventListener('load', enableNew, { once: true });
 
     // Show subtitle indicator
     const badge = document.getElementById('subtitle-badge');

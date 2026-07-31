@@ -247,7 +247,7 @@ describe('TCodeSync — invert at per-tick send (integration)', () => {
     sync._lastActionIndex = 0;
     sync._lastSendTime = 0;
     sync._tick();
-    expect(tcode.sendAxes).toHaveBeenCalledWith({ L0: 50 });
+    expect(tcode.sendAxes).toHaveBeenCalledWith({ L0: 50 }, expect.any(Number));
 
     // Reset send tracking
     tcode.sendAxes.mockClear();
@@ -258,7 +258,7 @@ describe('TCodeSync — invert at per-tick send (integration)', () => {
     // Now invert: pos 50 → invert to 50 (midpoint, fixed point)
     sync.setAxisInverted('L0', true);
     sync._tick();
-    expect(tcode.sendAxes).toHaveBeenCalledWith({ L0: 50 });
+    expect(tcode.sendAxes).toHaveBeenCalledWith({ L0: 50 }, expect.any(Number));
     // Midpoint case: harder to distinguish; use asymmetric time below
   });
 

@@ -7,10 +7,12 @@ Also serves funscript files and generates/caches thumbnails.
 import hashlib
 import mimetypes
 import os
+import secrets
 import stat
 import subprocess
+from urllib.parse import unquote
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 
 router = APIRouter()
@@ -286,6 +288,172 @@ async def get_vr_activity():
     return _vr_activity
 
 
+@router.post("/remux")
+def remux(
+    video_path: str = Query(..., description="Absolute path to the source video"),
+):
+    """Repackage a non-browser-playable container (e.g. .mkv) into MP4 via
+    ffmpeg stream-copy, so Chromium's <video> can play it. Result is cached
+    on disk; repeat calls for the same file return instantly.
+
+    Declared `def` (not `async def`) so FastAPI runs it in its threadpool —
+    the ffmpeg subprocess is blocking and shouldn't stall the event loop.
+    """
+    from services.ffmpeg import remux_to_mp4
+    try:
+        return remux_to_mp4(video_path)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        # 422: the file exists but can't be made playable by remuxing
+        # (unsupported video codec, or ffmpeg failed).
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Remote video — paste a page URL, play the stream synced with a funscript.
+#
+# Flow: /resolve runs yt-dlp to turn a page URL into a signed stream URL +
+# the headers it needs, stored server-side under a token. The renderer plays
+# the returned proxy URL (hls.js for HLS, <video src> for progressive MP4);
+# every byte is fetched by US with the right Referer/Cookie/UA (browser JS
+# can't set those) and re-served with CORS. See SCOPE-remote-video-url.md.
+# ---------------------------------------------------------------------------
+
+# token -> {"streamUrl", "headers", "isHls"}. Bounded; oldest evicted.
+_remote_streams: "dict[str, dict]" = {}
+_REMOTE_MAX = 32
+
+
+@router.post("/resolve")
+def resolve_remote(url: str = Query(..., description="Web page URL to resolve")):
+    """Resolve a page URL to a playable stream via yt-dlp. `def` → threadpool
+    (yt-dlp extraction blocks). Returns public metadata + a proxy URL; the
+    signed upstream URL + headers are kept server-side under a token."""
+    from services.resolver import resolve, ResolveError
+    try:
+        info = resolve(url)
+    except ResolveError as e:
+        # 422 + a category the UI can turn into a precise message.
+        raise HTTPException(status_code=422, detail={"kind": e.kind, "message": str(e)})
+    except Exception as e:  # pragma: no cover - defensive
+        raise HTTPException(status_code=500, detail={"kind": "error", "message": str(e)})
+
+    token = secrets.token_urlsafe(12)
+    _remote_streams[token] = {
+        "streamUrl": info["streamUrl"],
+        "headers": info.get("headers") or {},
+        "isHls": info["isHls"],
+    }
+    # Evict oldest entries so a long session doesn't grow unbounded.
+    while len(_remote_streams) > _REMOTE_MAX:
+        _remote_streams.pop(next(iter(_remote_streams)), None)
+
+    proxy_url = (
+        f"/api/media/remote/{token}/master.m3u8" if info["isHls"]
+        else f"/api/media/remote/{token}/file"
+    )
+    return {
+        "title": info["title"],
+        "duration": info["duration"],
+        "thumbnail": info["thumbnail"],
+        "site": info["site"],
+        "isHls": info["isHls"],
+        "height": info.get("height"),
+        "proxyUrl": proxy_url,
+        "token": token,
+    }
+
+
+async def _proxy_fetch(url: str, headers: dict, range_header: "str | None" = None):
+    """Stream an upstream URL back to the client, forwarding Range and the
+    stored signed headers. Returns a StreamingResponse mirroring the upstream
+    status + content headers (so <video> Range seeking + hls.js both work)."""
+    import httpx
+
+    req_headers = {k: v for k, v in (headers or {}).items()}
+    if range_header:
+        req_headers["Range"] = range_header
+
+    client = httpx.AsyncClient(follow_redirects=True, timeout=None)
+    try:
+        req = client.build_request("GET", url, headers=req_headers)
+        resp = await client.send(req, stream=True)
+    except Exception as e:
+        await client.aclose()
+        raise HTTPException(status_code=502, detail=f"upstream fetch failed: {e}")
+
+    async def _body():
+        try:
+            async for chunk in resp.aiter_bytes():
+                yield chunk
+        finally:
+            await resp.aclose()
+            await client.aclose()
+
+    passthrough = {}
+    for h in ("content-range", "content-length", "accept-ranges", "content-type"):
+        if h in resp.headers:
+            passthrough[h] = resp.headers[h]
+    return StreamingResponse(
+        _body(),
+        status_code=resp.status_code,
+        headers=passthrough,
+        media_type=resp.headers.get("content-type"),
+    )
+
+
+@router.get("/remote/{token}/master.m3u8")
+async def remote_master(token: str):
+    """Fetch + rewrite the top-level HLS manifest for `token`."""
+    entry = _remote_streams.get(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="unknown stream token")
+    return await _fetch_and_rewrite_manifest(entry["streamUrl"], entry["headers"], token)
+
+
+@router.get("/remote/{token}/manifest")
+async def remote_submanifest(token: str, u: str = Query(...)):
+    """Fetch + rewrite a sub-playlist (variant / audio rendition)."""
+    entry = _remote_streams.get(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="unknown stream token")
+    return await _fetch_and_rewrite_manifest(unquote(u), entry["headers"], token)
+
+
+async def _fetch_and_rewrite_manifest(manifest_url: str, headers: dict, token: str):
+    import httpx
+    from services.hls_proxy import rewrite_manifest
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            resp = await client.get(manifest_url, headers=headers or {})
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"manifest fetch failed: {e}")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=502, detail=f"manifest upstream {resp.status_code}")
+    # str(resp.url) reflects redirects, so relative URIs resolve correctly.
+    rewritten = rewrite_manifest(resp.text, str(resp.url), token)
+    return Response(content=rewritten, media_type="application/vnd.apple.mpegurl")
+
+
+@router.get("/remote/{token}/seg")
+async def remote_segment(token: str, request: Request, u: str = Query(...)):
+    """Stream an HLS media segment / key / init map for `token`."""
+    entry = _remote_streams.get(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="unknown stream token")
+    return await _proxy_fetch(unquote(u), entry["headers"], request.headers.get("range"))
+
+
+@router.get("/remote/{token}/file")
+async def remote_file(token: str, request: Request):
+    """Stream a progressive (non-HLS) remote video file with Range support."""
+    entry = _remote_streams.get(token)
+    if not entry:
+        raise HTTPException(status_code=404, detail="unknown stream token")
+    return await _proxy_fetch(entry["streamUrl"], entry["headers"], request.headers.get("range"))
+
+
 @router.get("/durations")
 async def get_durations():
     """Return all known video durations, keyed by absolute video path.
@@ -394,6 +562,7 @@ async def register_library(request: Request):
 
 MIME_TYPES = {
     ".mp4": "video/mp4",
+    ".m4v": "video/mp4",
     ".mkv": "video/x-matroska",
     ".webm": "video/webm",
     ".avi": "video/x-msvideo",
@@ -636,19 +805,19 @@ def _queue_thumb_generation(video_id, filepath, thumb_path):
     def _generate():
         _thumb_semaphore.acquire()
         try:
-            from services.ffmpeg import _find_binary, run_silent
-            ffmpeg_path = _find_binary("ffmpeg")
-            result = run_silent(
-                [ffmpeg_path, "-i", filepath, "-ss", "25%", "-frames:v", "1",
-                 "-q:v", "5", "-vf", "scale=320:-1", thumb_path, "-y"],
-                capture_output=True, timeout=30,
-            )
-            if result.returncode != 0 or not os.path.isfile(thumb_path):
-                run_silent(
-                    [ffmpeg_path, "-i", filepath, "-ss", "5", "-frames:v", "1",
-                     "-q:v", "5", "-vf", "scale=320:-1", thumb_path, "-y"],
-                    capture_output=True, timeout=30,
-                )
+            # Reuse the desktop library's thumbnail generator instead of a
+            # bespoke ffmpeg command. It seeks past studio-ident / fade-in
+            # windows (max(10s, 10%)), uses the fast `-skip_frame nokey`
+            # decode, and caches on disk by content hash. The old inline
+            # command here used `-ss 25%` (ffmpeg can't parse a percentage
+            # for -ss) with a `-ss 5` fallback that landed squarely in the
+            # black intro of most videos → black thumbnails on the phone.
+            from services.ffmpeg import generate_single_thumbnail
+            import shutil
+            result = generate_single_thumbnail(filepath, seek_pct=0.1, width=320)
+            src = result.get("path") if result else None
+            if src and os.path.isfile(src) and os.path.abspath(src) != os.path.abspath(thumb_path):
+                shutil.copyfile(src, thumb_path)
         except Exception:
             pass
         finally:

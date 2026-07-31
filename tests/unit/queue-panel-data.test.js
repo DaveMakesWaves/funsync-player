@@ -7,6 +7,7 @@
 // methods or testing the algorithms directly.
 
 import { describe, it, expect } from 'vitest';
+import { shuffle as shuffleArray } from '../../renderer/js/shuffle.js';
 
 // --- History semantics (SCOPE-queue-panel.md §3.5) ---
 
@@ -231,5 +232,47 @@ describe('Auto-advance priority — user queue first', () => {
 
   it('returns null when both are empty', () => {
     expect(nextOnAdvance([], null)).toBe(null);
+  });
+});
+
+// --- Shuffle "Up next" tail (queue panel Shuffle action) ---
+//
+// Mirrors App._shuffleUpcoming Case 1: shuffle only the not-yet-played
+// slice after the current index; the already-played prefix and the
+// currently-playing item stay fixed. Kept as pure logic so the
+// invariants can be checked without booting the App.
+
+describe('Shuffle upcoming — tail-only reorder', () => {
+  // Reproduces the in-place tail reorder from App._shuffleUpcoming.
+  function shuffleTail(queue, currentIndex) {
+    const idx = currentIndex + 1;
+    if (idx >= queue.length) return queue.slice(); // nothing upcoming
+    const tail = shuffleArray(queue.slice(idx));
+    return [...queue.slice(0, idx), ...tail];
+  }
+
+  const base = ['a', 'b', 'c', 'd', 'e', 'f'];
+
+  it('keeps the played prefix and current item fixed', () => {
+    const out = shuffleTail(base, 2); // current = 'c' at index 2
+    expect(out.slice(0, 3)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('tail is a permutation of the original upcoming items (no loss/dup)', () => {
+    const out = shuffleTail(base, 1); // upcoming = c,d,e,f
+    expect([...out].sort()).toEqual([...base].sort());
+    expect(out.slice(0, 2)).toEqual(['a', 'b']);
+    expect([...out.slice(2)].sort()).toEqual(['c', 'd', 'e', 'f']);
+  });
+
+  it('is a no-op when the current item is last (nothing upcoming)', () => {
+    const out = shuffleTail(base, base.length - 1);
+    expect(out).toEqual(base);
+  });
+
+  it('shuffles the whole tail when nothing has played yet (index -1)', () => {
+    const out = shuffleTail(base, -1);
+    expect([...out].sort()).toEqual([...base].sort());
+    expect(out.length).toBe(base.length);
   });
 });

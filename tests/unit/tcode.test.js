@@ -201,6 +201,46 @@ describe('TCodeSync', () => {
     expect(tcode.stop).toHaveBeenCalled();
   });
 
+  describe('setUpdateRate', () => {
+    it('defaults to ~25Hz (40ms tick)', () => {
+      expect(sync._tickIntervalMs).toBe(40);
+    });
+
+    it('converts Hz to a tick interval', () => {
+      sync.setUpdateRate(50);
+      expect(sync._tickIntervalMs).toBe(20); // 1000/50
+      sync.setUpdateRate(60);
+      expect(sync._tickIntervalMs).toBe(17); // round(1000/60)
+    });
+
+    it('clamps to the 15–60Hz range', () => {
+      sync.setUpdateRate(500);
+      expect(sync._tickIntervalMs).toBe(Math.round(1000 / 60)); // ceiling
+      sync.setUpdateRate(1);
+      expect(sync._tickIntervalMs).toBe(Math.round(1000 / 15)); // floor
+    });
+
+    it('coerces garbage to the 25Hz default', () => {
+      sync.setUpdateRate('nonsense');
+      expect(sync._tickIntervalMs).toBe(40);
+    });
+
+    it('keeps the scheduler live (restarted) when the rate changes mid-run', () => {
+      sync._startScheduler();
+      expect(sync._intervalId).not.toBeNull();
+      sync.setUpdateRate(50);
+      expect(sync._tickIntervalMs).toBe(20);
+      expect(sync._intervalId).not.toBeNull(); // still scheduled at the new rate
+      sync._stopScheduler();
+    });
+
+    it('does not start a scheduler if none was running', () => {
+      expect(sync._intervalId).toBeNull();
+      sync.setUpdateRate(50);
+      expect(sync._intervalId).toBeNull();
+    });
+  });
+
   it('tick sends L0 position via sendAxes', () => {
     sync.start();
     sync.player.currentTime = 0.5; // 500ms
@@ -212,6 +252,33 @@ describe('TCodeSync', () => {
     expect(axes.L0).toBeDefined();
     expect(axes.L0).toBeGreaterThanOrEqual(0);
     expect(axes.L0).toBeLessThanOrEqual(100);
+  });
+
+  it('sends a positive interval (I-suffix) so the device paces the move', () => {
+    // Regression: bare position commands made fast strokes under-travel on
+    // wired OSR/SR6. The tick must pass a move interval to sendAxes.
+    sync.start();
+    sync.player.currentTime = 0.5;
+    sync.player.paused = false;
+    sync._lastSendTime = 0;
+    sync._tick();
+    expect(tcode.sendAxes).toHaveBeenCalled();
+    const interval = tcode.sendAxes.mock.calls[0][1];
+    expect(interval).toBeGreaterThan(0);
+    expect(interval).toBeLessThanOrEqual(150); // capped (MOVE_INTERVAL_CAP_MS)
+  });
+
+  it('caps the interval after a long gap instead of crawling', () => {
+    // A stale _lastSendTime (post-seek/pause) must not produce a multi-second
+    // interval that makes the device creep toward the target.
+    sync.start();
+    sync.player.currentTime = 0.5;
+    sync.player.paused = false;
+    sync._lastSendTime = performance.now() - 10000; // 10s stale gap
+    sync._tick();
+    expect(tcode.sendAxes).toHaveBeenCalled();
+    const interval = tcode.sendAxes.mock.calls[0][1];
+    expect(interval).toBeLessThanOrEqual(150);
   });
 
   it('does not send when disconnected', () => {

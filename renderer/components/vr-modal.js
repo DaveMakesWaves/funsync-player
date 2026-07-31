@@ -167,6 +167,7 @@ function _template() {
         <p class="vr-modal__hint" id="vr-host-input-hint">
           ${t('vrModal.hostHint')}
         </p>
+        <p class="vr-modal__subnet-warning" id="vr-subnet-warning" role="alert" hidden></p>
       </div>
 
       <div id="vr-now-playing" class="vr-modal__now-playing" hidden>
@@ -191,8 +192,13 @@ function _template() {
 
 
 function _wire(root, { settings, vrBridge, port }) {
-  // Populate server URL
-  _loadServerUrl(root, port);
+  // Populate server URL and remember this PC's LAN IP so we can flag a
+  // subnet mismatch on the Device-Sync host below (see _checkSubnet).
+  let pcIp = null;
+  _loadServerUrl(root, port).then((ip) => {
+    pcIp = ip;
+    _checkSubnet(root, pcIp, root.querySelector('#vr-host-input')?.value);
+  });
 
   // Setup guide toggle — disclosure widget pattern. `aria-expanded` is
   // the source of truth for screen readers and the CSS `[aria-expanded="true"]`
@@ -271,6 +277,11 @@ function _wire(root, { settings, vrBridge, port }) {
   const savedHost = settings.get('vr.lastHost') || vrBridge.host || '127.0.0.1';
   hostInput.value = savedHost;
 
+  // Re-evaluate the subnet warning as the user edits the host. `pcIp` may
+  // still be null on the first keystrokes (network-info fetch in flight);
+  // _checkSubnet no-ops until it resolves, then paints via the .then above.
+  hostInput.addEventListener('input', () => _checkSubnet(root, pcIp, hostInput.value));
+
   // Initial paint + live updates handled by pollStatus above.
   pollStatus();
   if (vrBridge.connected && vrBridge.__vrModalLastVideo) {
@@ -294,6 +305,10 @@ function _wire(root, { settings, vrBridge, port }) {
       if (!success) {
         paintStatus('disconnected');
         statusText.textContent = t('vrModal.statusFailed');
+        // A failed dial is exactly when a subnet mismatch matters — make
+        // sure the hint is showing even if the field was pre-filled and
+        // never edited this session.
+        _checkSubnet(root, pcIp, host);
       }
     } finally {
       connectBtn.disabled = false;
@@ -357,12 +372,13 @@ function _wire(root, { settings, vrBridge, port }) {
 
 async function _loadServerUrl(root, port) {
   const hsUrl = root.querySelector('#vr-server-hs-url');
-  if (!hsUrl) return;
+  if (!hsUrl) return null;
+  let ip = null;
   try {
     const res = await fetch(`http://127.0.0.1:${port}/network-info`);
     if (res.ok) {
       const data = await res.json();
-      const ip = data.ip || '127.0.0.1';
+      ip = data.ip || '127.0.0.1';
       hsUrl.value = `http://${ip}:${port}/heresphere`;
     } else {
       hsUrl.value = t('vrModal.backendNotRunning');
@@ -371,6 +387,62 @@ async function _loadServerUrl(root, port) {
     hsUrl.value = t('vrModal.backendNotRunning');
   }
   hsUrl.addEventListener('click', () => hsUrl.select());
+  return ip;
+}
+
+
+// IPv4 /24 subnet ('192.168.101.5' -> '192.168.101'), or null if not a
+// dotted-quad address we can compare.
+export function subnet24(ip) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(ip || '').trim());
+  if (!m) return null;
+  const oct = m.slice(1).map(Number);
+  if (oct.some((o) => o > 255)) return null;
+  return oct.slice(0, 3).join('.');
+}
+
+/**
+ * Pure decision for the subnet-mismatch warning. Returns the PC's /24 to
+ * suggest (truthy) when the host is on a different network and worth
+ * warning about, or null when it's fine / undeterminable. Extracted so it
+ * can be unit-tested without DOM.
+ */
+export function shouldWarnSubnet(pcIp, host) {
+  const h = String(host || '').trim();
+  const pcNet = subnet24(pcIp);
+  const hostNet = subnet24(h);
+  if (!pcNet || !hostNet) return null;         // can't compare
+  if (hostNet === pcNet) return null;          // same subnet — fine
+  if (h.startsWith('127.')) return null;       // loopback = PCVR, always fine
+  if (pcIp === '127.0.0.1') return null;       // no LAN IP detected — don't nag
+  return pcNet;
+}
+
+
+/**
+ * Warn when the Device-Sync host is on a different /24 than this PC.
+ *
+ * The #1 support failure (2026-07 HereSphere report) is a user copying the
+ * IP HereSphere shows for its timestamp server while that IP belongs to a
+ * VPN / virtual adapter — a different subnet than the PC's LAN, so FunSync
+ * can't route to it. FunSync already knows its own LAN IP (the Library
+ * Streaming URL), so we can catch this before the user hits Connect.
+ *
+ * Soft, non-blocking: cross-subnet setups with real routing exist, so this
+ * is a hint, not a hard stop. Skipped for loopback (PCVR) and until the
+ * network-info fetch resolves.
+ */
+function _checkSubnet(root, pcIp, host) {
+  const warnEl = root.querySelector('#vr-subnet-warning');
+  if (!warnEl) return;
+  const pcNet = shouldWarnSubnet(pcIp, host);
+  if (pcNet) {
+    warnEl.textContent = t('vrModal.subnetWarning', { host: String(host).trim(), pcIp, pcNet });
+    warnEl.hidden = false;
+  } else {
+    warnEl.hidden = true;
+    warnEl.textContent = '';
+  }
 }
 
 

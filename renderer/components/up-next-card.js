@@ -65,6 +65,10 @@ export class UpNextCard {
     this._countdownLabelEl = null;
     this._currentPath = null;
     this._currentSourceContext = null;
+    // Mini-player mode: renders a minimal "Next video starts in Ns" strip and
+    // suppresses hover-pause (the corner overlay is glanceable and the user's
+    // pointer is usually over it — pausing there froze the countdown).
+    this._mini = false;
 
     if (!this._el) return;
 
@@ -78,19 +82,35 @@ export class UpNextCard {
     // events bubble up. Only meaningful when the countdown branch is
     // showing; the end-of-list branch ignores these via the engine.
     this._el.addEventListener('mouseenter', () => {
+      if (this._mini) return; // glanceable — never pause on hover in mini
       if (this.onHoverEnter) this.onHoverEnter();
     });
     this._el.addEventListener('mouseleave', () => {
+      if (this._mini) return;
       if (this.onHoverLeave) this.onHoverLeave();
     });
     this._el.addEventListener('focusin', () => {
+      if (this._mini) return;
       if (this.onHoverEnter) this.onHoverEnter();
     });
     this._el.addEventListener('focusout', (e) => {
+      if (this._mini) return;
       // Only resume when focus actually leaves the card subtree.
       if (this._el.contains(e.relatedTarget)) return;
       if (this.onHoverLeave) this.onHoverLeave();
     });
+  }
+
+  /** Toggle the compact mini-player rendering. Re-renders if a card is up. */
+  setMini(on) {
+    const next = !!on;
+    if (next === this._mini) return;
+    this._mini = next;
+    // Re-render an already-visible countdown in the new form.
+    if (this._el && !this._el.hidden && this._currentPath && !this._el.classList.contains('up-next--end-of-list')) {
+      const secs = parseInt(this._countdownLabelEl?.textContent, 10);
+      this.show(this._currentPath, Number.isFinite(secs) ? secs : 10);
+    }
   }
 
   show(nextPath, countdownSec) {
@@ -98,6 +118,16 @@ export class UpNextCard {
     this._currentPath = nextPath;
     this._el.classList.remove('up-next--end-of-list');
     this._el.hidden = false;
+
+    // Mini-player: a single minimal line — "Next video starts in Ns" — no
+    // thumbnail, body, or dismiss. Just enough to signal the auto-advance.
+    if (this._mini) {
+      this._el.innerHTML = `
+        <div class="up-next__mini-text">${_esc(t('upNext.miniPrefix'))} <span class="up-next__countdown" aria-label="${_esc(t('upNext.secondsAria'))}">${countdownSec}</span>${_esc(t('upNext.labelSuffix'))}</div>
+      `;
+      this._countdownLabelEl = this._el.querySelector('.up-next__countdown');
+      return;
+    }
 
     const meta = this._resolveMeta(nextPath);
 
@@ -157,6 +187,13 @@ export class UpNextCard {
     this._currentSourceContext = sourceContext || {};
     this._el.classList.add('up-next--end-of-list');
     this._el.hidden = false;
+
+    // Mini-player: just a compact end-of-list line, no CTA.
+    if (this._mini) {
+      this._el.innerHTML = `<div class="up-next__mini-text">${_esc(t('upNext.endLabel'))}</div>`;
+      this._countdownLabelEl = null;
+      return;
+    }
 
     const safeSource = _esc(sourceLabel || t('upNext.endSourceFallback'));
 
@@ -224,15 +261,21 @@ export class UpNextCard {
     } catch {
       return;
     }
-    // Race guard — if the card hid or moved on while we were loading,
-    // skip painting onto a stale DOM.
-    if (!this._el || this._el.hidden) return;
-    if (this._currentPath !== path) return;
     const dataUrl = result?.dataUrl || result;
-    if (!dataUrl) return;
+    this.setThumbnail(path, dataUrl);
+  }
+
+  /**
+   * Paint a thumbnail into the currently-shown card. Public so an external
+   * source can supply the frame (the player pop-out streams it from main
+   * rather than re-capturing). Race-guarded against a stale / hidden card.
+   */
+  setThumbnail(path, dataUrl) {
+    if (!this._el || this._el.hidden) return;
+    if (this._currentPath !== path || !dataUrl) return;
 
     const thumb = this._el.querySelector('.up-next__thumb');
-    if (!thumb) return;
+    if (!thumb || thumb.querySelector('.up-next__thumb-img')) return;
     const skeleton = thumb.querySelector('.up-next__thumb-skeleton');
     const img = document.createElement('img');
     img.className = 'up-next__thumb-img';

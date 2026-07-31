@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com https://discuss.eroscripts.com; media-src 'self' file: blob:; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com https://discuss.eroscripts.com; media-src 'self' file: blob: http://localhost:* http://127.0.0.1:*; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
   <title>FunSync Player</title>
   <link rel="stylesheet" href="styles/player.css">
   <link rel="stylesheet" href="styles/library.css">
@@ -17,6 +17,9 @@
   <link rel="stylesheet" href="styles/up-next.css">
   <link rel="stylesheet" href="styles/vr-format-panel.css">
   <link rel="stylesheet" href="styles/queue-panel.css">
+  <!-- Modern interface-style layer — MUST be last so its [data-style="modern"]
+       rules win specificity ties. Inert unless <html data-style="modern">. -->
+  <link rel="stylesheet" href="styles/modern.css">
 </head>
 <body>
   <div id="app">
@@ -40,6 +43,15 @@
           <span class="center-play__icon center-play__icon--pause" hidden><i data-lucide="pause"></i></span>
           <span class="center-play__icon center-play__icon--replay" hidden><i data-lucide="rotate-ccw"></i></span>
         </button>
+
+        <!-- Mini-player control bar — only visible when the player is docked
+             as a corner overlay (`.player-container--mini`), so the user can
+             expand / play-pause / close while browsing the library. -->
+        <div id="miniplayer-bar" class="miniplayer-bar">
+          <button id="miniplayer-playpause" class="miniplayer-bar__btn" type="button" data-i18n-aria-label="player.miniPlayPause" data-i18n-title="player.miniPlayPause" aria-label="Play / pause" title="Play / pause"></button>
+          <button id="miniplayer-expand" class="miniplayer-bar__btn" type="button" data-i18n-aria-label="player.miniExpand" data-i18n-title="player.miniExpand" aria-label="Back to player" title="Back to player"></button>
+          <button id="miniplayer-close" class="miniplayer-bar__btn miniplayer-bar__btn--close" type="button" data-i18n-aria-label="player.miniClose" data-i18n-title="player.miniClose" aria-label="Close" title="Close"></button>
+        </div>
       </div>
 
       <!-- Script Loading Overlay (shown while uploading funscript to Handy cloud) -->
@@ -248,6 +260,10 @@
                   <i data-lucide="picture-in-picture-2"></i>
                   <span data-i18n="player.pictureInPicture">Picture-in-Picture</span>
                 </button>
+                <button id="btn-popout-player" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.popOut" aria-label="Pop out player">
+                  <i data-lucide="maximize-2"></i>
+                  <span data-i18n="player.popOut">Pop out player</span>
+                </button>
                 <button id="btn-help" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.keyboardShortcuts" aria-label="Keyboard shortcuts">
                   <i data-lucide="keyboard"></i>
                   <span data-i18n="player.keyboardShortcuts">Keyboard shortcuts</span>
@@ -281,6 +297,13 @@
           <span id="player-sync-chip-text" class="player__sync-chip-text"></span>
         </div>
         <div id="video-category-dots" class="player__category-dots"></div>
+        <!-- TEMP DISABLED (2026-07-30): Load-from-URL hidden until it works reliably.
+             Restore this button + the nav-bar entry + the app.js wiring together.
+             See notes/SCRATCHPAD.md "Load-from-URL — disabled, revisit".
+        <!-- Load from URL — resolve a streaming-site page link (yt-dlp) and
+             play it synced with a funscript. See SCOPE-remote-video-url.md.
+        <button id="btn-load-url" class="player__quick-add" data-i18n-aria-label="remoteVideo.openAria" data-i18n-title="remoteVideo.openAria" aria-label="Load from URL" title="Load from URL"><i data-lucide="link"></i></button>
+        -->
         <button id="btn-add-to-playlist" class="player__quick-add" data-i18n-aria-label="player.addToPlaylist" data-i18n-title="player.addToPlaylist" aria-label="Add to playlist" title="Add to Playlist"><i data-lucide="plus"></i></button>
         <!-- Queue panel toggle — far-right corner of the top bar. The
              columns-2 icon mirrors the Android Auto split-screen look
@@ -304,10 +327,15 @@
       <!-- Up Next card (end-of-video autoplay countdown) -->
       <div id="up-next-card" class="up-next" hidden></div>
 
-      <!-- Queue panel mount — slides in from right edge of the player.
-           Component populates content at runtime. SCOPE-queue-panel.md. -->
-      <aside id="queue-panel" hidden></aside>
     </div>
+
+    <!-- Queue panel mount — TOP-LEVEL (sibling of the view containers) so it
+         slides in over ANY view (library / playlists / categories), not just
+         the player. It's position:fixed, so DOM position doesn't matter for
+         layout; previously being a child of #player-container meant it was
+         hidden along with the player in non-player views (the queue toggle
+         "did nothing" from the library). SCOPE-queue-panel.md. -->
+    <aside id="queue-panel" hidden></aside>
   </div>
 
   <!-- Backend-disconnected banner — shown when the Python FastAPI

@@ -20,6 +20,8 @@
 // usable feel — not as silky as HSSP at 1.0× but acceptable for the
 // non-1.0× preview case which the user wouldn't pick HSSP for anyway.
 
+import { applyCutoff } from './device-transform-stack.js';
+
 const DEFAULT_TICK_INTERVAL_MS = 33; // ~30 Hz — Handy WiFi/BLE rate ceiling
 const DEFAULT_LOOKAHEAD_MS = 100;    // movement budget per command
 const MIN_POS_DELTA = 1;             // skip duplicate sends below this delta
@@ -72,6 +74,10 @@ export class HandyHdspSync {
     this._lookaheadMs = opts.lookaheadMs ?? DEFAULT_LOOKAHEAD_MS;
     this._lastSendTime = 0;
     this._lastSentPos = -1;
+    // Output cutoff (hard floor/ceiling clamp). Null = no-op. Mirrors the
+    // Handy HSSP path, which clamps the uploaded script content instead
+    // (HDSP is per-tick so it clamps here). See SCOPE-device-cutoff-threshold.
+    this._cutoff = null;
     this._timer = null;
     this._setIntervalImpl = (typeof setInterval !== 'undefined') ? setInterval : null;
     this._clearIntervalImpl = (typeof clearInterval !== 'undefined') ? clearInterval : null;
@@ -84,6 +90,15 @@ export class HandyHdspSync {
   setTimerImpl(setIntervalImpl, clearIntervalImpl) {
     this._setIntervalImpl = setIntervalImpl;
     this._clearIntervalImpl = clearIntervalImpl;
+  }
+
+  /**
+   * Set the output cutoff floor/ceiling. Pass {min, max} (0-100) or null
+   * to clear. Default no-op when {0, 100}. Applied to the interpolated
+   * target before `hdspMove`.
+   */
+  setCutoff(cutoff) {
+    this._cutoff = cutoff || null;
   }
 
   setActions(actions) {
@@ -122,8 +137,10 @@ export class HandyHdspSync {
     if (!this._active) return;
     if (!this._actions || this._actions.length === 0) return;
     const timeMs = Math.max(0, (this.player.currentTime || 0) * 1000);
-    const target = interpolatePosition(this._actions, timeMs);
-    if (target === null) return;
+    const raw = interpolatePosition(this._actions, timeMs);
+    if (raw === null) return;
+    // Hard floor/ceiling clamp before send (no-op unless the user set one).
+    const target = applyCutoff(raw, this._cutoff);
     if (this._lastSentPos >= 0 && Math.abs(target - this._lastSentPos) < MIN_POS_DELTA) return;
     this._lastSentPos = target;
     this._lastSendTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();

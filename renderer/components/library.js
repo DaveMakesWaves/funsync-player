@@ -4,7 +4,7 @@ import { Modal } from './modal.js';
 import { rankFunscriptMatches, fuzzyMatchScore } from '../js/fuzzy-match.js';
 import { computeGridRange, hasRangeChanged } from '../js/virtual-scroll.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
-import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable } from '../js/icons.js';
+import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable, Shuffle, Columns2 } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { renderFilterChips, countActiveFilters } from '../js/filter-chips.js';
@@ -37,10 +37,33 @@ import { record, mark } from '../js/startup-timer.js';
 // sample (`Test.mp4` is H.264 1080p — won't catch the regression).
 const MAX_CONCURRENT_THUMBNAILS = 4;
 
+/**
+ * Resolve the seek percentage for a video's thumbnail from its optional
+ * custom-thumbnail override. Returns the clamped 0..1 `seekPct` when the
+ * user pinned a specific frame, else the default 10% mark. Kept pure +
+ * exported so the override/clamp rules are unit-testable.
+ *
+ * @param {{seekPct?: number}|undefined|null} custom
+ * @returns {number}
+ */
+export function resolveThumbSeekPct(custom) {
+  const pct = custom?.seekPct;
+  if (typeof pct === 'number' && isFinite(pct)) {
+    return Math.min(0.999, Math.max(0, pct));
+  }
+  return 0.1;
+}
+
 export class Library {
-  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, getEmbeddedAxes, detectEmbeddedAxesForPath, onExtractEmbeddedAxes, onAddToQueue, settings }) {
+  constructor({ onPlayVideo, onBack, onAddSource, onTestDevice, onOpenVRFormat, getEmbeddedAxes, detectEmbeddedAxesForPath, onExtractEmbeddedAxes, onAddToQueue, onPlayAll, onToggleQueue, settings }) {
     this._onPlayVideo = onPlayVideo;
     this._onBack = onBack;
+    // Play a list as an auto-advancing queue (shared with playlists'
+    // Play-All). Used by the header Shuffle All button.
+    this._onPlayAll = onPlayAll || null;
+    // Toggle the queue panel from the library header (parity with the
+    // player top-bar toggle; reachable while the detached player is open).
+    this._onToggleQueue = onToggleQueue || null;
     this._onAddSource = onAddSource || null;
     this._onTestDevice = onTestDevice || null;
     this._onOpenVRFormat = onOpenVRFormat || null;
@@ -184,6 +207,18 @@ export class Library {
         }
       });
       this._languageListenerAttached = true;
+    }
+
+    // Folder-previews toggle needs an immediate re-render (it changes what
+    // already-rendered folder cards show). Moving-previews is a hover-time
+    // gate so it doesn't need this. Subscribed once per instance.
+    if (!this._folderPreviewsListenerAttached) {
+      eventBus.on('settings:changed', ({ path }) => {
+        if (path === 'library.folderPreviews' && this._videos?.length > 0) {
+          this._applyFilters();
+        }
+      });
+      this._folderPreviewsListenerAttached = true;
     }
 
     // Resolve which directories to scan — all enabled sources, excluding unavailable (disconnected drives).
@@ -391,8 +426,10 @@ export class Library {
           <button class="view-toggle view-toggle--list" aria-label="${this._escapeHtml(t('library.listView'))}" title="${this._escapeHtml(t('library.listView'))}"></button>
         </div>
         <button class="folder-browse-btn view-toggle--folder" aria-label="${this._escapeHtml(t('library.folderBrowse'))}" title="${this._escapeHtml(t('library.folderBrowse'))}"></button>
+        <button class="library__shuffle-btn" aria-label="${this._escapeHtml(t('library.shuffleAll'))}" title="${this._escapeHtml(t('library.shuffleAllTitle'))}"></button>
         <button class="library__refresh-btn" aria-label="${this._escapeHtml(t('library.refresh'))}" title="${this._escapeHtml(t('library.refreshTitle'))}"></button>
         <button class="library__select-mode-btn">${this._escapeHtml(t('library.select'))}</button>
+        <button class="library__queue-toggle" aria-label="${this._escapeHtml(t('queuePanel.toggleAria'))}" title="${this._escapeHtml(t('queuePanel.toggleTooltip'))}" aria-pressed="false" aria-expanded="false"></button>
       </div>
       <!-- Stacking order under the header (top to bottom):
              1. Selection bar (multi-select mode)
@@ -505,6 +542,26 @@ export class Library {
       btnRefresh.addEventListener('click', () => this.refresh());
     }
 
+    // Shuffle All — play every currently-visible (filtered) video in a
+    // random, no-repeat order. Uses the same Play-All queue path as
+    // playlists (bag-model shuffle, reshuffle on loop wrap) so behaviour
+    // is consistent. Respects the active search/filters/folder scope:
+    // it shuffles exactly what the user is looking at.
+    const btnShuffle = this._container.querySelector('.library__shuffle-btn');
+    if (btnShuffle) {
+      btnShuffle.appendChild(icon(Shuffle, { width: 16, height: 16 }));
+      btnShuffle.addEventListener('click', () => this._shuffleAllVisible());
+    }
+
+    // Queue panel toggle — far-right of the header for location parity with
+    // the player's top-bar queue toggle. Reaches the same queue panel (now
+    // a top-level slide-in), so it works while the detached player is open.
+    const btnQueue = this._container.querySelector('.library__queue-toggle');
+    if (btnQueue) {
+      btnQueue.appendChild(icon(Columns2, { width: 16, height: 16 }));
+      btnQueue.addEventListener('click', () => { if (this._onToggleQueue) this._onToggleQueue(); });
+    }
+
     // Multi-select
     this._container.querySelector('.library__select-mode-btn')
       .addEventListener('click', () => this._toggleSelectMode());
@@ -518,6 +575,34 @@ export class Library {
       .addEventListener('click', () => this._bulkAddToCollection());
     this._container.querySelector('[data-action="vrtype"]')
       .addEventListener('click', () => this._bulkPromptVRType());
+  }
+
+  /**
+   * Shuffle All — play every currently-visible (filtered) video as a
+   * random, no-repeat auto-advancing queue. Honours the active
+   * search/filter/folder scope by shuffling `_filteredVideos` (exactly
+   * what's on screen), then hands off to the shared Play-All path.
+   */
+  _shuffleAllVisible() {
+    const videos = this._filteredVideos || [];
+    if (videos.length === 0) {
+      import('../js/toast.js').then(({ showToast }) => {
+        showToast(t('library.shuffleEmpty'), 'warn');
+      });
+      return;
+    }
+    if (!this._onPlayAll) return;
+    const videoList = videos.map((v) => ({
+      name: v.name || (v.path ? v.path.split(/[\\/]/).pop() : ''),
+      path: v.path,
+      funscriptPath: v.funscriptPath || null,
+    }));
+    this._onPlayAll(videoList, {
+      shuffle: true,
+      loop: false,
+      sourceLabel: this._headerTitle || t('nav.library'),
+      sourceContext: { kind: 'library-shuffle' },
+    });
   }
 
   async _scanDirectory(_dirPath, _sourceMap) {
@@ -1124,6 +1209,7 @@ export class Library {
         if (sampleCard && sampleCard.offsetHeight > 0) {
           const gridStyle = window.getComputedStyle(grid);
           const rowGap = parseFloat(gridStyle.rowGap || gridStyle.gap) || 16;
+          this._vsRowGap = rowGap; // remembered for the spacer leading-gap fix
           this._vsMeasuredRowHeight = sampleCard.offsetHeight + rowGap;
           this._vsRowHeight = this._vsMeasuredRowHeight;
           // Recompute the spacer-based layout with the corrected estimate
@@ -1199,7 +1285,21 @@ export class Library {
 
     // Rebuild visible cards only
     grid.innerHTML = '';
-    this._topSpacer.style.height = state.topSpacer + 'px';
+    // The top spacer is a full-width grid item, so the grid's row-gap adds a
+    // phantom gap BELOW it — i.e. above the first visible card row. At the top
+    // (spacer = 0) that's a dead band above row 1; when scrolled it pushes
+    // every row down by one gap. Fix: hide the spacer entirely when it would
+    // be zero (no leading gap at the top), and subtract one row-gap from its
+    // height when shown (the grid's own gap makes up the difference, so the
+    // first visible row lands exactly where the scroll math intends).
+    const rowGap = this._vsRowGap || 16;
+    if (state.topSpacer > 0) {
+      this._topSpacer.style.display = '';
+      this._topSpacer.style.height = Math.max(0, state.topSpacer - rowGap) + 'px';
+    } else {
+      this._topSpacer.style.display = 'none';
+      this._topSpacer.style.height = '0px';
+    }
     this._bottomSpacer.style.height = state.bottomSpacer + 'px';
 
     grid.appendChild(this._topSpacer);
@@ -2060,6 +2160,14 @@ export class Library {
       thumbEl.appendChild(icon(Folder, { width: 20, height: 20 }));
       return;
     }
+    // User turned off folder previews — show a plain folder icon instead
+    // of the video mosaic. Default is ON; only an explicit `false`
+    // disables, so untouched installs keep the mosaic.
+    if (this._settings?.get?.('library.folderPreviews') === false) {
+      thumbEl.appendChild(icon(Folder, { width: 48, height: 48 }));
+      return;
+    }
+
     const firstFour = descendantsOf(this._folderIndex, node.path).slice(0, 4);
     const cached = firstFour.map(v => thumbCache.get(v.path, 0));
     const n = cached.filter(Boolean).length;
@@ -2127,6 +2235,7 @@ export class Library {
 
     cardEl.appendChild(menu);
     cardEl.style.zIndex = '50';
+    this._positionKebabMenu(menu); // flip up near the bottom edge
     this._openMenu = menu;
     this._openMenuCard = cardEl;
     this._openMenuButton = buttonEl;
@@ -2446,6 +2555,122 @@ export class Library {
   }
 
   /**
+   * Frame picker — let the user scrub to a frame and pin it as this
+   * video's library thumbnail. WYSIWYG: the <video> element shows the
+   * exact frame as the slider moves; on confirm we store the seek % and
+   * regenerate the tile at that position. Community request (#180a).
+   */
+  async _pickCustomThumbnail(video, cardEl) {
+    const existing = (this._settings.get('library.customThumbnails') || {})[video.path];
+    const startPct = resolveThumbSeekPct(existing);
+
+    await Modal.open({
+      title: t('library.customThumbTitle'),
+      onRender: (body, close) => {
+        const wrap = document.createElement('div');
+        wrap.className = 'library__thumb-picker';
+
+        const vid = document.createElement('video');
+        vid.className = 'library__thumb-picker-video';
+        vid.src = pathToFileURL(video.path);
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.preload = 'auto';
+
+        const slider = document.createElement('input');
+        slider.type = 'range';
+        slider.min = '0';
+        slider.max = '1000';
+        slider.step = '1';
+        slider.value = String(Math.round(startPct * 1000));
+        slider.className = 'library__thumb-picker-slider';
+        slider.setAttribute('aria-label', t('library.customThumbTitle'));
+
+        const timeLabel = document.createElement('span');
+        timeLabel.className = 'library__thumb-picker-time';
+        timeLabel.textContent = '0:00';
+
+        const hint = document.createElement('p');
+        hint.className = 'library__thumb-picker-hint';
+        hint.textContent = t('library.customThumbHint');
+
+        const actions = document.createElement('div');
+        actions.className = 'library__thumb-picker-actions';
+        const useBtn = document.createElement('button');
+        useBtn.type = 'button';
+        useBtn.className = 'library__thumb-picker-use';
+        useBtn.textContent = t('library.customThumbUse');
+        const cancelBtn = document.createElement('button');
+        cancelBtn.type = 'button';
+        cancelBtn.className = 'library__thumb-picker-cancel';
+        cancelBtn.textContent = t('library.customThumbCancel');
+        actions.append(cancelBtn, useBtn);
+
+        const seekToSlider = () => {
+          if (vid.duration && isFinite(vid.duration)) {
+            const secs = (Number(slider.value) / 1000) * vid.duration;
+            vid.currentTime = secs;
+            timeLabel.textContent = this._formatDuration(secs);
+          }
+        };
+        slider.addEventListener('input', seekToSlider);
+        vid.addEventListener('loadedmetadata', seekToSlider, { once: true });
+
+        cancelBtn.addEventListener('click', () => close());
+        useBtn.addEventListener('click', async () => {
+          const pct = Number(slider.value) / 1000;
+          close();
+          await this._saveCustomThumbnail(video, pct, cardEl);
+        });
+
+        const bar = document.createElement('div');
+        bar.className = 'library__thumb-picker-bar';
+        bar.append(slider, timeLabel);
+
+        wrap.append(vid, bar, hint, actions);
+        body.appendChild(wrap);
+      },
+    });
+  }
+
+  async _saveCustomThumbnail(video, seekPct, cardEl) {
+    const map = { ...(this._settings.get('library.customThumbnails') || {}) };
+    map[video.path] = { seekPct };
+    this._settings.set('library.customThumbnails', map);
+    thumbCache.remove(video.path, 0);
+    await this._refreshCardThumbnail(video.path, cardEl);
+    const { showToast } = await import('../js/toast.js');
+    showToast(t('library.customThumbSaved'), 'success');
+  }
+
+  async _resetCustomThumbnail(video, cardEl) {
+    const map = { ...(this._settings.get('library.customThumbnails') || {}) };
+    delete map[video.path];
+    this._settings.set('library.customThumbnails', map);
+    thumbCache.remove(video.path, 0);
+    await this._refreshCardThumbnail(video.path, cardEl);
+    const { showToast } = await import('../js/toast.js');
+    showToast(t('library.customThumbResetDone'), 'info');
+  }
+
+  /**
+   * Drop the current tile image + duration badge and re-capture. Called
+   * after a custom-thumbnail change; the in-memory cache entry was already
+   * removed so `_loadThumbnail` re-fetches at the new seek %.
+   */
+  async _refreshCardThumbnail(videoPath, cardEl) {
+    if (!cardEl) return;
+    const container = cardEl.querySelector('.library__card-thumbnail')
+      || cardEl.querySelector('.library__list-thumb');
+    if (container) {
+      container.querySelectorAll('img').forEach((img) => img.remove());
+      container.querySelector('.library__duration-badge')?.remove();
+    }
+    cardEl.dataset.loaded = '';
+    await this._loadThumbnail(cardEl, videoPath);
+  }
+
+  /**
    * Get a single representative frame for a library card. Routes through
    * the backend's ffmpeg by default — much cheaper than the renderer's
    * old hidden-<video> decode (3 concurrent decoders × ~3s each per card
@@ -2456,10 +2681,14 @@ export class Library {
    * Returns { dataUrl, duration } or null on failure.
    */
   async _captureVideoFrame(videoPath) {
+    // Per-video custom-frame override — user picked a specific frame via
+    // the kebab "Set thumbnail frame…" action. Falls back to the 10% mark.
+    const custom = (this._settings?.get?.('library.customThumbnails') || {})[videoPath];
+    const seekPct = resolveThumbSeekPct(custom);
     // Backend ffmpeg path — fast, cached on disk by content hash.
     if (window.funsync?.generateSingleThumbnail) {
       try {
-        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct: 0.1, width: 320 });
+        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct, width: 320 });
         if (result?.dataUrl) {
           return { dataUrl: result.dataUrl, duration: result.duration || 0 };
         }
@@ -3254,6 +3483,11 @@ export class Library {
   }
 
   _startPreview(cardEl, videoPath) {
+    // Gate: user turned off moving previews (perf on large libraries).
+    // Default is ON — only an explicit `false` disables, so libraries
+    // that never touched the setting keep the animated hover preview.
+    if (this._settings?.get?.('library.movingPreviews') === false) return;
+
     // Gate: don't preview if a video is actively playing
     if (this._isVideoPlaying) return;
 
@@ -3563,6 +3797,31 @@ export class Library {
       menu.appendChild(libBtn);
     }
 
+    // Custom thumbnail — pick a specific frame for the library tile.
+    const thumbBtn = document.createElement('button');
+    thumbBtn.className = 'library__kebab-menu-item';
+    thumbBtn.textContent = t('library.customThumbSet');
+    thumbBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this._closeMenu();
+      this._pickCustomThumbnail(video, cardEl);
+    });
+    menu.appendChild(thumbBtn);
+
+    // Reset to the auto-generated frame — only when a custom one is set.
+    const customThumbs = this._settings.get('library.customThumbnails') || {};
+    if (customThumbs[video.path]) {
+      const resetThumbBtn = document.createElement('button');
+      resetThumbBtn.className = 'library__kebab-menu-item library__kebab-menu-item--danger';
+      resetThumbBtn.textContent = t('library.customThumbReset');
+      resetThumbBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this._closeMenu();
+        this._resetCustomThumbnail(video, cardEl);
+      });
+      menu.appendChild(resetThumbBtn);
+    }
+
     // Open file location
     const openLocBtn = document.createElement('button');
     openLocBtn.className = 'library__kebab-menu-item';
@@ -3576,6 +3835,7 @@ export class Library {
 
     cardEl.appendChild(menu);
     cardEl.style.zIndex = '50';
+    this._positionKebabMenu(menu); // flip up near the bottom edge
     this._openMenu = menu;
     this._openMenuCard = cardEl;
     this._openMenuButton = buttonEl;
@@ -3590,6 +3850,24 @@ export class Library {
     requestAnimationFrame(() => {
       document.addEventListener('click', this._boundCloseMenu, true);
     });
+  }
+
+  /**
+   * Flip a just-opened kebab menu upward when opening downward would run it
+   * past the bottom of the scrollable library area (which clips it) — so a
+   * video near the bottom of the window still shows every option. Must be
+   * called AFTER the menu is in the DOM so it can be measured. Vertical only;
+   * the menu is right-aligned to the card so horizontal overflow isn't a risk.
+   */
+  _positionKebabMenu(menu) {
+    if (!menu) return;
+    menu.classList.remove('library__kebab-menu--up');
+    const menuRect = menu.getBoundingClientRect();
+    const wrapper = this._container?.querySelector('.library__grid-wrapper');
+    const limit = (wrapper ? wrapper.getBoundingClientRect().bottom : window.innerHeight) - 4;
+    if (menuRect.bottom > limit) {
+      menu.classList.add('library__kebab-menu--up');
+    }
   }
 
   _closeMenu() {

@@ -1,6 +1,53 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
+
+// --- Portable mode (run from a USB / external disk) -------------------------
+// When launched from electron-builder's `portable` target, PORTABLE_EXECUTABLE_DIR
+// points at the folder holding the user-visible .exe (the app itself runs from a
+// temp extraction). We also honour a `data/` folder or a `FunSync-portable.txt`
+// marker next to the exe so an unpacked/zip build can opt in (VS Code convention).
+//
+// In portable mode ALL durable data — config, logs, backups, the (plaintext)
+// Handy key — lives in a `data/` folder next to the exe instead of %LOCALAPPDATA%,
+// so the whole thing travels on the stick. Regenerable caches (thumbnails, remux)
+// deliberately stay in the OS temp dir — they're fast-local and not worth carrying.
+//
+// MUST run before require('./logger') and require('./store') below: electron-log
+// resolves its file path lazily and electron-conf reads userData when initStore()
+// constructs it, so the override has to land first. See SCOPE-portable-install.md.
+const PORTABLE_DIR = (() => {
+  if (process.env.PORTABLE_EXECUTABLE_DIR) return process.env.PORTABLE_EXECUTABLE_DIR;
+  try {
+    const exeDir = path.dirname(app.getPath('exe'));
+    if (fs.existsSync(path.join(exeDir, 'FunSync-portable.txt'))
+        || fs.existsSync(path.join(exeDir, 'data'))) {
+      return exeDir;
+    }
+  } catch { /* getPath('exe') can throw very early on some platforms — ignore */ }
+  return null;
+})();
+let IS_PORTABLE = false;
+if (PORTABLE_DIR) {
+  const dataDir = path.join(PORTABLE_DIR, 'data');
+  try {
+    fs.mkdirSync(dataDir, { recursive: true });
+    // Probe writability up front — read-only / locked media must degrade
+    // gracefully (Nielsen #9), not crash on the first config write.
+    fs.accessSync(dataDir, fs.constants.W_OK);
+    app.setPath('userData', dataDir);
+    app.setAppLogsPath(path.join(dataDir, 'logs'));
+    IS_PORTABLE = true;
+    // Surfaced to safe-key.js + auto-updater gating without a circular require.
+    process.env.FUNSYNC_PORTABLE = '1';
+  } catch (err) {
+    // Unwritable portable media → fall back to the default userData so the app
+    // still runs (data just won't be portable). Logged once logger is up.
+    // eslint-disable-next-line no-console
+    console.error('[Portable] Cannot use portable data dir, falling back to default userData:', err.message);
+  }
+}
+
 const log = require('./logger');
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState } = require('./python-bridge');
 const store = require('./store');
@@ -10,8 +57,13 @@ const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = req
 const { EroScriptsAPI } = require('./eroscripts-api');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
+const playerPopout = require('./player-popout-window');
 
 const eroScripts = new EroScriptsAPI();
+
+if (IS_PORTABLE) {
+  log.info(`[Portable] Running in portable mode — data dir: ${app.getPath('userData')}`);
+}
 
 // Enable Chromium's VA-API hardware video decoder on Linux. Chromium
 // ships with this off by default on Linux because of historical
@@ -107,6 +159,12 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      // The device sync-engine timers (setInterval) live in this window.
+      // When the detached player window is open, the user foregrounds THAT
+      // window and backgrounds this one — Chromium would otherwise throttle
+      // these timers and the toy would stutter. Keep them full-rate.
+      // (SCOPE-separate-player-window.md §9.5.)
+      backgroundThrottling: false,
     },
     frame: true,
     show: false,
@@ -117,7 +175,10 @@ function createWindow() {
   mainWindow.once('ready-to-show', () => {
     splash.destroy();
     mainWindow.show();
-    if (app.isPackaged) {
+    // electron-builder's auto-updater doesn't support the portable target
+    // (no latest.yml is published for it), so skip it entirely in portable
+    // mode — the user updates by replacing the exe. See SCOPE-portable-install.
+    if (app.isPackaged && !IS_PORTABLE) {
       initAutoUpdater(mainWindow);
     }
   });
@@ -387,6 +448,12 @@ ipcMain.handle('get-app-version', () => {
   return app.getVersion();
 });
 
+// Portable-mode status for the About section (Nielsen #1 — let the user see
+// where their data lives). dataDir is the portable `data/` folder when active.
+ipcMain.handle('get-portable-info', () => {
+  return { portable: IS_PORTABLE, dataDir: app.getPath('userData') };
+});
+
 // Collect a privacy-scrubbed diagnostics bundle for the in-app
 // "Report a problem" dialog. Connection flags are passed in by the
 // renderer (where the device-manager state actually lives). Log path
@@ -545,6 +612,14 @@ ipcMain.handle('set-playlist-loop', (_event, id, loop) => {
   store.setPlaylistLoop(id, loop);
 });
 
+ipcMain.handle('set-playlist-shuffle', (_event, id, shuffle) => {
+  store.setPlaylistShuffle(id, shuffle);
+});
+
+ipcMain.handle('set-playlist-video-paths', (_event, id, videoPaths) => {
+  store.setPlaylistVideoPaths(id, videoPaths);
+});
+
 ipcMain.handle('delete-playlist', async (_event, id) => {
   await _preActionSnapshot('delete-playlist');
   store.deletePlaylist(id);
@@ -610,7 +685,7 @@ ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: 'Media Files', extensions: ['mp4', 'mkv', 'webm', 'avi', 'mov', 'mp3', 'wav', 'ogg', 'flac'] },
+      { name: 'Media Files', extensions: ['mp4', 'm4v', 'mkv', 'webm', 'avi', 'mov', 'mp3', 'wav', 'ogg', 'flac', 'm4a'] },
       { name: 'Funscript Files', extensions: ['funscript'] },
       { name: 'Subtitle Files', extensions: ['srt', 'vtt'] },
       { name: 'All Files', extensions: ['*'] },
@@ -727,6 +802,62 @@ ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {})
   }
 });
 
+/**
+ * Remux a non-browser-playable container (e.g. .mkv with H.264/AAC) into
+ * MP4 via the backend's ffmpeg, so Chromium's <video> can play it. Returns
+ * { path, cached } pointing at a cached temp MP4, or null on failure (the
+ * renderer then surfaces the usual "format not supported" error).
+ */
+ipcMain.handle('remux-video', async (_event, videoPath) => {
+  const { getBackendPort } = require('./python-bridge');
+  const port = getBackendPort();
+  const url = `http://localhost:${port}/api/media/remux?video_path=${encodeURIComponent(videoPath)}`;
+  try {
+    // 10 min ceiling: stream-copy is normally seconds, but a multi-GB file
+    // on slow/NAS storage plus an audio transcode can run long. This blocks
+    // playback start, so the renderer shows a "Preparing…" toast meanwhile.
+    const resp = await fetchWithTimeout(url, { method: 'POST' }, 600000);
+    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+    const meta = await resp.json();
+    if (!meta?.path || !fs.existsSync(meta.path)) {
+      throw new Error('Remux produced no file');
+    }
+    log.info(`[Remux] ${videoPath} → ${meta.path} (cached: ${!!meta.cached})`);
+    return { path: meta.path, cached: !!meta.cached };
+  } catch (err) {
+    log.warn(`[Remux] failed for ${videoPath}: ${err.message}`);
+    return null;
+  }
+});
+
+/**
+ * Resolve a remote video PAGE url (e.g. a streaming-site link) to a playable
+ * stream via the backend's yt-dlp. Returns { ok, title, isHls, proxyUrl, ... }
+ * with proxyUrl made ABSOLUTE (http://localhost:PORT/...) so the renderer can
+ * play it directly; or { ok:false, kind, message } so the UI can show a
+ * precise error. See SCOPE-remote-video-url.md.
+ */
+ipcMain.handle('resolve-remote-video', async (_event, pageUrl) => {
+  const { getBackendPort } = require('./python-bridge');
+  const port = getBackendPort();
+  const url = `http://localhost:${port}/api/media/resolve?url=${encodeURIComponent(pageUrl)}`;
+  try {
+    // yt-dlp extraction can take a few seconds (network + site parsing).
+    const resp = await fetchWithTimeout(url, { method: 'POST' }, 90000);
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      const kind = body?.detail?.kind || 'error';
+      log.info(`[Remote] resolve ${pageUrl} failed: ${kind}`);
+      return { ok: false, kind, message: body?.detail?.message || '' };
+    }
+    log.info(`[Remote] resolved ${pageUrl} → ${body.isHls ? 'HLS' : 'progressive'} "${body.title}"`);
+    return { ok: true, ...body, proxyUrl: `http://localhost:${port}${body.proxyUrl}` };
+  } catch (err) {
+    log.warn(`[Remote] resolve error for ${pageUrl}: ${err.message}`);
+    return { ok: false, kind: 'error', message: err.message };
+  }
+});
+
 // --- IPC Handlers: Library ---
 
 ipcMain.handle('select-directory', async () => {
@@ -743,7 +874,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   const dirPaths = Array.isArray(dirPathOrPaths) ? dirPathOrPaths : [dirPathOrPaths];
   const dirPath = dirPaths[0]; // for backward compat logging
   const _sourceMap = sourceMap || {};
-  const VIDEO_EXTS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+  const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
   const FUNSCRIPT_EXT = '.funscript';
   const SUBTITLE_EXTS = ['.srt', '.vtt'];
   const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
@@ -803,6 +934,27 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
     return entry.parentPath || entry.path || dirPath;
   };
 
+  // Pre-compute the set of video basenames (full, including any
+  // parenthetical) so funscript classification can distinguish a
+  // real-title parenthetical from a variant suffix. Example:
+  //   "Title (Nude).mp4" + "Title (Nude).funscript"  → the "(Nude)" is
+  //      part of the title; the funscript is that video's PRIMARY.
+  //   "Title.mp4" + "Title (Soft).funscript"         → no "Title (Soft)"
+  //      video exists; "(Soft)" is a variant label of "Title".
+  // Without this, "Title (Nude).funscript" was always classified as a
+  // "(Nude)" variant of "Title" and absorbed into "Title.mp4", leaving
+  // "Title (Nude).mp4" script-less and hidden under the Matched tab.
+  const videoBaseLocal = new Set();  // dir + '\0' + normalizedBase
+  const videoBaseGlobal = new Set(); // normalizedBase
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    const vext = path.extname(entry.name).toLowerCase();
+    if (!VIDEO_EXTS.includes(vext)) continue;
+    const vbase = normalizeName(path.basename(entry.name, vext));
+    videoBaseLocal.add(entryDir(entry) + '\0' + vbase);
+    videoBaseGlobal.add(vbase);
+  }
+
   // Collect all funscripts with variant/axis classification
   const funscriptList = [];
   for (const entry of entries) {
@@ -827,10 +979,21 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
       videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
       variantLabel = null; // axis, not a variant
     } else if (parenMatch) {
-      // Parenthesized variant — `"Title (Soft).funscript"`. Unambiguous
-      // user intent; treat as variant.
-      videoBase = normalizeName(parenMatch[1]);
-      variantLabel = parenMatch[2].trim();
+      const fullBase = normalizeName(nameNoExt);
+      const fsDir = entryDir(entry);
+      if (videoBaseLocal.has(fsDir + '\0' + fullBase) || videoBaseGlobal.has(fullBase)) {
+        // A video whose real title includes the parenthetical exists
+        // (e.g. "Title (Nude).mp4"). The parens are part of the title,
+        // not a variant suffix — treat this funscript as that video's
+        // primary so the video isn't left script-less and hidden.
+        videoBase = fullBase;
+        variantLabel = null;
+      } else {
+        // Parenthesized variant — `"Title (Soft).funscript"` with only
+        // "Title.mp4" present. Unambiguous user intent; treat as variant.
+        videoBase = normalizeName(parenMatch[1]);
+        variantLabel = parenMatch[2].trim();
+      }
     } else if (dotSuffix && dotIdx > 0) {
       // AMBIGUOUS — could be a real variant ("video.intense.funscript")
       // OR just a filename that happens to contain a dot ("S01.E03.funscript",
@@ -995,7 +1158,14 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
       funscriptPath,
       hasSubtitle: subtitlePath !== null,
       subtitlePath,
-      variants: variants.length > 1 ? variants : [],
+      // Pass ALL detected variants through, even a single one. The
+      // renderer decides whether to SHOW the switcher (it hides the
+      // dropdown when the combined auto+manual count is < 2), and it
+      // combines these with manually-associated variants — so dropping a
+      // lone auto variant here used to hide the switcher for a video that
+      // had 1 auto script + 1 manual variant (2 real scripts). It also
+      // preserved the real label/path instead of a synthesised "Default".
+      variants,
       sourceName: sourceName || path.basename(path.dirname(fullPath)) || 'Library',
       // `dateAdded` is populated in a batched stat pass below. Using `mtimeMs`
       // as a pragmatic "date added" proxy — cross-platform reliable (unlike
@@ -1505,6 +1675,31 @@ ipcMain.handle('audience-popout:relay', (_event, direction, payload) => {
   return { success: true };
 });
 
+// --- Player pop-out (SCOPE-separate-player-window.md — detached player) ---
+// Same lifecycle shape as audience/editor pop-outs. Channel:
+// `player-popout:event`. Bounds key: `player.popoutBounds`.
+ipcMain.handle('player-popout:open', () => {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    return { success: false, error: 'Main window unavailable' };
+  }
+  playerPopout.open(mainWindow, store);
+  return { success: true };
+});
+
+ipcMain.handle('player-popout:close', () => {
+  playerPopout.close();
+  return { success: true };
+});
+
+ipcMain.handle('player-popout:status', () => {
+  return { open: playerPopout.isOpen() };
+});
+
+ipcMain.handle('player-popout:relay', (_event, direction, payload) => {
+  playerPopout.relay(direction, payload);
+  return { success: true };
+});
+
 ipcMain.handle('backup:open-folder', async () => {
   const { shell } = require('electron');
   const userDataDir = app.getPath('userData');
@@ -1868,6 +2063,7 @@ ipcMain.handle('autoblow-latency', async () => {
 // --- IPC Handlers: Auto-Updater ---
 
 ipcMain.handle('updater-check', () => {
+  if (IS_PORTABLE) return; // no auto-update for portable builds
   checkForUpdates();
 });
 

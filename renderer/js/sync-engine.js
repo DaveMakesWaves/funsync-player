@@ -156,6 +156,25 @@ export class SyncEngine {
       await this.handy.hsspPlay(timeMs);
       if (gen !== this._seekGen) return;
       this._emitStatus('synced');
+
+      // Correction pass — mirrors _handlePlaying's double-play. A seek WHILE
+      // PLAYING lands the device ~one hsspPlay round-trip behind (the video
+      // keeps advancing during the ~100-200ms the Play takes to reach the
+      // Handy). Re-anchor once the position has settled so the user doesn't
+      // have to pause/play to fix it (community report: seek in pop-out / VR
+      // left the Handy slightly out of sync until a manual pause+play).
+      clearTimeout(this._playingTimer);
+      this._playingTimer = setTimeout(async () => {
+        if (!this._active || this.player.paused || !this.handy.connected) return;
+        if (gen !== this._seekGen) return;
+        const correctedTimeMs = Math.round(this.player.currentTime * 1000);
+        console.log(`[Sync] seek correction hsspPlay at ${correctedTimeMs}ms`);
+        try {
+          await this.handy.hsspPlay(correctedTimeMs);
+        } catch (err) {
+          console.warn(`[Sync] seek correction hsspPlay failed: ${err?.message || err}`);
+        }
+      }, this._secondPlayDelay);
     }
   }
 

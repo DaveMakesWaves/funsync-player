@@ -339,6 +339,71 @@ class TestVRFormatOverride:
         assert st == 'flat' and is3d is False
 
 
+class TestVRDimsFallback:
+    """`detect_vr_format_for_video` upgrades an untagged file to VR when its
+    dimensions look like a stereoscopic master (~2:1 and high-res).
+    Community-reported: VR files with no filename token were served flat and
+    HereSphere played them in 2D."""
+
+    def test_untagged_2to1_highres_detected_as_vr(self):
+        # 3840x1920 = 2.0 aspect, 4K wide — classic VR180 SBS master.
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Plain.mp4"}, dims=(3840, 1920)
+        )
+        assert is3d is True and st == 'mkx200' and sm == 'sbs'
+
+    def test_untagged_8k_2to1_detected_as_vr(self):
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Untagged.mp4"}, dims=(7680, 3840)
+        )
+        assert is3d is True
+
+    def test_normal_16by9_not_misfired(self):
+        # 3840x2160 = 1.78 aspect — a 4K flat video must stay flat.
+        _, _, is3d = detect_vr_format_for_video(
+            {"name": "Movie.mp4"}, dims=(3840, 2160)
+        )
+        assert is3d is False
+
+    def test_cinemascope_not_misfired(self):
+        # 3840x1600 = 2.4 aspect — an ultrawide 2D film stays flat.
+        _, _, is3d = detect_vr_format_for_video(
+            {"name": "Film.mp4"}, dims=(3840, 1600)
+        )
+        assert is3d is False
+
+    def test_low_res_2to1_not_misfired(self):
+        # 1920x960 = 2.0 aspect but low-res — below the width floor, stays flat.
+        _, _, is3d = detect_vr_format_for_video(
+            {"name": "Clip.mp4"}, dims=(1920, 960)
+        )
+        assert is3d is False
+
+    def test_manual_flat_override_beats_dims(self):
+        # User explicitly said flat — dimensions must not override that.
+        _, _, is3d = detect_vr_format_for_video(
+            {"name": "Plain.mp4", "manualVRType": "flat"}, dims=(3840, 1920)
+        )
+        assert is3d is False
+
+    def test_filename_tag_wins_over_dims(self):
+        # A tagged 180 SBS keeps its specific projection even with VR-ish dims.
+        st, sm, is3d = detect_vr_format_for_video(
+            {"name": "Scene_180_sbs.mp4"}, dims=(3840, 1920)
+        )
+        assert st == 'dome' and sm == 'sbs' and is3d is True
+
+    def test_no_dims_falls_through_to_flat(self):
+        _, _, is3d = detect_vr_format_for_video({"name": "Plain.mp4"})
+        assert is3d is False
+
+    def test_zero_dims_safe(self):
+        _, _, is3d = detect_vr_format_for_video(
+            {"name": "Plain.mp4"}, dims=(0, 0)
+        )
+        assert is3d is False
+
+
 @pytest.mark.anyio
 async def test_heresphere_scene_respects_manual_override_flat(client):
     """A filename that the heuristic flags as VR but the user has marked

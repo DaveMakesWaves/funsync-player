@@ -51,6 +51,10 @@ const send = (payload) => window.funsync.audiencePopoutRelay('to-parent', payloa
 function applyTheme(t) {
   if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
 }
+function applyStyle(s) {
+  // No-op on undefined so a theme-only sync can't reset the style.
+  if (s === 'classic' || s === 'modern') document.documentElement.dataset.style = s;
+}
 applyTheme('dark');
 
 // --- Render ---
@@ -357,6 +361,7 @@ function onMessage(payload) {
       state.theme = payload.theme || 'dark';
       state.locale = payload.locale || 'en';
       applyTheme(state.theme);
+      applyStyle(payload.uiStyle);
       // (Re-)load the locale bundle for the pop-out. If we picked the
       // same locale we already have, this is a quick no-op.
       setLocale(state.locale).then(() => {
@@ -408,6 +413,7 @@ function onMessage(payload) {
     }
     case THEME: {
       applyTheme(payload.theme);
+      applyStyle(payload.uiStyle);
       break;
     }
   }

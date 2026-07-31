@@ -112,6 +112,32 @@
   pointer-events: none;
   opacity: 0.6;
 }
+
+/* Shuffle All — icon-only header button, same shape as the refresh
+   button so the right-side control cluster reads as a unit. Plays the
+   currently-visible videos in a random no-repeat queue. */
+.library__shuffle-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #a0a0a0);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 150ms, color 150ms;
+}
+.library__shuffle-btn:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary, #e0e0e0);
+}
+.library__shuffle-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 @media (prefers-reduced-motion: no-preference) {
   .library__refresh-btn--spinning svg {
     animation: library-refresh-spin 800ms linear infinite;
@@ -166,6 +192,7 @@
   --accent: #e94560;
   --accent-hover: #ff6b81;
   --accent-soft: rgba(233, 69, 96, 0.14);
+  --accent-rgb: 233, 69, 96;   /* for rgba() rings/glows (Modern focus states) */
 
   /* Borders */
   --border-subtle: rgba(255, 255, 255, 0.08);
@@ -252,6 +279,7 @@
   --accent: #e94560;
   --accent-hover: #d83a52;          /* darker than dark-mode hover for AA */
   --accent-soft: rgba(233, 69, 96, 0.10);
+  --accent-rgb: 233, 69, 96;
 
   --border-subtle: rgba(0, 0, 0, 0.08);
   --border-strong: rgba(0, 0, 0, 0.18);
@@ -287,6 +315,88 @@
   --bg-controls: var(--surface-controls);
   --bg-modal: var(--surface-card);
   --control-hover: var(--surface-overlay);
+}
+
+/* === Non-colour design scales (radius / elevation / spacing / motion / type)
+   ==========================================================================
+   Added for the Classic↔Modern interface style (SCOPE-modern-theme.md). These
+   are theme-independent by default. CLASSIC values equal today's look exactly,
+   so a plain `:root` (Classic) is byte-for-byte unchanged. The Modern style
+   opts in via `<html data-style="modern">` and only overrides the token
+   VALUES — the palette (--accent, --surface-*, etc.) is never touched. */
+:root {
+  /* Radius scale — Classic mirrors the values already hard-coded across the app. */
+  --radius-xs: 3px;
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-pill: 999px;
+
+  /* Spacing scale (rhythm; applied only where a surface is modernised). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Motion — Classic keeps plain `ease` + the existing durations. */
+  --ease-out: ease;
+  --ease-spring: ease;
+  --dur-1: 150ms;
+  --dur-2: 250ms;
+  --dur-3: 320ms;
+
+  /* Type weights + heading tracking (Classic: no negative tracking). */
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+  --fw-bold: 700;
+  --tracking-tight: 0;
+
+  /* Elevation — Classic has no RESTING elevation (cards are flat; shadow only
+     appears on hover today). elev-3 maps to the existing modal shadow so
+     Classic modals are unchanged. The `--edge-highlight` lit-top-edge is a
+     Modern-only affordance. */
+  --elev-1: none;
+  --elev-2: none;
+  --elev-3: var(--shadow-modal, 0 12px 40px rgba(0, 0, 0, 0.5));
+  --edge-highlight: none;
+}
+
+/* MODERN — softer/larger corners, real layered elevation + lit edge, spring
+   easing, tighter headings, and a variable system font. Colours untouched. */
+:root[data-style="modern"] {
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+  --dur-2: 220ms;
+
+  --tracking-tight: -0.01em;
+  --font-family: 'Segoe UI Variable Text', 'Segoe UI', 'Inter', system-ui, -apple-system, sans-serif;
+
+  /* Dark elevation: layered soft shadow + a hair-light top edge (researched
+     dark-mode depth pattern — shadow alone reads weakly on dark surfaces). */
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.40), 0 2px 6px rgba(0, 0, 0, 0.30);
+  --elev-2: 0 6px 18px rgba(0, 0, 0, 0.45);
+  --elev-3: 0 16px 40px rgba(0, 0, 0, 0.50);
+  --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Modern light-mode elevation: softer, lower-alpha shadows + a brighter lit
+   edge, so depth doesn't turn muddy on off-white surfaces. */
+:root[data-style="modern"][data-theme="light"] {
+  --elev-1: 0 1px 2px rgba(0, 0, 0, 0.06), 0 2px 8px rgba(0, 0, 0, 0.06);
+  --elev-2: 0 6px 18px rgba(0, 0, 0, 0.10);
+  --elev-3: 0 16px 40px rgba(0, 0, 0, 0.16);
+  --edge-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.60);
 }
 
 /* Global dropdown styling */
@@ -338,6 +448,85 @@ html, body {
   /* Required so the VR-flatten transforms (which double the video
      element's effective bounds) don't bleed past the player chrome. */
   overflow: hidden;
+}
+
+/* === Mini-player (Phase 1 — browse the library while a video plays) ===
+   The whole player container docks into a fixed corner overlay. The
+   <video> element never moves in the DOM (playback + device sync keep
+   running); only CSS changes. Heavy chrome (controls, top bar, center
+   play, script overlay) hides; a compact mini control bar appears. */
+.player-container--mini {
+  position: fixed;
+  top: auto;
+  left: auto;
+  right: 16px;
+  bottom: 16px;
+  width: 340px;
+  height: 191px; /* 16:9 */
+  max-width: 42vw;
+  z-index: 60;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+  border: 1px solid var(--border, #333);
+  cursor: default;
+}
+.player-container--mini .player__controls,
+.player-container--mini .player__top-bar,
+.player-container--mini .center-play,
+.player-container--mini .script-loading-overlay,
+/* Gap-skip ("Skip to next action") overlay — the manual skip buttons don't
+   belong in the tiny corner overlay (they'd sit mispositioned over the video).
+   Hide them in mini mode; auto-skip, if enabled, still runs silently. */
+.player-container--mini .gap-skip {
+  display: none !important;
+}
+
+/* Mini control bar — hidden by default, revealed only in mini mode. */
+.miniplayer-bar {
+  display: none;
+}
+.player-container--mini .miniplayer-bar {
+  display: flex;
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  gap: 4px;
+  z-index: 2;
+  opacity: 0;
+  transition: opacity 120ms;
+}
+.player-container--mini:hover .miniplayer-bar,
+.player-container--mini:focus-within .miniplayer-bar {
+  opacity: 1;
+}
+.miniplayer-bar__btn {
+  width: 30px;
+  height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  cursor: pointer;
+  padding: 0;
+  transition: background 120ms;
+}
+.miniplayer-bar__btn:hover {
+  background: rgba(0, 0, 0, 0.85);
+}
+.miniplayer-bar__btn--close:hover {
+  background: var(--state-danger, #c0392b);
+}
+.miniplayer-bar__btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.miniplayer-bar__btn svg {
+  width: 16px;
+  height: 16px;
 }
 
 /* Phase 2a — WebGL canvas overlay for non-planar VR projections
@@ -1330,6 +1519,32 @@ html, body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Pin-as-default star at the trailing edge of each variant row. */
+.variant-selector__star {
+  flex: 0 0 auto;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--text-secondary);
+  opacity: 0.55;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: color 150ms, opacity 150ms, background 150ms;
+}
+
+.variant-selector__star:hover,
+.variant-selector__star:focus-visible {
+  color: var(--accent);
+  opacity: 1;
+  background: var(--surface-overlay);
+  outline: none;
+}
+
+.variant-selector__star--active {
+  color: var(--accent);
+  opacity: 1;
 }
 
 .variant-selector__add {
@@ -3013,4 +3228,160 @@ html, body {
 
 .player__broadcast-chip[hidden] {
   display: none;
+}
+
+/* === Detached player pop-out window (Phase 2) === */
+.player-popout-body {
+  margin: 0;
+  background: #000;
+  color: var(--text-primary, #e0e0e0);
+  height: 100vh;
+  overflow: hidden;
+}
+#player-popout-host {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.player-popout-loading {
+  font-size: 14px;
+  color: var(--text-secondary, #a0a0a0);
+  text-align: center;
+  padding: 24px;
+}
+
+/* Detached player — video stage + lean controls (Phase 2b). */
+.ppo-stage {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.ppo-video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+  cursor: pointer;
+}
+.ppo-controls {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 8px 12px 10px;
+  background: linear-gradient(to top, rgba(0,0,0,0.8), rgba(0,0,0,0));
+  opacity: 1;
+  transition: opacity 200ms;
+}
+/* Auto-hide while playing + mouse idle; JS toggles `--idle` on the stage. */
+.ppo-stage.ppo-stage--idle .ppo-controls {
+  opacity: 0;
+}
+.ppo-stage.ppo-stage--idle .ppo-video {
+  cursor: none;
+}
+.ppo-seek {
+  width: 100%;
+  margin: 0 0 6px;
+  cursor: pointer;
+}
+.ppo-controls-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #fff;
+}
+.ppo-spacer { flex: 1; }
+.ppo-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: #e0e0e0;
+}
+.ppo-btn {
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 0;
+}
+.ppo-btn:hover { background: rgba(255,255,255,0.15); }
+.ppo-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Detached-player buffering / hand-off spinner. */
+.ppo-spinner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.35);
+  z-index: 5;
+  pointer-events: none;
+}
+.ppo-spinner__ring {
+  width: 54px;
+  height: 54px;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.25);
+  border-top-color: var(--accent, #e0397a);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .ppo-spinner__ring { animation: ppo-spin 800ms linear infinite; }
+}
+@keyframes ppo-spin { to { transform: rotate(360deg); } }
+
+/* Detached-player keyboard-shortcuts overlay. */
+.ppo-shortcuts {
+  position: fixed; inset: 0; z-index: 30;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.6); cursor: pointer;
+}
+.ppo-shortcuts__card {
+  background: var(--surface-raised, #1e1e2e); color: var(--text-primary, #e0e0e0);
+  border: 1px solid var(--border, #333); border-radius: 10px;
+  padding: 20px 24px; min-width: 280px;
+}
+.ppo-shortcuts__card h2 { margin: 0 0 12px; font-size: 16px; }
+.ppo-shortcuts__row { display: flex; justify-content: space-between; gap: 24px; padding: 4px 0; }
+.ppo-shortcuts__row kbd {
+  background: var(--surface-overlay, #333); border-radius: 4px; padding: 2px 8px;
+  font-family: monospace; font-size: 12px;
+}
+
+/* Library-header queue toggle — icon button matching refresh/shuffle. */
+.library__queue-toggle {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #a0a0a0);
+  width: 36px;
+  height: 36px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: background 150ms, color 150ms;
+}
+.library__queue-toggle:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary, #e0e0e0);
+}
+.library__queue-toggle[aria-pressed="true"] {
+  background: var(--accent-soft, rgba(224, 57, 122, 0.18));
+  color: var(--accent, #e0397a);
+}
+.library__queue-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }

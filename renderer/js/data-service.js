@@ -159,6 +159,27 @@ class DataService {
     eventBus.emit('playlist:changed', { action: 'setLoop', id, loop: !!loop });
   }
 
+  setPlaylistShuffle(id, shuffle) {
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) playlist.shuffle = !!shuffle;
+    window.funsync.setPlaylistShuffle(id, !!shuffle);
+    eventBus.emit('playlist:changed', { action: 'setShuffle', id, shuffle: !!shuffle });
+  }
+
+  /**
+   * Replace a playlist's video order (drag / Move reorder). `newVideoPaths`
+   * must be a reordering of the existing paths. Updates cache synchronously
+   * + fire-and-forget IPC (last write wins; callers debounce rapid moves).
+   */
+  setPlaylistVideoPaths(id, newVideoPaths) {
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist && Array.isArray(newVideoPaths)) {
+      playlist.videoPaths = [...newVideoPaths];
+    }
+    window.funsync.setPlaylistVideoPaths(id, newVideoPaths);
+    eventBus.emit('playlist:changed', { action: 'reorder', id });
+  }
+
   addVideoToPlaylist(id, videoPath) {
     const playlist = this._cache.playlists.find((p) => p.id === id);
     if (playlist && !playlist.videoPaths.includes(videoPath)) {

@@ -1,12 +1,24 @@
 // SafeKey — encrypt/decrypt Handy connection key using Electron safeStorage
 const { safeStorage } = require('electron');
 
+// Portable mode: safeStorage is backed by the OS keychain/DPAPI, which is
+// bound to the originating machine + user — an encrypted blob carried on a
+// USB stick will NOT decrypt on another machine (and the plaintext fallback
+// would then return garbage). So in portable mode we deliberately store the
+// key as plaintext in the portable `data/` folder. The Handy key is a
+// low-sensitivity pairing code, and physical possession of the stick already
+// implies access. See SCOPE-portable-install.md §3.
+function isPortable() {
+  return process.env.FUNSYNC_PORTABLE === '1';
+}
+
 /**
  * Encrypt a plaintext string. Returns base64 if safeStorage is available,
- * otherwise returns the plaintext unchanged (graceful fallback).
+ * otherwise (or in portable mode) returns the plaintext unchanged.
  */
 function encryptKey(plaintext) {
   if (!plaintext) return '';
+  if (isPortable()) return plaintext; // keychain-bound encryption can't travel
   try {
     if (safeStorage.isEncryptionAvailable()) {
       const encrypted = safeStorage.encryptString(plaintext);
@@ -24,6 +36,7 @@ function encryptKey(plaintext) {
  */
 function decryptKey(stored) {
   if (!stored) return '';
+  if (isPortable()) return stored; // stored plaintext in portable mode
   try {
     if (safeStorage.isEncryptionAvailable()) {
       const buf = Buffer.from(stored, 'base64');

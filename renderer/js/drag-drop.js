@@ -11,7 +11,7 @@
 
 import { t } from './i18n.js';
 
-const VIDEO_EXTENSIONS = ['.mp4', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+const VIDEO_EXTENSIONS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
 const FUNSCRIPT_EXTENSIONS = ['.funscript'];
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt'];
 const ALL_ACCEPTED = [...VIDEO_EXTENSIONS, ...FUNSCRIPT_EXTENSIONS, ...SUBTITLE_EXTENSIONS];
@@ -128,13 +128,28 @@ export class DragDrop {
         || mime === 'application/x-msdownload';
   }
 
+  /**
+   * True only for OS FILE drags. Internal HTML5 element drags (e.g.
+   * reordering rows in the queue panel) also bubble to document, but they
+   * carry `text/*` data, not `Files`. Without this guard the file
+   * drop-zone overlay pops up over the queue during a reorder AND covers
+   * the drop target so the row never lands — breaking queue drag-reorder.
+   */
+  _isFileDrag(e) {
+    const types = e?.dataTransfer?.types;
+    if (!types) return false;
+    return Array.from(types).includes('Files');
+  }
+
   _onDragEnter(e) {
+    if (!this._isFileDrag(e)) return; // internal drag (queue reorder etc.)
     e.preventDefault();
     this._dragDepth++;
     this._showOverlay(e);
   }
 
   _onDragOver(e) {
+    if (!this._isFileDrag(e)) return; // let internal drags reach their targets
     e.preventDefault();
     if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
     // Re-evaluate rejection on every dragover — the user may drag
@@ -143,6 +158,7 @@ export class DragDrop {
   }
 
   _onDragLeave(e) {
+    if (!this._isFileDrag(e)) return; // internal drag — overlay isn't showing
     e.preventDefault();
     this._dragDepth = Math.max(0, this._dragDepth - 1);
     // Only hide when we've left every nested element AND the drag has
@@ -154,6 +170,7 @@ export class DragDrop {
   }
 
   _onDrop(e) {
+    if (!this._isFileDrag(e)) return; // internal drag — let the target handle it
     e.preventDefault();
     this._dragDepth = 0;
     this._hideOverlay();

@@ -1,17 +1,18 @@
 // NavBar — Persistent top navigation bar
 
-import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown } from '../js/icons.js';
+import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown, Link } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 
 export class NavBar {
-  constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
+  constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLoadUrlClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
     this._onNavigate = onNavigate;
     this._onHandyClick = onHandyClick;
     this._onSettingsClick = onSettingsClick;
     this._onRemoteClick = onRemoteClick;
     this._onVRClick = onVRClick;
     this._onEroScriptsClick = onEroScriptsClick;
+    this._onLoadUrlClick = onLoadUrlClick;
     this._onLibraryCollectionChange = onLibraryCollectionChange;
     this._onNewCollection = onNewCollection;
     this._onRenameCollection = onRenameCollection;
@@ -213,6 +214,31 @@ export class NavBar {
       if (this._onVRClick) this._onVRClick();
     });
     this._el.appendChild(this._vrBtn);
+
+    // TEMP DISABLED (2026-07-30): Load-from-URL hidden until it works reliably.
+    // Restore this block + the #btn-load-url button in index.html + the app.js
+    // wiring (onLoadUrlClick + #btn-load-url listener) together.
+    // See notes/SCRATCHPAD.md "Load-from-URL — disabled, revisit".
+    /*
+    // Load from URL — resolve a streaming-site page link (yt-dlp) and play it
+    // synced with a funscript. Lives in the persistent nav bar (not the player
+    // overlay) so it's reachable from the Library/home view where you'd start
+    // a session. See SCOPE-remote-video-url.md.
+    this._loadUrlBtn = document.createElement('button');
+    this._loadUrlBtn.className = 'nav-bar__action nav-bar__load-url';
+    this._loadUrlBtn.title = t('remoteVideo.openAria');
+    this._loadUrlBtn.setAttribute('aria-label', t('remoteVideo.openAria'));
+    this._loadUrlBtn.appendChild(icon(Link, { width: 16, height: 16 }));
+    const loadUrlLabel = document.createElement('span');
+    loadUrlLabel.className = 'nav-bar__action-label';
+    loadUrlLabel.dataset.i18nKey = 'remoteVideo.navLabel';
+    loadUrlLabel.textContent = t('remoteVideo.navLabel');
+    this._loadUrlBtn.appendChild(loadUrlLabel);
+    this._loadUrlBtn.addEventListener('click', () => {
+      if (this._onLoadUrlClick) this._onLoadUrlClick();
+    });
+    this._el.appendChild(this._loadUrlBtn);
+    */
 
     this._el.appendChild(this._buildClusterGap());
 

@@ -26,6 +26,9 @@ const SETTINGS_DEFAULTS = {
   'player.linearStrategy': 'action-boundary',
   'player.linearLookaheadMs': 60,
   'player.minStrokeMs': 60,
+  'library.movingPreviews': true,
+  'library.folderPreviews': true,
+  'player.miniPlayer': true,
 };
 
 export class SettingsPanel {
@@ -42,6 +45,9 @@ export class SettingsPanel {
     onLinearLookaheadChanged,
     onMinStrokeChanged,
     onRangeExtenderChanged,
+    onPickOrgasmScript,
+    onClearOrgasmScript,
+    getOrgasmScriptName,
     getConnectionState,
   }) {
     this._settings = settings;
@@ -56,6 +62,9 @@ export class SettingsPanel {
     this.onLinearLookaheadChanged = onLinearLookaheadChanged || null;
     this.onMinStrokeChanged = onMinStrokeChanged || null;
     this.onRangeExtenderChanged = onRangeExtenderChanged || null;
+    this.onPickOrgasmScript = onPickOrgasmScript || null;
+    this.onClearOrgasmScript = onClearOrgasmScript || null;
+    this.getOrgasmScriptName = getOrgasmScriptName || null;
     // Optional — returns a snapshot of device connection state for the
     // "Report a problem" dialog. Caller (app.js) owns the device managers
     // so it's the natural place to read this from.
@@ -605,6 +614,7 @@ export class SettingsPanel {
           <option value="linear">${t('settingsPanel.playback.smoothLinear')}</option>
           <option value="pchip">${t('settingsPanel.playback.smoothPchip')}</option>
           <option value="makima">${t('settingsPanel.playback.smoothMakima')}</option>
+          <option value="step">${t('settingsPanel.playback.smoothStep')}</option>
         </select>
         <button type="button" id="sp-smoothing-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.smoothResetTitle')}" aria-label="${t('settingsPanel.playback.smoothResetAria')}">↻</button>
       </div>
@@ -621,6 +631,13 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-range-extender-hint">${t('settingsPanel.playback.rangeExtenderHint')}</div>
       <div class="settings-panel__hint" id="sp-smoothing-hint">${t('settingsPanel.playback.smoothingHint')}</div>
+      <div class="settings-panel__field">
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.orgasmScriptLabel')}</span>
+        <span id="sp-orgasm-script-name" class="settings-panel__field-value" style="flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
+        <button type="button" id="sp-orgasm-script-pick" class="settings-panel__add-btn">${t('settingsPanel.playback.orgasmScriptChoose')}</button>
+        <button type="button" id="sp-orgasm-script-clear" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.orgasmScriptClear')}" aria-label="${t('settingsPanel.playback.orgasmScriptClear')}">✕</button>
+      </div>
+      <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmScriptHint')}</div>
     `;
     panel.appendChild(smoothSection);
 
@@ -805,6 +822,25 @@ export class SettingsPanel {
       rangeExtender?.addEventListener('change', () => {
         this._settings.set('player.rangeExtender.enabled', !!rangeExtender.checked);
         if (this.onRangeExtenderChanged) this.onRangeExtenderChanged(!!rangeExtender.checked);
+      });
+
+      // Orgasm Switch — pick / clear the global orgasm script (hold X to use).
+      const orgasmName = panel.querySelector('#sp-orgasm-script-name');
+      const orgasmPick = panel.querySelector('#sp-orgasm-script-pick');
+      const orgasmClear = panel.querySelector('#sp-orgasm-script-clear');
+      const refreshOrgasmName = () => {
+        const name = this.getOrgasmScriptName?.();
+        if (orgasmName) orgasmName.textContent = name || t('settingsPanel.playback.orgasmScriptNone');
+        if (orgasmClear) orgasmClear.hidden = !name;
+      };
+      refreshOrgasmName();
+      orgasmPick?.addEventListener('click', async () => {
+        if (this.onPickOrgasmScript) await this.onPickOrgasmScript();
+        refreshOrgasmName();
+      });
+      orgasmClear?.addEventListener('click', () => {
+        if (this.onClearOrgasmScript) this.onClearOrgasmScript();
+        refreshOrgasmName();
       });
 
       // Linear strategy + lookahead + min-stroke
@@ -1026,6 +1062,43 @@ export class SettingsPanel {
 
     panel.appendChild(themeSection);
 
+    // Interface style — Classic vs Modern. Orthogonal to the palette theme
+    // above (applies in both dark and light). theme-manager's settings:changed
+    // listener applies `data-style` automatically on change.
+    const styleSection = document.createElement('div');
+    styleSection.className = 'settings-panel__section';
+    const currentStyle = this._settings.get('player.uiStyle') || 'classic';
+    styleSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.styleHeader')}</h2>
+      <div class="settings-panel__hint" id="style-hint">
+        ${t('settingsPanel.appearance.styleHint')}
+      </div>
+      <div class="settings-panel__theme-options" role="radiogroup"
+           aria-labelledby="style-hint" data-setting="player.uiStyle">
+        <label class="settings-panel__theme-option">
+          <input type="radio" name="uiStyle" value="classic" ${currentStyle === 'classic' ? 'checked' : ''}>
+          <span class="settings-panel__theme-label">
+            <span class="settings-panel__theme-name">${t('settingsPanel.appearance.styleClassic')}</span>
+            <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.styleClassicDesc')}</span>
+          </span>
+        </label>
+        <label class="settings-panel__theme-option">
+          <input type="radio" name="uiStyle" value="modern" ${currentStyle === 'modern' ? 'checked' : ''}>
+          <span class="settings-panel__theme-label">
+            <span class="settings-panel__theme-name">${t('settingsPanel.appearance.styleModern')}</span>
+            <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.styleModernDesc')}</span>
+          </span>
+        </label>
+      </div>
+    `;
+    styleSection.querySelector('[data-setting="player.uiStyle"]')
+      .addEventListener('change', (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
+        this._settings.set('player.uiStyle', target.value);
+      });
+    panel.appendChild(styleSection);
+
     // Language section — locale picker. Native names in the dropdown so a
     // user who can't read the current UI language still recognises their
     // own (Nielsen #6 recognition over recall).
@@ -1064,6 +1137,49 @@ export class SettingsPanel {
         }
       });
     panel.appendChild(languageSection);
+
+    // Library section — browsing visuals. The animated hover preview
+    // (a playing <video> + canvas cycling through timestamps) is the
+    // heaviest thing the grid does; on large libraries the decode churn
+    // during fast mouse movement is what users feel as sluggishness.
+    // Default ON to preserve behaviour; the gate in library.js only
+    // disables on an explicit `false`.
+    const librarySection = document.createElement('div');
+    librarySection.className = 'settings-panel__section';
+    const movingOn = this._settings.get('library.movingPreviews') !== false;
+    const folderPreviewsOn = this._settings.get('library.folderPreviews') !== false;
+    const miniPlayerOn = this._settings.get('player.miniPlayer') !== false;
+    librarySection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.libraryHeader')}</h2>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-moving-previews">${t('settingsPanel.appearance.movingPreviewsLabel')}</label>
+        <input type="checkbox" id="sp-moving-previews" class="settings-panel__input settings-panel__input--checkbox" ${movingOn ? 'checked' : ''} aria-describedby="sp-moving-previews-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-moving-previews-hint">${t('settingsPanel.appearance.movingPreviewsHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-folder-previews">${t('settingsPanel.appearance.folderPreviewsLabel')}</label>
+        <input type="checkbox" id="sp-folder-previews" class="settings-panel__input settings-panel__input--checkbox" ${folderPreviewsOn ? 'checked' : ''} aria-describedby="sp-folder-previews-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-folder-previews-hint">${t('settingsPanel.appearance.folderPreviewsHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
+        <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${miniPlayerOn ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-mini-player-hint">${t('settingsPanel.appearance.miniPlayerHint')}</div>
+    `;
+    librarySection.querySelector('#sp-mini-player')
+      .addEventListener('change', (e) => {
+        this._settings.set('player.miniPlayer', !!e.target.checked);
+      });
+    librarySection.querySelector('#sp-moving-previews')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.movingPreviews', !!e.target.checked);
+      });
+    librarySection.querySelector('#sp-folder-previews')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.folderPreviews', !!e.target.checked);
+      });
+    panel.appendChild(librarySection);
 
     return panel;
   }
@@ -1187,6 +1303,7 @@ export class SettingsPanel {
     aboutSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.help.aboutHeader')}</h2>
       <div id="sp-about-version" class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.aboutVersion', { version: '…' })}</div>
+      <div id="sp-about-portable" class="settings-panel__hint" style="margin-bottom:10px" hidden></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
         <button id="sp-about-github" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.aboutGithub')}</button>
         <button id="sp-about-license" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.help.aboutLicense')}</button>
@@ -1199,6 +1316,16 @@ export class SettingsPanel {
       const el = panel.querySelector('#sp-about-version');
       if (el) el.textContent = t('settingsPanel.help.aboutVersion', { version: version || '?' });
     }).catch(() => { /* leave placeholder */ });
+    // Portable-mode indicator — only shown when running portably so normal
+    // installs see nothing (Nielsen #1 + #8 minimalist). Tells the user where
+    // their data lives, which matters most on a USB stick.
+    window.funsync.getPortableInfo?.().then((info) => {
+      const el = panel.querySelector('#sp-about-portable');
+      if (el && info?.portable) {
+        el.textContent = t('settingsPanel.help.portableMode', { dir: info.dataDir || '' });
+        el.hidden = false;
+      }
+    }).catch(() => { /* not portable / unavailable */ });
 
     setTimeout(() => this._wireHelpTab(panel), 0);
     return panel;
