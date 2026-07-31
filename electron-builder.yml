@@ -2,6 +2,18 @@ appId: com.funsync.player
 productName: FunSync Player
 copyright: Copyright © 2026
 
+# serialport's native binding (@serialport/bindings-cpp) ships N-API prebuilds
+# — ABI-stable across Node AND Electron, loaded at runtime via node-gyp-build —
+# so it NEVER needs a from-source rebuild. Skip electron-builder's default
+# rebuild: it required Visual Studio / node-gyp on the Windows CI runner and
+# failed the v0.8.0 build ("Could not find any Visual Studio installation to
+# use"). Linux built fine either way; this makes Windows use the prebuild too.
+npmRebuild: false
+# Native .node prebuilds can't be dlopen'd from inside the asar — keep them
+# unpacked so node-gyp-build can load them at runtime.
+asarUnpack:
+  - "**/*.node"
+
 directories:
   output: dist
 
