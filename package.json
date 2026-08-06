@@ -11,7 +11,8 @@
     "test:e2e": "playwright test",
     "backend:dev": "cd backend && python3 main.py || python main.py",
     "backend:test": "cd backend && python3 -m pytest -v || python -m pytest -v",
-    "build": "node scripts/build.js"
+    "build": "node scripts/build.js",
+    "backup": "node scripts/backup-ignored.mjs"
   },
   "keywords": [
     "video-player",
