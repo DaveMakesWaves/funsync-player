@@ -14,6 +14,69 @@ function _debugLog(msg) {
   try { log.debug(`[EroScripts] ${msg}`); } catch { /* log unavailable */ }
 }
 
+/**
+ * Pick a thumbnail from a Discourse `thumbnails[]` array.
+ *
+ * Entries come in several sizes (typically 1366/1920, 1024, 800, 400, 200,
+ * 100, 50 px wide, the smaller ones as `optimized/` derivatives). The
+ * smallest entry at least `MIN_THUMB_WIDTH` wins — big enough not to look
+ * soft, small enough not to pull a full-size image per row.
+ *
+ * 400 because the row renders the thumbnail at 120 CSS px, which is 240
+ * device px on a 2x display: a 200px source would be upscaled and visibly
+ * soft there, while 1024+ is wasteful for a 120px slot. Topics whose
+ * original is smaller than 400 (plenty are ~200) have no such entry and
+ * fall through to the largest they do offer.
+ *
+ * @param {Array<{width?: number, url?: string}>} thumbnails
+ * @returns {string|null}
+ */
+const MIN_THUMB_WIDTH = 400;
+
+/**
+ * Decode the HTML entities Discourse emits inside post markup.
+ *
+ * Attachment names come from the link TEXT of the rendered `cooked` HTML,
+ * so a script called `Luna Snow & Sue Storm.funscript` arrives as
+ * `Luna Snow &amp; Sue Storm.funscript` and would be saved to disk under
+ * that literal name. That also breaks multi-axis pairing, which matches a
+ * main against its companions by exact base name.
+ *
+ * Deliberately a small explicit table plus numeric refs rather than a DOM
+ * round-trip: this runs in the main process, where there is no document.
+ */
+const _ENTITIES = {
+  amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: ' ', '#39': "'", '#x27': "'",
+};
+
+function decodeEntities(text) {
+  if (typeof text !== 'string' || !text.includes('&')) return text;
+  return text.replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (whole, body) => {
+    const key = body.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(_ENTITIES, key)) return _ENTITIES[key];
+    if (key.startsWith('#x')) {
+      const code = parseInt(key.slice(2), 16);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+    }
+    if (key.startsWith('#')) {
+      const code = parseInt(key.slice(1), 10);
+      return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+    }
+    // Unknown entity — leave it alone rather than mangling the name.
+    return whole;
+  });
+}
+
+function pickThumbnail(thumbnails) {
+  if (!Array.isArray(thumbnails) || thumbnails.length === 0) return null;
+  const usable = thumbnails.filter(x => x && typeof x.url === 'string' && x.url);
+  if (usable.length === 0) return null;
+  const big = usable
+    .filter(x => Number(x.width) >= MIN_THUMB_WIDTH)
+    .sort((a, b) => Number(a.width) - Number(b.width));
+  return (big[0] || usable[0]).url;
+}
+
 class EroScriptsAPI {
   constructor() {
     this._cookie = null;
@@ -104,8 +167,12 @@ class EroScriptsAPI {
       if (resp.status === 429) {
         return { results: [], error: 'Rate limited — try again in a moment' };
       }
-      if (resp.status === 403) {
-        return { results: [], error: 'Access denied — try logging in again' };
+      if (resp.status === 403 || resp.status === 401) {
+        // `authExpired` is the machine-readable half of this. The message
+        // alone forced every caller to string-match, and the auto-match
+        // path simply ignored it — so a dead session looked exactly like
+        // "this video has no script", silently, for weeks.
+        return { results: [], error: 'Access denied — try logging in again', authExpired: true };
       }
 
       const data = await this._safeJson(resp);
@@ -118,7 +185,14 @@ class EroScriptsAPI {
         (data.topics || []).length, (data.posts || []).length, (data.users || []).length);
       if (data.topics?.length > 0) {
         const t = data.topics[0];
-        log.info('[EroScripts] Sample topic:', JSON.stringify(t).substring(0, 500));
+        // Field list and tags called out on their own lines. The truncated
+        // dump below used to cut at 500 chars, which lands before `tags` on
+        // almost every topic — so "does search actually return tags?" was
+        // unanswerable from the logs, despite the parser and the panel both
+        // being wired for them.
+        log.info('[EroScripts] Topic fields: %s', Object.keys(t).join(','));
+        log.info('[EroScripts] Topic tags: %s', JSON.stringify(t.tags ?? null));
+        log.info('[EroScripts] Sample topic:', JSON.stringify(t).substring(0, 1500));
       }
       if (data.posts?.length > 0) {
         const p = data.posts[0];
@@ -136,11 +210,17 @@ class EroScriptsAPI {
         // Topics available (some Discourse versions return these)
         topics = data.topics.map(t => {
           const tags = (t.tags || []).map(tag => typeof tag === 'string' ? tag : (tag.name || tag.text || String(tag)));
-          let thumbnail = t.image_url || null;
-          if (thumbnail && !thumbnail.startsWith('http')) thumbnail = `${BASE_URL}${thumbnail}`;
 
           const post = posts.find(p => p.topic_id === t.id);
           const user = post ? users.get(post.user_id) : null;
+
+          // Search topics carry `thumbnails[]` (several sizes), NOT the
+          // `image_url` this used to read — that field only exists on the
+          // topic endpoint, so every search result came back with a null
+          // thumbnail and the panel paid for a second request per row to
+          // fetch one. Prefer an entry near the rendered size.
+          let thumbnail = pickThumbnail(t.thumbnails) || t.image_url || null;
+          if (thumbnail && !thumbnail.startsWith('http')) thumbnail = `${BASE_URL}${thumbnail}`;
 
           let avatar = post?.avatar_template || null;
           if (avatar) {
@@ -150,8 +230,18 @@ class EroScriptsAPI {
 
           return {
             id: t.id, title: t.title, slug: t.slug,
-            createdAt: t.created_at, likeCount: t.like_count || 0,
-            views: t.views || 0, tags, thumbnail, avatar,
+            createdAt: t.created_at,
+            // Like count lives on the POST in a search response, not the
+            // topic — `t.like_count` doesn't exist there, so this read 0 for
+            // every result and the panel (which hides a 0) showed nothing.
+            // The post was already being looked up two lines above for the
+            // avatar.
+            likeCount: post?.like_count ?? t.like_count ?? 0,
+            // `views` genuinely isn't in the search serializer — not on the
+            // topic and not on the post. It only exists on /t/{id}.json.
+            // Left at 0 rather than faked; the panel hides a 0 view count.
+            views: t.views || 0,
+            tags, thumbnail, avatar,
             creator: post?.username || user?.username || null,
             url: `${BASE_URL}/t/${t.slug || t.id}/${t.id}`,
           };
@@ -223,6 +313,9 @@ class EroScriptsAPI {
       if (resp.status === 429) {
         return { attachments: [], error: 'Rate limited' };
       }
+      if (resp.status === 403 || resp.status === 401) {
+        return { attachments: [], error: 'Access denied — try logging in again', authExpired: true };
+      }
 
       const data = await this._safeJson(resp);
       if (!data) {
@@ -242,7 +335,7 @@ class EroScriptsAPI {
       let match;
       while ((match = attachRegex.exec(html)) !== null) {
         const href = match[1];
-        const name = match[2].trim();
+        const name = decodeEntities(match[2].trim());
         if (name.endsWith('.funscript') || name.endsWith('.zip')) {
           const url = href.startsWith('http') ? href : `${BASE_URL}${href}`;
           attachments.push({ name, url });

@@ -70,6 +70,11 @@ export const VIDEO_META    = 'video-meta';
 export const REQUEST_EXPAND = 'request-expand';
 // Variant selector click → main performs the switch + streams fresh data.
 export const SWITCH_VARIANT = 'switch-variant'; // { type, label }
+// Pop-out toggled a TL/HM inline visualisation. Main owns the settings
+// store, so it persists the flag and mirrors it onto its own overlay —
+// the two windows stay in step and the choice survives a restart.
+//   { type, key: 'timeline'|'heatmap', on: boolean }
+export const SET_INLINE_VIZ = 'set-inline-viz';
 // Queue navigation from the player window's prev/next controls.
 export const LOAD_NEXT     = 'load-next';      // { type }
 export const LOAD_PREV     = 'load-prev';      // { type }
@@ -102,5 +107,5 @@ export const ALL_MESSAGE_TYPES = Object.freeze([
   INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME,
   CAPTURE_FRAME, HEATMAP, CHAPTERS, VARIANTS, QUEUE_STATE, UP_NEXT, THEME, LOCALE,
   READY, TIME_TICK, VIDEO_EVENT, VIDEO_META, REQUEST_EXPAND, SWITCH_VARIANT,
-  LOAD_NEXT, LOAD_PREV, UP_NEXT_ACTION, FRAME_CAPTURED,
+  LOAD_NEXT, LOAD_PREV, UP_NEXT_ACTION, FRAME_CAPTURED, SET_INLINE_VIZ,
 ]);

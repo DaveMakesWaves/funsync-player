@@ -118,7 +118,8 @@
     },
     "toast": {
       "selfKey": "这是你自己的 Handy — 它已经由 Handy 标签控制。"
-    }
+    },
+    "popoutWindowTitle": "观众房间"
   },
   "nav": {
     "library": "媒体库",
@@ -195,6 +196,8 @@
     "devicesConnectionShortcut": "设备连接 (H)",
     "editor": "编辑器",
     "scriptEditor": "脚本编辑器 (E)",
+    "inlineTimeline": "脚本时间轴",
+    "inlineHeatmap": "热力图条",
     "screenshot": "截图",
     "pictureInPicture": "画中画",
     "miniPlayPause": "播放 / 暂停",
@@ -343,7 +346,18 @@
     "showingFolder": "当前位置：{folder}",
     "openFileLocation": "打开文件所在位置",
     "customThumbSet": "设置缩略图帧…",
+    "customThumbUpload": "上传缩略图图片…",
+    "customThumbUploadFailed": "无法使用该图片",
     "customThumbReset": "重置缩略图",
+    "variantDefault": "默认",
+    "assignScriptBulk": "分配脚本",
+    "bulkScriptAssigned": "已将 {name} 分配给 {count} 个视频",
+    "kebabGroupOrganize": "整理",
+    "kebabGroupScripts": "脚本与字幕",
+    "kebabGroupThumbnail": "缩略图",
+    "kebabGroupVR": "VR",
+    "kebabExtractAxes": "提取内嵌轴 ({count})…",
+    "kebabExtractAxesTitle": "将 {axes} 保存为配套 .funscript 文件",
     "customThumbTitle": "选择缩略图帧",
     "customThumbHint": "拖动滑块到想要的帧,然后将其用作该视频的封面。",
     "customThumbUse": "使用此帧",
@@ -452,8 +466,10 @@
       "scriptNone": "(无)",
       "selectScriptBtn": "选择",
       "addRoute": "+ 添加路由",
-      "variantSearchTitle": "选择变体脚本"
-    }
+      "variantSearchTitle": "选择变体脚本",
+      "searchEroScripts": "搜索 EroScripts..."
+    },
+    "heatmapUnavailable": "热力图不可用"
   },
   "playlists": {
     "title": "播放列表",
@@ -482,7 +498,29 @@
     "gridView": "网格视图",
     "listView": "列表视图",
     "detailEmpty": "此播放列表中无视频",
-    "detailEmptyHint": "通过媒体库中的更多菜单添加视频"
+    "detailEmptyHint": "通过媒体库中的更多菜单添加视频",
+    "advanced": {
+      "openTitle": "播放列表高级设置",
+      "title": "播放列表高级设置",
+      "balanceLabel": "让每个脚本获得同样的机会",
+      "balanceWhy": "有些脚本会被多个视频共用。这样一来，仅仅因为使用它的视频更多，随机播放时这个脚本就会更常出现。",
+      "balanceHow": "开启后，无论多少视频共用同一个脚本，每个脚本被选中的机会都一样。系统仍会从中随机播放一个视频，下一轮通常会是另一个。",
+      "balanceNeedsShuffleOn": "只有在开启随机播放时才有作用。",
+      "balanceNeedsShuffleOff": "请先开启随机播放才能使用。按顺序播放时该选项没有作用。",
+      "unwatchedLabel": "优先未观看",
+      "unwatchedWhy": "随机播放时优先播放尚未看完的视频。已观看的视频仍会播放，只是排在最后。"
+    },
+    "lastWatched": "上次观看",
+    "continueWatching": "继续观看",
+    "continueWatchingNamed": "从 {name} 继续",
+    "resetProgress": "重置进度",
+    "resetProgressHint": "清除此播放列表的标记和已保存的播放位置",
+    "resetProgressTitle": "要重置播放列表进度吗?",
+    "resetProgressConfirm": "这会清除“{name}”的标记以及其中每个视频的已保存位置。由于位置按视频保存，出现在其他播放列表中的视频也会失去位置。",
+    "watched": "已观看",
+    "watchedCount": "已观看 {watched}/{total}",
+    "timeLeft": "剩余 {time}",
+    "continueNamed": "继续观看 {name}"
   },
   "categories": {
     "title": "分类",
@@ -562,6 +600,7 @@
     "orgasmNotConfigured": "未设置高潮脚本 — 请在设置 ▸ 播放中选择",
     "orgasmInvalidScript": "该文件不是有效的 funscript",
     "orgasmScriptSet": "已设置高潮脚本：{name}",
+    "randomVariant": "随机脚本：{name}",
     "videoErrorGeneric": "加载视频失败",
     "mutexTakeover": "{incoming} 已从 {evicted} 接管",
     "added": "已添加",
@@ -626,7 +665,9 @@
     "multiAxisFailed": "多轴:{suffix} 脚本加载失败 ({error})",
     "queueReadFailed": "队列项 {name}:脚本 {script} 无法读取 — 无同步播放",
     "queueReadError": "队列项 {name}:脚本读取失败 ({error}) — 无同步播放",
-    "handyUploadTimeout": "Handy 脚本上传超时 — 视频正在播放但 Handy 无法同步。请检查连接并重新加载视频。"
+    "handyUploadTimeout": "Handy 脚本上传超时 — 视频正在播放但 Handy 无法同步。请检查连接并重新加载视频。",
+    "orgasmRoutingFallback": "高潮开关：{devices} 未连接。在全部连接前将使用单轴模式。",
+    "orgasmScriptRecovered": "已找到 {count} 个移动过的收尾脚本并更新了路径"
   },
   "modal": {
     "noItemsAvailable": "无可用项",
@@ -672,6 +713,8 @@
       "sort": "排序",
       "viewToggleAria": "切换网格或列表视图",
       "viewToggleTitle": "切换网格 / 列表",
+      "playAll": "全部播放",
+      "shufflePlay": "随机播放",
       "folderAria": "按文件夹浏览",
       "folderTitle": "按文件夹浏览",
       "filters": "筛选"
@@ -762,6 +805,20 @@
       "connected": "已连接：{devices}",
       "noDevices": "桌面端没有连接的设备",
       "connectedCount": "{count, plural, other {已连接设备 · #}}",
+      "playPause": "播放 / 暂停",
+      "seek": "进度",
+      "mute": "静音",
+      "fullscreen": "全屏",
+      "loopAB": "A-B 循环",
+      "skipGap": "跳过间隙",
+      "offset": "偏移",
+      "orgasmHold": "Orgasm Switch - 按住",
+      "orgasmRiding": "松开返回",
+      "orgasmTap": "Orgasm Switch - 点按",
+      "orgasmStop": "点按停止",
+      "upNextIn": "{seconds}秒后播放下一个",
+      "upNextPlayNow": "立即播放",
+      "upNextCancel": "取消",
       "intensity": "Funscript 强度",
       "avg": "平均",
       "max": "最大",
@@ -960,10 +1017,16 @@
       "rangeExtenderResetTitle": "重置为默认 (关闭)",
       "rangeExtenderResetAria": "将拉伸范围受限的脚本重置为默认",
       "orgasmScriptLabel": "高潮开关脚本",
-      "orgasmScriptChoose": "选择…",
+      "orgasmScriptChoose": "设置…",
       "orgasmScriptClear": "清除高潮脚本",
       "orgasmScriptNone": "无",
       "orgasmScriptHint": "播放时按住 X 可将设备切换到这段循环的短脚本，松开即恢复。支持 Handy、Buttplug 和 T-Code。",
+      "orgasmModeLabel": "X 键行为",
+      "orgasmModeHold": "按住持续播放(松开返回)",
+      "orgasmModeToggle": "点按完成(之后停止)",
+      "orgasmModeHint": "按住持续播放:按住 X 播放循环脚本,松开后返回主脚本。点按完成:点按 X 开始循环,再次点按停止设备——不会返回主脚本。",
+      "randomVariantLabel": "随机脚本变体",
+      "randomVariantHint": "当视频有多个脚本变体时，每次播放随机选择一个。开启期间优先于已固定的默认变体。",
       "bpHeader": "Buttplug 线性输出 (BLE)",
       "fieldStrategy": "策略",
       "strategyActionBoundary": "按动作 (BLE 更平滑)",
@@ -976,7 +1039,18 @@
       "fieldMinStroke": "最短行程",
       "minStrokeResetTitle": "重置为默认 (60ms)",
       "minStrokeResetAria": "将最短行程重置为默认",
-      "bpHint": "按动作模式每个动作发送一条指令,由设备固件做插值 — 体验接近 Handy WiFi API (HSSP)。预测补偿 BLE 往返时延;最短行程会拉长过短动作以便 BLE 能够执行。对通过连接密钥 (HSSP) 的 Handy 无效。"
+      "bpHint": "按动作模式每个动作发送一条指令,由设备固件做插值 — 体验接近 Handy WiFi API (HSSP)。预测补偿 BLE 往返时延;最短行程会拉长过短动作以便 BLE 能够执行。对通过连接密钥 (HSSP) 的 Handy 无效。",
+      "orgasmSummaryMulti": "多轴（{count} 个轴）",
+      "orgasmSummaryCustom": "自定义路由（{count} 条路由）",
+      "inlineVizOpacityLabel": "叠加层不透明度",
+      "inlineVizOpacityResetTitle": "恢复默认不透明度",
+      "inlineVizOpacityHint": "脚本时间轴和热力图条在视频上的清晰程度。在播放器的 ⋮ 菜单中开启。",
+      "orgasmScriptMissing": "（找不到文件）",
+      "playbackHeader": "播放",
+      "orgasmHeader": "Orgasm Switch",
+      "videoHeader": "视频与性能",
+      "rememberSpeedLabel": "记住播放速度",
+      "rememberSpeedHint": "加载其他视频时保持当前速度。默认关闭，每个视频都以 1 倍速开始。"
     },
     "appearance": {
       "themeHeader": "主题",
@@ -1001,7 +1075,16 @@
       "folderPreviewsLabel": "文件夹预览缩略图",
       "folderPreviewsHint": "在文件夹磁贴上显示内部视频的拼贴预览。关闭则改用普通文件夹图标。",
       "miniPlayerLabel": "浏览时保持播放",
-      "miniPlayerHint": "播放视频时返回媒体库,视频会缩小为角落的迷你播放器并继续播放(并继续驱动设备),而不是停止。"
+      "miniPlayerHint": "播放视频时返回媒体库,视频会缩小为角落的迷你播放器并继续播放(并继续驱动设备),而不是停止。",
+      "hwDecodeLabel": "硬件视频解码",
+      "hwDecodeHint": "默认开启。如果视频无法播放(黑屏或解码错误,在 NVIDIA + Linux 上常见),请关闭此项以使用软件解码。重启应用后生效。",
+      "hwDecodeRestart": "重启 FunSync 以应用视频解码更改。",
+      "cardHeatmapLabel": "在媒体库卡片上显示热力图",
+      "cardHeatmapHint": "在每个缩略图下方显示行程速度热力图。使用视频的主脚本。默认关闭，因为每张卡片都需读取脚本。",
+      "resumeProgressLabel": "在播放列表中显示进度",
+      "resumeProgressHint": "在播放列表的卡片和列表行上以进度条显示观看位置。仅适用于播放列表，主媒体库不会显示。",
+      "hideDupesLabel": "隐藏重复名称",
+      "hideDupesHint": "当多个视频文件名完全相同时只显示一个条目，例如同一文件位于两个来源文件夹中。会保留带脚本的那一份。"
     },
     "data": {
       "backupHeader": "备份与恢复",
@@ -1126,7 +1209,20 @@
     "noAttachments": "此主题中未找到 funscript 附件",
     "downloadFailed": "下载失败",
     "savedToast": "脚本已保存:{name}",
-    "sessionExpired": "EroScripts 会话已过期 — 请在 EroScripts 面板中重新登录"
+    "sessionExpired": "EroScripts 会话已过期 — 请在 EroScripts 面板中重新登录",
+    "inline": {
+      "title": "在 EroScripts 上查找脚本",
+      "axesLine": "主脚本 + {count} 个轴 ({list})",
+      "downloadAll": "全部下载 (主脚本 + {count} 个轴)",
+      "downloadMainOnly": "仅主脚本",
+      "download": "下载并关联",
+      "downloading": "下载中...",
+      "multiBadge": "多轴",
+      "noAttachments": "该帖子没有可下载的脚本",
+      "noMain": "只有轴文件，没有主脚本",
+      "zipNote": "{count} 个 zip 附件暂时无法打开",
+      "loadingPost": "正在加载帖子..."
+    }
   },
   "upNext": {
     "regionAria": "下一个",
@@ -1143,7 +1239,10 @@
     "endText": "此{source}中没有更多视频。",
     "endCta": "返回{source}",
     "endSourceFallback": "列表",
-    "sourcePlaylist": "播放列表"
+    "sourcePlaylist": "播放列表",
+    "resumeFrom": "从 {time}",
+    "startOver": "从头开始",
+    "resumeGroupAria": "继续播放或从头开始"
   },
   "session": {
     "state": {
@@ -1383,7 +1482,8 @@
     "customKeysReservedWarn": "{key} 已被编辑器命令占用",
     "customKeysDuplicateWarn": "{key} 已绑定到位置 {pos}",
     "customKeysMidiHint": "MIDI 键盘用户通常配合 MIDI 转按键工具 (如 MIDIKey2Key) 使用。",
-    "customKeysHelpGroup": "自定义位置按键"
+    "customKeysHelpGroup": "自定义位置按键",
+    "popoutWindowTitle": "脚本编辑器"
   },
   "connection": {
     "vibeHelp": {
@@ -1481,7 +1581,8 @@
       "badgeVibrate": "振动",
       "badgeRotate": "旋转",
       "badgeEstim": "电刺激",
-      "axisCustom": "跟随自定义路由"
+      "axisCustom": "跟随自定义路由",
+      "tuning": "输出调节"
     },
     "tcode": {
       "l0Label": "冲程 (主)",
@@ -1614,6 +1715,8 @@
     "jumpStartEnd": "跳到开头 / 结尾",
     "skipNextAction": "跳到下一个动作（间隔跳过）",
     "skipPrevAction": "跳到上一个动作",
+    "nextVideo": "队列中的下一个视频",
+    "prevVideo": "队列中的上一个视频",
     "volume5": "音量 ±5%",
     "muteToggle": "静音 / 取消静音",
     "fullscreen": "全屏",
@@ -1683,5 +1786,19 @@
     "editorSelectLeftRightOfCursor": "选择播放头之前/之后的全部",
     "editorEqualize": "均衡 — 在时间上均匀重新分布中间动作",
     "editorMoveToPlayhead": "将单选动作移动到播放头"
+  },
+  "orgasmConfig": {
+    "title": "高潮开关设置",
+    "mainScript": "主脚本：",
+    "hintMulti": "轴脚本长度最好与主脚本一致。较短的轴会保持最后位置。",
+    "hintCustom": "当所有指定设备都已连接时，将按路由配置播放。缺少设备时，将以单轴播放主脚本，直到设备重新连接。"
+  },
+  "resume": {
+    "title": "继续观看?",
+    "message": "你上次看到 {time}。",
+    "startOver": "从头开始",
+    "resumeAt": "从 {time} 继续",
+    "progressLabel": "已观看 {percent}%",
+    "resumedToast": "已从 {time} 继续播放"
   }
 }

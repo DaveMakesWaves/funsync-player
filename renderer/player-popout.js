@@ -10,22 +10,27 @@
 
 import { t, initI18n, setLocale, translatePage } from './js/i18n.js';
 import { installConsoleForwarding } from './js/logger.js';
+import { applyWcoClass } from './js/wco.js';
 import {
   createIcons, Play, Pause, RotateCcw, Volume2, Volume1, VolumeX,
   ChevronDown, PictureInPicture2, Maximize, Minimize, Repeat1,
   EllipsisVertical, Gauge, Keyboard, SkipBack, SkipForward,
+  Activity, Thermometer,
 } from './js/icons.js';
 import { VideoPlayer } from './js/video-player.js';
 import { ProgressBar } from './js/progress-bar.js';
+import { InlineViz } from './components/inline-viz.js';
 import { UpNextCard } from './components/up-next-card.js';
 import {
   INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME,
   HEATMAP, CHAPTERS, VARIANTS, SWITCH_VARIANT, QUEUE_STATE, LOAD_PREV, LOAD_NEXT,
   UP_NEXT, UP_NEXT_ACTION, THEME, LOCALE, READY, TIME_TICK, VIDEO_EVENT, VIDEO_META,
-  makeMessage, classifyMessage,
+  SET_INLINE_VIZ, makeMessage, classifyMessage,
 } from './js/player-popout-protocol.js';
 
 try { installConsoleForwarding(); } catch { /* non-fatal */ }
+// Frameless window → the page owns the drag region (.ppo-dragstrip).
+applyWcoClass();
 
 const $ = (id) => document.getElementById(id);
 const loadingEl = $('player-popout-loading');
@@ -37,6 +42,10 @@ let _hasVideo = false;
 let _tickTimer = null;
 let videoPlayer = null;
 let progressBar = null;
+let inlineViz = null;
+// TL/HM state seeded from INITIAL_STATE; the pop-out has no settings store,
+// so main persists the flags (SET_INLINE_VIZ) and both windows stay in step.
+const _vizState = { timeline: false, heatmap: false };
 let upNextCard = null;
 let _backendPort = null;
 // Metadata for the up-next card the engine (in main) last asked us to show.
@@ -44,8 +53,97 @@ let _backendPort = null;
 let _upNextMeta = null;
 
 function send(payload) { window.funsync?.playerPopoutRelay?.('to-parent', payload); }
+
+/**
+ * Wire the TL/HM checkbox items in the overflow menu. Mirrors the main
+ * window's behaviour: aria-checked drives the CSS tick, and the toggle is
+ * relayed up so main can persist it (the pop-out has no settings store).
+ */
+function _wireInlineVizToggles() {
+  const wire = (btnId, key, apply) => {
+    const btn = $(btnId);
+    if (!btn) return;
+    btn.addEventListener('click', () => {
+      const on = !_vizState[key];
+      _vizState[key] = on;
+      apply(on);
+      btn.setAttribute('aria-checked', String(on));
+      send(makeMessage(SET_INLINE_VIZ, { key, on }));
+    });
+  };
+  wire('btn-inline-tl', 'timeline', (on) => inlineViz?.setTimelineVisible(on));
+  wire('btn-inline-hm', 'heatmap', (on) => inlineViz?.setHeatmapVisible(on));
+}
+
+// --- Caption strip (Windows Controls Overlay) ---------------------------
+// Matches the main window's PLAYER VIEW exactly: transparent background so
+// the buttons sit on the video rather than a solid nav-bar-coloured block,
+// white symbols (the video behind is dark whatever the app theme), and the
+// symbols hiding along with the control bar. Without this the pop-out kept
+// the themed strip it was created with and looked nothing like the main
+// window (Dave 2026-08-04).
+let _captionState = null;
+let _popoutTheme = 'dark';
+
+/** Caption-button strip in CSS px relative to the content area, or null. */
+function _captionRect() {
+  const wco = navigator.windowControlsOverlay;
+  if (!wco?.visible) return null;
+  try {
+    const r = wco.getTitlebarAreaRect();
+    const left = r.x + r.width;
+    const width = Math.max(0, window.innerWidth - left);
+    if (width <= 0) return null;
+    return { x: left, y: 0, width, height: r.height || 48 };
+  } catch {
+    return null;
+  }
+}
+
+function syncCaptionOverlay(visible = null) {
+  if (!window.funsync?.updateWindowChrome) return;
+  // Fullscreen has no caption strip at all — nothing to sync.
+  if (document.fullscreenElement) return;
+  const shown = visible === null
+    ? !!containerEl?.classList.contains('controls-visible')
+    : !!visible;
+  const next = shown ? 'over-video' : 'over-video-hidden';
+  if (_captionState === next) return;
+  _captionState = next;
+  try {
+    window.funsync.updateWindowChrome(_popoutTheme, {
+      overVideo: true,
+      hideSymbols: !shown,
+      captionRect: _captionRect(),
+    });
+  } catch { /* non-fatal */ }
+}
+
+/** Apply TL/HM state from main (INITIAL_STATE) without echoing it back. */
+function _applyInlineVizState(state) {
+  if (!state) return;
+  _vizState.timeline = state.timeline === true;
+  _vizState.heatmap = state.heatmap === true;
+  inlineViz?.setTimelineVisible(_vizState.timeline);
+  inlineViz?.setHeatmapVisible(_vizState.heatmap);
+  $('btn-inline-tl')?.setAttribute('aria-checked', String(_vizState.timeline));
+  $('btn-inline-hm')?.setAttribute('aria-checked', String(_vizState.heatmap));
+  const pct = Number(state.opacity);
+  if (Number.isFinite(pct)) {
+    document.documentElement.style.setProperty(
+      '--inline-viz-opacity', String(Math.min(100, Math.max(20, pct)) / 100),
+    );
+  }
+}
 function applyTheme(theme) {
   if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
+  // Retint this window's native chrome too. Previously the pop-out only
+  // restyled its CSS, so after a theme switch its caption strip kept the
+  // colours it was CREATED with while the main window updated — a visible
+  // mismatch between the two windows.
+  if (theme === 'dark' || theme === 'light' || theme === 'system') _popoutTheme = theme;
+  _captionState = null; // force re-apply with the new colours
+  syncCaptionOverlay();
 }
 function applyStyle(style) {
   // No-op on undefined (a theme-only message must not reset the style).
@@ -86,6 +184,8 @@ function setupPlayer() {
       Play, Pause, RotateCcw, Volume2, Volume1, VolumeX,
       ChevronDown, PictureInPicture2, Maximize, Minimize, Repeat1,
       EllipsisVertical, Gauge, Keyboard, SkipBack, SkipForward,
+      // Inline TL/HM overlay toggles in the overflow menu.
+      Activity, Thermometer,
     },
     attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
   });
@@ -103,6 +203,20 @@ function setupPlayer() {
   });
   // Hover scrubbing preview (same wiring the inline player uses).
   videoPlayer.onProgressHover = (timeSeconds) => progressBar.updateThumbnailPreview(timeSeconds);
+
+  // Inline TL/HM overlays — the SAME component as the inline player, fed by
+  // the actions main already streams for the seek-bar heatmap.
+  inlineViz = new InlineViz({ container: containerEl, video });
+  _wireInlineVizToggles();
+
+  // Caption buttons follow the control bar, same as the main window's player.
+  videoPlayer.onControlsVisibilityChanged = (visible) => syncCaptionOverlay(visible);
+  document.addEventListener('fullscreenchange', () => {
+    // Leaving fullscreen brings the strip back — re-assert the current state.
+    _captionState = null;
+    syncCaptionOverlay();
+  });
+  syncCaptionOverlay();
 
   // Up Next countdown card — the SAME component as the inline player. The
   // engine (queue + funscript + countdown) lives in main; here it's a pure
@@ -122,6 +236,13 @@ function setupPlayer() {
     onHoverEnter: () => send(makeMessage(UP_NEXT_ACTION, { action: 'pause' })),
     onHoverLeave: () => send(makeMessage(UP_NEXT_ACTION, { action: 'resume' })),
     onBackToSource: () => send(makeMessage(UP_NEXT_ACTION, { action: 'back' })),
+    // Resume choice. The label is resolved in main (only it can read the
+    // play context and settings) and arrives on the UP_NEXT 'show' payload;
+    // null means no row, same as in the main window.
+    getResumeChoice: (p) => (_upNextMeta && _upNextMeta.path === p && _upNextMeta.resumeLabel
+      ? { label: _upNextMeta.resumeLabel }
+      : null),
+    onStartOver: () => send(makeMessage(UP_NEXT_ACTION, { action: 'start-over' })),
   });
 
   // Stream the local <video>'s clock + events up so main's proxy (and thus
@@ -329,6 +450,7 @@ function handleUpNext(payload) {
       _upNextMeta = {
         path: payload.path, name: payload.name,
         duration: payload.duration, hasFunscript: payload.hasFunscript,
+        resumeLabel: payload.resumeLabel || null,
       };
       upNextCard.show(payload.path, payload.countdownSec);
       break;
@@ -358,6 +480,7 @@ function onMessage(payload) {
       applyTheme(payload.theme);
       applyStyle(payload.uiStyle);
       if (typeof payload.backendPort === 'number') _backendPort = payload.backendPort;
+      _applyInlineVizState(payload.inlineViz);
       if (payload.locale) setLocale(payload.locale).then(() => { _i18nReady = true; render(); });
       else render();
       if (payload.video) loadVideo(payload.video);
@@ -370,8 +493,17 @@ function onMessage(payload) {
       if (typeof payload.volume === 'number') videoPlayer?.setVolume?.(payload.volume);
       break;
     case HEATMAP:
-      if (progressBar && Array.isArray(payload.actions)) {
-        progressBar.renderHeatmap(payload.actions, (payload.durationMs || 0) / 1000);
+      if (Array.isArray(payload.actions)) {
+        const durSec = (payload.durationMs || 0) / 1000;
+        progressBar?.renderHeatmap(payload.actions, durSec);
+        // Same data drives the inline overlays; the menu items only appear
+        // once there's a script to visualise (matches the main window).
+        inlineViz?.setScript(payload.actions, durSec);
+        const has = payload.actions.length >= 2;
+        const tl = $('btn-inline-tl');
+        const hm = $('btn-inline-hm');
+        if (tl) tl.hidden = !has;
+        if (hm) hm.hidden = !has;
       }
       break;
     case CHAPTERS:

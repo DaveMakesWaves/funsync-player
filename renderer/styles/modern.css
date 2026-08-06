@@ -482,3 +482,54 @@
     transform: none;
   }
 }
+
+/* ============================================================
+   Skeleton loading — Modern layer (2026-08-03)
+   Classic keeps the icon + simple sheen from library.css. Modern goes
+   full current-gen: clean gradient plate (no icon), soft breathing
+   pulse, accent-tinted sheen, per-card phase offsets so the grid
+   ripples instead of blinking in unison, and a scale+fade reveal when
+   the real thumbnail lands.
+   ============================================================ */
+
+/* Modern variant of the unified-sweep skeleton: identical shared stripe
+   mechanics (library.css owns plate, attachment and timing — overriding
+   those would detach this style's plates from the sweep), with a faint
+   accent tint riding just ahead of the white stripe. Icon hiding now
+   lives in library.css (both styles get clean blocks). */
+:root[data-style="modern"] .library__card:not([data-loaded="true"]):not([data-loaded="failed"]) .library__card-placeholder,
+:root[data-style="modern"] .library__list-item:not([data-loaded="true"]):not([data-loaded="failed"]) .library__card-placeholder {
+  background-image: linear-gradient(
+    100deg,
+    transparent,
+    transparent 50%,
+    rgba(var(--accent-rgb), 0.08) 57%,
+    rgba(255, 255, 255, 0.08) 61%,
+    transparent 70%
+  );
+}
+
+/* Content reveal: the arriving thumbnail settles into place with a slight
+   scale-down + fade, the current-gen "content pops in" feel. Container
+   overflow keeps the 1.03 start invisible outside the tile. */
+:root[data-style="modern"] .library__thumb-img--reveal {
+  animation: modern-thumb-in 260ms var(--ease-out);
+}
+
+@keyframes modern-thumb-in {
+  from { opacity: 0; transform: scale(1.03); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .library__card .library__card-placeholder,
+  :root[data-style="modern"] .library__list-item .library__card-placeholder,
+  :root[data-style="modern"] .library__card .library__card-placeholder::after,
+  :root[data-style="modern"] .library__list-item .library__card-placeholder::after {
+    animation: none;
+  }
+  :root[data-style="modern"] .library__thumb-img--reveal {
+    animation: none;
+    transform: none;
+  }
+}

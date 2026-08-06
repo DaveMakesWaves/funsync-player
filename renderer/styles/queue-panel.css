@@ -145,6 +145,17 @@
   bottom: 0;
 }
 
+/* WCO: the OS caption strip (min/max/close) is painted over the top of the
+   player, so a panel starting at `top: 0` runs underneath it. Start below
+   that row instead — level with the queue toggle, which uses the same offset.
+   Child combinator on purpose: the panel is a direct child of #app only when
+   NOT fullscreen. In fullscreen it is re-parented into the player container
+   (see queue-panel.js), where there is no caption strip to clear, so this
+   rule stops matching and the panel correctly returns to the top edge. */
+html.has-wco #app[data-view="player"] > .queue-panel {
+  top: calc(env(titlebar-area-height, 48px) + 4px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .queue-panel { transition: none; }
 }

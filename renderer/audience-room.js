@@ -15,6 +15,7 @@
 
 import { t, initI18n, setLocale } from './js/i18n.js';
 import { icon, X, Volume2, VolumeX, Eye, EyeOff, Bell, Users } from './js/icons.js';
+import { applyWcoClass } from './js/wco.js';
 import {
   INITIAL_STATE, VIEWER_ADDED, VIEWER_REMOVED, VIEWER_STATUS, VIEWER_OFFSET,
   HIDE_KEYS_CHANGED, THEME,
@@ -22,6 +23,9 @@ import {
   TEST_BUZZ_ALL, SET_HIDE_KEYS, END_ROOM,
   makeMessage, classifyMessage,
 } from './js/audience-popout-protocol.js';
+
+// Frameless window → the page owns the drag region (.popout-titlebar).
+applyWcoClass();
 
 const HOST_ID = 'audience-room-host';
 const host = document.getElementById(HOST_ID);
@@ -50,6 +54,11 @@ const send = (payload) => window.funsync.audiencePopoutRelay('to-parent', payloa
 
 function applyTheme(t) {
   if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t;
+  // Retint this window's native chrome too, or the caption strip keeps the
+  // colours it was CREATED with while the main window follows the theme.
+  if (t === 'dark' || t === 'light' || t === 'system') {
+    try { window.funsync?.updateWindowChrome?.(t); } catch { /* non-fatal */ }
+  }
 }
 function applyStyle(s) {
   // No-op on undefined so a theme-only sync can't reset the style.

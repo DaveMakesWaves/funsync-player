@@ -41,6 +41,9 @@ contextBridge.exposeInMainWorld('funsync', {
   renamePlaylist: (id, name) => ipcRenderer.invoke('rename-playlist', id, name),
   setPlaylistLoop: (id, loop) => ipcRenderer.invoke('set-playlist-loop', id, loop),
   setPlaylistShuffle: (id, shuffle) => ipcRenderer.invoke('set-playlist-shuffle', id, shuffle),
+  setPlaylistBalance: (id, balance) => ipcRenderer.invoke('set-playlist-balance', id, balance),
+  setPlaylistPreferUnwatched: (id, prefer) => ipcRenderer.invoke('set-playlist-prefer-unwatched', id, prefer),
+  updateWindowChrome: (theme, opts) => ipcRenderer.invoke('update-window-chrome', theme, opts),
   deletePlaylist: (id) => ipcRenderer.invoke('delete-playlist', id),
   addVideoToPlaylist: (id, videoPath) => ipcRenderer.invoke('add-video-to-playlist', id, videoPath),
   removeVideoFromPlaylist: (id, videoPath) => ipcRenderer.invoke('remove-video-from-playlist', id, videoPath),
@@ -67,6 +70,12 @@ contextBridge.exposeInMainWorld('funsync', {
   selectFunscript: () => ipcRenderer.invoke('select-funscript'),
   readFunscript: (filePath) => ipcRenderer.invoke('read-funscript', filePath),
   selectSubtitle: () => ipcRenderer.invoke('select-subtitle'),
+
+  // Custom thumbnail images (user-uploaded posters)
+  selectThumbnailImage: () => ipcRenderer.invoke('select-thumbnail-image'),
+  importCustomThumbnail: (videoPath, imagePath) => ipcRenderer.invoke('import-custom-thumbnail', videoPath, imagePath),
+  readCustomThumbnail: (cachedPath) => ipcRenderer.invoke('read-custom-thumbnail', cachedPath),
+  getCustomThumbsDir: () => ipcRenderer.invoke('get-custom-thumbs-dir'),
 
   // Script editor
   saveFunscript: (content, name) => ipcRenderer.invoke('save-funscript', content, name),

@@ -20,7 +20,7 @@
     "electron"
   ],
   "author": "FunSync",
-  "license": "UNLICENSED",
+  "license": "GPL-3.0-or-later",
   "private": true,
   "dependencies": {
     "@ohdoki/handy-sdk": "^2.3.4",

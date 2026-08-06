@@ -53,6 +53,7 @@ export { default as FileText } from '../../node_modules/lucide/dist/esm/icons/fi
 export { default as Rows3 } from '../../node_modules/lucide/dist/esm/icons/rows-3.js';
 export { default as AudioWaveform } from '../../node_modules/lucide/dist/esm/icons/audio-waveform.js';
 export { default as Activity } from '../../node_modules/lucide/dist/esm/icons/activity.js';
+export { default as Thermometer } from '../../node_modules/lucide/dist/esm/icons/thermometer.js';
 export { default as Info } from '../../node_modules/lucide/dist/esm/icons/info.js';
 export { default as FileCheck } from '../../node_modules/lucide/dist/esm/icons/file-check.js';
 export { default as FileX } from '../../node_modules/lucide/dist/esm/icons/file-x.js';
@@ -75,6 +76,12 @@ export { default as ChevronDown } from '../../node_modules/lucide/dist/esm/icons
 // ChevronUp + Shuffle — playlist reorder (Move up) + shuffle toggle.
 export { default as ChevronUp } from '../../node_modules/lucide/dist/esm/icons/chevron-up.js';
 export { default as Shuffle } from '../../node_modules/lucide/dist/esm/icons/shuffle.js';
+export { default as Scale } from '../../node_modules/lucide/dist/esm/icons/scale.js';
+// History — playlist "Continue from last watched". (RotateCcw, used for
+// the matching Reset, is already exported above.)
+export { default as History } from '../../node_modules/lucide/dist/esm/icons/history.js';
+// Check — the "watched" mark on playlist cards and rows.
+export { default as Check } from '../../node_modules/lucide/dist/esm/icons/check.js';
 // Search — visible affordance in the library search input (left-side
 // icon, complements the placeholder which disappears on focus).
 export { default as Search } from '../../node_modules/lucide/dist/esm/icons/search.js';

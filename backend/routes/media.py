@@ -37,6 +37,27 @@ _sources: list[dict] = []
 # Thumbnail cache directory
 _thumb_cache_dir = None
 
+# Phone-triggered rescan handshake. The web remote can only ever see the
+# snapshot the desktop last pushed via /register — dropping a new file into a
+# source folder registers nothing until the desktop rescans. Rather than add a
+# filesystem watcher, the phone's Refresh button POSTs /api/remote/request-rescan
+# which bumps this counter; the desktop polls /api/media/rescan-request and, when
+# the counter advances, does a forced rescan + re-register. Monotonic so a
+# missed poll still converges on the next tick.
+_rescan_request_seq = 0
+
+
+def bump_rescan_request() -> int:
+    """Increment the rescan request counter (called by the phone) and return it."""
+    global _rescan_request_seq
+    _rescan_request_seq += 1
+    return _rescan_request_seq
+
+
+def get_rescan_request_seq() -> int:
+    """Current rescan request counter (polled by the desktop renderer)."""
+    return _rescan_request_seq
+
 
 def set_thumb_cache_dir(path: str):
     """Set the thumbnail cache directory."""
@@ -286,6 +307,16 @@ def record_vr_activity(client_ip: str, video_id: str):
 async def get_vr_activity():
     """Get the last VR scene request (polled by renderer for auto-connect)."""
     return _vr_activity
+
+
+@router.get("/rescan-request")
+async def get_rescan_request():
+    """Current phone-triggered rescan counter (polled by the desktop renderer).
+
+    When this advances past the last value the renderer saw, the renderer
+    forces a library rescan + re-register so newly-added files reach the phone.
+    """
+    return {"seq": get_rescan_request_seq()}
 
 
 @router.post("/remux")
@@ -550,6 +581,18 @@ async def register_library(request: Request):
     if thumb_dir:
         set_thumb_cache_dir(thumb_dir)
 
+    # Custom thumbnails (SCOPE-web-remote-2.md F7): pinned frames / uploaded
+    # posters reach the phone too. Map is keyed by video PATH (matching the
+    # desktop's `library.customThumbnails` shape); the dir is the desktop's
+    # userData/custom-thumbs folder — image entries are served ONLY from
+    # inside it (path-validated, same guard as the desktop IPC).
+    global _custom_thumbs, _custom_thumbs_dir
+    if "customThumbnails" in data:
+        ct = data.get("customThumbnails")
+        _custom_thumbs = ct if isinstance(ct, dict) else {}
+    if data.get("customThumbsDir"):
+        _custom_thumbs_dir = str(data["customThumbsDir"])
+
     return {
         "registered": len(_video_registry),
         "collections": len(_collections),
@@ -743,6 +786,19 @@ async def get_subtitle(video_id: str):
 
 # --- Thumbnail Generation ---
 
+# Custom thumbnail overrides pushed by the desktop at register time (F7).
+_custom_thumbs: dict = {}
+_custom_thumbs_dir: str | None = None
+
+_IMAGE_MIME = {".png": "image/png", ".webp": "image/webp", ".jpg": "image/jpeg", ".jpeg": "image/jpeg"}
+
+
+def _custom_thumb_for(filepath: str):
+    """Return this video's custom-thumbnail entry, or None."""
+    entry = _custom_thumbs.get(filepath)
+    return entry if isinstance(entry, dict) else None
+
+
 @router.get("/thumb/{video_id}")
 async def get_thumbnail(video_id: str):
     """Serve a thumbnail for a video (generated via ffmpeg, cached).
@@ -750,6 +806,11 @@ async def get_thumbnail(video_id: str):
     Returns cached thumbnail immediately if available. If not cached,
     kicks off background generation and returns a 1x1 transparent placeholder
     so the request doesn't block (VR players will re-request on next load).
+
+    Custom thumbnails (F7): an uploaded poster image is served directly
+    (path-validated inside the desktop's custom-thumbs dir); a pinned frame
+    generates at the picked timestamp (frame-accurate) under a pin-keyed
+    cache name so re-pins bust the phone's cached tile.
     """
     video = _video_registry.get(video_id)
     if not video:
@@ -762,7 +823,28 @@ async def get_thumbnail(video_id: str):
     if not _thumb_cache_dir:
         raise HTTPException(status_code=500, detail="Thumbnail cache not configured")
 
-    thumb_path = os.path.join(_thumb_cache_dir, f"{video_id}.jpg")
+    custom = _custom_thumb_for(filepath)
+
+    # Uploaded poster image — serve the cached file itself.
+    if custom and custom.get("type") == "image" and custom.get("imagePath") and _custom_thumbs_dir:
+        img = os.path.abspath(str(custom["imagePath"]))
+        root = os.path.abspath(_custom_thumbs_dir)
+        # Untrusted path from a pushed payload — only serve from inside
+        # the registered custom-thumbs dir; anything else falls through
+        # to the normal auto-thumb path.
+        if img.startswith(root + os.sep) and os.path.isfile(img):
+            mime = _IMAGE_MIME.get(os.path.splitext(img)[1].lower(), "image/jpeg")
+            return FileResponse(img, media_type=mime,
+                                headers={"Access-Control-Allow-Origin": "*",
+                                         "Cache-Control": "public, max-age=3600"})
+
+    # Pinned frame — pin-keyed cache name so a re-pin regenerates.
+    pin_pct = None
+    if custom and isinstance(custom.get("seekPct"), (int, float)):
+        pin_pct = min(0.999, max(0.0, float(custom["seekPct"])))
+
+    thumb_name = f"{video_id}.jpg" if pin_pct is None else f"{video_id}_p{int(pin_pct * 1000):04d}.jpg"
+    thumb_path = os.path.join(_thumb_cache_dir, thumb_name)
 
     # Return cached thumbnail if exists
     if os.path.isfile(thumb_path):
@@ -771,7 +853,7 @@ async def get_thumbnail(video_id: str):
                                      "Cache-Control": "public, max-age=86400"})
 
     # Not cached — generate in background, return placeholder now
-    _queue_thumb_generation(video_id, filepath, thumb_path)
+    _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=pin_pct)
 
     # 1x1 transparent PNG placeholder (67 bytes)
     import base64
@@ -790,8 +872,10 @@ _thumb_generating = set()
 _thumb_semaphore = None
 
 
-def _queue_thumb_generation(video_id, filepath, thumb_path):
-    """Generate thumbnail in background thread (max 2 concurrent)."""
+def _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=None):
+    """Generate thumbnail in background thread (max 2 concurrent).
+    `seek_pct` set = a user-pinned frame (F7) → frame-accurate `exact`
+    generation at that timestamp; None = the default auto-thumb path."""
     global _thumb_semaphore
     if video_id in _thumb_generating:
         return
@@ -814,7 +898,11 @@ def _queue_thumb_generation(video_id, filepath, thumb_path):
             # black intro of most videos → black thumbnails on the phone.
             from services.ffmpeg import generate_single_thumbnail
             import shutil
-            result = generate_single_thumbnail(filepath, seek_pct=0.1, width=320)
+            result = (
+                generate_single_thumbnail(filepath, seek_pct=seek_pct, width=320, exact=True)
+                if seek_pct is not None
+                else generate_single_thumbnail(filepath, seek_pct=0.1, width=320)
+            )
             src = result.get("path") if result else None
             if src and os.path.isfile(src) and os.path.abspath(src) != os.path.abspath(thumb_path):
                 shutil.copyfile(src, thumb_path)

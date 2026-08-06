@@ -32,3 +32,41 @@ export function shouldEnterMiniplayer({ enabled, hasVideo, paused, ended }) {
   if (ended) return false;
   return !paused;
 }
+
+/**
+ * Drop OS fullscreen before leaving the player view. Call this on EVERY
+ * exit path, not just the mini-player one.
+ *
+ * Bug (zaikechi, EroScripts #229, 2026-08-05): pressing Back while
+ * fullscreen left the user stuck, having to kill the app. Nothing in the
+ * navigation path exited fullscreen — the only `exitFullscreen()` call was
+ * the user-initiated toggle — so the player container stayed
+ * `document.fullscreenElement` while the mini-player docked on top of it.
+ *
+ * A fullscreen element fills the display regardless of its CSS box, so the
+ * mini-player's corner styling did nothing and it rendered full screen.
+ * `.player-container--mini` then hid `.player__top-bar`, taking the back
+ * arrow with it, and left only the mini's expand/close buttons. Expand
+ * re-entered the player (arrow back), Back re-docked the mini (arrow gone),
+ * and the two states alternated forever over a library the fullscreen
+ * element was covering.
+ *
+ * Returns whether an exit was actually requested, so callers/tests can tell
+ * a no-op from a real exit. Never throws: `exitFullscreen()` rejects if the
+ * document isn't in fullscreen, and this runs on a teardown path where a
+ * rejection must not break navigation.
+ *
+ * @param {Document} [doc=document]
+ * @returns {boolean} true if an exit was requested
+ */
+export function exitFullscreenForNav(doc = (typeof document !== 'undefined' ? document : null)) {
+  if (!doc || !doc.fullscreenElement) return false;
+  if (typeof doc.exitFullscreen !== 'function') return false;
+  try {
+    const p = doc.exitFullscreen();
+    if (p && typeof p.catch === 'function') p.catch(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}

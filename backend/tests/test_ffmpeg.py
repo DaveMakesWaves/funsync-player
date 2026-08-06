@@ -1,11 +1,28 @@
 """Tests for ffmpeg binary finding and video hash utilities."""
 
+import json
 import os
 import sys
+
+import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from services.ffmpeg import _find_binary, _get_video_hash
+
+
+@pytest.fixture
+def _isolated_metadata_cache():
+    """Reset the persisted-metadata-cache module state before AND after a
+    test. The after-reset is load-bearing: a test that lazily loaded from
+    its tmp_path cache leaves `loaded=True` with only-test entries in
+    memory — if a later test then probes a real file, the write-behind
+    save would snapshot that test-only state over the developer's REAL
+    cache file in the machine temp dir."""
+    import services.ffmpeg as ffmpeg_mod
+    ffmpeg_mod._reset_metadata_cache_for_tests()
+    yield
+    ffmpeg_mod._reset_metadata_cache_for_tests()
 
 
 class TestFindBinary:
@@ -253,6 +270,166 @@ class TestGenerateSingleThumbnail:
             "-skip_frame must appear before -i to apply to the input "
             "decoder; placing it after -i would silently make it a no-op."
         )
+
+    def test_exact_mode_skips_keyframe_only_decode(self, monkeypatch, tmp_path):
+        """User-picked frames (`exact=True`) must NOT use `-skip_frame
+        nokey` — it makes the output the nearest KEYFRAME to the seek
+        target, which is visibly a different frame than the one the
+        picker's frame-accurate <video> preview showed (community
+        report: 'the selected frame isn't the one that shows as the
+        thumbnail'). Without it, `-ss` before `-i` decodes forward from
+        the prior keyframe to the exact timestamp."""
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"placeholder")
+        captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=300.0)
+
+        generate_single_thumbnail(str(video), seek_pct=0.5, width=320, exact=True)
+        assert "-skip_frame" not in captured["args"], (
+            "exact mode must decode the exact picked frame, not the "
+            "nearest keyframe — the WYSIWYG picker bug."
+        )
+
+    def test_exact_mode_honors_picks_inside_first_10s(self, monkeypatch, tmp_path):
+        """The 10s minimum-seek clamp (studio-ident avoidance) is a
+        default-path heuristic. An EXPLICIT user pick in the first 10s
+        of a long video must be honored verbatim, not silently moved
+        to the 10s mark."""
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "long.mp4"
+        video.write_bytes(b"placeholder")
+        captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=1800.0)
+
+        generate_single_thumbnail(str(video), seek_pct=0.002, width=320, exact=True)
+        seek_arg = captured["args"][captured["args"].index("-ss") + 1]
+        assert float(seek_arg) == 3.6  # 0.2% of 1800s — NOT clamped to 10
+
+    def test_exact_mode_has_its_own_cache_namespace(self, monkeypatch, tmp_path):
+        """A default-path generation is a keyframe grab; it must not
+        satisfy a later exact request at the same pct/width from cache
+        (the user would keep seeing the old keyframe frame). The cache
+        filenames must differ."""
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"placeholder")
+        captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=300.0)
+
+        default = generate_single_thumbnail(str(video), seek_pct=0.5, width=320)
+        exact = generate_single_thumbnail(str(video), seek_pct=0.5, width=320, exact=True)
+        assert default["path"] != exact["path"]
+        assert "_v4e_" in os.path.basename(exact["path"])
+        # And the exact call actually re-ran ffmpeg (not a cache hit on
+        # the default file): its output path is the exact-namespace one.
+        out_arg = captured["args"][captured["args"].index("-y") + 1]
+        assert out_arg == exact["path"]
+
+    def test_metadata_cache_survives_backend_restart(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """THE startup fix (2026-08-03): the ffprobe metadata cache used to
+        be in-memory only, so every app launch re-probed every visible
+        library card (~700ms each — 7s of a 13s startup on a 420-video
+        library). It must now persist to disk and serve a warm hit after a
+        backend restart WITHOUT invoking ffprobe."""
+        import services.ffmpeg as ffmpeg_mod
+        from services.ffmpeg import get_metadata
+
+        video, probes = self._patch_probe(monkeypatch, tmp_path)
+
+        first = get_metadata(str(video))
+        assert first["duration"] == 120.0
+        assert probes["count"] == 1
+
+        # Simulate an app relaunch: flush to disk, drop ALL in-memory state.
+        ffmpeg_mod._save_metadata_cache(force=True)
+        ffmpeg_mod._reset_metadata_cache_for_tests()
+
+        second = get_metadata(str(video))
+        assert second == first
+        assert probes["count"] == 1, (
+            "get_metadata re-ran ffprobe after a restart — the persisted "
+            "cache was not loaded (or not written). This regresses the "
+            "~700ms-per-thumbnail startup cost."
+        )
+
+    def test_metadata_cache_invalidates_when_file_changes(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """The disk cache is keyed path:size:mtime like the in-memory one —
+        an edited file must re-probe, not serve stale metadata."""
+        import services.ffmpeg as ffmpeg_mod
+        from services.ffmpeg import get_metadata
+
+        video, probes = self._patch_probe(monkeypatch, tmp_path)
+        get_metadata(str(video))
+        ffmpeg_mod._save_metadata_cache(force=True)
+        ffmpeg_mod._reset_metadata_cache_for_tests()
+
+        video.write_bytes(b"different bytes entirely")  # size + mtime change
+        get_metadata(str(video))
+        assert probes["count"] == 2
+
+    def test_corrupt_or_wrong_version_cache_file_is_discarded(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """A corrupt/foreign cache file must never break probing — start
+        empty and re-probe."""
+        import services.ffmpeg as ffmpeg_mod
+        from services.ffmpeg import get_metadata
+
+        video, probes = self._patch_probe(monkeypatch, tmp_path)
+        cache_file = ffmpeg_mod._metadata_cache_path()
+        os.makedirs(os.path.dirname(cache_file), exist_ok=True)
+
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write("{ not json !!!")
+        get_metadata(str(video))
+        assert probes["count"] == 1
+
+        ffmpeg_mod._reset_metadata_cache_for_tests()
+        with open(cache_file, "w", encoding="utf-8") as f:
+            f.write('{"version": 999, "entries": {"x": {"duration": 1}}}')
+        get_metadata(str(video))
+        assert probes["count"] == 2
+
+    def test_first_probe_writes_the_cache_file(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """The write-behind throttle must still flush promptly on the first
+        insert (interval measured from 0), so even a single-probe session
+        persists something."""
+        import services.ffmpeg as ffmpeg_mod
+        from services.ffmpeg import get_metadata
+
+        video, _probes = self._patch_probe(monkeypatch, tmp_path)
+        get_metadata(str(video))
+        cache_file = ffmpeg_mod._metadata_cache_path()
+        assert os.path.exists(cache_file)
+        with open(cache_file, encoding="utf-8") as f:
+            payload = json.load(f)
+        assert payload["version"] == ffmpeg_mod.METADATA_CACHE_VERSION
+        assert len(payload["entries"]) == 1
+
+    def _patch_probe(self, monkeypatch, tmp_path):
+        """Point the module's tempfile at tmp_path (isolates the cache
+        file) and stub run_silent with a counting fake ffprobe."""
+        import services.ffmpeg as ffmpeg_mod
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"placeholder")
+
+        probes = {"count": 0}
+
+        def fake_probe(args, **kw):
+            probes["count"] += 1
+            return MagicMock(returncode=0, stdout=json.dumps({
+                "format": {"duration": "120.0", "format_name": "mp4", "bit_rate": "1000"},
+                "streams": [{"codec_type": "video", "width": 1920, "height": 1080,
+                             "codec_name": "h264", "r_frame_rate": "30/1"}],
+            }))
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", fake_probe)
+        return video, probes
 
     def test_zero_byte_file_raises_before_invoking_ffmpeg(self, monkeypatch, tmp_path):
         """Aborted/incomplete downloads (0-byte files) used to hang

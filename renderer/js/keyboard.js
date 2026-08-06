@@ -4,7 +4,7 @@ import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, onJumpChapter, onJumpBookmark }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev }) {
     this.player = videoPlayer;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
@@ -16,6 +16,8 @@ export class KeyboardHandler {
     this.onToggleQueue = onToggleQueue || null;
     this.onJumpChapter = onJumpChapter || null;
     this.onJumpBookmark = onJumpBookmark || null;
+    this.onLoadNext = onLoadNext || null;
+    this.onLoadPrev = onLoadPrev || null;
     this._bindEvents();
   }
 
@@ -281,6 +283,26 @@ export class KeyboardHandler {
       case 'G':
         e.preventDefault();
         if (this.gapSkipEngine) this.gapSkipEngine.skipToPreviousAction();
+        break;
+
+      case 'n':
+      case 'N':
+        // Next / previous video in the active queue. Same bindings the
+        // detached pop-out window has always used, so the two windows
+        // behave identically. Gated against the editor: swapping the
+        // loaded video out from under an authoring session is worse
+        // than a dead keypress. No-op with no queue, matching the
+        // prev/next buttons (which stay hidden below 2 items).
+        if (this.scriptEditor?.isOpen) break;
+        e.preventDefault();
+        if (this.onLoadNext) this.onLoadNext();
+        break;
+
+      case 'p':
+      case 'P':
+        if (this.scriptEditor?.isOpen) break;
+        e.preventDefault();
+        if (this.onLoadPrev) this.onLoadPrev();
         break;
 
       case 'o':

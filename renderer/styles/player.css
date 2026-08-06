@@ -1281,6 +1281,142 @@ html, body {
    Nielsen #6 recognition over recall. */
 .control-btn__label { display: none; }
 .control-btn--labelled { gap: 6px; }
+
+/* Checkbox items in the ⋮ overflow menu (role="menuitemcheckbox").
+   Used by the inline-viz toggles, which are persistent view state rather
+   than one-shot actions, so they need a visible checked affordance instead
+   of the plain action-row styling. */
+.controls-overflow__check {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 4px;
+  box-sizing: border-box;
+  position: relative;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.controls-overflow__item[aria-checked="true"] .controls-overflow__check {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+/* Tick drawn from two borders rather than a glyph or an icon font, so it
+   can't be affected by icon loading or font fallback. */
+.controls-overflow__item[aria-checked="true"] .controls-overflow__check::after {
+  content: '';
+  position: absolute;
+  left: 4.5px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.controls-overflow__item[aria-checked="true"] {
+  color: var(--accent);
+}
+
+/* ---- Inline script visualization (zaikechi #209) ----
+   Read-only display overlay docked above the control bar: full-duration
+   heatmap strip + windowed timeline graph. pointer-events:none — pure
+   display, all interaction stays on the seek bar. Hidden in the mini
+   player (no room). Rendered inside the player container, so fullscreen
+   works automatically. */
+.inline-viz {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 96px; /* clears the control bar when visible */
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 12px;
+  pointer-events: none;
+  /* User-adjustable (Settings ▸ Playback). 0.8 default so the overlays read
+     clearly without fully masking the video behind them. Set on :root by
+     app.js `_applyInlineVizOpacity`; the fallback keeps the overlay visible
+     if the property is ever missing. */
+  opacity: var(--inline-viz-opacity, 0.8);
+  /* `bottom: 96px` clears the control bar, but the bar is only there when
+     the controls are showing — otherwise the overlay floats with a dead gap
+     underneath it. Drop it down to sit near the bottom edge when the
+     controls hide, and lift it back in step with them.
+     Animating `transform` rather than `bottom`: transform is composited, so
+     it stays smooth over playing video, whereas `bottom` relayouts every
+     frame. Same duration as the control bar's own fade, so the two move
+     together instead of racing. */
+  transform: translateY(80px);
+  transition: transform var(--transition-normal);
+  will-change: transform;
+  /* Below .player__controls (60) and .player__top-bar — the bars stay
+     interactive above the overlay when both are visible. */
+  z-index: 5;
+}
+
+/* Controls showing → sit above the control bar. */
+.player-container.controls-visible .inline-viz {
+  transform: translateY(0);
+}
+
+/* Reduced motion: still reposition (the dead gap is the bug being fixed),
+   just without the slide. */
+@media (prefers-reduced-motion: reduce) {
+  .inline-viz { transition: none; }
+}
+
+.inline-viz__heatmap {
+  display: block;
+  width: 100%;
+  height: 22px;
+  border-radius: 4px;
+  opacity: 0.9;
+}
+
+.inline-viz__timeline {
+  width: 100%;
+  height: 92px;
+  border-radius: 4px;
+  overflow: hidden;
+  opacity: 0.92;
+}
+
+.inline-viz__timeline canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.player-container--mini .inline-viz {
+  display: none;
+}
+
+/* WCO chrome (see nav-bar.css): in the player view the nav bar is hidden,
+   so the player top bar doubles as the title bar while it's visible —
+   draggable, with the same caption-button inset. When it auto-hides the
+   top strip is just video (same as fullscreen video apps). */
+html.has-wco .player__top-bar {
+  -webkit-app-region: drag;
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw) + 12px);
+}
+
+/* ONLY the queue toggle drops below the caption buttons (Dave 2026-08-04:
+   level with min/max/close it "causes a weird effect"; the rest of the bar
+   looked better where it was). Taken out of the flex row and pinned under
+   the caption strip, so the back button, title and chips keep their original
+   positions. `titlebar-area-height` is the WCO-reported height, falling back
+   to the 48px the overlay is configured with. */
+html.has-wco .player__queue-toggle {
+  position: absolute;
+  top: calc(env(titlebar-area-height, 48px) + 4px);
+  right: 12px;
+  -webkit-app-region: no-drag;
+}
+
+html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
 @media (min-width: 1024px) {
   .control-btn--labelled .control-btn__label {
     display: inline;

@@ -50,6 +50,7 @@ if (PORTABLE_DIR) {
 
 const log = require('./logger');
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState } = require('./python-bridge');
+const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
 const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
@@ -60,6 +61,13 @@ const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
 
 const eroScripts = new EroScriptsAPI();
+
+// Warm the electron-conf ESM import NOW (module load, before whenReady) —
+// it was ~1s of the serial initStore cost on the startup trace and doesn't
+// touch userData (only `new Conf` inside initStore does, safely after the
+// portable redirect above). Resolves in parallel with Chromium init + the
+// recovery sweep.
+store.preloadModule();
 
 if (IS_PORTABLE) {
   log.info(`[Portable] Running in portable mode — data dir: ${app.getPath('userData')}`);
@@ -76,11 +84,35 @@ if (IS_PORTABLE) {
 // Windows/macOS (Chromium ignores it on those platforms) so leaving
 // it unconditional keeps the code simple. Must be called BEFORE
 // app.whenReady() — Chromium feature flags are parsed at init.
+// Gated by a user setting (player.hwVideoDecode, default ON = prior behaviour)
+// so a machine whose VA-API driver is broken can turn it OFF and fall back to
+// software decode. Force-using a broken driver (esp. nvidia-vaapi, which
+// VaapiIgnoreDriverChecks uses even when it can't actually decode) makes the
+// <video> error out — community report (Galm): a H.264 file played in VLC/MPC
+// and on an AMD box but failed in FunSync on an NVIDIA/Linux box. The store
+// isn't initialised until whenReady and Chromium flags must be set before
+// that, so read config.json directly here.
 if (process.platform === 'linux') {
-  app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiIgnoreDriverChecks');
+  let hwDecode = true;
+  try {
+    const raw = fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8');
+    if (JSON.parse(raw)?.settings?.player?.hwVideoDecode === false) hwDecode = false;
+  } catch { /* no config yet → default ON */ }
+  if (hwDecode) {
+    app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiIgnoreDriverChecks');
+  } else {
+    // Force software decode. Chromium on Linux can't use NVDEC the way VLC/MPC
+    // do, so when VA-API is broken this is the only path that plays at all.
+    app.commandLine.appendSwitch('disable-accelerated-video-decode');
+  }
 }
 
 let mainWindow = null;
+// Per-window poll handles for holding the caption buttons visible while the
+// cursor is over them (see the update-window-chrome handler). Keyed by
+// BrowserWindow id — the pop-outs run the same chrome, so a single shared
+// handle would let one window cancel another's hold.
+const _captionHoverPolls = new Map();
 
 // Result of the boot-time auto-recovery check, held so the renderer
 // can pick it up via IPC and surface a toast on the first paint. Null
@@ -109,6 +141,12 @@ async function _preActionSnapshot(label) {
 // Disposer for the electron-conf onDidAnyChange subscription. Held so
 // before-quit can clean up the listener before the app exits.
 let _unsubscribeFromStore = null;
+
+// Resolves when the Python backend has booted (or startBackend gave up —
+// it always resolves within 10s). fetchWithTimeout awaits this so backend
+// proxy IPC issued while the window is ahead of uvicorn waits instead of
+// failing. Null until whenReady kicks the parallel boot off.
+let _backendReadyPromise = null;
 
 // Guard for the deferred-quit flow. before-quit fires twice: once when
 // we e.preventDefault() to take a final snapshot, and a second time
@@ -146,6 +184,13 @@ function createWindow() {
   splash.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html'));
   splash.center();
 
+  // Theme-matched window chrome (ScriptPlayer+-style "one surface" look):
+  // backgroundColor follows the saved theme so launch/resize never flashes
+  // a foreign color, and on Windows the native title bar is replaced by a
+  // Window Controls Overlay tinted to the app surface — the nav bar becomes
+  // the title bar (drag region + caption-button inset in nav-bar.css).
+  // Linux keeps the native frame (WCO overlay is Windows-only in Electron).
+  const winColors = resolveWindowColors();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -153,7 +198,17 @@ function createWindow() {
     minHeight: 500,
     title: "FunSync Player",
     icon: path.join(__dirname, '..', 'assets', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
-    backgroundColor: "#1a1a2e",
+    backgroundColor: winColors.background,
+    ...(process.platform === 'win32' ? {
+      titleBarStyle: 'hidden',
+      titleBarOverlay: {
+        // chrome = the nav bar's surface (--surface-elevated), NOT the page
+        // background — the caption buttons live inside the nav bar.
+        color: winColors.chrome,
+        symbolColor: winColors.symbol,
+        height: 48, // matches .nav-bar height so caption buttons align with it
+      },
+    } : {}),
     webPreferences: {
       preload: path.join(__dirname, "preload.js"),
       contextIsolation: true,
@@ -183,8 +238,12 @@ function createWindow() {
     }
   });
 
+  const _mainWinId = mainWindow.id;
   mainWindow.on('closed', () => {
     mainWindow = null;
+    // Drop the caption-hover poll if the window went away mid-hover.
+    const poll = _captionHoverPolls.get(_mainWinId);
+    if (poll) { clearInterval(poll); _captionHoverPolls.delete(_mainWinId); }
   });
 
   // Open DevTools in development
@@ -309,20 +368,28 @@ app.whenReady().then(async () => {
     log.warn('[Backup] Startup snapshot failed:', err.message);
   }
 
+  // Start the Python backend IN PARALLEL with window creation — it was
+  // serially awaited here, putting ~2.1s of interpreter + FastAPI import
+  // time between launch and first pixel. Nothing the renderer does in its
+  // first seconds needs the backend: library scan is main-process fs, and
+  // every backend proxy IPC awaits _backendReadyPromise inside
+  // fetchWithTimeout (so early thumbnail requests WAIT for uvicorn instead
+  // of failing into the expensive renderer <video>-decode fallback).
+  // startBackend always resolves (10s internal timeout), never rejects.
   const _tBackend = Date.now();
-  await startBackend();
-  log.info(`[Timing main] startBackend (Python spawn + uvicorn boot): ${Date.now() - _tBackend}ms`);
-
-  // Backend health-monitor wiring. Forward state transitions to every
-  // renderer window via IPC so the disconnected-banner can react.
-  // Started here (not inside startBackend) so manual restarts can
-  // re-call startHealthMonitor without coupling through the spawn.
-  setHealthListener((state, detail) => {
-    BrowserWindow.getAllWindows().forEach(w =>
-      w.webContents.send('backend-status', { state, detail })
-    );
+  _backendReadyPromise = startBackend().then(() => {
+    log.info(`[Timing main] startBackend (parallel with window): ${Date.now() - _tBackend}ms`);
+    // Backend health-monitor wiring. Forward state transitions to every
+    // renderer window via IPC so the disconnected-banner can react.
+    // Started here (not inside startBackend) so manual restarts can
+    // re-call startHealthMonitor without coupling through the spawn.
+    setHealthListener((state, detail) => {
+      BrowserWindow.getAllWindows().forEach(w =>
+        w.webContents.send('backend-status', { state, detail })
+      );
+    });
+    startHealthMonitor();
   });
-  startHealthMonitor();
 
   const _tWindow = Date.now();
   createWindow();
@@ -616,6 +683,119 @@ ipcMain.handle('set-playlist-shuffle', (_event, id, shuffle) => {
   store.setPlaylistShuffle(id, shuffle);
 });
 
+ipcMain.handle('set-playlist-balance', (_event, id, balance) => {
+  store.setPlaylistBalance(id, balance);
+});
+
+ipcMain.handle('set-playlist-prefer-unwatched', (_event, id, prefer) => {
+  store.setPlaylistPreferUnwatched(id, prefer);
+});
+
+// Live theme switch → retint the window background + (Windows) title-bar
+// overlay so the chrome follows the UI instantly. Theme is passed directly
+// rather than re-read from disk: the settings write is fire-and-forget IPC
+// and a disk read here could race it.
+/**
+ * Retint the OS window chrome. `opts` lets the player view override the
+ * caption strip (Dave 2026-08-04):
+ *   overVideo   — caption background fully transparent so the buttons sit
+ *                 directly on the video instead of a solid nav-bar-coloured
+ *                 block. Symbols forced white: the video behind them is dark
+ *                 regardless of the app theme.
+ *   hideSymbols — symbols transparent too, so the buttons fade out together
+ *                 with the seek bar when the controls auto-hide.
+ * Windows-only; other platforms just get the background colour.
+ */
+/**
+ * Is the OS cursor currently inside the caption-button strip?
+ *
+ * The caption buttons are drawn by the browser/OS, not the page, so the
+ * renderer never receives hover events over them — there is no DOM element
+ * to listen on. `screen.getCursorScreenPoint()` reads the pointer directly,
+ * which is the only way to answer this. `rect` comes from the renderer's
+ * `windowControlsOverlay.getTitlebarAreaRect()` in CSS px relative to the
+ * content area, so it maps onto content bounds.
+ */
+function _cursorOverCaption(win, rect) {
+  if (!rect || !win || win.isDestroyed()) return false;
+  try {
+    const { screen } = require('electron'); // lazily: unavailable before ready
+    const b = win.getContentBounds();
+    const p = screen.getCursorScreenPoint();
+    return p.x >= b.x + rect.x && p.x <= b.x + rect.x + rect.width
+        && p.y >= b.y + rect.y && p.y <= b.y + rect.y + rect.height;
+  } catch {
+    return false;
+  }
+}
+
+ipcMain.handle('update-window-chrome', (event, theme, opts = {}) => {
+  const { colorsForTheme, TITLE_BAR_HEIGHT } = require('./window-bg');
+  const colors = colorsForTheme(theme);
+  // Target the window that ASKED, not mainWindow — the pop-outs run the same
+  // themed overlay and each retints itself (a hardcoded mainWindow here made
+  // a pop-out's theme change silently repaint the main window instead).
+  const win = BrowserWindow.fromWebContents(event.sender) || mainWindow;
+  if (!win || win.isDestroyed()) return;
+  try { win.setBackgroundColor?.(colors.background); } catch { /* best-effort */ }
+  if (process.platform !== 'win32') return;
+
+  const TRANSPARENT = '#00000000'; // 8-digit hex: RRGGBBAA
+  // Hover scrim. White caption symbols vanish against a white video frame,
+  // and we cannot recolour them per-pixel (the buttons are OS-drawn; the API
+  // exposes one flat symbol colour). So darken the strip behind them instead.
+  //
+  // 0.8 alpha is picked for contrast, not taste: over a pure white frame the
+  // composite lands at ~0.20 relative luminance, giving white symbols ~4.2:1
+  // — clear of the 3:1 WCAG floor for UI components. At the 0.7 the player's
+  // top-bar gradient uses it would sit at exactly 3.0:1, i.e. borderline on
+  // the worst-case frame.
+  const HOVER_SCRIM = '#000000CC';
+  const apply = (hideSymbols, scrim = false) => {
+    if (win.isDestroyed()) return;
+    try {
+      win.setTitleBarOverlay?.({
+        color: opts.overVideo
+          ? (scrim ? HOVER_SCRIM : TRANSPARENT)
+          : colors.chrome, // else nav-bar surface, see window-bg.js
+        symbolColor: hideSymbols
+          ? TRANSPARENT
+          : (opts.overVideo ? '#ffffff' : colors.symbol),
+        height: TITLE_BAR_HEIGHT,
+      });
+    } catch { /* overlay not active (e.g. frame fallback) */ }
+  };
+
+  // Any new request for THIS window supersedes its pending hover-hold.
+  const prev = _captionHoverPolls.get(win.id);
+  if (prev) { clearInterval(prev); _captionHoverPolls.delete(win.id); }
+
+  // Hovering the caption strip keeps ALL THREE buttons lit even as the player
+  // controls fade (Dave 2026-08-04) — they are one visual group, so hiding
+  // them under the cursor reads as the app losing its window controls. Hold
+  // them, then poll until the pointer leaves and apply the hide late.
+  //
+  // This hold is also the ONLY state that needs the scrim. With the controls
+  // visible the player's top bar already paints its gradient across the full
+  // width, and that shows through the transparent strip — white symbols read
+  // fine. It's only here, controls faded but symbols held, that they sit on
+  // raw video with nothing behind them.
+  if (opts.hideSymbols && _cursorOverCaption(win, opts.captionRect)) {
+    apply(false, true);
+    const id = setInterval(() => {
+      if (win.isDestroyed()) { clearInterval(id); _captionHoverPolls.delete(win.id); return; }
+      if (_cursorOverCaption(win, opts.captionRect)) return;
+      clearInterval(id);
+      _captionHoverPolls.delete(win.id);
+      apply(true); // pointer left → symbols and scrim both go
+    }, 300);
+    _captionHoverPolls.set(win.id, id);
+    return;
+  }
+
+  apply(!!opts.hideSymbols);
+});
+
 ipcMain.handle('set-playlist-video-paths', (_event, id, videoPaths) => {
   store.setPlaylistVideoPaths(id, videoPaths);
 });
@@ -721,6 +901,15 @@ ipcMain.handle('open-file-dialog', async () => {
  * the caller can toast "backend timed out" and move on.
  */
 async function fetchWithTimeout(url, opts = {}, timeoutMs = 15000) {
+  // Backend boots in parallel with the window (see whenReady). Every
+  // backend proxy funnels through here, so gate on backend-ready: an
+  // early request WAITS for uvicorn (bounded — startBackend resolves
+  // within 10s no matter what) instead of failing fast, which would
+  // trip the renderer's expensive <video>-decode thumbnail fallback
+  // during the exact seconds we're trying to speed up.
+  if (_backendReadyPromise) {
+    try { await _backendReadyPromise; } catch { /* proceed; fetch will surface the state */ }
+  }
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -782,6 +971,10 @@ ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {})
     video_path: videoPath,
     seek_pct: String(opts.seekPct ?? 0.1),
     width: String(opts.width ?? 320),
+    // Frame-accurate grab for user-picked thumbnail frames ("Set
+    // thumbnail frame…") — the default path is keyframe-only + a 10s
+    // minimum seek, both of which would silently change the frame.
+    exact: String(!!opts.exact),
   });
   const url = `http://localhost:${port}/thumbnails/single?${params}`;
   try {
@@ -1302,6 +1495,86 @@ ipcMain.handle('select-subtitle', async () => {
   if (result.canceled || result.filePaths.length === 0) return null;
   const filePath = result.filePaths[0];
   return { name: path.basename(filePath), path: filePath };
+});
+
+// ---- Custom thumbnail images (user-uploaded posters, community #217) ----
+// Image I/O stays in the main process (renderer is sandboxed). The chosen
+// image is decoded via nativeImage, downscaled to tile width, re-encoded as
+// JPEG and stored under userData/custom-thumbs keyed by a hash of the video
+// path (re-picking overwrites). The renderer displays thumbnails as data
+// URLs (CSP img-src allows data:, not file:), so import/read both return one.
+
+const customThumbsDir = () => path.join(app.getPath('userData'), 'custom-thumbs');
+
+ipcMain.handle('select-thumbnail-image', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [
+      // Uppercase variants included because Linux (GTK) dialog filters are
+      // CASE-SENSITIVE — without them a camera's IMG.JPG wouldn't match.
+      // Harmless on Windows (case-insensitive there).
+      { name: 'Images', extensions: ['jpg', 'jpeg', 'png', 'webp', 'JPG', 'JPEG', 'PNG', 'WEBP'] },
+    ],
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  const filePath = result.filePaths[0];
+  return { name: path.basename(filePath), path: filePath };
+});
+
+ipcMain.handle('import-custom-thumbnail', async (_event, videoPath, imagePath) => {
+  try {
+    const { nativeImage } = require('electron');
+    const crypto = require('crypto');
+    const dir = customThumbsDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const hash = crypto.createHash('md5').update(String(videoPath)).digest('hex');
+    // Re-picking may change the extension (jpg → raw png copy etc.) — drop
+    // any previous cached file for this video first so no stale sibling
+    // lingers.
+    for (const f of fs.readdirSync(dir)) {
+      if (f.startsWith(`${hash}.`)) { try { fs.unlinkSync(path.join(dir, f)); } catch { /* best-effort */ } }
+    }
+    let img = nativeImage.createFromPath(imagePath);
+    if (!img.isEmpty()) {
+      const size = img.getSize();
+      if (size.width > 640) img = img.resize({ width: 640 });
+      const jpeg = img.toJPEG(82);
+      const outPath = path.join(dir, `${hash}.jpg`);
+      fs.writeFileSync(outPath, jpeg);
+      return { path: outPath, dataUrl: `data:image/jpeg;base64,${jpeg.toString('base64')}` };
+    }
+    // Format nativeImage can't decode (e.g. some webp encodes) — copy the
+    // raw file; Chromium's <img> still renders it from a data URL.
+    const ext = path.extname(imagePath).toLowerCase().replace('.', '') || 'img';
+    const outPath = path.join(dir, `${hash}.${ext}`);
+    fs.copyFileSync(imagePath, outPath);
+    const bytes = fs.readFileSync(outPath);
+    const mime = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+    return { path: outPath, dataUrl: `data:${mime};base64,${bytes.toString('base64')}` };
+  } catch (err) {
+    log.warn('Custom thumbnail import failed:', err.message);
+    return null;
+  }
+});
+
+// The backend serves custom-thumb images to the phone (F7) — it needs to
+// know (and validate against) the same dir the import IPC writes into.
+ipcMain.handle('get-custom-thumbs-dir', () => customThumbsDir());
+
+ipcMain.handle('read-custom-thumbnail', async (_event, cachedPath) => {
+  try {
+    // Only serve files from OUR cache dir — the renderer stores the path in
+    // settings, so treat it as untrusted (no arbitrary-file reads).
+    const resolved = path.resolve(String(cachedPath));
+    if (!resolved.startsWith(path.resolve(customThumbsDir()) + path.sep)) return null;
+    if (!fs.existsSync(resolved)) return null;
+    const bytes = fs.readFileSync(resolved);
+    const ext = path.extname(resolved).toLowerCase();
+    const mime = ext === '.png' ? 'image/png' : ext === '.webp' ? 'image/webp' : 'image/jpeg';
+    return { dataUrl: `data:${mime};base64,${bytes.toString('base64')}` };
+  } catch {
+    return null;
+  }
 });
 
 ipcMain.handle('read-funscript', async (_event, filePath) => {

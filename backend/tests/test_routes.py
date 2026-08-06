@@ -176,3 +176,43 @@ async def test_remote_proxy_unknown_token_404(client):
     assert resp.status_code == 404
     resp2 = await client.get("/api/media/remote/nope/master.m3u8")
     assert resp2.status_code == 404
+
+
+# --- Phone-triggered rescan handshake ---
+
+@pytest.mark.anyio
+async def test_request_rescan_bumps_counter_desktop_sees_it(client):
+    """The phone's POST /api/remote/request-rescan advances the counter that the
+    desktop polls via GET /api/media/rescan-request, so the desktop knows to
+    rescan + re-register newly-added files."""
+    before = (await client.get("/api/media/rescan-request")).json()["seq"]
+
+    bumped = (await client.post("/api/remote/request-rescan")).json()["seq"]
+    assert bumped == before + 1
+
+    # The desktop-facing poll now reports the advanced value.
+    after = (await client.get("/api/media/rescan-request")).json()["seq"]
+    assert after == bumped
+
+    # Monotonic — a second request advances again.
+    again = (await client.post("/api/remote/request-rescan")).json()["seq"]
+    assert again == bumped + 1
+
+
+def test_remote_assets_are_no_cache():
+    """Stale-asset guard (2026-08-04): every /remote/ + /locales/ response
+    carries Cache-Control: no-cache so a phone can never mix a cached
+    index.html/style.css with a freshly-updated app.js after an app
+    update — the broken-hybrid-UI bug required a manual reload to clear."""
+    from fastapi.testclient import TestClient
+    from main import app
+    client = TestClient(app)
+    res = client.get("/remote/")
+    assert res.status_code == 200
+    assert res.headers.get("cache-control") == "no-cache"
+    res = client.get("/remote/app.js")
+    assert res.status_code == 200
+    assert res.headers.get("cache-control") == "no-cache"
+    # Non-remote routes keep their own caching policies.
+    res = client.get("/health")
+    assert res.headers.get("cache-control") != "no-cache"

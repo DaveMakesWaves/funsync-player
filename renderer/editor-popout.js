@@ -24,6 +24,7 @@ import {
   WandSparkles, BookmarkPlus, FileText, Rows3,
 } from './js/icons.js';
 import { openKeyboardHelp, getEditorShortcutGroups } from './js/keyboard-help.js';
+import { applyWcoClass } from './js/wco.js';
 import {
   TIME_TICK, VIDEO_META, INITIAL_STATE, ACTIONS_CHANGED, SCRIPTS_CHANGED, THEME, SETTINGS,
   READY, msg, editOp,
@@ -41,6 +42,9 @@ import {
   REQUEST_TOGGLE_WAVEFORM,
 } from './js/editor-popout-protocol.js';
 
+// Frameless window → the page owns the drag region (.popout-titlebar).
+applyWcoClass();
+
 const HOST_ID = 'editor-popout-host';
 const host = document.getElementById(HOST_ID);
 if (!host) throw new Error('[editor-popout] missing host element #' + HOST_ID);
@@ -53,6 +57,11 @@ applyTheme(document.documentElement.dataset.theme || 'dark');
 function applyTheme(t) {
   if (t === 'dark' || t === 'light') {
     document.documentElement.dataset.theme = t;
+  }
+  // Retint this window's native chrome too, or the caption strip keeps the
+  // colours it was CREATED with while the main window follows the theme.
+  if (t === 'dark' || t === 'light' || t === 'system') {
+    try { window.funsync?.updateWindowChrome?.(t); } catch { /* non-fatal */ }
   }
 }
 function applyStyle(s) {

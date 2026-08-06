@@ -159,4 +159,69 @@ describe('thumbnail-cache', () => {
       expect(cache.get('/v/1.mp4', 1)).toBeNull();           // evicted instead
     });
   });
+
+  // --- Cross-view sharing (ProfKiwi, EroScripts #225) ------------------
+  //
+  // Thumbnails built up in the Library used to be invisible to the
+  // Playlists and Categories views: only library.js imported this module,
+  // so those two re-fetched every tile on each view switch. They now read
+  // through the same cache, which only works because all three key on
+  // mtime 0 — hence the explicit key-agreement test below.
+  describe('getEntry — duration carried alongside the image', () => {
+    it('returns dataUrl and duration together', () => {
+      cache.set('/v/a.mp4', 0, 'data:image/jpeg;base64,AAA', 123.5);
+      expect(cache.getEntry('/v/a.mp4', 0)).toEqual({
+        dataUrl: 'data:image/jpeg;base64,AAA', duration: 123.5,
+      });
+    });
+
+    it('reports duration 0 when none was stored', () => {
+      cache.set('/v/b.mp4', 0, 'data:image/jpeg;base64,BBB');
+      expect(cache.getEntry('/v/b.mp4', 0).duration).toBe(0);
+    });
+
+    it('does NOT erase a known duration when re-set without one', () => {
+      // The playlists/categories views can cache a tile they fetched
+      // without a duration. That must not wipe the duration the library
+      // already stored, or the badge would vanish on the next view switch.
+      cache.set('/v/c.mp4', 0, 'data:image/jpeg;base64,CCC', 42);
+      cache.set('/v/c.mp4', 0, 'data:image/jpeg;base64,CCC');
+      expect(cache.getEntry('/v/c.mp4', 0).duration).toBe(42);
+    });
+
+    it('ignores a non-finite or zero duration', () => {
+      cache.set('/v/d.mp4', 0, 'data:image/jpeg;base64,DDD', NaN);
+      expect(cache.getEntry('/v/d.mp4', 0).duration).toBe(0);
+      cache.set('/v/e.mp4', 0, 'data:image/jpeg;base64,EEE', 0);
+      expect(cache.getEntry('/v/e.mp4', 0).duration).toBe(0);
+    });
+
+    it('misses on a different mtime, like get()', () => {
+      cache.set('/v/f.mp4', 0, 'data:image/jpeg;base64,FFF', 10);
+      expect(cache.getEntry('/v/f.mp4', 99)).toBeNull();
+      expect(cache.getEntry('', 0)).toBeNull();
+    });
+  });
+
+  describe('get() keeps its string contract', () => {
+    it('still returns a bare data URL, not the entry object', () => {
+      // library.js has ~11 call sites expecting a string; getEntry was
+      // added rather than changing this return type.
+      cache.set('/v/g.mp4', 0, 'data:image/jpeg;base64,GGG', 7);
+      expect(cache.get('/v/g.mp4', 0)).toBe('data:image/jpeg;base64,GGG');
+    });
+  });
+
+  describe('all three views share one entry (mtime key 0)', () => {
+    it('a tile cached under key 0 is readable by every view', () => {
+      // If any view drifted to a different mtime key the sharing would
+      // silently stop and each view would re-fetch again.
+      cache.set('/v/shared.mp4', 0, 'data:image/jpeg;base64,SHARED', 60);
+      expect(cache.get('/v/shared.mp4', 0)).toBe('data:image/jpeg;base64,SHARED');
+      expect(cache.getEntry('/v/shared.mp4', 0).duration).toBe(60);
+      // Library invalidation (custom thumb / pin change) clears it for all.
+      cache.remove('/v/shared.mp4', 0);
+      expect(cache.getEntry('/v/shared.mp4', 0)).toBeNull();
+    });
+  });
 });

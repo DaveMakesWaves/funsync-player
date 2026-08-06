@@ -6,6 +6,9 @@ import os
 import hashlib
 import sys
 import tempfile
+import threading
+import time
+import atexit
 from typing import Any
 
 
@@ -55,13 +58,119 @@ def run_silent(*args, **kwargs):
     return subprocess.run(*args, **kwargs)
 
 
-# In-memory metadata cache. Keyed by (path, size, mtime) so file edits
-# invalidate naturally. The thumbnail-single endpoint calls
-# get_metadata for EVERY thumbnail to know the duration; without
-# caching, that doubles the per-thumbnail cost (ffprobe + ffmpeg).
-# Cache survives the lifetime of the backend process; no need to bound
-# growth — entries are tiny dicts and a library of 10k videos is < 1MB.
+# Metadata cache. Keyed by (path, size, mtime) so file edits invalidate
+# naturally. The thumbnail-single endpoint calls get_metadata for EVERY
+# thumbnail to know the duration; without caching, that doubles the
+# per-thumbnail cost (ffprobe + ffmpeg).
+#
+# PERSISTED TO DISK (2026-08-03): the cache used to be in-memory only, so
+# it died with the backend process — i.e. on EVERY app launch. Startup
+# profiling on a 420-video library showed each visible card paying a fresh
+# ~700ms ffprobe for a video probed dozens of times before (~7s of the
+# ~13s startup; the thumbnail JPEGs themselves were disk-cached and
+# near-free). The cache now loads lazily from a JSON file in the same
+# temp directory as the thumbnail cache (if the OS cleans temp, both die
+# together and both rebuild) and is written back with a throttle.
+#
+# Concurrency: FastAPI runs sync route handlers in a threadpool, so
+# get_metadata races with itself — all cache state is guarded by
+# _metadata_cache_lock. The disk write is atomic (tmp file + os.replace,
+# which is atomic on both Windows and POSIX) so a concurrent second
+# backend instance can't observe a torn file.
+#
+# Loss window: the write-behind throttle means a hard kill (Windows
+# taskkill /F skips atexit) can lose the last few seconds of NEW probes.
+# Cost: those videos re-probe once next launch. Graceful exits (Linux
+# SIGTERM, dev Ctrl-C) flush via atexit.
 _metadata_cache: dict[str, dict[str, Any]] = {}
+_metadata_cache_lock = threading.Lock()
+_metadata_cache_loaded = False
+_metadata_cache_dirty = 0          # new entries since last successful save
+_metadata_cache_last_save = 0.0    # time.monotonic() of last save attempt
+
+METADATA_CACHE_VERSION = 1
+# ~200 bytes/entry → 5000 entries ≈ 1MB ceiling. Oldest-inserted pruned
+# first on save; stale keys (moved/renamed/deleted files) age out this way.
+METADATA_CACHE_MAX_ENTRIES = 5000
+METADATA_CACHE_SAVE_INTERVAL_SEC = 2.0
+METADATA_CACHE_SAVE_BATCH = 16     # force a save every N new entries
+
+
+def _metadata_cache_path() -> str:
+    # Resolved at call time (not import) so tests that monkeypatch
+    # `tempfile` on this module isolate the file, mirroring the
+    # thumbnail-cache tests.
+    return os.path.join(tempfile.gettempdir(), "funsync_thumbs", "metadata-cache-v1.json")
+
+
+def _load_metadata_cache_locked() -> None:
+    """Populate _metadata_cache from disk, once. Caller holds the lock.
+    Missing/corrupt/wrong-version files are silently discarded — the cache
+    is a pure accelerator and must never block a probe."""
+    global _metadata_cache_loaded
+    if _metadata_cache_loaded:
+        return
+    _metadata_cache_loaded = True
+    try:
+        with open(_metadata_cache_path(), encoding="utf-8") as f:
+            payload = json.load(f)
+        if (isinstance(payload, dict)
+                and payload.get("version") == METADATA_CACHE_VERSION
+                and isinstance(payload.get("entries"), dict)):
+            for key, value in payload["entries"].items():
+                if isinstance(key, str) and isinstance(value, dict):
+                    _metadata_cache[key] = value
+    except (OSError, ValueError):
+        pass  # no cache yet / unreadable / corrupt JSON → start empty
+
+
+def _save_metadata_cache(force: bool = False) -> None:
+    """Write-behind persistence. Throttled so a cold library scan doesn't
+    rewrite the file hundreds of times; `force` (atexit) flushes whatever
+    is pending. Failures are swallowed — worst case is re-probing later."""
+    global _metadata_cache_dirty, _metadata_cache_last_save
+    with _metadata_cache_lock:
+        if _metadata_cache_dirty == 0:
+            return
+        now = time.monotonic()
+        if (not force
+                and _metadata_cache_dirty < METADATA_CACHE_SAVE_BATCH
+                and (now - _metadata_cache_last_save) < METADATA_CACHE_SAVE_INTERVAL_SEC):
+            return
+        # Prune oldest-inserted entries beyond the cap (dict preserves
+        # insertion order; disk-loaded entries were inserted first).
+        excess = len(_metadata_cache) - METADATA_CACHE_MAX_ENTRIES
+        if excess > 0:
+            for key in list(_metadata_cache)[:excess]:
+                del _metadata_cache[key]
+        snapshot = {"version": METADATA_CACHE_VERSION, "entries": dict(_metadata_cache)}
+        _metadata_cache_dirty = 0
+        _metadata_cache_last_save = now
+    # Serialize + write OUTSIDE the lock — probes shouldn't wait on disk.
+    try:
+        path = _metadata_cache_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = f"{path}.tmp-{os.getpid()}"
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, ensure_ascii=False)
+        os.replace(tmp_path, path)  # atomic on Windows AND POSIX
+    except OSError:
+        pass
+
+
+atexit.register(lambda: _save_metadata_cache(force=True))
+
+
+def _reset_metadata_cache_for_tests() -> None:
+    """Test hook: drop all in-memory cache state so a test can simulate a
+    backend restart (the disk file is untouched — point the module's
+    `tempfile` at a tmp_path to isolate that too)."""
+    global _metadata_cache_loaded, _metadata_cache_dirty, _metadata_cache_last_save
+    with _metadata_cache_lock:
+        _metadata_cache.clear()
+        _metadata_cache_loaded = False
+        _metadata_cache_dirty = 0
+        _metadata_cache_last_save = 0.0
 
 # Per-thumbnail ffmpeg decode budget. With the `-skip_frame nokey` strategy a
 # single frame decodes in ~1s (5.7s max in the 8K-HEVC benchmark), stretching
@@ -93,10 +202,13 @@ def get_metadata(video_path: str) -> dict[str, Any]:
 
     # Cache lookup — most callers will hit this for the same files
     # repeatedly during a session (each thumbnail call previously
-    # re-ran ffprobe wastefully).
+    # re-ran ffprobe wastefully). First call lazily loads the persisted
+    # cache from disk so probes survive backend restarts (app launches).
     stat = os.stat(video_path)
     cache_key = f"{video_path}:{stat.st_size}:{stat.st_mtime}"
-    cached = _metadata_cache.get(cache_key)
+    with _metadata_cache_lock:
+        _load_metadata_cache_locked()
+        cached = _metadata_cache.get(cache_key)
     if cached is not None:
         return cached
 
@@ -160,7 +272,11 @@ def get_metadata(video_path: str) -> dict[str, Any]:
             "fps": _parse_fps(video_stream.get("r_frame_rate", "0/1")),
         })
 
-    _metadata_cache[cache_key] = metadata
+    global _metadata_cache_dirty
+    with _metadata_cache_lock:
+        _metadata_cache[cache_key] = metadata
+        _metadata_cache_dirty += 1
+    _save_metadata_cache()
     return metadata
 
 
@@ -440,6 +556,7 @@ def generate_single_thumbnail(
     video_path: str,
     seek_pct: float = 0.1,
     width: int = 320,
+    exact: bool = False,
 ) -> dict[str, Any]:
     """Generate ONE thumbnail frame for a library card. Single ffmpeg
     invocation — much cheaper than the multi-frame preview generator
@@ -452,6 +569,17 @@ def generate_single_thumbnail(
         video_path: Absolute path to the video file.
         seek_pct: Where in the video to grab (0.0 - 1.0). Default 10%.
         width: Output width in pixels. Height auto-scales.
+        exact: Grab the frame AT seek_pct exactly. Used when the user
+            explicitly picked a frame ("Set thumbnail frame…") — the
+            picker preview shows a frame-accurate seek, so the generated
+            tile must match it (WYSIWYG). Disables the two default-path
+            heuristics that trade accuracy for speed: the 10s minimum
+            seek (studio-ident avoidance) and `-skip_frame nokey`
+            (nearest-keyframe decode). Still a single-frame output — the
+            extra cost is decoding forward from the previous keyframe to
+            the picked timestamp (bounded by one GOP), acceptable for a
+            one-off user-triggered request but NOT for the 8-way bulk
+            library queue, which stays on the fast default path.
 
     Returns:
         Dict with:
@@ -485,7 +613,11 @@ def generate_single_thumbnail(
     # stubs, and v3 software-decode versions are all abandoned and
     # regenerated with the current `-skip_frame nokey` strategy on
     # next view.
-    cache_name = f"single_v4_{int(seek_pct * 1000):04d}_{width}.jpg"
+    # Exact (user-picked) frames get their own cache namespace — a prior
+    # default-path generation at the same pct/width is a *keyframe* grab
+    # and must not satisfy an exact request.
+    marker = "v4e" if exact else "v4"
+    cache_name = f"single_{marker}_{int(seek_pct * 1000):04d}_{width}.jpg"
     output_path = os.path.join(output_dir, cache_name)
 
     # Need duration to compute seek time AND to return alongside the
@@ -516,7 +648,14 @@ def generate_single_thumbnail(
     # don't seek past the action. Inverted from the previous min(...,5s)
     # cap, which sampled directly INTO the studio ident window and
     # produced black thumbnails for most long videos.
-    seek_time = max(10.0, duration * seek_pct) if duration > 60 else duration * seek_pct
+    #
+    # Exact mode: the user picked this timestamp on purpose — never
+    # second-guess it (the clamp silently overrode any pick inside the
+    # first 10s of a longer video).
+    if exact:
+        seek_time = duration * seek_pct
+    else:
+        seek_time = max(10.0, duration * seek_pct) if duration > 60 else duration * seek_pct
 
     try:
         result = run_silent(
@@ -553,7 +692,14 @@ def generate_single_thumbnail(
                 #
                 # See bench/bench_thumbnails.py to re-run on other
                 # hardware. Must come BEFORE -i (decoder option).
-                "-skip_frame", "nokey",
+                #
+                # Omitted in exact mode: skipping non-keyframes makes the
+                # output the nearest KEYFRAME to the seek target (fine
+                # for auto thumbs, wrong for a user-picked frame). Without
+                # it, `-ss` before `-i` is frame-accurate in modern ffmpeg
+                # — it seeks to the prior keyframe and decodes forward to
+                # the exact timestamp.
+                *([] if exact else ["-skip_frame", "nokey"]),
                 # -ss BEFORE -i = fast seek (skips ahead via container
                 # index instead of decoding from the start). Order matters.
                 "-ss", str(seek_time),

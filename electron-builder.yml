@@ -58,6 +58,9 @@ linux:
   # in-app productName "FunSync Player" is preserved for the desktop
   # entry / menu label.
   executableName: funsync-player
+  # Space-free AppImage name so it matches latest-linux.yml (same spaces →
+  # dashes vs GitHub dots mismatch as the Windows installer had).
+  artifactName: FunSync-Player-${version}.${ext}
   target:
     - target: AppImage
       arch: x64
@@ -72,6 +75,13 @@ linux:
         - ffprobe
 
 nsis:
+  # Dash-based, space-free artifact name. The default derives from the
+  # space-containing productName ("FunSync Player Setup X.Y.Z.exe"); GitHub
+  # then rewrites spaces → dots on upload ("FunSync.Player.Setup..."), but
+  # electron-builder writes latest.yml with spaces → DASHES — so the two never
+  # matched and the auto-update download 404'd. Naming the file with dashes up
+  # front makes the file, latest.yml, and the GitHub asset all identical.
+  artifactName: FunSync-Player-Setup-${version}.${ext}
   # Assisted installer (NOT oneClick) — shows a wizard with a destination
   # folder picker and a "create desktop shortcut" checkbox. Default install
   # path stays per-user (`%LOCALAPPDATA%\Programs\funsync-player`); the user

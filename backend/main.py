@@ -44,6 +44,22 @@ _remote_dir = os.path.join(_remote_base, "web-remote")
 if os.path.isdir(_remote_dir):
     app.mount("/remote", StaticFiles(directory=_remote_dir, html=True), name="web-remote")
 
+
+# Stale-asset guard for the web remote (2026-08-04): after an app update the
+# phone would mix cached index.html/style.css with freshly-fetched app.js —
+# broken hybrid UI until a manual reload (bit Dave live on the 0.9 remote
+# rework; versioned URLs wouldn't fully fix it because app.js's sibling ES-
+# module imports cache independently). `no-cache` forces revalidation on
+# every /remote/ asset: StaticFiles serves ETags, so unchanged files are
+# 304s — trivial on LAN — and changed files are always picked up.
+@app.middleware("http")
+async def _remote_no_stale_cache(request, call_next):
+    response = await call_next(request)
+    path = request.url.path
+    if path == "/remote" or path.startswith("/remote/") or path.startswith("/locales/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # Locale bundles for the web-remote i18n module. In packaged builds
 # PyInstaller's spec ships renderer/locales/ as <_MEIPASS>/locales/.
 # In dev they live at <project>/renderer/locales/ (two dirs up from

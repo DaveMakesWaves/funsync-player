@@ -140,8 +140,12 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
   afterEach(() => { delete global.window; });
 
   it('sends DSTOP for legacy firmware AND a neutral-position frame for MFP consumers', async () => {
+    // The neutral frame is for MFP-protocol consumers (restim/Howl) over ws/udp
+    // that don't understand DSTOP. Serial firmware halts in place on DSTOP and
+    // must NOT get the (violent) recenter frame — see the serial-only test in
+    // tcode.test.js.
     const m = new TCodeManager();
-    await m.connect('serial', { path: 'COM3' });
+    await m.connect('websocket', { url: 'ws://restim.local:81' });
     m.stop();
     expect(sent[0]).toBe('DSTOP\n');
     // Second frame is `L0500 L1500 L2500 R0500 R1500 R2500 V0500 A0500 A1500 A2500\n`
@@ -151,7 +155,7 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
   it('scales the neutral frame to 4-digit precision when configured', async () => {
     const m = new TCodeManager();
     m.setPrecision(4);
-    await m.connect('serial', { path: 'COM3' });
+    await m.connect('websocket', { url: 'ws://restim.local:81' });
     m.stop();
     expect(sent[1]).toMatch(/L05000 .* A25000\n$/);
   });

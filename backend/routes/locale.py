@@ -31,30 +31,33 @@ def set_user_data_dir(path: str | None) -> None:
 
 @router.get("/locale")
 async def get_locale():
-    """Return the locale the desktop is currently using.
+    """Return the locale AND theme the desktop is currently using.
 
-    Shape: ``{"locale": "<code>"}`` where code is one of the supported
-    languages (en/zh/ja/ko/de/es/fr/ru). Always returns 200; never
-    raises. The web-remote treats any failure as 'en'.
+    Shape: ``{"locale": "<code>", "theme": "dark"|"light"|"system"}``.
+    The theme field was added 2026-08-04 (web-remote theme mirroring,
+    SCOPE-web-remote-2.md F5) — older phone clients ignore it. Always
+    returns 200; never raises. The web-remote treats any failure as
+    'en' + dark.
     """
+    result = {"locale": "en", "theme": "dark"}
     if not _user_data_dir:
-        return {"locale": "en"}
+        return result
     config_path = os.path.join(_user_data_dir, "config.json")
     try:
         with open(config_path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        locale = (
-            data.get("settings", {})
-            .get("player", {})
-            .get("language")
-        )
+        player = data.get("settings", {}).get("player", {})
+        locale = player.get("language")
         # Whitelist a sensible shape. Don't validate against the
         # supported-locales set here — the web-remote's i18n module
         # already falls back to English for any unknown bundle. Keeping
         # this lenient also means adding a new locale doesn't require
         # a backend code change.
         if isinstance(locale, str) and 2 <= len(locale) <= 8:
-            return {"locale": locale}
+            result["locale"] = locale
+        theme = player.get("theme")
+        if theme in ("dark", "light", "system"):
+            result["theme"] = theme
     except (OSError, json.JSONDecodeError, ValueError):
         pass
-    return {"locale": "en"}
+    return result

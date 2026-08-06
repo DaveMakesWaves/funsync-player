@@ -118,7 +118,8 @@
     },
     "toast": {
       "selfKey": "それはあなた自身の Handy です — すでに Handy タブから制御されています。"
-    }
+    },
+    "popoutWindowTitle": "オーディエンスルーム"
   },
   "nav": {
     "library": "ライブラリ",
@@ -195,6 +196,8 @@
     "devicesConnectionShortcut": "デバイス接続 (H)",
     "editor": "エディタ",
     "scriptEditor": "スクリプトエディタ (E)",
+    "inlineTimeline": "スクリプトタイムライン",
+    "inlineHeatmap": "ヒートマップバー",
     "screenshot": "スクリーンショット",
     "pictureInPicture": "ピクチャ・イン・ピクチャ",
     "miniPlayPause": "再生 / 一時停止",
@@ -344,7 +347,18 @@
     "showingFolder": "表示中: {folder}",
     "openFileLocation": "ファイルの場所を開く",
     "customThumbSet": "サムネイルのフレームを設定…",
+    "customThumbUpload": "サムネイル画像をアップロード…",
+    "customThumbUploadFailed": "この画像は使用できませんでした",
     "customThumbReset": "サムネイルをリセット",
+    "variantDefault": "デフォルト",
+    "assignScriptBulk": "スクリプトを割り当て",
+    "bulkScriptAssigned": "{name} を {count} 本の動画に割り当てました",
+    "kebabGroupOrganize": "整理",
+    "kebabGroupScripts": "スクリプトと字幕",
+    "kebabGroupThumbnail": "サムネイル",
+    "kebabGroupVR": "VR",
+    "kebabExtractAxes": "埋め込みの軸を抽出 ({count})…",
+    "kebabExtractAxesTitle": "{axes} をコンパニオン .funscript ファイルとして保存",
     "customThumbTitle": "サムネイルのフレームを選択",
     "customThumbHint": "スライダーを好きなフレームまでドラッグし、この動画のタイルに使用します。",
     "customThumbUse": "このフレームを使用",
@@ -452,8 +466,10 @@
       "scriptNone": "(なし)",
       "selectScriptBtn": "選択",
       "addRoute": "+ ルートを追加",
-      "variantSearchTitle": "バリエーション用スクリプトを選択"
-    }
+      "variantSearchTitle": "バリエーション用スクリプトを選択",
+      "searchEroScripts": "EroScripts を検索..."
+    },
+    "heatmapUnavailable": "ヒートマップは利用できません"
   },
   "playlists": {
     "title": "プレイリスト",
@@ -482,7 +498,29 @@
     "gridView": "グリッド表示",
     "listView": "リスト表示",
     "detailEmpty": "このプレイリストに動画はありません",
-    "detailEmptyHint": "ライブラリのケバブメニューから動画を追加してください"
+    "detailEmptyHint": "ライブラリのケバブメニューから動画を追加してください",
+    "advanced": {
+      "openTitle": "プレイリストの詳細設定",
+      "title": "プレイリストの詳細設定",
+      "balanceLabel": "どのスクリプトも同じ回数だけ選ばれるようにする",
+      "balanceWhy": "同じスクリプトを使っている動画が複数あることがあります。そのままだと、単に動画の数が多いというだけで、そのスクリプトがシャッフル中に出やすくなります。",
+      "balanceHow": "オンにすると、何本の動画が同じスクリプトを使っていても、スクリプトごとの選ばれやすさが同じになります。動画はその中からランダムに1本選ばれ、次に一周したときは別の動画になることが多いです。",
+      "balanceNeedsShuffleOn": "これはシャッフルがオンのときだけ効果があります。",
+      "balanceNeedsShuffleOff": "使うにはシャッフルをオンにしてください。順番どおりの再生では効果がありません。",
+      "unwatchedLabel": "未視聴を優先",
+      "unwatchedWhy": "シャッフル時に未視聴の動画を先に再生します。視聴済みの動画も最後に再生されます。"
+    },
+    "lastWatched": "最後に視聴",
+    "continueWatching": "続きから",
+    "continueWatchingNamed": "{name} の続きから再生",
+    "resetProgress": "進行状況をリセット",
+    "resetProgressHint": "このプレイリストのマーカーと保存位置を消去します",
+    "resetProgressTitle": "進行状況をリセットしますか?",
+    "resetProgressConfirm": "\"{name}\" のマーカーと、含まれるすべての動画の保存位置を消去します。位置は動画ごとに保存されるため、他のプレイリストにある動画もその位置を失います。",
+    "watched": "視聴済み",
+    "watchedCount": "{total} 本中 {watched} 本視聴済み",
+    "timeLeft": "残り {time}",
+    "continueNamed": "{name} の続きから"
   },
   "categories": {
     "title": "カテゴリ",
@@ -562,6 +600,7 @@
     "orgasmNotConfigured": "オーガズムスクリプトが未設定です — 設定 ▸ 再生 で選択してください",
     "orgasmInvalidScript": "そのファイルは有効な funscript ではありません",
     "orgasmScriptSet": "オーガズムスクリプトを設定しました: {name}",
+    "randomVariant": "ランダムスクリプト: {name}",
     "videoErrorGeneric": "動画の読み込みに失敗しました",
     "mutexTakeover": "{incoming} が {evicted} から引き継ぎました",
     "added": "追加しました",
@@ -626,7 +665,9 @@
     "multiAxisFailed": "マルチ軸: {suffix} スクリプトの読み込みに失敗 ({error})",
     "queueReadFailed": "キュー項目 {name}: スクリプト {script} を読み取れませんでした — 同期なしで再生します",
     "queueReadError": "キュー項目 {name}: スクリプトの読み取りに失敗 ({error}) — 同期なしで再生します",
-    "handyUploadTimeout": "Handy スクリプトのアップロードがタイムアウトしました — 動画は再生されますが Handy は同期されません。接続を確認して動画を再読み込みしてください。"
+    "handyUploadTimeout": "Handy スクリプトのアップロードがタイムアウトしました — 動画は再生されますが Handy は同期されません。接続を確認して動画を再読み込みしてください。",
+    "orgasmRoutingFallback": "オーガズムスイッチ: {devices} が未接続です。すべて接続されるまで単軸で動作します。",
+    "orgasmScriptRecovered": "移動されたフィニッシャースクリプトを{count}件見つけ、パスを更新しました"
   },
   "modal": {
     "noItemsAvailable": "利用可能な項目がありません",
@@ -672,6 +713,8 @@
       "sort": "並べ替え",
       "viewToggleAria": "グリッド/リスト表示を切り替え",
       "viewToggleTitle": "グリッド / リスト",
+      "playAll": "すべて再生",
+      "shufflePlay": "シャッフル",
       "folderAria": "フォルダーで参照",
       "folderTitle": "フォルダーで参照",
       "filters": "フィルター"
@@ -762,6 +805,20 @@
       "connected": "接続済み：{devices}",
       "noDevices": "デスクトップに接続されたデバイスはありません",
       "connectedCount": "{count, plural, other {接続中のデバイス · #}}",
+      "playPause": "再生 / 一時停止",
+      "seek": "シーク",
+      "mute": "ミュート",
+      "fullscreen": "全画面",
+      "loopAB": "A-Bループ",
+      "skipGap": "間をスキップ",
+      "offset": "オフセット",
+      "orgasmHold": "Orgasm Switch - 長押し",
+      "orgasmRiding": "離すと戻ります",
+      "orgasmTap": "Orgasm Switch - タップ",
+      "orgasmStop": "タップで停止",
+      "upNextIn": "次は {seconds}秒後",
+      "upNextPlayNow": "今すぐ再生",
+      "upNextCancel": "キャンセル",
       "intensity": "Funscript の強さ",
       "avg": "平均",
       "max": "最大",
@@ -960,10 +1017,16 @@
       "rangeExtenderResetTitle": "デフォルトにリセット (オフ)",
       "rangeExtenderResetAria": "範囲が狭いスクリプトを引き伸ばすをデフォルトにリセット",
       "orgasmScriptLabel": "オーガズムスイッチのスクリプト",
-      "orgasmScriptChoose": "選択…",
+      "orgasmScriptChoose": "設定…",
       "orgasmScriptClear": "オーガズムスクリプトをクリア",
       "orgasmScriptNone": "なし",
       "orgasmScriptHint": "再生中に X を押し続けると、この短いループスクリプトにデバイスを切り替えます。離すと元に戻ります。Handy、Buttplug、T-Code に対応。",
+      "orgasmModeLabel": "X キーの動作",
+      "orgasmModeHold": "押している間だけ再生(離すと戻る)",
+      "orgasmModeToggle": "押して仕上げ(その後停止)",
+      "orgasmModeHint": "押している間だけ再生:X を押している間ループスクリプトを再生し、離すとメインスクリプトに戻ります。押して仕上げ:X を押すとループ開始、もう一度押すとデバイスを停止します(メインスクリプトには戻りません)。",
+      "randomVariantLabel": "スクリプトバリエーションをランダムに",
+      "randomVariantHint": "複数のスクリプトバリエーションがある動画では、再生のたびにランダムに1つ選択します。有効な間はピン留めしたデフォルトより優先されます。",
       "bpHeader": "Buttplug リニア出力 (BLE)",
       "fieldStrategy": "戦略",
       "strategyActionBoundary": "ストロークごと (BLE でよりスムーズ)",
@@ -976,7 +1039,18 @@
       "fieldMinStroke": "最小ストローク",
       "minStrokeResetTitle": "デフォルトにリセット (60ms)",
       "minStrokeResetAria": "最小ストロークをデフォルトにリセット",
-      "bpHint": "ストロークごとはアクションごとに1つのコマンドを送信しデバイスのファームウェアに補間させます — Handy の WiFi API (HSSP) の感触に近くなります。先読みは BLE の往復時間を補償します。最小ストロークは短すぎるストロークを伸ばして BLE が実行できるようにします。接続コード (HSSP) 経由の Handy では効果はありません。"
+      "bpHint": "ストロークごとはアクションごとに1つのコマンドを送信しデバイスのファームウェアに補間させます — Handy の WiFi API (HSSP) の感触に近くなります。先読みは BLE の往復時間を補償します。最小ストロークは短すぎるストロークを伸ばして BLE が実行できるようにします。接続コード (HSSP) 経由の Handy では効果はありません。",
+      "orgasmSummaryMulti": "多軸（{count}軸）",
+      "orgasmSummaryCustom": "カスタムルーティング（{count}ルート）",
+      "inlineVizOpacityLabel": "オーバーレイの不透明度",
+      "inlineVizOpacityResetTitle": "既定の不透明度に戻す",
+      "inlineVizOpacityHint": "動画の上に重なるスクリプトタイムラインとヒートマップの濃さです。プレーヤーの ⋮ メニューから表示できます。",
+      "orgasmScriptMissing": "(ファイルが見つかりません)",
+      "playbackHeader": "再生",
+      "orgasmHeader": "Orgasm Switch",
+      "videoHeader": "ビデオとパフォーマンス",
+      "rememberSpeedLabel": "再生速度を記憶",
+      "rememberSpeedHint": "別の動画を読み込んでも現在の速度を維持します。既定はオフで、各動画は1倍速で始まります。"
     },
     "appearance": {
       "themeHeader": "テーマ",
@@ -1001,7 +1075,16 @@
       "folderPreviewsLabel": "フォルダーのプレビューサムネイル",
       "folderPreviewsHint": "フォルダーのタイルに中の動画のモザイクを表示します。オフにすると通常のフォルダーアイコンを使用します。",
       "miniPlayerLabel": "閲覧中も再生を続ける",
-      "miniPlayerHint": "動画の再生中にライブラリへ戻ると、停止せずに隅のミニプレーヤーに縮小して再生を続けます(デバイスの駆動も継続します)。"
+      "miniPlayerHint": "動画の再生中にライブラリへ戻ると、停止せずに隅のミニプレーヤーに縮小して再生を続けます(デバイスの駆動も継続します)。",
+      "hwDecodeLabel": "ハードウェアビデオデコード",
+      "hwDecodeHint": "既定でオン。動画が再生されない(黒画面やデコードエラー、NVIDIA + Linux でよくある)場合はオフにしてソフトウェアデコードを使用します。アプリの再起動後に有効になります。",
+      "hwDecodeRestart": "動画デコードの変更を適用するには FunSync を再起動してください。",
+      "cardHeatmapLabel": "ライブラリカードにヒートマップ",
+      "cardHeatmapHint": "各サムネイルの下にストローク速度のヒートマップを表示します。動画のメインスクリプトを使用します。カードごとにスクリプトを読み込むため既定はオフです。",
+      "resumeProgressLabel": "プレイリストに再生位置を表示",
+      "resumeProgressHint": "プレイリストのカードと行にバーで再生位置を表示します。プレイリスト再生のみ。メインライブラリには表示されません。",
+      "hideDupesLabel": "重複した名前を隠す",
+      "hideDupesHint": "複数の動画が同じファイル名の場合、1件だけ表示します（同じファイルが2つのソースフォルダーにある場合など）。スクリプトのあるコピーが残ります。"
     },
     "data": {
       "backupHeader": "バックアップと復元",
@@ -1126,7 +1209,20 @@
     "noAttachments": "このトピックにはファンスクリプトの添付ファイルがありません",
     "downloadFailed": "ダウンロードに失敗しました",
     "savedToast": "スクリプトを保存しました: {name}",
-    "sessionExpired": "EroScripts セッションの有効期限が切れました — EroScripts パネルから再度ログインしてください"
+    "sessionExpired": "EroScripts セッションの有効期限が切れました — EroScripts パネルから再度ログインしてください",
+    "inline": {
+      "title": "EroScripts でスクリプトを探す",
+      "axesLine": "メイン + {count} 軸 ({list})",
+      "downloadAll": "すべてダウンロード (メイン + {count} 軸)",
+      "downloadMainOnly": "メインのみ",
+      "download": "ダウンロードして関連付け",
+      "downloading": "ダウンロード中...",
+      "multiBadge": "マルチ軸",
+      "noAttachments": "この投稿にダウンロードできるスクリプトはありません",
+      "noMain": "軸ファイルのみでメインスクリプトがありません",
+      "zipNote": "{count} 件の zip 添付はまだ開けません",
+      "loadingPost": "投稿を読み込み中..."
+    }
   },
   "upNext": {
     "regionAria": "次の動画",
@@ -1143,7 +1239,10 @@
     "endText": "この{source}にはこれ以上動画がありません。",
     "endCta": "{source}に戻る",
     "endSourceFallback": "リスト",
-    "sourcePlaylist": "プレイリスト"
+    "sourcePlaylist": "プレイリスト",
+    "resumeFrom": "{time} から",
+    "startOver": "最初から",
+    "resumeGroupAria": "続きから再生するか最初から再生するか"
   },
   "session": {
     "state": {
@@ -1383,7 +1482,8 @@
     "customKeysReservedWarn": "{key} はエディターコマンドで予約されています",
     "customKeysDuplicateWarn": "{key} はすでに位置 {pos} に割り当てられています",
     "customKeysMidiHint": "MIDIキーボードユーザーは通常、MIDI to キー変換ソフト (MIDIKey2Key など) と組み合わせて使用します。",
-    "customKeysHelpGroup": "カスタム位置キー"
+    "customKeysHelpGroup": "カスタム位置キー",
+    "popoutWindowTitle": "スクリプトエディター"
   },
   "connection": {
     "vibeHelp": {
@@ -1481,7 +1581,8 @@
       "badgeVibrate": "振動",
       "badgeRotate": "回転",
       "badgeEstim": "電気刺激",
-      "axisCustom": "カスタムルーティングに従う"
+      "axisCustom": "カスタムルーティングに従う",
+      "tuning": "出力調整"
     },
     "tcode": {
       "l0Label": "ストローク (メイン)",
@@ -1614,6 +1715,8 @@
     "jumpStartEnd": "先頭 / 末尾へジャンプ",
     "skipNextAction": "次のアクションへスキップ (ギャップスキップ)",
     "skipPrevAction": "前のアクションへスキップ",
+    "nextVideo": "キュー内の次の動画",
+    "prevVideo": "キュー内の前の動画",
     "volume5": "音量 ±5%",
     "muteToggle": "ミュート / ミュート解除",
     "fullscreen": "フルスクリーン",
@@ -1683,5 +1786,19 @@
     "editorSelectLeftRightOfCursor": "再生ヘッドの前/後の全てを選択",
     "editorEqualize": "イコライズ — 中間アクションを時間軸上で均等配分",
     "editorMoveToPlayhead": "単一選択アクションを再生ヘッドへ移動"
+  },
+  "orgasmConfig": {
+    "title": "オーガズムスイッチ設定",
+    "mainScript": "メインスクリプト:",
+    "hintMulti": "軸スクリプトはメインスクリプトと同じ長さが理想です。短い軸は最後の位置を保持します。",
+    "hintCustom": "ルーティング設定は、割り当てたデバイスがすべて接続されているときに再生されます。不足している場合は、再接続まで単軸でメインスクリプトを再生します。"
+  },
+  "resume": {
+    "title": "続きから再生しますか?",
+    "message": "{time} で停止しました。",
+    "startOver": "最初から",
+    "resumeAt": "{time} から再生",
+    "progressLabel": "{percent}% 視聴済み",
+    "resumedToast": "{time} から再開しました"
   }
 }

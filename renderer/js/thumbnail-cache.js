@@ -40,6 +40,26 @@ export function cacheKey(videoPath, mtime) {
  * @returns {string|null} data URL or null
  */
 export function get(videoPath, mtime) {
+  const entry = getEntry(videoPath, mtime);
+  return entry ? entry.dataUrl : null;
+}
+
+/**
+ * Get the whole cached entry, including the video duration when one was
+ * stored with it.
+ *
+ * `get()` deliberately still returns just the data URL — it has a dozen
+ * call sites in library.js that expect a string. This exists because the
+ * playlists and categories views render a duration badge from the same
+ * capture result: without the duration, a cache hit would draw the tile but
+ * silently drop its badge, so cached tiles would look different from
+ * freshly-fetched ones.
+ *
+ * @param {string} videoPath
+ * @param {number} mtime — current file modification time in ms
+ * @returns {{dataUrl: string, duration: number}|null}
+ */
+export function getEntry(videoPath, mtime) {
   if (!videoPath) return null;
 
   const key = cacheKey(videoPath, mtime);
@@ -54,7 +74,7 @@ export function get(videoPath, mtime) {
   _cache.delete(key);
   _cache.set(key, entry);
 
-  return entry.dataUrl;
+  return { dataUrl: entry.dataUrl, duration: entry.duration || 0 };
 }
 
 /**
@@ -63,15 +83,25 @@ export function get(videoPath, mtime) {
  * @param {string} videoPath
  * @param {number} mtime — file modification time in ms
  * @param {string} dataUrl — thumbnail data URL
+ * @param {number} [duration] — video duration in seconds, when the capture
+ *   reported one. Stored so the playlists/categories duration badge survives
+ *   a cache hit (see getEntry).
  */
-export function set(videoPath, mtime, dataUrl) {
+export function set(videoPath, mtime, dataUrl, duration) {
   if (!videoPath || !dataUrl) return;
 
   const key = cacheKey(videoPath, mtime);
+  // Preserve a previously-stored duration when a later write doesn't carry
+  // one, so re-caching from a view that has no duration can't erase it.
+  const prev = _cache.get(key);
+  const dur = Number.isFinite(duration) && duration > 0
+    ? duration
+    : (prev && prev.mtime === mtime ? prev.duration : undefined);
   // Refresh LRU position on re-set so the newest write is treated as hot.
   if (_cache.has(key)) _cache.delete(key);
   _cache.set(key, {
     dataUrl,
+    duration: dur,
     mtime,
     cachedAt: Date.now(),
   });

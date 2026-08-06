@@ -33,9 +33,33 @@ const DEFAULTS = {
       preferMultiAxis: 'single',
       smoothing: 'linear',
       speedLimit: 0,
+      // Orgasm Switch (hold-X) behaviour:
+      //   'hold'   — hold to ride the looping script, release returns to main
+      //   'toggle' — press to start the finisher looping, press again to stop
+      //              the device(s) (no return to the main script)
+      orgasmSwitchMode: 'hold',
+      // Pick a random script variation each time a multi-variant video
+      // loads (zaikechi #209/#221). Beats pinned defaults while on.
+      randomVariantOnPlay: false,
+      // Carry the playback rate across videos instead of resetting to 1x
+      // on each load. Off by default — resetting matches YouTube / VLC and
+      // avoids "why is this at 2x?" the next morning — but a community
+      // report (2026-08-05) uses non-1x constantly and re-picked it every
+      // time. Read live by VideoPlayer at each load.
+      rememberPlaybackSpeed: false,
+      // Inline visualization overlays during normal playback (zaikechi
+      // #209): TL = windowed timeline graph, HM = full-duration heatmap
+      // strip. Independent toggles via the player's TL/HM buttons.
+      inlineTimeline: false,
+      inlineHeatmap: false,
       // Keep the video playing in a docked corner overlay while browsing
       // the library, instead of stopping on leave (mini-player). Default on.
       miniPlayer: true,
+      // Linux only: VA-API hardware video decode. Default on (prior
+      // behaviour). Turn off if video won't play — a broken VA-API driver
+      // (esp. nvidia-vaapi) errors instead of falling back to software.
+      // Read directly in main.js before app.whenReady (Chromium flags).
+      hwVideoDecode: true,
       // i18n — locked decisions in notes/features/IMPL-multi-language.md
       // #2: default is English, not 'auto'.
       // #3: _localeOfferedFor tracks the locale that's already been
@@ -73,10 +97,42 @@ const DEFAULTS = {
       // Non-planar projections (fisheye/equirect/MKX/RF52/EAC) reserved
       // for Phase 2a/2b — they appear disabled in the panel dropdown.
       vrFormat: {},
-      // Per-path custom thumbnail override. Value is `{ seekPct: 0..1 }` —
-      // the user picked a specific frame for the library tile instead of
-      // the auto-generated 10%-mark frame. Absent means auto.
+      // Per-path custom thumbnail override. Two shapes:
+      //   `{ seekPct: 0..1 }` — pinned frame (legacy shape, no `type` key)
+      //   `{ type: 'image', imagePath }` — user-uploaded poster, imported
+      //     into userData/custom-thumbs by main.js (community #217)
+      // Absent means auto (10%-mark frame).
       customThumbnails: {},
+      // Per-path resume position — "continue where you left off"
+      // (community request 2026-08-05). Shape:
+      //   `{ position: seconds, duration: seconds, updatedAt: epochMs }`
+      // Keyed by VIDEO PATH, not playlist, so the same video shares one
+      // position everywhere it appears and library cards get progress for
+      // free. Entries are written only between the thresholds in
+      // renderer/js/resume-position.js and cleared on natural end.
+      // `updatedAt` doubles as the last-played stamp.
+      resumePositions: {},
+      // Per-playlist "where was I" marker, so reopening a playlist shows
+      // which video you were last on and can offer to continue from it.
+      // Shape: `{ [playlistId]: { lastVideoPath, updatedAt } }`. Separate
+      // from resumePositions because that map is keyed by video path and
+      // one video can sit in several playlists.
+      playlistProgress: {},
+      // Show the resume progress bar on cards / list rows. On by default —
+      // the feature is pointless invisible — but it IS a visible watch
+      // record, so it stays switchable.
+      showResumeProgress: true,
+      // Collapse videos sharing an identical filename to a single grid
+      // entry (the same file living in two source folders). Off by default.
+      // Never hides a video outright — one copy always survives; see
+      // dedupeByName in renderer/js/library-search.js.
+      hideDuplicateNames: false,
+      // EroScripts tags of the post each video's script came from, keyed by
+      // VIDEO PATH. Recorded on download from any route (standalone panel or
+      // the Associate-modal search); nothing displays it yet. Shape:
+      //   `{ tags: string[], topicId, topicUrl, source, savedAt }`
+      // Last write wins — the record describes the CURRENT script's post.
+      scriptTags: {},
       collections: [],
       activeCollectionId: null,
     },
@@ -100,7 +156,7 @@ const DEFAULTS = {
       udpPort: 0,
       wsUrl: '',            // ws://device.local:81  (also restim/MFP-consumer URLs)
       precision: 3,         // 3 = TCode-0.2 (L0500), 4 = TCode-0.3 (L05000)
-      updateRateHz: 25,     // output rate; higher = smoother on wired OSR2+/SR6 (advanced)
+      updateRateHz: 60,     // keyframe poll/detect rate; higher = fast vibration survives on OSR2+/SR6 (advanced)
       axisRanges: {},
       axisEnabled: {},
     },
@@ -115,9 +171,20 @@ const DEFAULTS = {
   _migrated: false,
 };
 
+// electron-conf is ESM-only → dynamic import. The import itself is the
+// expensive half of initStore (~1s cold on the startup trace), and it
+// touches nothing app-specific (no userData read — only `new Conf` does
+// that), so main.js kicks it off at module load via preloadModule() and
+// it resolves in parallel with Chromium init + the recovery sweep.
+let _confModulePromise = null;
+
+function preloadModule() {
+  if (!_confModulePromise) _confModulePromise = import('electron-conf');
+  return _confModulePromise;
+}
+
 async function initStore() {
-  // electron-conf is ESM-only, so we use dynamic import
-  const mod = await import('electron-conf');
+  const mod = await preloadModule();
   Conf = mod.default || mod.Conf;
   conf = new Conf({ defaults: DEFAULTS });
   return conf;
@@ -215,6 +282,29 @@ function setPlaylistShuffle(id, shuffle) {
   const playlist = playlists.find((p) => p.id === id);
   if (playlist) {
     playlist.shuffle = !!shuffle;
+    conf.set('playlists', playlists);
+  }
+}
+
+// "Balance shuffle by script" (zaikechi #221): videos sharing an
+// associated funscript occupy one slot in this playlist's shuffle.
+function setPlaylistBalance(id, balance) {
+  const playlists = getPlaylists();
+  const playlist = playlists.find((p) => p.id === id);
+  if (playlist) {
+    playlist.balanceByScript = !!balance;
+    conf.set('playlists', playlists);
+  }
+}
+
+// "Prefer unwatched" — shuffle draws videos you haven't finished before
+// ones you have. Watched items still play, just last (see
+// renderer/js/playlist-progress.js partitionByWatched).
+function setPlaylistPreferUnwatched(id, prefer) {
+  const playlists = getPlaylists();
+  const playlist = playlists.find((p) => p.id === id);
+  if (playlist) {
+    playlist.preferUnwatched = !!prefer;
     conf.set('playlists', playlists);
   }
 }
@@ -390,6 +480,7 @@ function migrateFromLegacy(legacyData) {
 module.exports = {
   DEFAULTS,
   initStore,
+  preloadModule,
   subscribe,
   getAll,
   getSetting,
@@ -402,6 +493,8 @@ module.exports = {
   renamePlaylist,
   setPlaylistLoop,
   setPlaylistShuffle,
+  setPlaylistBalance,
+  setPlaylistPreferUnwatched,
   addVideoToPlaylist,
   removeVideoFromPlaylist,
   setPlaylistVideoPaths,

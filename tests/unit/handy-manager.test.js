@@ -290,4 +290,88 @@ describe('HandyManager', () => {
       expect(manager.connected).toBe(false);
     });
   });
+
+  describe('hdspMove — HDSP mode handling', () => {
+    beforeEach(async () => { await manager.connect('key'); });
+
+    it('switches the device into HDSP mode (2) before the first send', async () => {
+      await manager.hdspMove(50, 100);
+      expect(mockHandy.setMode).toHaveBeenCalledWith(2);
+      expect(mockHandy.hdsp).toHaveBeenCalledWith(50, 100, 'percent', 'time', true, true);
+    });
+
+    it('enterHdsp() explicitly switches to mode 2 and primes the cache', async () => {
+      const ok = await manager.enterHdsp();
+      expect(ok).toBe(true);
+      expect(mockHandy.setMode).toHaveBeenCalledWith(2);
+      // A following hdspMove sees mode 2 already set → no redundant switch.
+      mockHandy.setMode.mockClear();
+      await manager.hdspMove(50, 100);
+      expect(mockHandy.setMode).not.toHaveBeenCalled();
+    });
+
+    it('enterHdsp() returns false when the mode switch fails', async () => {
+      mockHandy.setMode.mockRejectedValueOnce(new Error('offline'));
+      const ok = await manager.enterHdsp();
+      expect(ok).toBe(false);
+    });
+
+    it('does not re-switch mode on subsequent sends (cached)', async () => {
+      await manager.hdspMove(50, 100);
+      mockHandy.setMode.mockClear();
+      await manager.hdspMove(60, 100);
+      expect(mockHandy.setMode).not.toHaveBeenCalled();
+      expect(mockHandy.hdsp).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-enters HDSP mode after an HSSP setup switched the device to mode 1', async () => {
+      await manager.hdspMove(50, 100);              // device now in HDSP (mode 2)
+      await manager.setupScript('http://x/s.csv');  // setScript → HSSP (mode 1)
+      mockHandy.setMode.mockClear();
+      await manager.hdspMove(70, 100);
+      expect(mockHandy.setMode).toHaveBeenCalledWith(2); // must re-switch, else "just stops"
+    });
+
+    it('forces a mode re-check after a failed send', async () => {
+      await manager.hdspMove(50, 100);             // mode → 2
+      mockHandy.hdsp.mockRejectedValueOnce(new Error('device busy'));
+      await manager.hdspMove(60, 100);             // fails → _mode reset to null
+      mockHandy.setMode.mockClear();
+      await manager.hdspMove(70, 100);             // must re-switch mode
+      expect(mockHandy.setMode).toHaveBeenCalledWith(2);
+    });
+  });
+
+  describe('hsspPlay — self-heal on lost scriptSet', () => {
+    beforeEach(async () => {
+      await manager.connect('key');
+      manager._lastCloudUrl = 'http://cached/s.csv'; // as if a script was uploaded
+    });
+
+    it('re-sets the cached script and retries when scriptSet was cleared (HDSP/Orgasm)', async () => {
+      mockHandy.hsspPlay
+        .mockRejectedValueOnce(new Error('Script set is required'))
+        .mockResolvedValueOnce({ result: 0 });
+      const ok = await manager.hsspPlay(1000);
+      expect(mockHandy.setScript).toHaveBeenCalledWith('http://cached/s.csv');
+      expect(mockHandy.hsspPlay).toHaveBeenCalledTimes(2);
+      expect(ok).toBe(true);
+    });
+
+    it('does NOT retry for unrelated errors', async () => {
+      mockHandy.hsspPlay.mockRejectedValueOnce(new Error('network down'));
+      const ok = await manager.hsspPlay(1000);
+      expect(mockHandy.setScript).not.toHaveBeenCalled();
+      expect(ok).toBe(false);
+    });
+  });
+
+  describe('uploadScriptOnly (Orgasm Switch finisher)', () => {
+    it('uploads to the cloud and returns the URL without setting the script', async () => {
+      await manager.connect('key');
+      const url = await manager.uploadScriptOnly('{"actions":[{"at":0,"pos":0},{"at":100,"pos":100}]}');
+      expect(url).toBe('https://scripts01.handyfeeling.com/abc123'); // from the mocked uploadDataToServer
+      expect(mockHandy.setScript).not.toHaveBeenCalled(); // upload-only — main script untouched
+    });
+  });
 });

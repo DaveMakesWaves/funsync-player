@@ -69,3 +69,88 @@ describe('reshuffleAvoidingRepeat', () => {
     expect(reshuffleAvoidingRepeat([], 'x')).toEqual([]);
   });
 });
+
+// --- Balance by script (zaikechi #221) ---
+
+import { balancedShuffle, reshuffleBalancedAvoidingRepeat } from '../../renderer/js/shuffle.js';
+
+const V = (path, script) => ({ path, funscriptPath: script });
+const keyOf = (v) => v.funscriptPath || null;
+
+describe('balancedShuffle', () => {
+  it('collapses same-key items into ONE slot (the weighting fix)', () => {
+    // 6 videos on one script + 1 on another → exactly 2 slots.
+    const items = [
+      V('a1', 's1'), V('a2', 's1'), V('a3', 's1'),
+      V('a4', 's1'), V('a5', 's1'), V('a6', 's1'),
+      V('b1', 's2'),
+    ];
+    for (let n = 0; n < 50; n++) {
+      const out = balancedShuffle(items, keyOf);
+      expect(out.length).toBe(2);
+      const keys = out.map(keyOf).sort();
+      expect(keys).toEqual(['s1', 's2']);
+      // The s1 representative is a member of the group, chosen per draw.
+      expect(['a1', 'a2', 'a3', 'a4', 'a5', 'a6']).toContain(out.find(v => keyOf(v) === 's1').path);
+    }
+  });
+
+  it('keyless items participate individually (scriptless videos unchanged)', () => {
+    const items = [V('a', 's1'), V('b', 's1'), V('c', null), V('d', null)];
+    const out = balancedShuffle(items, keyOf);
+    expect(out.length).toBe(3); // s1-group + c + d
+    const paths = out.map(v => v.path);
+    expect(paths).toContain('c');
+    expect(paths).toContain('d');
+  });
+
+  it('representatives vary across draws (randomly chosen per group)', () => {
+    const items = [V('a1', 's1'), V('a2', 's1'), V('a3', 's1')];
+    const seen = new Set();
+    for (let n = 0; n < 200 && seen.size < 3; n++) {
+      seen.add(balancedShuffle(items, keyOf)[0].path);
+    }
+    expect(seen.size).toBe(3);
+  });
+
+  it('no groups → behaves like a plain shuffle (same members, same length)', () => {
+    const items = [V('a', 's1'), V('b', 's2'), V('c', 's3')];
+    const out = balancedShuffle(items, keyOf);
+    expect(out.map(v => v.path).sort()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('non-array input → empty array', () => {
+    expect(balancedShuffle(null, keyOf)).toEqual([]);
+  });
+});
+
+describe('reshuffleBalancedAvoidingRepeat', () => {
+  it('never starts the new cycle on the just-played GROUP (key compare, not identity)', () => {
+    const items = [
+      V('a1', 's1'), V('a2', 's1'), V('a3', 's1'),
+      V('b1', 's2'), V('c1', 's3'),
+    ];
+    const justPlayed = V('a2', 's1'); // any member of s1
+    for (let n = 0; n < 200; n++) {
+      const out = reshuffleBalancedAvoidingRepeat(items, keyOf, justPlayed);
+      expect(keyOf(out[0])).not.toBe('s1');
+    }
+  });
+
+  it('redraws from the FULL list, so a different group member can appear next cycle', () => {
+    const items = [V('a1', 's1'), V('a2', 's1'), V('b1', 's2')];
+    const seen = new Set();
+    for (let n = 0; n < 200 && seen.size < 2; n++) {
+      const out = reshuffleBalancedAvoidingRepeat(items, keyOf, V('b1', 's2'));
+      seen.add(out.find(v => keyOf(v) === 's1').path);
+    }
+    expect(seen.size).toBe(2);
+  });
+
+  it('single-group edge: cannot avoid, still returns a valid draw', () => {
+    const items = [V('a1', 's1'), V('a2', 's1')];
+    const out = reshuffleBalancedAvoidingRepeat(items, keyOf, V('a1', 's1'));
+    expect(out.length).toBe(1);
+    expect(keyOf(out[0])).toBe('s1');
+  });
+});

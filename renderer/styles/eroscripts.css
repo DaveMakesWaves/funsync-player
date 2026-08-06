@@ -335,9 +335,20 @@
   background: rgba(255, 255, 255, 0.04);
 }
 
+/* Fills the row's height rather than sitting as a small fixed box — the
+   content column (title + meta + tags + actions) is ~85px tall, so a 50px
+   thumbnail read as an afterthought.
+   WIDTH stays fixed and the HEIGHT stretches, deliberately: deriving width
+   from height (via aspect-ratio) would feed back into the content column's
+   available width, which changes how the title and tags wrap, which changes
+   the row height — a circular layout. Fixed width has no such loop, and
+   `cover` handles the varying aspect. */
 .eroscripts-panel__result-thumb {
-  width: 80px;
-  height: 50px;
+  width: 120px;
+  height: auto;
+  align-self: stretch;
+  /* Floor so a sparse row (no tags, no meta) still gets a usable image. */
+  min-height: 68px;
   object-fit: cover;
   border-radius: 4px;
   flex-shrink: 0;
@@ -433,4 +444,96 @@
 .eroscripts-panel__results::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.15);
   border-radius: 3px;
+}
+
+/* --- Inline search (Associate Funscript ▸ Search EroScripts) ---
+   Reuses the panel's result typography, but rows are collapsed accordions:
+   a post's attachments only load when you open it, so a search doesn't fire
+   N topic requests. */
+.eroscripts-inline__results {
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-top: 10px;
+}
+
+.eroscripts-inline__result {
+  border-radius: 6px;
+  margin-bottom: 4px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.eroscripts-inline__result-head {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 8px 10px;
+  cursor: pointer;
+  border-radius: 6px;
+}
+
+.eroscripts-inline__result-head:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.eroscripts-inline__badge {
+  display: inline-block;
+  margin-top: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+}
+
+.eroscripts-inline__groups {
+  padding: 0 10px 8px 10px;
+}
+
+/* One row per script set. Indented under its post so the grouping is
+   visible at a glance in a 15-attachment topic. */
+.eroscripts-inline__group {
+  padding: 8px 10px;
+  margin-top: 6px;
+  border-left: 2px solid var(--accent);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 0 4px 4px 0;
+}
+
+.eroscripts-inline__group-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.eroscripts-inline__group-axes {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.eroscripts-inline__group-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.eroscripts-inline__note {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 6px;
+}
+
+/* Sits alongside "Browse..." but reads as an action, not a dimmed footnote
+   — the mistake the existing browse row makes. */
+.library__ero-search-row {
+  color: var(--accent);
 }

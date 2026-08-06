@@ -66,3 +66,89 @@ describe('UpNextCard.setThumbnail', () => {
     expect(el.querySelector('.up-next__thumb-img')).toBeNull();
   });
 });
+
+// --- Resume choice row (playlists only; provider returns null elsewhere) ---
+
+describe('UpNextCard resume choice', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  it('renders no resume row when the provider returns null', () => {
+    // This is the library / category / no-saved-position case, i.e. the
+    // card exactly as it was before the feature.
+    const { el, card } = makeCard({ getResumeChoice: () => null });
+    card.show(PATH, 10);
+    expect(el.querySelector('.up-next__resume')).toBeNull();
+  });
+
+  it('renders no resume row when no provider is wired at all', () => {
+    const { el, card } = makeCard();
+    card.show(PATH, 10);
+    expect(el.querySelector('.up-next__resume')).toBeNull();
+  });
+
+  it('renders both choices when a saved position exists', () => {
+    const { el, card } = makeCard({ getResumeChoice: () => ({ label: '12:34' }) });
+    card.show(PATH, 10);
+
+    const btns = el.querySelectorAll('.up-next__resume-btn');
+    expect(btns).toHaveLength(2);
+    expect(btns[0].textContent).toContain('12:34');
+    expect(btns[0].dataset.resume).toBe('resume');
+    expect(btns[1].dataset.resume).toBe('start-over');
+  });
+
+  it('Resume plays next immediately, without waiting out the countdown', () => {
+    let played = 0;
+    const { el, card } = makeCard({
+      getResumeChoice: () => ({ label: '12:34' }),
+      onPlayNext: () => { played += 1; },
+    });
+    card.show(PATH, 10);
+    el.querySelector('[data-resume="resume"]').click();
+    expect(played).toBe(1);
+  });
+
+  it('Start over fires its own callback, not the plain play path', () => {
+    let played = 0;
+    let startedOver = 0;
+    const { el, card } = makeCard({
+      getResumeChoice: () => ({ label: '12:34' }),
+      onPlayNext: () => { played += 1; },
+      onStartOver: () => { startedOver += 1; },
+    });
+    card.show(PATH, 10);
+    el.querySelector('[data-resume="start-over"]').click();
+    expect(startedOver).toBe(1);
+    expect(played).toBe(0);
+  });
+
+  it('a resume click does not also trigger the card-body play handler', () => {
+    // The buttons sit outside .up-next__body, but a stray bubble would
+    // double-fire the advance — guard it explicitly.
+    let played = 0;
+    const { el, card } = makeCard({
+      getResumeChoice: () => ({ label: '12:34' }),
+      onPlayNext: () => { played += 1; },
+      onStartOver: () => {},
+    });
+    card.show(PATH, 10);
+    el.querySelector('[data-resume="start-over"]').click();
+    expect(played).toBe(0);
+  });
+
+  it('survives a throwing provider rather than blanking the card', () => {
+    const { el, card } = makeCard({
+      getResumeChoice: () => { throw new Error('settings unavailable'); },
+    });
+    expect(() => card.show(PATH, 10)).not.toThrow();
+    expect(el.querySelector('.up-next__title')).not.toBeNull();
+    expect(el.querySelector('.up-next__resume')).toBeNull();
+  });
+
+  it('omits the row in mini-player mode (deliberately minimal)', () => {
+    const { el, card } = makeCard({ getResumeChoice: () => ({ label: '12:34' }) });
+    card.setMini(true);
+    card.show(PATH, 10);
+    expect(el.querySelector('.up-next__resume')).toBeNull();
+  });
+});

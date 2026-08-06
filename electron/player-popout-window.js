@@ -97,7 +97,13 @@ function open(parent, store) {
     minHeight: 270,
     title: 'FunSync Player',
     autoHideMenuBar: true,
-    backgroundColor: '#000000',
+    // Theme surface, not black — matches the main window chrome so the
+    // pop-out reads as part of the app (the video element paints its own
+    // black letterbox; this only shows pre-paint / during resize).
+    backgroundColor: require('./window-bg').resolveWindowColors().background,
+    // Same themed title-bar overlay as the main window. The renderer supplies
+    // the drag region (player-popout.css `.ppo-dragstrip`).
+    ...require('./window-bg').winChromeOptions(require('./window-bg').resolveWindowColors()),
     icon: path.join(
       __dirname,
       '..',

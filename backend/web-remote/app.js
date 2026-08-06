@@ -12,6 +12,33 @@ import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from './vr-dete
 import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
 import { t, initWebRemoteI18n, translatePage } from './i18n.js';
+import { shuffle as shuffleList, balancedShuffle } from './shuffle.js';
+
+/* ============================================================
+   Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
+   Shuffle from a grouping detail builds an ordered id list; the
+   player auto-advances via its `ended` handler (each advance is a
+   normal `#play/<id>` navigation, so the desktop's per-video sync
+   session turnover works unchanged). Navigating to a video that
+   is NOT the queue's current/next item cancels the queue — manual
+   navigation wins (Nielsen #3 user control).
+   ============================================================ */
+let phoneQueue = null; // { ids: string[], index: number, label: string }
+
+function startPhoneQueue(videos, { shuffled = false, balance = false, label = '' } = {}) {
+  const list = (videos || []).filter(v => v && v.id);
+  if (list.length === 0) return;
+  let ordered = list;
+  if (shuffled) {
+    // Balance-by-script parity with the desktop: same-script videos take
+    // one slot; key = the script URL (unique per script path).
+    ordered = balance
+      ? balancedShuffle(list, (v) => (v.hasFunscript && v.scriptUrl) ? v.scriptUrl : null)
+      : shuffleList(list);
+  }
+  phoneQueue = { ids: ordered.map(v => v.id), index: 0, label };
+  location.hash = `play/${ordered[0].id}`;
+}
 
 // === Mobile viewport-height sync ===
 //
@@ -983,6 +1010,35 @@ async function renderGroupingDetail(kind, id) {
   const anchor = _buildFolderJumpLink(videos);
   if (anchor) mainEl.appendChild(anchor);
 
+  // Play All / Shuffle bar (F1). Plays the FILTERED set (what's on
+  // screen), honoring the playlist's balance-by-script flag when this
+  // grouping is a playlist (desktop parity — zaikechi's weighting fix).
+  if (filtered.length > 0) {
+    const bar = document.createElement('div');
+    bar.className = 'playall-bar';
+    const balance = kind === 'playlists' && !!item.balanceByScript;
+
+    const playAllBtn = document.createElement('button');
+    playAllBtn.type = 'button';
+    playAllBtn.className = 'playall-bar__btn playall-bar__btn--primary';
+    playAllBtn.append(svgIcon('play', 16));
+    playAllBtn.append(document.createTextNode(t('webRemote.actions.playAll')));
+    playAllBtn.addEventListener('click', () => {
+      startPhoneQueue(filtered, { shuffled: false, label: item.name || '' });
+    });
+
+    const shuffleBtn = document.createElement('button');
+    shuffleBtn.type = 'button';
+    shuffleBtn.className = 'playall-bar__btn';
+    shuffleBtn.textContent = t('webRemote.actions.shufflePlay');
+    shuffleBtn.addEventListener('click', () => {
+      startPhoneQueue(filtered, { shuffled: true, balance, label: item.name || '' });
+    });
+
+    bar.append(playAllBtn, shuffleBtn);
+    mainEl.appendChild(bar);
+  }
+
   if (uiState.view === 'grid') mainEl.appendChild(renderGrid(filtered));
   else mainEl.appendChild(renderRows(filtered));
 }
@@ -1415,7 +1471,50 @@ for (const btn of navTabsEl.querySelectorAll('.nav-tabs__tab')) {
 
 // Manual refresh + auto-refresh when the user returns to the tab (covers
 // "I added videos on desktop while the phone was in my pocket" case).
+// After asking the desktop to rescan its source folders, the fresh video list
+// doesn't land instantly — the desktop polls the rescan-request counter every
+// ~3s, then scans. A single immediate re-fetch (done by the click handler
+// below) would miss files just dropped into a folder, so poll a few more times
+// until the list actually changes (or the window elapses). `prevIds` is the set
+// the phone knew *before* refresh, so we can tell when the rescan added or
+// removed something. Total window ~7.5s covers the desktop poll + a typical
+// scan; a very large library that scans slower just needs a second tap.
+const RESCAN_POLL_DELAYS_MS = [1500, 1500, 2000, 2500];
+async function _pollForRescanResult(prevIds) {
+  for (const delay of RESCAN_POLL_DELAYS_MS) {
+    await new Promise(r => setTimeout(r, delay));
+    let fresh;
+    try {
+      const resp = await fetch('/api/remote/videos');
+      if (!resp.ok) continue;
+      const data = await resp.json();
+      fresh = data.videos || [];
+    } catch { continue; }
+    const freshIds = new Set(fresh.map(v => v.id));
+    const changed = freshIds.size !== prevIds.size
+      || [...freshIds].some(id => !prevIds.has(id));
+    if (changed) {
+      // Adopt the fresh list and drop the derived caches so groupings /
+      // folder tree / search context rebuild against it, then re-render.
+      library = fresh;
+      sources = null;
+      folderIndex = null;
+      collections = null;
+      playlists = null;
+      categories = null;
+      searchContextMap = null;
+      _scheduleDurationRefreshIfNeeded();
+      rerenderCurrent();
+      return;
+    }
+  }
+}
+
 refreshBtn.addEventListener('click', () => {
+  // Baseline: the IDs the phone currently knows, so the post-rescan poll can
+  // tell when the desktop's rescan has actually landed new/removed videos.
+  const prevIds = new Set((library || []).map(v => v.id));
+
   // Clear all caches so the next render re-fetches fresh.
   library = null;
   sources = null;
@@ -1434,10 +1533,20 @@ refreshBtn.addEventListener('click', () => {
   // the user hits refresh to see durations).
   _durationRefreshAttempts = 0;
   if (_durationRefreshTimer) { clearTimeout(_durationRefreshTimer); _durationRefreshTimer = null; }
+
+  // Ask the desktop to rescan its source folders + re-register. The phone only
+  // ever sees the desktop's last-pushed snapshot, so a file just dropped into a
+  // source folder is invisible until the desktop rescans. Fire-and-forget; the
+  // immediate rerender below shows the current snapshot and _pollForRescanResult
+  // adopts the fresh list once the desktop's rescan lands.
+  try { fetch('/api/remote/request-rescan', { method: 'POST' }).catch(() => {}); } catch { /* offline — snapshot refresh still runs */ }
+
   refreshBtn.classList.add('header__action--spinning');
-  rerenderCurrent().finally(() => {
-    setTimeout(() => refreshBtn.classList.remove('header__action--spinning'), 600);
-  });
+  rerenderCurrent()
+    .then(() => _pollForRescanResult(prevIds))
+    .finally(() => {
+      refreshBtn.classList.remove('header__action--spinning');
+    });
 });
 
 document.addEventListener('visibilitychange', () => {
@@ -1746,7 +1855,9 @@ async function renderPlayer(id) {
   const videoEl = document.createElement('video');
   videoEl.className = 'player__video';
   videoEl.src = video.streamUrl;
-  videoEl.controls = true;
+  // Custom controls (V4) — stock browser chrome replaced by our overlay,
+  // built after the wrapper is assembled below.
+  videoEl.controls = false;
   videoEl.playsInline = true;
   videoEl.preload = 'metadata';
   if (video.subtitleUrl) {
@@ -1775,12 +1886,122 @@ async function renderPlayer(id) {
   videoWrap.appendChild(loadingOverlay);
   wrap.appendChild(videoWrap);
 
+  // Custom control overlay (V4) — center play, seek bar with chapter
+  // markers, A-B loop, gap skip, mute, fullscreen.
+  buildPlayerControls(videoWrap, videoEl, video);
+
   // Device-sync status pill above the video. Populated by server messages.
   const pill = document.createElement('div');
   pill.className = 'player__sync-pill';
   pill.textContent = t('webRemote.player.connecting');
   pill.dataset.state = 'connecting';
   wrap.appendChild(pill);
+
+  // ---- Orgasm Switch remote button (F2) ----
+  // A hold-pill in the thumb zone that drives the DESKTOP's orgasm switch
+  // over the sync WS (precedent: switch-variant). Hidden until the desktop
+  // reports an orgasm script is configured; reflects desktop-side state via
+  // `orgasm-state` so keyboard X and this button never diverge. In hold
+  // mode a dropped touch / hidden page / dead socket MUST release — the
+  // desktop also releases on phone disconnect (safety, both ends).
+  const orgasmBtn = document.createElement('button');
+  orgasmBtn.type = 'button';
+  orgasmBtn.className = 'player__orgasm-btn';
+  orgasmBtn.hidden = true;
+  orgasmBtn.textContent = t('webRemote.player.orgasmHold');
+  wrap.appendChild(orgasmBtn);
+  let orgasmMode = 'hold';
+  let orgasmActive = false;
+  let orgasmHeld = false;
+  const orgasmSend = (active) => {
+    if (activeSyncClient?.sendOrgasmHold) activeSyncClient.sendOrgasmHold(active);
+  };
+  const orgasmVisual = () => {
+    orgasmBtn.classList.toggle('player__orgasm-btn--active', orgasmActive);
+    orgasmBtn.textContent = orgasmActive
+      ? (orgasmMode === 'toggle' ? t('webRemote.player.orgasmStop') : t('webRemote.player.orgasmRiding'))
+      : (orgasmMode === 'toggle' ? t('webRemote.player.orgasmTap') : t('webRemote.player.orgasmHold'));
+  };
+  const orgasmRelease = () => {
+    if (orgasmMode !== 'hold' || !orgasmHeld) return;
+    orgasmHeld = false;
+    orgasmSend(false);
+  };
+  orgasmBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (orgasmMode === 'toggle') return; // toggle acts on click
+    orgasmHeld = true;
+    orgasmSend(true);
+    try { navigator.vibrate?.(30); } catch { /* unsupported */ }
+  });
+  orgasmBtn.addEventListener('pointerup', orgasmRelease);
+  orgasmBtn.addEventListener('pointercancel', orgasmRelease);
+  orgasmBtn.addEventListener('pointerleave', orgasmRelease);
+  orgasmBtn.addEventListener('click', () => {
+    if (orgasmMode !== 'toggle') return;
+    orgasmSend(true); // desktop's toggle handler flips start/stop itself
+    try { navigator.vibrate?.(30); } catch { /* unsupported */ }
+  });
+  // Page hidden / navigating away = release (hold mode safety).
+  const onHidden = () => { if (document.visibilityState === 'hidden') orgasmRelease(); };
+  document.addEventListener('visibilitychange', onHidden);
+  window.addEventListener('pagehide', orgasmRelease);
+
+  // ---- Queue auto-advance + Up Next (F1) ----
+  // Sync the queue's index to this render: navigating to a video outside
+  // the queue cancels it (manual navigation wins).
+  if (phoneQueue) {
+    const qIdx = phoneQueue.ids.indexOf(video.id);
+    if (qIdx >= 0) phoneQueue.index = qIdx;
+    else phoneQueue = null;
+  }
+  if (phoneQueue && phoneQueue.index < phoneQueue.ids.length - 1) {
+    const nextId = phoneQueue.ids[phoneQueue.index + 1];
+    const nextVideo = videos.find(v => v.id === nextId);
+    const upNext = document.createElement('div');
+    upNext.className = 'up-next-phone';
+    upNext.hidden = true;
+    const upTitle = document.createElement('div');
+    upTitle.className = 'up-next-phone__title';
+    const upName = document.createElement('div');
+    upName.className = 'up-next-phone__name';
+    upName.textContent = nextVideo ? nextVideo.name : '';
+    const upActions = document.createElement('div');
+    upActions.className = 'up-next-phone__actions';
+    const playNowBtn = document.createElement('button');
+    playNowBtn.className = 'up-next-phone__btn up-next-phone__btn--primary';
+    playNowBtn.textContent = t('webRemote.player.upNextPlayNow');
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'up-next-phone__btn';
+    cancelBtn.textContent = t('webRemote.player.upNextCancel');
+    upActions.append(playNowBtn, cancelBtn);
+    upNext.append(upTitle, upName, upActions);
+    videoWrap.appendChild(upNext);
+
+    let countdownTimer = null;
+    const advance = () => {
+      clearInterval(countdownTimer);
+      location.hash = `play/${nextId}`;
+    };
+    playNowBtn.addEventListener('click', advance);
+    cancelBtn.addEventListener('click', () => {
+      clearInterval(countdownTimer);
+      upNext.hidden = true;
+      phoneQueue = null; // cancelled — stop the queue entirely
+    });
+    videoEl.addEventListener('ended', () => {
+      if (!phoneQueue) return;
+      let remaining = 8;
+      upTitle.textContent = t('webRemote.player.upNextIn', { seconds: remaining });
+      upNext.hidden = false;
+      clearInterval(countdownTimer);
+      countdownTimer = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) { advance(); return; }
+        upTitle.textContent = t('webRemote.player.upNextIn', { seconds: remaining });
+      }, 1000);
+    });
+  }
 
   // Track whether we paused the video for a desktop-side re-upload, so
   // we know whether to auto-resume when `script-ready` arrives. Without
@@ -1802,6 +2023,16 @@ async function renderPlayer(id) {
         // wrap's apply function before delegating to the sync pill.
         if (msg && msg.type === 'variant-changed' && wrap._applyActiveVariant) {
           wrap._applyActiveVariant(msg.label);
+          return;
+        }
+        // Orgasm Switch state from the desktop (F2): configured flag
+        // shows/hides the button; active + mode keep it truthful when
+        // the desktop's keyboard X is used instead of the phone.
+        if (msg && msg.type === 'orgasm-state') {
+          orgasmActive = !!msg.active;
+          if (msg.mode === 'hold' || msg.mode === 'toggle') orgasmMode = msg.mode;
+          if (typeof msg.configured === 'boolean') orgasmBtn.hidden = !msg.configured;
+          orgasmVisual();
           return;
         }
         // `script-loading` / `script-ready` bracket the desktop's
@@ -2114,6 +2345,354 @@ async function renderPlayer(id) {
   mainEl.appendChild(wrap);
 }
 
+/* ============================================================
+   Custom player controls (V4, 2026-08-04 — SCOPE-web-remote-2.md).
+   Replaces the stock <video controls> chrome with the app's own
+   overlay: center play, seek bar with chapter markers (F3), time
+   chips, mute, fullscreen (pseudo-fullscreen on iOS — real
+   fullscreen swaps in Apple's chrome and kills custom controls),
+   A-B loop + gap skip (F6). Auto-hides while playing; tap reveals.
+   ============================================================ */
+
+const GAP_SKIP_THRESHOLD_MS = 10000; // phone-local default (F6)
+
+function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
+  const overlay = document.createElement('div');
+  overlay.className = 'pcx';
+
+  // --- center play/pause ---
+  const centerBtn = document.createElement('button');
+  centerBtn.className = 'pcx__center';
+  centerBtn.setAttribute('aria-label', t('webRemote.player.playPause'));
+  centerBtn.appendChild(svgIcon('play', 34));
+  overlay.appendChild(centerBtn);
+
+  // --- bottom bar ---
+  const bar = document.createElement('div');
+  bar.className = 'pcx__bar';
+
+  const playBtn = document.createElement('button');
+  playBtn.className = 'pcx__btn pcx__play';
+  playBtn.setAttribute('aria-label', t('webRemote.player.playPause'));
+  playBtn.appendChild(svgIcon('play', 20));
+
+  const timeNow = document.createElement('span');
+  timeNow.className = 'pcx__time';
+  timeNow.textContent = '0:00';
+
+  const seek = document.createElement('div');
+  seek.className = 'pcx__seek';
+  seek.setAttribute('role', 'slider');
+  seek.setAttribute('aria-label', t('webRemote.player.seek'));
+  const seekTrack = document.createElement('div');
+  seekTrack.className = 'pcx__seek-track';
+  const seekBuffered = document.createElement('div');
+  seekBuffered.className = 'pcx__seek-buffered';
+  const seekPlayed = document.createElement('div');
+  seekPlayed.className = 'pcx__seek-played';
+  const seekThumb = document.createElement('div');
+  seekThumb.className = 'pcx__seek-thumb';
+  const chapterLayer = document.createElement('div');
+  chapterLayer.className = 'pcx__chapters';
+  seekTrack.append(seekBuffered, seekPlayed, chapterLayer, seekThumb);
+  seek.appendChild(seekTrack);
+
+  const timeTotal = document.createElement('span');
+  timeTotal.className = 'pcx__time';
+  timeTotal.textContent = video.duration ? formatDuration(video.duration) : '0:00';
+
+  const muteBtn = document.createElement('button');
+  muteBtn.className = 'pcx__btn';
+  muteBtn.setAttribute('aria-label', t('webRemote.player.mute'));
+  muteBtn.appendChild(svgIcon('volume', 20));
+
+  const fsBtn = document.createElement('button');
+  fsBtn.className = 'pcx__btn';
+  fsBtn.setAttribute('aria-label', t('webRemote.player.fullscreen'));
+  fsBtn.appendChild(svgIcon('maximize', 20));
+
+  // TWO ROWS (2026-08-04, Dave: "the seekbar just looks too short"). One row
+  // could not work: play + both time labels + mute + fullscreen are 212px of
+  // non-shrinkable children (min-width is the 44px tap target), plus 40px of
+  // gaps and 20px padding. On a 390px phone that left the seek bar ~118px.
+  // Giving the seek its own full-width row is what every mobile player does,
+  // and it takes the crowding off the button row so the last button
+  // (fullscreen) can't get squeezed out.
+  //
+  // NOTE: no A-B loop on the phone (removed 2026-08-04, Dave — takes up too
+  // much space at phone widths and loop is a desktop-niche control).
+  const seekRow = document.createElement('div');
+  seekRow.className = 'pcx__seekrow';
+  seekRow.append(timeNow, seek, timeTotal);
+
+  const btnRow = document.createElement('div');
+  btnRow.className = 'pcx__btnrow';
+  const spacer = document.createElement('div');
+  spacer.className = 'pcx__spacer';
+  btnRow.append(playBtn, muteBtn, spacer, fsBtn);
+
+  bar.append(seekRow, btnRow);
+  overlay.appendChild(bar);
+
+  // --- gap-skip chip (F6): appears inside a script gap ≥ threshold ---
+  const gapChip = document.createElement('button');
+  gapChip.className = 'pcx__gap-chip';
+  gapChip.hidden = true;
+  gapChip.textContent = t('webRemote.player.skipGap');
+  overlay.appendChild(gapChip);
+
+  videoWrap.appendChild(overlay);
+
+  // ---------- state ----------
+  let hideTimer = null;
+  let actions = null;      // funscript actions (for gaps), set async below
+  let chapters = [];
+  let gapTarget = null;    // ms to seek to when the chip is tapped
+  const dur = () => (isFinite(videoEl.duration) && videoEl.duration > 0)
+    ? videoEl.duration : (video.duration || 0);
+
+  const setPlayIcons = () => {
+    const name = videoEl.paused ? 'play' : 'pause';
+    playBtn.replaceChildren(svgIcon(name, 20));
+    centerBtn.replaceChildren(svgIcon(name, 34));
+    centerBtn.classList.toggle('pcx__center--paused', videoEl.paused);
+  };
+
+  const show = () => {
+    overlay.classList.add('pcx--visible');
+    clearTimeout(hideTimer);
+    if (!videoEl.paused) {
+      hideTimer = setTimeout(() => overlay.classList.remove('pcx--visible'), 2600);
+    }
+  };
+  show();
+
+  const togglePlay = () => {
+    if (videoEl.paused) videoEl.play().catch(() => {});
+    else videoEl.pause();
+  };
+
+  // Skip-feedback flashes for double-tap seeking (YouTube convention).
+  const skipFlash = (side) => {
+    const el = document.createElement('div');
+    el.className = `pcx__skip-flash pcx__skip-flash--${side}`;
+    el.textContent = side === 'left' ? '« 10s' : '10s »';
+    overlay.appendChild(el);
+    setTimeout(() => el.remove(), 500);
+  };
+
+  // Tap gestures on the WHOLE wrap — not just the video element, so they
+  // work in fullscreen where the video letterboxes and taps land on the
+  // black bars (the original videoEl-only listener made fullscreen feel
+  // dead). Single tap toggles the controls; double-tap on the left/right
+  // third seeks ±10s; double-tap center toggles play. 260ms discrimination
+  // timer (same idea as the desktop's click-vs-double-click handling).
+  //
+  // SKIP CHAIN (perceived-latency fix, Dave 2026-08-04): after a double-
+  // tap skip, further taps on the same side within 800ms skip AGAIN
+  // immediately — no discrimination wait per tap (YouTube's exact
+  // behavior; without it every extra ±10 pays the 260ms tax). The UI
+  // (seek bar + time chip) also updates OPTIMISTICALLY the moment the
+  // seek is requested — the currentTime setter reflects the target right
+  // away — so the interface responds instantly even while the stream
+  // buffers at the new position (network seek time itself is physics).
+  let tapTimer = null;
+  let skipChainSide = null;
+  let skipChainUntil = 0;
+
+  // Gesture skips use fastSeek where the browser has it (Safari/Firefox):
+  // it lands on the NEAREST KEYFRAME instead of decoding forward to the
+  // exact frame — skipping the biggest chunk of network-seek latency
+  // (long-GOP encodes put keyframes seconds apart; an accurate seek
+  // silently decodes all of it). Precision is irrelevant for ±10s taps,
+  // and device sync follows the ACTUAL landed time via `seeked`, so
+  // scripts stay correct. Android Chrome lacks fastSeek → falls back to
+  // the accurate currentTime set.
+  const seekTo = (t) => {
+    if (typeof videoEl.fastSeek === 'function') videoEl.fastSeek(t);
+    else videoEl.currentTime = t;
+  };
+  const doSkip = (side) => {
+    if (side === 'left') {
+      seekTo(Math.max(0, videoEl.currentTime - 10));
+    } else {
+      const d = dur();
+      seekTo(d > 0 ? Math.min(d, videoEl.currentTime + 10) : videoEl.currentTime + 10);
+    }
+    skipFlash(side);
+    renderProgress(); // optimistic — don't wait for post-buffer timeupdate
+    show();
+    skipChainSide = side;
+    skipChainUntil = performance.now() + 800;
+  };
+
+  videoWrap.addEventListener('pointerup', (e) => {
+    // Controls handle their own events — never treat those as gestures.
+    if (e.target !== videoEl && e.target !== videoWrap
+        && !e.target.classList?.contains('pcx')) return;
+    const rect = videoWrap.getBoundingClientRect();
+    const x = rect.width > 0 ? (e.clientX - rect.left) / rect.width : 0.5;
+    const side = x < 0.35 ? 'left' : (x > 0.65 ? 'right' : 'center');
+
+    // Active skip chain + same side → immediate additional skip.
+    if (skipChainSide && side === skipChainSide && performance.now() < skipChainUntil) {
+      if (tapTimer) { clearTimeout(tapTimer); tapTimer = null; }
+      doSkip(side);
+      return;
+    }
+    skipChainSide = null;
+
+    if (tapTimer) {
+      // Double tap.
+      clearTimeout(tapTimer);
+      tapTimer = null;
+      if (side === 'center') togglePlay();
+      else doSkip(side);
+      return;
+    }
+    tapTimer = setTimeout(() => {
+      tapTimer = null;
+      if (overlay.classList.contains('pcx--visible')) {
+        overlay.classList.remove('pcx--visible');
+        clearTimeout(hideTimer);
+      } else {
+        show();
+      }
+    }, 260);
+  });
+  centerBtn.addEventListener('click', togglePlay);
+  playBtn.addEventListener('click', togglePlay);
+  videoEl.addEventListener('play', () => { setPlayIcons(); show(); });
+  videoEl.addEventListener('pause', () => {
+    setPlayIcons();
+    overlay.classList.add('pcx--visible');
+    clearTimeout(hideTimer);
+  });
+
+  muteBtn.addEventListener('click', () => {
+    videoEl.muted = !videoEl.muted;
+    muteBtn.replaceChildren(svgIcon(videoEl.muted ? 'volumeOff' : 'volume', 20));
+  });
+
+  // --- fullscreen: real where supported, pseudo (fixed overlay) on iOS ---
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  fsBtn.addEventListener('click', () => {
+    if (!isIOS && videoWrap.requestFullscreen) {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      else videoWrap.requestFullscreen().catch(() => {});
+    } else {
+      // Pseudo-fullscreen: fixed-position wrapper; custom controls survive.
+      const on = videoWrap.classList.toggle('player__video-wrap--fs');
+      document.documentElement.classList.toggle('pfs-lock', on);
+    }
+  });
+
+  // --- seek bar ---
+  const pctFromEvent = (e) => {
+    const rect = seekTrack.getBoundingClientRect();
+    if (rect.width <= 0) return 0;
+    return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+  };
+  let scrubbing = false;
+  seek.addEventListener('pointerdown', (e) => {
+    scrubbing = true;
+    seek.setPointerCapture?.(e.pointerId);
+    videoEl.currentTime = pctFromEvent(e) * dur();
+    show();
+  });
+  seek.addEventListener('pointermove', (e) => {
+    if (scrubbing) videoEl.currentTime = pctFromEvent(e) * dur();
+  });
+  const endScrub = () => { scrubbing = false; };
+  seek.addEventListener('pointerup', endScrub);
+  seek.addEventListener('pointercancel', endScrub);
+
+  const renderProgress = () => {
+    const d = dur();
+    if (d <= 0) return;
+    const pct = (videoEl.currentTime / d) * 100;
+    seekPlayed.style.width = `${pct}%`;
+    seekThumb.style.left = `${pct}%`;
+    timeNow.textContent = formatDuration(videoEl.currentTime);
+    if (isFinite(videoEl.duration)) timeTotal.textContent = formatDuration(videoEl.duration);
+    try {
+      const b = videoEl.buffered;
+      if (b && b.length > 0) {
+        seekBuffered.style.width = `${(b.end(b.length - 1) / d) * 100}%`;
+      }
+    } catch { /* ignore */ }
+  };
+
+  // --- timeupdate: progress + gap detection ---
+  videoEl.addEventListener('timeupdate', () => {
+    renderProgress();
+    if (actions && actions.length > 1) {
+      const ms = videoEl.currentTime * 1000;
+      gapTarget = null;
+      // Binary-search-free scan is fine at 4Hz timeupdate on mobile.
+      for (let i = 0; i < actions.length - 1; i++) {
+        if (ms >= actions[i].at && ms < actions[i + 1].at) {
+          if (actions[i + 1].at - actions[i].at >= GAP_SKIP_THRESHOLD_MS
+              && ms < actions[i + 1].at - 1500) {
+            gapTarget = actions[i + 1].at;
+          }
+          break;
+        }
+      }
+      gapChip.hidden = gapTarget == null;
+    }
+  });
+  gapChip.addEventListener('click', () => {
+    if (gapTarget != null) videoEl.currentTime = gapTarget / 1000;
+  });
+
+  // --- chapters (F3): parse the same funscript the heatmap fetches ---
+  if (video.hasFunscript && video.scriptUrl) {
+    fetch(video.scriptUrl)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((fs) => {
+        if (!fs) return;
+        if (Array.isArray(fs.actions)) {
+          actions = fs.actions
+            .filter((a) => a && Number.isFinite(a.at) && Number.isFinite(a.pos))
+            .sort((a, b) => a.at - b.at);
+        }
+        const meta = fs.metadata || {};
+        const list = Array.isArray(meta.chapters) ? meta.chapters : [];
+        const d = (video.duration || 0) * 1000;
+        if (d <= 0 || list.length === 0) return;
+        chapters = list;
+        for (const ch of list) {
+          const startMs = parseChapterTime(ch.startTime ?? ch.start ?? ch.at);
+          if (startMs == null || startMs <= 0 || startMs >= d) continue;
+          const mark = document.createElement('div');
+          mark.className = 'pcx__chapter-mark';
+          mark.style.left = `${(startMs / d) * 100}%`;
+          if (ch.name) mark.title = ch.name;
+          chapterLayer.appendChild(mark);
+        }
+      })
+      .catch(() => { /* chapters are decorative — never block playback */ });
+  }
+
+  setPlayIcons();
+  renderProgress();
+  return { overlay, show };
+}
+
+/**
+ * Chapter start times appear as ms numbers or "HH:MM:SS[.mmm]" strings in
+ * the wild (OFS exports the latter). Returns ms or null.
+ */
+function parseChapterTime(v) {
+  if (typeof v === 'number' && isFinite(v)) return v;
+  if (typeof v !== 'string') return null;
+  const m = v.match(/^(\d+):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/);
+  if (!m) return null;
+  return ((+m[1]) * 3600 + (+m[2]) * 60 + (+m[3])) * 1000 + (+(m[4] || 0));
+}
+
 /**
  * Update the device-status pill based on server messages. Visually summarises
  * whether the desktop is ready to drive devices and which are connected.
@@ -2192,6 +2771,9 @@ function renderDevicePill(pill, devices) {
   const list = document.createElement('ul');
   list.className = 'player__sync-pill-list';
   list.hidden = true;
+  // One offset slider PER KIND (offsets are per-transport on the desktop,
+  // so multiple Buttplug devices share one row's slider — F4).
+  const kindsWithSlider = new Set();
   for (const d of devices) {
     const li = document.createElement('li');
     li.className = 'player__sync-pill-item';
@@ -2206,6 +2788,48 @@ function renderDevicePill(pill, devices) {
       li.appendChild(tag);
     }
     list.appendChild(li);
+
+    // Offset slider (F4): seeded from the desktop's live value; drags
+    // debounce → `set-offset` over the sync WS; the desktop clamps,
+    // applies through the Sync-tab paths, and re-broadcasts.
+    if (d.kind && typeof d.offsetMs === 'number' && !kindsWithSlider.has(d.kind)) {
+      kindsWithSlider.add(d.kind);
+      const offRow = document.createElement('li');
+      offRow.className = 'player__sync-pill-offset';
+      const offLabel = document.createElement('span');
+      offLabel.className = 'player__sync-pill-offset-label';
+      const offValue = document.createElement('span');
+      offValue.className = 'player__sync-pill-offset-value';
+      const setLabel = (v) => {
+        offLabel.textContent = t('webRemote.player.offset');
+        offValue.textContent = `${v > 0 ? '+' : ''}${v} ms`;
+      };
+      const slider = document.createElement('input');
+      slider.type = 'range';
+      slider.min = '-1000';
+      slider.max = '1000';
+      slider.step = '10';
+      slider.value = String(d.offsetMs);
+      slider.className = 'player__sync-pill-offset-slider';
+      slider.setAttribute('aria-label', `${d.kind} ${t('webRemote.player.offset')}`);
+      setLabel(d.offsetMs);
+      let debounce = null;
+      slider.addEventListener('input', () => {
+        const v = Math.round(Number(slider.value) || 0);
+        setLabel(v);
+        clearTimeout(debounce);
+        debounce = setTimeout(() => {
+          activeSyncClient?.sendSetOffset?.(d.kind, v);
+        }, 150);
+      });
+      // Sliding must not collapse the pill (pill.onclick toggles).
+      offRow.addEventListener('click', (e) => e.stopPropagation());
+      const head = document.createElement('div');
+      head.className = 'player__sync-pill-offset-head';
+      head.append(offLabel, offValue);
+      offRow.append(head, slider);
+      list.appendChild(offRow);
+    }
   }
   pill.appendChild(list);
 
@@ -2256,7 +2880,15 @@ function wireThumb(img, url, onGiveUp) {
   let attempts = 0;
   const MAX_ATTEMPTS = 8;
   img.onload = () => {
-    if (img.naturalWidth > 1) return; // real thumbnail arrived
+    if (img.naturalWidth > 1) {
+      // Real thumbnail arrived over the network → settle-in reveal (V3).
+      // Cached instant loads skip it: `img.complete` is true synchronously
+      // after setting src for a memory-cache hit, so the animation only
+      // plays when there was actually a wait — same rule as the desktop
+      // grid's scroll rebuilds.
+      if (!img.dataset.instant) img.classList.add('thumb-reveal');
+      return;
+    }
     if (attempts >= MAX_ATTEMPTS) { if (onGiveUp) onGiveUp(); return; }
     attempts++;
     const delay = Math.min(1000 * attempts, 4000); // back off: 1s → 4s cap
@@ -2266,6 +2898,7 @@ function wireThumb(img, url, onGiveUp) {
   };
   img.onerror = () => { if (onGiveUp) onGiveUp(); };
   img.src = url;
+  if (img.complete && img.naturalWidth > 1) img.dataset.instant = '1';
 }
 
 /**

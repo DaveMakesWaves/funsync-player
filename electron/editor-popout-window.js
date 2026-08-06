@@ -94,7 +94,10 @@ function open(parent, store) {
     title: 'FunSync — Script Editor',
     parent,
     autoHideMenuBar: true,
-    backgroundColor: '#1a1a2e',
+    backgroundColor: require('./window-bg').resolveWindowColors().background, // theme surface
+    // Same themed title-bar overlay as the main window; the renderer supplies
+    // the drag region (`.popout-titlebar`).
+    ...require('./window-bg').winChromeOptions(require('./window-bg').resolveWindowColors()),
     icon: path.join(
       __dirname,
       '..',

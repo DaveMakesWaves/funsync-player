@@ -1,0 +1,77 @@
+/* Shared pop-out window chrome.
+ *
+ * All pop-outs run with the same themed Windows Controls Overlay the main
+ * window uses (electron/window-bg.js `winChromeOptions`). That removes the
+ * OS title bar, so every pop-out MUST provide its own drag region or the
+ * window can't be moved. These rules are the shared implementation.
+ *
+ * Everything is scoped under `html.has-wco`, which each pop-out renderer
+ * sets only when the overlay is actually present. On Linux (native frame)
+ * and any frame-fallback build none of this applies and the windows keep
+ * their normal title bars.
+ */
+
+/* --- Title-bar strip (editor / audience pop-outs) ---------------------
+   A real 48px bar carrying the window name, matching .nav-bar's surface and
+   height so the caption buttons line up with it exactly as they do in the
+   main window. */
+.popout-titlebar {
+  display: none;
+}
+
+html.has-wco .popout-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px; /* must match TITLE_BAR_HEIGHT in window-bg.js */
+  flex-shrink: 0;
+  padding: 0 16px;
+  background: var(--surface-elevated);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 500;
+  user-select: none;
+  -webkit-app-region: drag;
+  /* Keep the label clear of the caption buttons. */
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw) + 16px);
+}
+
+/* Anything interactive in the bar must opt out of dragging, or it can't be
+   clicked (the drag region swallows the press). */
+html.has-wco .popout-titlebar :is(button, input, select, a, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+
+.popout-titlebar__title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --- Player pop-out --------------------------------------------------
+   No permanent bar here: a title strip over a video window wastes the space
+   the window exists for. Instead the top edge is an invisible drag strip,
+   and the caption buttons are handled the same way as the main window's
+   player view (transparent over the video, fading with the controls) — see
+   `_syncCaptionOverlay` in the pop-out renderer. */
+.ppo-dragstrip {
+  display: none;
+}
+
+html.has-wco .ppo-dragstrip {
+  display: block;
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Stop short of the caption buttons so they stay clickable. */
+  width: env(titlebar-area-width, 100vw);
+  height: 48px;
+  -webkit-app-region: drag;
+  /* Purely a drag handle — never intercepts clicks meant for the video. */
+  pointer-events: auto;
+  background: none;
+  z-index: 61; /* above .player__controls (60) so the top edge always drags */
+}
+

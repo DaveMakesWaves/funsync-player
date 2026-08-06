@@ -141,3 +141,42 @@ export function classifyOverlap(newPath, existing) {
 
   return { kind: 'none' };
 }
+
+/**
+ * Join a directory and a filename using the separator the directory already
+ * uses.
+ *
+ * Replaces the `${dir}/${name}` + separator-rewrite idiom, which hard-codes
+ * Windows: on Linux it rewrites `/home/dave/clips/x.funscript` into
+ * `\home\dave\clips\x.funscript` — not a path at all, just a filename full
+ * of backslashes. That silently broke EroScripts downloads on the AppImage.
+ *
+ * @param {string} dir
+ * @param {string} name
+ * @returns {string}
+ */
+export function joinPath(dir, name) {
+  const raw = String(dir || '');
+  const file = String(name || '');
+  if (!raw) return file;
+
+  const trimmed = raw.replace(/[\\/]+$/, '');
+  // A POSIX path that trims to nothing was the filesystem root.
+  if (!trimmed) return `/${file}`;
+  const sep = trimmed.includes('\\') ? '\\' : '/';
+  return `${trimmed}${sep}${file}`;
+}
+
+/**
+ * Directory portion of a path, preserving the POSIX root.
+ *
+ * @param {string} p
+ * @returns {string}
+ */
+export function dirOfPath(p) {
+  const raw = String(p || '');
+  const cut = raw.replace(/[\\/][^\\/]+$/, '');
+  // `/Clip.mp4` -> '' would lose the root and make the result relative.
+  if (!cut && raw.startsWith('/')) return '/';
+  return cut;
+}

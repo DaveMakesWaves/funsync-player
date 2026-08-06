@@ -158,12 +158,32 @@ export async function initWebRemoteI18n() {
     if (r.ok) {
       const body = await r.json();
       if (body && typeof body.locale === 'string') locale = body.locale;
+      // Theme mirroring (F5, 2026-08-04): same endpoint carries the
+      // desktop's theme. 'system' resolves via prefers-color-scheme.
+      // Applied here (the one guaranteed pre-render await) so the first
+      // paint is already themed — same rule as the locale itself.
+      applyRemoteTheme(body && body.theme);
     }
   } catch {
     // Network glitch / endpoint missing → stay on default. Web-remote
-    // remains usable; just in English.
+    // remains usable; just in English + dark.
   }
   await setLocale(locale);
+}
+
+/** Set <html data-theme> + the PWA theme-color meta from the desktop's theme. */
+export function applyRemoteTheme(theme) {
+  let effective = theme === 'light' || theme === 'dark' ? theme : null;
+  if (!effective) {
+    // 'system' / unknown → follow the PHONE's own preference.
+    try {
+      effective = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches
+        ? 'light' : 'dark';
+    } catch { effective = 'dark'; }
+  }
+  document.documentElement.dataset.theme = effective;
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.content = effective === 'light' ? '#f5f5f7' : '#1a1a2e';
 }
 
 // Test-only — reset module state between cases (mirror of the

@@ -34,6 +34,9 @@ def single(
     video_path: str = Query(..., description="Absolute path to video file"),
     seek_pct: float = Query(0.1, description="Where in the video (0-1)"),
     width: int = Query(320, description="Output width in pixels"),
+    exact: bool = Query(False, description="Frame-accurate grab at seek_pct "
+                        "(user-picked thumbnail frame; skips the keyframe-only "
+                        "fast path and the 10s minimum-seek heuristic)"),
 ):
     """Generate ONE thumbnail for library card display. Cached on disk
     by content hash so repeat calls are nearly free. Replaces the
@@ -47,7 +50,7 @@ def single(
     requests don't serialise on the event loop.
     """
     try:
-        return generate_single_thumbnail(video_path, seek_pct=seek_pct, width=width)
+        return generate_single_thumbnail(video_path, seek_pct=seek_pct, width=width, exact=exact)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except RuntimeError as e:

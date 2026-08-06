@@ -48,7 +48,7 @@ def reset_user_data_dir():
 async def test_returns_en_when_user_data_dir_not_set(client):
     res = await client.get("/api/remote/locale")
     assert res.status_code == 200
-    assert res.json() == {"locale": "en"}
+    assert res.json() == {"locale": "en", "theme": "dark"}
 
 
 @pytest.mark.anyio
@@ -57,7 +57,7 @@ async def test_returns_en_when_config_json_missing(client, tmp_user_data):
     set_user_data_dir(tmp_user_data)
     res = await client.get("/api/remote/locale")
     assert res.status_code == 200
-    assert res.json() == {"locale": "en"}
+    assert res.json() == {"locale": "en", "theme": "dark"}
 
 
 @pytest.mark.anyio
@@ -67,7 +67,7 @@ async def test_returns_en_when_config_json_malformed(client, tmp_user_data):
     set_user_data_dir(tmp_user_data)
     res = await client.get("/api/remote/locale")
     assert res.status_code == 200
-    assert res.json() == {"locale": "en"}
+    assert res.json() == {"locale": "en", "theme": "dark"}
 
 
 @pytest.mark.anyio
@@ -78,7 +78,7 @@ async def test_returns_locale_from_config(client, tmp_user_data):
     set_user_data_dir(tmp_user_data)
     res = await client.get("/api/remote/locale")
     assert res.status_code == 200
-    assert res.json() == {"locale": "zh"}
+    assert res.json() == {"locale": "zh", "theme": "dark"}
 
 
 @pytest.mark.anyio
@@ -90,7 +90,7 @@ async def test_returns_en_when_language_field_missing(client, tmp_user_data):
     set_user_data_dir(tmp_user_data)
     res = await client.get("/api/remote/locale")
     assert res.status_code == 200
-    assert res.json() == {"locale": "en"}
+    assert res.json() == {"locale": "en", "theme": "dark"}
 
 
 @pytest.mark.anyio
@@ -102,4 +102,22 @@ async def test_returns_en_when_language_field_wrong_type(client, tmp_user_data):
     set_user_data_dir(tmp_user_data)
     res = await client.get("/api/remote/locale")
     assert res.status_code == 200
-    assert res.json() == {"locale": "en"}
+    assert res.json() == {"locale": "en", "theme": "dark"}
+
+
+@pytest.mark.anyio
+async def test_returns_saved_theme(client, tmp_user_data):
+    """Theme mirroring (SCOPE-web-remote-2.md F5): the endpoint carries the
+    desktop's saved theme; invalid values fall back to dark."""
+    import json as _json, os as _os
+    cfg = _os.path.join(tmp_user_data, "config.json")
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.write(_json.dumps({"settings": {"player": {"language": "de", "theme": "light"}}}))
+    set_user_data_dir(tmp_user_data)
+    res = await client.get("/api/remote/locale")
+    assert res.json() == {"locale": "de", "theme": "light"}
+
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.write(_json.dumps({"settings": {"player": {"theme": "neon"}}}))
+    res = await client.get("/api/remote/locale")
+    assert res.json()["theme"] == "dark"

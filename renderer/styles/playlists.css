@@ -49,6 +49,121 @@
   flex: 1;
 }
 
+/* Continue / Reset — secondary weight next to the accent-filled Play All,
+   so the primary action still reads as primary (Nielsen #6). Same metrics
+   so the three sit on one baseline. */
+.playlists__continue-btn,
+.playlists__reset-btn {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: background var(--transition-fast);
+}
+
+.playlists__continue-btn:hover,
+.playlists__reset-btn:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+}
+
+/* Watched check — top-right of the thumbnail. Distinct from the resume
+   bar: the bar means "part way through", this means "seen it". */
+.playlists__watched-check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.65);
+  color: var(--accent);
+  pointer-events: none;
+}
+
+.playlists__watched-check--inline {
+  position: static;
+  width: auto;
+  height: auto;
+  border-radius: 3px;
+  padding: 2px 4px;
+  background: transparent;
+}
+
+/* Watched cards dim slightly — enough to read as "done" while scanning,
+   not so much that the thumbnail becomes unusable. */
+.playlists__video-card--watched .playlists__video-thumbnail,
+.playlists__list-item--watched .playlists__list-name {
+  opacity: 0.62;
+}
+
+/* Playlist tile progress summary + bar. */
+.playlists__card-progress {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.playlists__card-progress-track {
+  margin-top: 6px;
+  height: 3px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.14);
+  overflow: hidden;
+}
+
+.playlists__card-progress-fill {
+  height: 100%;
+  background: var(--accent);
+}
+
+.playlists__card-action-btn--continue {
+  color: var(--accent);
+}
+
+/* "Last watched" pill — top-left of the thumbnail, opposite the duration
+   badge (bottom-right) so the two never collide. */
+.playlists__last-watched {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--accent);
+  color: #fff;
+  pointer-events: none;
+}
+
+/* List rows have no thumbnail to position against — the marker sits in
+   the badge strip and flows normally. */
+.playlists__last-watched--inline {
+  position: static;
+}
+
+/* Card / row emphasis, so the marker is findable by scanning rather than
+   by reading every pill. */
+.playlists__video-card--last-watched,
+.playlists__list-item--last-watched {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: 8px;
+}
+
 .playlists__play-all-btn {
   background: var(--accent);
   color: #fff;
@@ -571,4 +686,49 @@
 }
 .playlists__list-item--drop-after {
   box-shadow: inset 0 -2px 0 0 var(--accent);
+}
+
+/* === Advanced playlist settings modal ================================
+   Home for shuffle-modifying options that need explaining. Balance by
+   script lived as a bare header icon; nothing on a 14px glyph could
+   convey what it does, and it silently no-ops while Shuffle is off. */
+
+.playlists__advanced-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.playlists__advanced-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+/* Disabled (Shuffle off) reads as unavailable rather than broken — the
+   reason is spelled out in the note directly below it. */
+.playlists__advanced-row:has(input:disabled) {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.playlists__advanced-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.playlists__advanced-desc {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.playlists__advanced-note {
+  margin: 2px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--text-muted);
+  font-style: italic;
 }

@@ -256,6 +256,34 @@ export class ConnectionPanel {
         <div class="connection-panel__hint" id="bp-resync-status" aria-live="polite"></div>
       </div>
 
+      <!-- Output tuning. Moved here from Settings ▸ Playback (2026-08-05):
+           these only mean anything with a Buttplug device connected, and
+           every comparable per-device setting for the Handy, T-Code and
+           Autoblow already lives in this panel. -->
+      <div class="connection-panel__form">
+        <div class="connection-panel__section-label" data-i18n="connection.buttplug.tuning">${_esc(t('connection.buttplug.tuning'))}</div>
+
+        <label class="connection-panel__label" for="bp-linear-strategy" data-i18n="settingsPanel.playback.fieldStrategy">${_esc(t('settingsPanel.playback.fieldStrategy'))}</label>
+        <select id="bp-linear-strategy" class="connection-panel__input" aria-describedby="bp-tuning-hint">
+          <option value="action-boundary" data-i18n="settingsPanel.playback.strategyActionBoundary">${_esc(t('settingsPanel.playback.strategyActionBoundary'))}</option>
+          <option value="interpolated" data-i18n="settingsPanel.playback.strategyInterpolated">${_esc(t('settingsPanel.playback.strategyInterpolated'))}</option>
+        </select>
+
+        <div id="bp-lookahead-row">
+          <label class="connection-panel__label" for="bp-lookahead" data-i18n="settingsPanel.playback.fieldLookahead">${_esc(t('settingsPanel.playback.fieldLookahead'))}</label>
+          <input type="range" id="bp-lookahead" class="connection-panel__input" min="0" max="200" value="60" step="10" aria-describedby="bp-tuning-hint">
+          <span id="bp-lookahead-val" class="connection-panel__hint">60ms</span>
+        </div>
+
+        <div id="bp-min-stroke-row">
+          <label class="connection-panel__label" for="bp-min-stroke" data-i18n="settingsPanel.playback.fieldMinStroke">${_esc(t('settingsPanel.playback.fieldMinStroke'))}</label>
+          <input type="range" id="bp-min-stroke" class="connection-panel__input" min="0" max="200" value="60" step="10" aria-describedby="bp-tuning-hint">
+          <span id="bp-min-stroke-val" class="connection-panel__hint">60ms</span>
+        </div>
+
+        <div class="connection-panel__hint" id="bp-tuning-hint">${_esc(t('settingsPanel.playback.bpHint'))}</div>
+      </div>
+
       </div><!-- end tab-buttplug -->
 
       <div class="connection-panel__tab-content" id="tab-tcode" role="tabpanel" aria-labelledby="connection-panel__tab-btn-tcode" hidden>
@@ -317,10 +345,10 @@ export class ConnectionPanel {
 
         <label class="connection-panel__label" style="margin-top:8px" data-i18n="connection.tcode.updateRate">${_esc(t('connection.tcode.updateRate'))}</label>
         <select id="tcode-update-rate-select" class="connection-panel__input" data-i18n-aria-label="connection.tcode.updateRateAria" aria-label="${_esc(t('connection.tcode.updateRateAria'))}">
-          <option value="25" selected>25 Hz</option>
+          <option value="25">25 Hz</option>
           <option value="33">33 Hz</option>
           <option value="50">50 Hz</option>
-          <option value="60">60 Hz</option>
+          <option value="60" selected>60 Hz</option>
         </select>
         <div class="connection-panel__hint" style="margin-top:4px;font-size:11px;color:var(--text-secondary)" data-i18n="connection.tcode.updateRateHint">
           ${_esc(t('connection.tcode.updateRateHint'))}
@@ -649,6 +677,7 @@ export class ConnectionPanel {
     if (this.buttplug) {
       this._panel.querySelector('#btn-bp-connect').addEventListener('click', () => this._onButtplugConnect());
       this._panel.querySelector('#btn-bp-scan').addEventListener('click', () => this._onButtplugScan());
+      this._wireButtplugTuning();
       this._panel.querySelector('#btn-bp-resync').addEventListener('click', () => this._onButtplugResync());
 
       this.buttplug.onConnect = () => this._updateButtplugStatus('connected');
@@ -700,7 +729,10 @@ export class ConnectionPanel {
       // live to the sync engine (restarts its scheduler) and persists.
       const rateSelect = this._panel.querySelector('#tcode-update-rate-select');
       if (rateSelect) {
-        const savedRate = Number(this.settings.get('tcode.updateRateHz')) || 25;
+        // Fallback matches the store default (60 since the keyframe-output
+        // rework) — a mismatched fallback here showed 25 in the dropdown
+        // while the engine actually ran at 60.
+        const savedRate = Number(this.settings.get('tcode.updateRateHz')) || 60;
         rateSelect.value = String(savedRate);
         this.tcodeSync?.setUpdateRate?.(savedRate);
         rateSelect.addEventListener('change', () => {
@@ -1204,6 +1236,70 @@ export class ConnectionPanel {
     } else {
       this._updateButtplugStatus('error');
     }
+  }
+
+  /**
+   * Buttplug output tuning — linear strategy, lookahead, min stroke.
+   *
+   * Moved here from Settings ▸ Playback (2026-08-05). Unlike there, this
+   * panel already holds `buttplugSync`, so it drives it directly instead of
+   * routing three callbacks back out through app.js.
+   *
+   * Lookahead and min-stroke only apply to action-boundary mode. They're
+   * dimmed rather than hidden when interpolated is selected, so the options
+   * stay discoverable (Nielsen #1) — the same treatment they had before.
+   */
+  _wireButtplugTuning() {
+    const strategy = this._panel.querySelector('#bp-linear-strategy');
+    const lookahead = this._panel.querySelector('#bp-lookahead');
+    const lookaheadVal = this._panel.querySelector('#bp-lookahead-val');
+    const lookaheadRow = this._panel.querySelector('#bp-lookahead-row');
+    const minStroke = this._panel.querySelector('#bp-min-stroke');
+    const minStrokeVal = this._panel.querySelector('#bp-min-stroke-val');
+    const minStrokeRow = this._panel.querySelector('#bp-min-stroke-row');
+
+    const applyStrategyVisibility = (value) => {
+      const isActionBoundary = value === 'action-boundary';
+      for (const [row, range] of [[lookaheadRow, lookahead], [minStrokeRow, minStroke]]) {
+        if (!row) continue;
+        row.classList.toggle('connection-panel__field--inert', !isActionBoundary);
+        if (range) {
+          range.disabled = !isActionBoundary;
+          range.setAttribute('aria-disabled', String(!isActionBoundary));
+        }
+      }
+    };
+
+    if (strategy) {
+      const saved = this.settings?.get?.('player.linearStrategy') || 'action-boundary';
+      strategy.value = saved;
+      applyStrategyVisibility(saved);
+      strategy.addEventListener('change', () => {
+        const val = strategy.value;
+        this.settings?.set?.('player.linearStrategy', val);
+        applyStrategyVisibility(val);
+        this.buttplugSync?.setLinearStrategy?.(val);
+      });
+    }
+
+    const wireRange = (input, valueEl, key, fallback, apply) => {
+      if (!input) return;
+      const saved = this.settings?.get?.(key);
+      const initial = saved != null ? saved : fallback;
+      input.value = initial;
+      if (valueEl) valueEl.textContent = `${initial}ms`;
+      input.addEventListener('input', () => {
+        const val = parseInt(input.value, 10) || 0;
+        if (valueEl) valueEl.textContent = `${val}ms`;
+        this.settings?.set?.(key, val);
+        apply(val);
+      });
+    };
+
+    wireRange(lookahead, lookaheadVal, 'player.linearLookaheadMs', 60,
+      (v) => this.buttplugSync?.setLinearLookaheadMs?.(v));
+    wireRange(minStroke, minStrokeVal, 'player.minStrokeMs', 60,
+      (v) => this.buttplugSync?.setMinStrokeMs?.(v));
   }
 
   async _onButtplugScan() {

@@ -123,49 +123,114 @@
   grid-column: 1 / -1;
 }
 
-.library__loading-spinner {
-  width: 24px;
-  height: 24px;
-  border: 3px solid var(--border-subtle);
-  border-top-color: var(--accent);
+/* Scan-phase loader: three accent-colored dots, each popping up and
+ * settling back inline in sequence. No text (the old spinner's
+ * "Scanning library..." label was hardcoded English). */
+.library__loading-dots {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library__loading-dots span {
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  animation: spin 0.8s linear infinite;
+  background: var(--accent);
+  animation: library-dot-pop 1.2s ease-in-out infinite;
 }
 
-@keyframes spin {
-  to { transform: rotate(360deg); }
+.library__loading-dots span:nth-child(2) { animation-delay: 0.15s; }
+.library__loading-dots span:nth-child(3) { animation-delay: 0.3s; }
+
+@keyframes library-dot-pop {
+  0%, 55%, 100% { transform: translateY(0); }
+  25% { transform: translateY(-7px); }
 }
 
-.library__loading-text {
-  color: var(--text-secondary);
-  font-size: 13px;
+/* Reduced motion: a loading indicator is essential feedback, so don't
+ * freeze it — swap the positional pop for a gentle opacity pulse
+ * (opacity changes aren't vestibular triggers; WCAG treats them as
+ * acceptable under reduced motion). NOTE: Electron inherits this media
+ * query from the OS — on Windows it's Settings > Accessibility >
+ * Visual effects > "Animation effects". */
+@media (prefers-reduced-motion: reduce) {
+  .library__loading-dots span {
+    animation: library-dot-fade 1.2s ease-in-out infinite;
+  }
 }
 
-/* Blocking overlay shown over the grid-wrapper after scan completes, while
- * the initial batch of thumbnail <video> decoders is still running. Removed
- * the moment the thumbnail queue drains. pointer-events:auto on the overlay
- * swallows clicks on cards behind it — prevents early playback during the
- * GPU-decode-contention window. */
+@keyframes library-dot-fade {
+  0%, 55%, 100% { opacity: 1; }
+  25% { opacity: 0.35; }
+}
+
 .library__grid-wrapper { position: relative; }
 
-.library__initial-thumbs-overlay {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  background: rgba(10, 10, 15, 0.72);
-  backdrop-filter: blur(2px);
-  z-index: 10;
-  pointer-events: auto;
-  animation: fadeIn 180ms ease;
+/* ---- Skeleton loading (replaces the old blocking "Generating previews"
+ * overlay — the GPU-decode contention it guarded against is gone since
+ * thumbnails moved to backend ffmpeg). The grid stays interactive; each
+ * card's placeholder shimmers until its thumbnail lands. Shimmer runs only
+ * while genuinely loading: data-loaded is absent/'pending'/'pending-scroll'
+ * during load, 'true' on success (placeholder removed), 'failed' on a
+ * broken file (static icon, no endless animation). Shared by grid + list
+ * (same .library__card-placeholder element). ---- */
+.library__card-placeholder {
+  position: relative;
+  overflow: hidden;
 }
 
-@keyframes fadeIn {
+/* Unified-sweep skeleton (matsimon.dev "simple skeleton loaders", Dave's
+ * reference): pending tiles are SOLID flat plates, and ONE tilted gradient
+ * stripe sweeps across all of them as a single cohesive pass. The trick is
+ * `background-attachment: fixed` — the gradient's positioning area becomes
+ * the VIEWPORT, so every plate shows the slice of the same stripe that's
+ * currently over it, instead of running its own copy of the animation. */
+.library__card:not([data-loaded="true"]):not([data-loaded="failed"]) .library__card-placeholder,
+.library__list-item:not([data-loaded="true"]):not([data-loaded="failed"]) .library__card-placeholder {
+  opacity: 1;
+  background-color: #232338;
+  background-image: linear-gradient(
+    100deg,
+    transparent,
+    transparent 50%,
+    rgba(255, 255, 255, 0.08) 60%,
+    transparent 70%
+  );
+  background-size: 200% 100%;
+  background-attachment: fixed;
+  animation: library-skeleton-shimmer 1.6s linear infinite;
+}
+
+/* Clean blocks while loading — the clapperboard icon comes back for the
+ * terminal 'failed' state so broken files still show something. */
+.library__card:not([data-loaded="true"]):not([data-loaded="failed"]) .library__card-placeholder svg,
+.library__list-item:not([data-loaded="true"]):not([data-loaded="failed"]) .library__card-placeholder svg {
+  opacity: 0;
+}
+
+@keyframes library-skeleton-shimmer {
+  0% { background-position-x: 200%; }
+  100% { background-position-x: 0%; }
+}
+
+/* Async-loaded thumbnails fade in over the skeleton. Applied ONLY by
+ * _loadThumbnail — cache-hit renders during scroll rebuilds skip it. */
+.library__thumb-img--reveal {
+  animation: library-thumb-in 220ms ease;
+}
+
+@keyframes library-thumb-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .library__card .library__card-placeholder,
+  .library__list-item .library__card-placeholder {
+    animation: none;
+  }
+  .library__thumb-img--reveal { animation: none; }
 }
 
 .library__empty-btn {
@@ -839,6 +904,41 @@
   color: var(--badge-purple);
 }
 
+/* Resume progress — "how far you got" strip along the bottom of a
+   thumbnail. Absolutely positioned so it adds no height: a card with a bar
+   and one without stay identical in size. Sits under the duration badge's
+   z-index so the two never fight for the bottom-right corner.
+   Shared by library cards, playlist cards and playlist list rows. */
+.resume-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* List rows have no thumbnail to overlay, so the bar flows inline. */
+.resume-bar--inline {
+  position: relative;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  width: 60px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.resume-bar__fill {
+  height: 100%;
+  background: var(--accent, #e0245e);
+  /* No transition: these are built at render time, and animating every
+     card's bar on a library re-render would ripple across the grid. */
+}
+
 .library__duration-badge {
   position: absolute;
   bottom: 6px;
@@ -872,18 +972,21 @@
 
 /* Kebab Menu Dropdown */
 .library__kebab-menu {
-  position: absolute;
-  top: 36px;
-  right: 6px;
+  /* Portal: mounted on document.body with position:fixed — coordinates are
+     set inline by _positionKebabMenu (anchored to the kebab button, viewport
+     clamped). Body-level fixed positioning escapes the grid-wrapper's
+     overflow clipping and every stacking context, so the menu can overlay
+     the filter bar / top bar and is never cut off. */
+  position: fixed;
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  z-index: 100;
+  z-index: 1000;
   min-width: 180px;
   padding: 4px 0;
-  /* Safety net: if the menu is taller than the space available even after
-     flipping, let it scroll rather than run off-screen. */
+  /* Safety net: if the menu is taller than the viewport even after the
+     positioner pins it to an edge, let it scroll rather than run off-screen. */
   max-height: calc(100vh - 24px);
   overflow-y: auto;
 }
@@ -891,11 +994,6 @@
 /* Edge-aware flip: opens ABOVE the card instead of below when a downward
    menu would be clipped by the bottom of the scrolling library area. Applied
    by `_positionKebabMenu()` after measuring. */
-.library__kebab-menu--up {
-  top: auto;
-  bottom: calc(100% + 4px);
-}
-
 .library__kebab-menu-item {
   display: block;
   width: 100%;
@@ -923,6 +1021,39 @@
 .library__kebab-menu-item--danger:hover {
   color: var(--state-error);
   background: var(--state-error-soft);
+}
+
+/* Collapsible kebab groups (accordion submenus). The header is a regular
+   menu item with a rotating chevron; expanded items sit on a slightly
+   recessed band with extra left padding so the hierarchy reads at a
+   glance. [hidden] on the items container does the collapsing (display
+   guaranteed by the CSS reset's [hidden] rule). */
+.library__kebab-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.library__kebab-group-chevron {
+  color: var(--text-secondary);
+  font-size: 10px;
+  line-height: 1;
+  transition: transform var(--transition-fast);
+}
+
+.library__kebab-group--open .library__kebab-group-chevron {
+  transform: rotate(90deg);
+}
+
+.library__kebab-group-items {
+  background: rgba(0, 0, 0, 0.18);
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.library__kebab-group-items .library__kebab-menu-item {
+  padding-left: 24px;
 }
 
 /* Video Count */
@@ -1999,3 +2130,38 @@
 }
 .library__thumb-picker-use:hover { filter: brightness(1.08); }
 .library__thumb-picker-cancel:hover { background: var(--surface-overlay); }
+
+/* === Per-card heatmap strip (opt-in: library.showCardHeatmap) ==========
+   Sits between the thumbnail and the title. Rendered ONLY when the setting
+   is on — when off the element is absent entirely, so cards keep their
+   original height rather than reserving an empty band.
+   Fixed row height so a card showing a strip and a card showing the
+   "unavailable" note stay on the same baseline; a ragged grid would be
+   worse than either. */
+.library__card-heatmap {
+  height: 16px;
+  display: flex;
+  align-items: center;
+  padding: 0 8px;
+  background: var(--surface-card);
+  pointer-events: none;
+}
+
+.library__card-heatmap-canvas {
+  width: 100%;
+  height: 6px;
+  display: block;
+  border-radius: 2px;
+  background: var(--surface-overlay);
+  color: var(--accent); /* renderBins reads currentColor for the fallback */
+}
+
+/* No matched script — say so quietly rather than leaving a blank band. */
+.library__card-heatmap--unavailable {
+  font-size: 10px;
+  color: var(--text-muted);
+  justify-content: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

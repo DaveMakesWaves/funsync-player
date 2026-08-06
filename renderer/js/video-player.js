@@ -40,6 +40,17 @@ export class VideoPlayer {
     this._controlsTimeout = null;
     this._cursorTimeout = null;
     this._isSeeking = false;
+    // Our own view of the playback rate, tracked separately from
+    // `video.playbackRate`: the ELEMENT's value is reset to
+    // `defaultPlaybackRate` (1) by the browser whenever a new resource
+    // loads, so it can't be used to detect "the rate needs resetting".
+    // See `_onMetadataLoaded`.
+    this._currentRate = 1;
+    // Returns whether the playback rate should carry across videos. A
+    // PROVIDER rather than a cached flag so there's no state to keep in
+    // sync when the setting changes — nothing subscribes to settings
+    // changes in the renderer, and a stale copy here would be invisible.
+    this._rememberRateProvider = null;
     this._clickTimer = null;
     this._abLoop = { a: null, b: null };
     this._infoVisible = false;
@@ -47,6 +58,8 @@ export class VideoPlayer {
     this._aspectIndex = 0;
     this._centerFlashTimer = null;
     this.onProgressHover = null; // callback: (timeSeconds) => {}
+    // Fired only on an actual show/hide transition of the control chrome.
+    this.onControlsVisibilityChanged = null; // callback: (visible: boolean) => {}
     this.onSeekDrag = null; // callback: (timeSeconds) => {} — called during scrub
 
     this._cacheElements();
@@ -398,6 +411,18 @@ export class VideoPlayer {
   }
 
   async toggleFullscreen() {
+    // Never fullscreen the DOCKED mini-player. The keyboard handler has no
+    // view gating, so F / F11 fires while the user is browsing the library
+    // with a video docked in the corner. A fullscreen element fills the
+    // display regardless of its CSS box, so the corner overlay would take
+    // over the whole screen — and `.player-container--mini` hides the top
+    // bar, so it would do so with no back arrow and no way out but killing
+    // the app. Same stuck state as the Back-while-fullscreen bug
+    // (zaikechi, EroScripts #229); this is its second route in.
+    if (!document.fullscreenElement
+        && this.container?.classList?.contains('player-container--mini')) {
+      return;
+    }
     // Fullscreen can be denied by browser policy (no user gesture, or
     // the page is in an embedded iframe without `allow="fullscreen"`).
     // Wrap in try/catch and surface the failure so the user knows the
@@ -534,8 +559,31 @@ export class VideoPlayer {
     // / VLC convention — avoids "why is this video at 2×?" surprise the
     // next morning. Replaces the editor-close reset (removed from
     // script-editor.js since rate is now player-owned).
-    if (this.video.playbackRate !== 1) {
-      this.setPlaybackRate(1);
+    //
+    // Guarded on OUR tracked rate, not `video.playbackRate`. Loading a new
+    // resource already reset the element to `defaultPlaybackRate` (1), so
+    // by the time this runs `video.playbackRate` is ALWAYS 1 and the old
+    // guard never fired. The rate really did drop to 1×, but nothing
+    // emitted `playback:rate-changed`, so the speed chip kept showing the
+    // previous video's rate — "appears to persist but doesn't really", and
+    // reselecting the same value was the only way to make it take effect.
+    //
+    // It also left the Handy in HDSP mode after a non-1× video, since the
+    // HSSP↔HDSP switch lives in setPlaybackRate and was likewise skipped.
+    //
+    // With "remember playback speed" on we re-APPLY the tracked rate rather
+    // than resetting — the element still needs writing to either way, since
+    // the browser has just reset it to 1.
+    if (this._currentRate !== 1) {
+      let remember = false;
+      try {
+        remember = !!this._rememberRateProvider?.();
+      } catch {
+        // A broken provider must not stop the reset — falling back to 1×
+        // is the safe direction.
+        remember = false;
+      }
+      this.setPlaybackRate(remember ? this._currentRate : 1);
     }
 
     // Resolution badge
@@ -612,11 +660,16 @@ export class VideoPlayer {
   // --- Controls Visibility ---
 
   _showControls() {
+    // Fire the callback only on an actual transition. `_showControls` runs on
+    // every mousemove, so notifying unconditionally would spam the consumer
+    // (the caption-overlay sync is an IPC round-trip).
+    const wasVisible = this.container.classList.contains('controls-visible');
     this.container.classList.add('controls-visible');
     this.container.style.cursor = '';
     clearTimeout(this._controlsTimeout);
     clearTimeout(this._cursorTimeout);
     this._hideControlsDelayed();
+    if (!wasVisible) this._emitControlsVisibility(true);
   }
 
   _hideControlsDelayed() {
@@ -624,10 +677,17 @@ export class VideoPlayer {
     clearTimeout(this._cursorTimeout);
     this._controlsTimeout = setTimeout(() => {
       if (!this.video.paused) {
+        const wasVisible = this.container.classList.contains('controls-visible');
         this.container.classList.remove('controls-visible');
         this.container.style.cursor = 'none';
+        if (wasVisible) this._emitControlsVisibility(false);
       }
     }, 1500);
+  }
+
+  /** Notify the app that the control chrome appeared/disappeared. */
+  _emitControlsVisibility(visible) {
+    try { this.onControlsVisibilityChanged?.(visible); } catch { /* best-effort */ }
   }
 
   // --- Screenshot ---
@@ -938,6 +998,17 @@ export class VideoPlayer {
    * HSSP↔HDSP mode switch. Called by app.js once the managers are
    * constructed. Idempotent — passing nullish keeps existing refs.
    */
+  /**
+   * Supply a predicate for "carry the playback rate across videos"
+   * (`player.rememberPlaybackSpeed`). Read at each video load, so a change
+   * in Settings takes effect on the very next video with no propagation.
+   *
+   * @param {() => boolean} fn
+   */
+  setRememberRateProvider(fn) {
+    this._rememberRateProvider = typeof fn === 'function' ? fn : null;
+  }
+
   setHandySyncRefs({ handyManager, handySyncEngine, handyHdspSync }) {
     if (handyManager !== undefined) this._handyManager = handyManager;
     if (handySyncEngine !== undefined) this._handySyncEngine = handySyncEngine;

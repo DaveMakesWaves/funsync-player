@@ -9,8 +9,15 @@
   <link rel="stylesheet" href="styles/modal.css">
   <link rel="stylesheet" href="styles/audience-room.css">
   <link rel="stylesheet" href="styles/modern.css">
+  <link rel="stylesheet" href="styles/popout-chrome.css">
 </head>
 <body class="audience-room-body">
+  <!-- Drag region + window name for the frameless (WCO) window. Shares the
+       main window's nav-bar surface and 48px height so the caption buttons
+       align identically. Collapses to nothing without the overlay. -->
+  <div class="popout-titlebar">
+    <span class="popout-titlebar__title" data-i18n="audience.popoutWindowTitle">Audience Room</span>
+  </div>
   <!-- Mount point for the audience-room renderer. Bootstrap script
        fills this in once it receives INITIAL_STATE from main. Until
        then a tiny loading shimmer keeps the user oriented. -->

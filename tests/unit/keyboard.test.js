@@ -226,4 +226,49 @@ describe('KeyboardHandler', () => {
     document.dispatchEvent(new KeyboardEvent('keyup', { key: 'x', bubbles: true }));
     expect(onOrgasmHold).not.toHaveBeenCalled();
   });
+
+  // --- Next / previous video (community request, matches the pop-out) ---
+
+  it('n loads the next queue item', () => {
+    const onLoadNext = vi.fn();
+    handler.onLoadNext = onLoadNext;
+    fireKey('n');
+    expect(onLoadNext).toHaveBeenCalledTimes(1);
+  });
+
+  it('p loads the previous queue item', () => {
+    const onLoadPrev = vi.fn();
+    handler.onLoadPrev = onLoadPrev;
+    fireKey('p');
+    expect(onLoadPrev).toHaveBeenCalledTimes(1);
+  });
+
+  it('N / P (uppercase) work the same', () => {
+    const onLoadNext = vi.fn();
+    const onLoadPrev = vi.fn();
+    handler.onLoadNext = onLoadNext;
+    handler.onLoadPrev = onLoadPrev;
+    fireKey('N');
+    fireKey('P');
+    expect(onLoadNext).toHaveBeenCalledTimes(1);
+    expect(onLoadPrev).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not change video while the editor is open', () => {
+    const onLoadNext = vi.fn();
+    const onLoadPrev = vi.fn();
+    handler.onLoadNext = onLoadNext;
+    handler.onLoadPrev = onLoadPrev;
+    scriptEditor.isOpen = true;
+    fireKey('n');
+    fireKey('p');
+    expect(onLoadNext).not.toHaveBeenCalled();
+    expect(onLoadPrev).not.toHaveBeenCalled();
+  });
+
+  it('n / p are inert when no callback is wired (no queue)', () => {
+    handler.onLoadNext = null;
+    handler.onLoadPrev = null;
+    expect(() => { fireKey('n'); fireKey('p'); }).not.toThrow();
+  });
 });

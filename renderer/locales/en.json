@@ -118,7 +118,8 @@
     },
     "toast": {
       "selfKey": "That's your own Handy — it's already controlled by the Handy tab."
-    }
+    },
+    "popoutWindowTitle": "Audience Room"
   },
   "nav": {
     "library": "Library",
@@ -195,6 +196,8 @@
     "devicesConnectionShortcut": "Devices Connection (H)",
     "editor": "Editor",
     "scriptEditor": "Script Editor (E)",
+    "inlineTimeline": "Script timeline",
+    "inlineHeatmap": "Heatmap strip",
     "screenshot": "Screenshot",
     "pictureInPicture": "Picture-in-Picture",
     "miniPlayPause": "Play / pause",
@@ -344,7 +347,18 @@
     "showingFolder": "Showing: {folder}",
     "openFileLocation": "Open File Location",
     "customThumbSet": "Set thumbnail frame…",
+    "customThumbUpload": "Upload thumbnail image…",
+    "customThumbUploadFailed": "Couldn't use that image",
     "customThumbReset": "Reset thumbnail",
+    "variantDefault": "Default",
+    "assignScriptBulk": "Assign Script",
+    "bulkScriptAssigned": "{name} assigned to {count} videos",
+    "kebabGroupOrganize": "Organize",
+    "kebabGroupScripts": "Scripts & subtitles",
+    "kebabGroupThumbnail": "Thumbnail",
+    "kebabGroupVR": "VR",
+    "kebabExtractAxes": "Extract embedded axes ({count})…",
+    "kebabExtractAxesTitle": "Save {axes} as companion .funscript files",
     "customThumbTitle": "Pick a thumbnail frame",
     "customThumbHint": "Drag the slider to the frame you want, then use it as this video's tile.",
     "customThumbUse": "Use this frame",
@@ -452,8 +466,10 @@
       "scriptNone": "(none)",
       "selectScriptBtn": "Select",
       "addRoute": "+ Add Route",
-      "variantSearchTitle": "Select Script for Variation"
-    }
+      "variantSearchTitle": "Select Script for Variation",
+      "searchEroScripts": "Search EroScripts..."
+    },
+    "heatmapUnavailable": "Heatmap unavailable"
   },
   "playlists": {
     "title": "Playlists",
@@ -482,7 +498,29 @@
     "gridView": "Grid view",
     "listView": "List view",
     "detailEmpty": "No videos in this playlist",
-    "detailEmptyHint": "Add videos from the Library using the kebab menu"
+    "detailEmptyHint": "Add videos from the Library using the kebab menu",
+    "advanced": {
+      "openTitle": "Advanced playlist settings",
+      "title": "Advanced playlist settings",
+      "balanceLabel": "Give every script an equal turn",
+      "balanceWhy": "Some scripts are used by more than one video. Normally that makes them come up more often when shuffling, just because there are more videos using them.",
+      "balanceHow": "With this on, each script gets the same chance no matter how many videos share it. You still get one of those videos at random, and next time round the playlist you will usually get a different one.",
+      "balanceNeedsShuffleOn": "This only changes anything while Shuffle is on.",
+      "balanceNeedsShuffleOff": "Turn Shuffle on to use this. It has no effect when the playlist plays in order.",
+      "unwatchedLabel": "Prefer unwatched",
+      "unwatchedWhy": "Shuffle plays videos you haven't finished before ones you have. Videos you've watched still play, just last."
+    },
+    "lastWatched": "Last watched",
+    "continueWatching": "Continue",
+    "continueWatchingNamed": "Continue from {name}",
+    "resetProgress": "Reset progress",
+    "resetProgressHint": "Clear the last-watched marker and saved positions for this playlist",
+    "resetProgressTitle": "Reset playlist progress?",
+    "resetProgressConfirm": "This clears the last-watched marker for \"{name}\" and the saved position of every video in it. Videos shared with another playlist lose their position there too, since positions are stored per video.",
+    "watched": "Watched",
+    "watchedCount": "{watched} of {total} watched",
+    "timeLeft": "{time} left",
+    "continueNamed": "Continue {name}"
   },
   "categories": {
     "title": "Categories",
@@ -597,6 +635,8 @@
     "jumpStartEnd": "Jump to start / end",
     "skipNextAction": "Skip to next action (gap skip)",
     "skipPrevAction": "Skip to previous action",
+    "nextVideo": "Next video in queue",
+    "prevVideo": "Previous video in queue",
     "volume5": "Volume ±5%",
     "muteToggle": "Mute / Unmute",
     "fullscreen": "Fullscreen",
@@ -779,6 +819,7 @@
     "orgasmNotConfigured": "No orgasm script set — choose one in Settings ▸ Playback",
     "orgasmInvalidScript": "That file isn't a valid funscript",
     "orgasmScriptSet": "Orgasm script set: {name}",
+    "randomVariant": "Random script: {name}",
     "videoErrorGeneric": "Failed to load video",
     "mutexTakeover": "{incoming} took over from {evicted}",
     "added": "Added",
@@ -843,7 +884,9 @@
     "multiAxisFailed": "Multi-axis: {suffix} script failed to load ({error})",
     "queueReadFailed": "Queue item {name}: script {script} couldn't be read — playing without sync",
     "queueReadError": "Queue item {name}: script read failed ({error}) — playing without sync",
-    "handyUploadTimeout": "Handy script upload timed out — video is playing but the Handy won't be in sync. Check your connection and try reloading the video."
+    "handyUploadTimeout": "Handy script upload timed out — video is playing but the Handy won't be in sync. Check your connection and try reloading the video.",
+    "orgasmRoutingFallback": "Orgasm Switch: {devices} not connected. Using the single-axis fallback until everything is back.",
+    "orgasmScriptRecovered": "Found {count} moved finisher script(s) and updated the path"
   },
   "modal": {
     "closeAria": "Close {title}",
@@ -945,10 +988,16 @@
       "rangeExtenderResetTitle": "Reset to default (off)",
       "rangeExtenderResetAria": "Reset Stretch limited-range scripts to default",
       "orgasmScriptLabel": "Orgasm Switch script",
-      "orgasmScriptChoose": "Choose…",
+      "orgasmScriptChoose": "Configure…",
       "orgasmScriptClear": "Clear orgasm script",
       "orgasmScriptNone": "None",
       "orgasmScriptHint": "Hold X during playback to swap your device(s) onto this short looping script, then release to snap back. Works with Handy, Buttplug and T-Code.",
+      "orgasmModeLabel": "X key behaviour",
+      "orgasmModeHold": "Hold to ride (return on release)",
+      "orgasmModeToggle": "Press to finish (stop after)",
+      "orgasmModeHint": "Hold to ride: hold X to play the looping script, release to return to the main script. Press to finish: tap X to start it looping, tap again to stop the device — it won't return to the main script.",
+      "randomVariantLabel": "Random script variation",
+      "randomVariantHint": "When a video has multiple script variations, pick one at random each time it plays. Overrides pinned default variations while on.",
       "bpHeader": "Buttplug Linear Output (BLE)",
       "fieldStrategy": "Strategy",
       "strategyActionBoundary": "Per-stroke (smoother on BLE)",
@@ -961,7 +1010,18 @@
       "fieldMinStroke": "Min stroke",
       "minStrokeResetTitle": "Reset to default (60ms)",
       "minStrokeResetAria": "Reset Min Stroke to default",
-      "bpHint": "Per-stroke sends one command per action and lets the device's firmware interpolate — matches how the Handy's WiFi API (HSSP) feels. Lookahead compensates for BLE round-trip; min stroke stretches too-short strokes up so BLE can honor them. For Handy via connection code (HSSP), these have no effect."
+      "bpHint": "Per-stroke sends one command per action and lets the device's firmware interpolate — matches how the Handy's WiFi API (HSSP) feels. Lookahead compensates for BLE round-trip; min stroke stretches too-short strokes up so BLE can honor them. For Handy via connection code (HSSP), these have no effect.",
+      "orgasmSummaryMulti": "Multi-axis ({count} axes)",
+      "orgasmSummaryCustom": "Custom routing ({count} routes)",
+      "inlineVizOpacityLabel": "Overlay opacity",
+      "inlineVizOpacityResetTitle": "Restore default opacity",
+      "inlineVizOpacityHint": "How solid the script timeline and heatmap strip look over the video. Turn them on from the player's ⋮ menu.",
+      "orgasmScriptMissing": "(file not found)",
+      "playbackHeader": "Playback",
+      "orgasmHeader": "Orgasm Switch",
+      "videoHeader": "Video & performance",
+      "rememberSpeedLabel": "Remember playback speed",
+      "rememberSpeedHint": "Keep the current speed when you load another video. Off by default, so each video starts at 1x."
     },
     "appearance": {
       "themeHeader": "Theme",
@@ -986,7 +1046,16 @@
       "folderPreviewsLabel": "Folder preview thumbnails",
       "folderPreviewsHint": "Show a mosaic of the videos inside on folder tiles. Turn off to use a plain folder icon instead.",
       "miniPlayerLabel": "Keep playing while browsing",
-      "miniPlayerHint": "When you go back to the library while a video is playing, it shrinks into a corner mini-player and keeps playing (and keeps driving your device) instead of stopping."
+      "miniPlayerHint": "When you go back to the library while a video is playing, it shrinks into a corner mini-player and keeps playing (and keeps driving your device) instead of stopping.",
+      "hwDecodeLabel": "Hardware video decoding",
+      "hwDecodeHint": "On by default. If videos won't play — a black screen or decode error, common on NVIDIA + Linux — turn this off to use software decoding. Takes effect after restarting the app.",
+      "hwDecodeRestart": "Restart FunSync to apply the video decoding change.",
+      "cardHeatmapLabel": "Heatmap on library cards",
+      "cardHeatmapHint": "Show a stroke-speed heatmap under each thumbnail. Uses the video's main script. Off by default because it reads a script per card.",
+      "resumeProgressLabel": "Resume progress in playlists",
+      "resumeProgressHint": "Show how far through each video you got, as a bar on playlist cards and rows. Playlist playback only — the main library is left unmarked.",
+      "hideDupesLabel": "Hide duplicate names",
+      "hideDupesHint": "Show only one entry when several videos share an identical filename, such as the same file in two source folders. The copy with a script is kept."
     },
     "data": {
       "backupHeader": "Backup & Recovery",
@@ -1122,6 +1191,8 @@
       "sort": "Sort",
       "viewToggleAria": "Toggle grid or list view",
       "viewToggleTitle": "Toggle grid / list",
+      "playAll": "Play all",
+      "shufflePlay": "Shuffle",
       "folderAria": "Browse by folder",
       "folderTitle": "Browse by folder",
       "filters": "Filters"
@@ -1212,6 +1283,20 @@
       "connected": "Connected: {devices}",
       "noDevices": "No devices connected on desktop",
       "connectedCount": "{count, plural, one {Connected device · #} other {Connected devices · #}}",
+      "playPause": "Play / Pause",
+      "seek": "Seek",
+      "mute": "Mute",
+      "fullscreen": "Fullscreen",
+      "loopAB": "A-B loop",
+      "skipGap": "Skip gap",
+      "offset": "Offset",
+      "orgasmHold": "Orgasm Switch - hold",
+      "orgasmRiding": "Release to return",
+      "orgasmTap": "Orgasm Switch - tap",
+      "orgasmStop": "Tap to stop",
+      "upNextIn": "Up next in {seconds}s",
+      "upNextPlayNow": "Play now",
+      "upNextCancel": "Cancel",
       "intensity": "Funscript intensity",
       "avg": "Avg",
       "max": "Max",
@@ -1243,7 +1328,20 @@
     "noAttachments": "No funscript attachments found in this topic",
     "downloadFailed": "Download failed",
     "savedToast": "Script saved: {name}",
-    "sessionExpired": "EroScripts session expired — log in again via the EroScripts panel"
+    "sessionExpired": "EroScripts session expired — log in again via the EroScripts panel",
+    "inline": {
+      "title": "Find a script on EroScripts",
+      "axesLine": "Main + {count} axes ({list})",
+      "downloadAll": "Download all (main + {count} axes)",
+      "downloadMainOnly": "Main only",
+      "download": "Download & associate",
+      "downloading": "Downloading...",
+      "multiBadge": "Multi-axis",
+      "noAttachments": "No downloadable scripts in this post",
+      "noMain": "Axis files only, no main script",
+      "zipNote": "{count} zip attachment(s) cannot be opened yet",
+      "loadingPost": "Loading post..."
+    }
   },
   "upNext": {
     "regionAria": "Up Next",
@@ -1260,7 +1358,10 @@
     "endText": "No more videos in this {source}.",
     "endCta": "Back to {source}",
     "endSourceFallback": "list",
-    "sourcePlaylist": "playlist"
+    "sourcePlaylist": "playlist",
+    "resumeFrom": "Resume {time}",
+    "startOver": "Start over",
+    "resumeGroupAria": "Resume or start this video over"
   },
   "session": {
     "state": {
@@ -1500,7 +1601,8 @@
     "customKeysReservedWarn": "{key} is reserved by an editor command",
     "customKeysDuplicateWarn": "{key} is already bound to position {pos}",
     "customKeysMidiHint": "MIDI keyboard users typically pair this with a MIDI-to-key translator (e.g. MIDIKey2Key).",
-    "customKeysHelpGroup": "Custom position keys"
+    "customKeysHelpGroup": "Custom position keys",
+    "popoutWindowTitle": "Script Editor"
   },
   "connection": {
     "vibeHelp": {
@@ -1598,7 +1700,8 @@
       "badgeVibrate": "Vibrate",
       "badgeRotate": "Rotate",
       "badgeEstim": "E-Stim",
-      "axisCustom": "Follow Custom Routing"
+      "axisCustom": "Follow Custom Routing",
+      "tuning": "Output tuning"
     },
     "tcode": {
       "l0Label": "Stroke (main)",
@@ -1683,5 +1786,19 @@
       "latencyRefreshed": "Latency refreshed",
       "refreshFailed": "Refresh failed: {error}"
     }
+  },
+  "orgasmConfig": {
+    "title": "Orgasm Switch Setup",
+    "mainScript": "Main script:",
+    "hintMulti": "Axis scripts should match the main script's length. Shorter axes hold their last position.",
+    "hintCustom": "The routed setup plays when every routed device is connected. If any are missing, the main script plays on a single axis until they reconnect."
+  },
+  "resume": {
+    "title": "Continue watching?",
+    "message": "You stopped at {time}.",
+    "startOver": "Start over",
+    "resumeAt": "Resume from {time}",
+    "progressLabel": "{percent}% watched",
+    "resumedToast": "Resumed from {time}"
   }
 }

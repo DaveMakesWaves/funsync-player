@@ -13,6 +13,7 @@ const PRECISION_LIMITS = { 3: 999, 4: 9999 };
 export class TCodeManager {
   constructor() {
     this._connected = false;
+    this._transportKind = null; // 'serial' | 'udp' | 'websocket' — set on connect()
     this._portPath = '';
     this._baudRate = 115200;
     this._disconnectCleanup = null;
@@ -160,9 +161,14 @@ export class TCodeManager {
    * Only sends axes that have changed since last call.
    *
    * @param {Object} axisValues — e.g. { L0: 50, R0: 75, V0: 30 }
-   * @param {number} [durationMs] — optional interval for timed moves (I suffix)
+   * @param {number} [durationMs] — shared interval for timed moves (I suffix)
+   * @param {Object} [axisIntervals] — optional per-axis interval override map,
+   *   e.g. { L0: 20, R0: 250 }. When present, an axis's own interval wins over
+   *   `durationMs` so each axis can move over the exact time to ITS next
+   *   keyframe — the same shape XTEngine emits (`L0500I100 R0300I250`). Falls
+   *   back to `durationMs` for any axis not in the map.
    */
-  sendAxes(axisValues, durationMs) {
+  sendAxes(axisValues, durationMs, axisIntervals) {
     if (!this._connected || !axisValues) return;
 
     const parts = [];
@@ -170,8 +176,9 @@ export class TCodeManager {
       const tcodeVal = Math.round(Math.max(0, Math.min(100, value)) / 100 * this._valueMax);
       const valStr = String(tcodeVal).padStart(this._precision, '0');
       let cmd = `${axis}${valStr}`;
-      if (durationMs && durationMs > 0) {
-        cmd += `I${Math.round(durationMs)}`;
+      const iv = (axisIntervals && axisIntervals[axis] != null) ? axisIntervals[axis] : durationMs;
+      if (iv && iv > 0) {
+        cmd += `I${Math.round(iv)}`;
       }
       parts.push(cmd);
     }
@@ -193,8 +200,13 @@ export class TCodeManager {
   stop() {
     if (!this._connected) return;
     this.send('DSTOP\n');
-    // Neutral-position fallback frame for MFP-style listeners. 50% on
-    // every TCode v0.3 axis we support. Pads to the configured precision.
+    // The neutral-position fallback frame (50% on every axis) is ONLY for
+    // MFP-protocol consumers (restim, Howl, etc. over ws/udp) that don't
+    // understand DSTOP and expect explicit axis values. On real TCode firmware
+    // (serial OSR2+/SR6) DSTOP already halts motion in place, and a BARE
+    // (interval-less) 50% frame makes the device slam to center at full speed —
+    // the "violent jump on pause" OSR2+ users reported. So skip it on serial.
+    if (this._transportKind === 'serial') return;
     const half = Math.round(this._valueMax / 2);
     const valStr = String(half).padStart(this._precision, '0');
     const axes = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'V0', 'A0', 'A1', 'A2'];

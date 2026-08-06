@@ -45,6 +45,8 @@ export class SettingsPanel {
     onLinearLookaheadChanged,
     onMinStrokeChanged,
     onRangeExtenderChanged,
+    onInlineVizOpacityChanged,
+    onLibraryDisplayChanged,
     onPickOrgasmScript,
     onClearOrgasmScript,
     getOrgasmScriptName,
@@ -62,6 +64,8 @@ export class SettingsPanel {
     this.onLinearLookaheadChanged = onLinearLookaheadChanged || null;
     this.onMinStrokeChanged = onMinStrokeChanged || null;
     this.onRangeExtenderChanged = onRangeExtenderChanged || null;
+    this.onInlineVizOpacityChanged = onInlineVizOpacityChanged || null;
+    this.onLibraryDisplayChanged = onLibraryDisplayChanged || null;
     this.onPickOrgasmScript = onPickOrgasmScript || null;
     this.onClearOrgasmScript = onClearOrgasmScript || null;
     this.getOrgasmScriptName = getOrgasmScriptName || null;
@@ -159,66 +163,203 @@ export class SettingsPanel {
     if (unsubscribeLang) unsubscribeLang();
   }
 
+  /**
+   * Areas shown in the left rail, and the section groups each one expands
+   * to. `groups` entries are `{ id, label }` where `id` is the DOM id of a
+   * `.settings-panel__section` inside that area's panel — the rail scrolls
+   * to it and highlights whichever is currently in view.
+   *
+   * Only areas that are genuinely long carry groups. Sources is long too,
+   * but it's ONE list (add / rename / reorder / enable), so splitting it
+   * would invent divisions that aren't there.
+   */
+  _railAreas() {
+    const isLinux = (typeof window !== 'undefined' && window.funsync?.platform === 'linux');
+    return [
+      { id: 'sources', label: t('settingsPanel.tabSources'), groups: [] },
+      {
+        id: 'playback',
+        label: t('settingsPanel.tabPlayback'),
+        groups: [
+          { id: 'sp-sec-playback', label: t('settingsPanel.playback.playbackHeader') },
+          { id: 'sp-sec-upnext', label: t('settingsPanel.playback.upNextHeader') },
+          { id: 'sp-sec-gapskip', label: t('settingsPanel.playback.gapSkipHeader') },
+          { id: 'sp-sec-orgasm', label: t('settingsPanel.playback.orgasmHeader') },
+          { id: 'sp-sec-multiaxis', label: t('settingsPanel.playback.multiHeader') },
+          // Linux-only setting, so the group would otherwise be an empty
+          // rail entry on Windows.
+          ...(isLinux ? [{ id: 'sp-sec-video', label: t('settingsPanel.playback.videoHeader') }] : []),
+        ],
+      },
+      { id: 'editor', label: t('settingsPanel.tabEditor'), groups: [] },
+      {
+        id: 'appearance',
+        label: t('settingsPanel.tabAppearance'),
+        groups: [
+          { id: 'sp-sec-theme', label: t('settingsPanel.appearance.themeHeader') },
+          { id: 'sp-sec-style', label: t('settingsPanel.appearance.styleHeader') },
+          { id: 'sp-sec-language', label: t('settingsPanel.appearance.languageHeader') },
+          { id: 'sp-sec-library', label: t('settingsPanel.appearance.libraryHeader') },
+        ],
+      },
+      { id: 'data', label: t('settingsPanel.tabData'), groups: [] },
+      { id: 'help', label: t('settingsPanel.tabHelp'), groups: [] },
+    ];
+  }
+
+  /** Mark one rail group link active, clearing the rest. */
+  _markRailGroupActive(sectionId) {
+    if (!this._railEl) return;
+    for (const el of this._railEl.querySelectorAll('.settings-panel__rail-group')) {
+      el.classList.toggle('settings-panel__rail-group--active', el.dataset.section === sectionId);
+    }
+  }
+
+  /**
+   * Highlight whichever group's section is currently at the top of the
+   * content column. Runs on scroll and after an area switch, so the rail
+   * agrees with the view whether the user clicked a link or just scrolled.
+   *
+   * Deliberately a scroll handler rather than IntersectionObserver: the
+   * content column is a small, known scroller and this needs no observer
+   * lifecycle to tear down when the dialog is rebuilt on a locale change.
+   */
+  _syncRailGroupHighlight() {
+    const rail = this._railEl;
+    const content = this._contentEl;
+    if (!rail || !content) return;
+    const visibleList = rail.querySelector('.settings-panel__rail-groups:not([hidden])');
+    if (!visibleList) return;
+
+    const links = [...visibleList.querySelectorAll('.settings-panel__rail-group')];
+    if (links.length === 0) return;
+
+    // A section counts as "current" once its top has passed just under the
+    // top of the viewport; the last such section wins. The tolerance stops
+    // a section sitting exactly at the edge from flickering between two.
+    const cutoff = content.scrollTop + 24;
+    let currentId = links[0].dataset.section;
+    for (const link of links) {
+      const section = content.querySelector(`#${link.dataset.section}`);
+      if (section && section.offsetTop <= cutoff) currentId = link.dataset.section;
+    }
+    this._markRailGroupActive(currentId);
+  }
+
   _renderBody(body, close, initialTabId) {
     body.innerHTML = '';
 
-    // Tab bar
-    const tabBar = document.createElement('div');
-    tabBar.className = 'settings-panel__tabs';
-    tabBar.setAttribute('role', 'tablist');
-    tabBar.setAttribute('aria-label', t('settingsPanel.tabsAria'));
+    // Two-column shell: a vertical rail on the left, the active area's
+    // panel scrolling on the right. Replaces the old horizontal tab strip,
+    // which was at its limit at six tabs and had no room to surface the
+    // sections inside the long ones.
+    const layout = document.createElement('div');
+    layout.className = 'settings-panel__layout';
 
-    const tabs = [
-      { id: 'sources', label: t('settingsPanel.tabSources') },
-      { id: 'playback', label: t('settingsPanel.tabPlayback') },
-      { id: 'editor', label: t('settingsPanel.tabEditor') },
-      { id: 'appearance', label: t('settingsPanel.tabAppearance') },
-      { id: 'data', label: t('settingsPanel.tabData') },
-      { id: 'help', label: t('settingsPanel.tabHelp') },
-    ];
+    const rail = document.createElement('div');
+    rail.className = 'settings-panel__rail';
+    rail.setAttribute('role', 'tablist');
+    rail.setAttribute('aria-orientation', 'vertical');
+    rail.setAttribute('aria-label', t('settingsPanel.tabsAria'));
 
+    const content = document.createElement('div');
+    content.className = 'settings-panel__content';
+
+    const areas = this._railAreas();
     const panels = {};
+    const groupLists = {};
 
-    for (const tab of tabs) {
+    const activateArea = (areaId, { focus = true } = {}) => {
+      for (const a of areas) {
+        const isActive = a.id === areaId;
+        const item = rail.querySelector(`[data-area="${a.id}"]`);
+        if (item) {
+          item.classList.toggle('settings-panel__rail-item--active', isActive);
+          item.setAttribute('aria-selected', isActive ? 'true' : 'false');
+          item.tabIndex = isActive ? 0 : -1;
+        }
+        // Group links only make sense for the area you're in — showing all
+        // of them at once would put the rail back where the tab strip was.
+        if (groupLists[a.id]) groupLists[a.id].hidden = !isActive;
+        if (panels[a.id]) panels[a.id].hidden = !isActive;
+      }
+      content.scrollTop = 0;
+      this._activeTabId = areaId;
+      const item = rail.querySelector(`[data-area="${areaId}"]`);
+      if (focus && item) item.focus();
+      this._syncRailGroupHighlight();
+    };
+
+    for (const area of areas) {
       const btn = document.createElement('button');
-      btn.className = 'settings-panel__tab';
-      btn.dataset.tab = tab.id;
-      btn.textContent = tab.label;
-      btn.id = `settings-tab-${tab.id}`;
+      btn.type = 'button';
+      btn.className = 'settings-panel__rail-item';
+      btn.dataset.area = area.id;
+      btn.dataset.tab = area.id; // back-compat for anything querying by tab
+      btn.textContent = area.label;
+      btn.id = `settings-tab-${area.id}`;
       btn.setAttribute('role', 'tab');
       btn.setAttribute('aria-selected', 'false');
-      btn.setAttribute('aria-controls', `settings-tabpanel-${tab.id}`);
+      btn.setAttribute('aria-controls', `settings-tabpanel-${area.id}`);
       btn.tabIndex = -1;
-      btn.addEventListener('click', () => {
-        tabBar.querySelectorAll('.settings-panel__tab').forEach(t => {
-          const isActive = t.dataset.tab === tab.id;
-          t.classList.toggle('settings-panel__tab--active', isActive);
-          t.setAttribute('aria-selected', isActive ? 'true' : 'false');
-          t.tabIndex = isActive ? 0 : -1;
-        });
-        Object.values(panels).forEach(p => p.hidden = true);
-        panels[tab.id].hidden = false;
-        btn.focus();
-      });
-      tabBar.appendChild(btn);
+      btn.addEventListener('click', () => activateArea(area.id));
+      rail.appendChild(btn);
+
+      if (area.groups.length > 0) {
+        const list = document.createElement('div');
+        list.className = 'settings-panel__rail-groups';
+        list.hidden = true;
+        for (const group of area.groups) {
+          const gBtn = document.createElement('button');
+          gBtn.type = 'button';
+          gBtn.className = 'settings-panel__rail-group';
+          gBtn.dataset.section = group.id;
+          gBtn.textContent = group.label;
+          gBtn.addEventListener('click', () => {
+            const target = content.querySelector(`#${group.id}`);
+            if (!target) return;
+            // Scroll the CONTENT column, not the page — the panel is the
+            // scrolling container.
+            content.scrollTo({
+              top: Math.max(0, target.offsetTop - 8),
+              behavior: 'smooth',
+            });
+            this._markRailGroupActive(group.id);
+          });
+          list.appendChild(gBtn);
+        }
+        rail.appendChild(list);
+        groupLists[area.id] = list;
+      }
     }
-    // Wire arrow-key navigation between tabs (Nielsen #4 standards —
-    // canonical tablist keyboard pattern).
-    tabBar.addEventListener('keydown', (e) => {
-      const tabBtns = [...tabBar.querySelectorAll('.settings-panel__tab')];
-      const idx = tabBtns.indexOf(document.activeElement);
+
+    // Vertical tablist keyboard pattern (Nielsen #4 standards). Up/Down
+    // now, not Left/Right — the rail is vertical.
+    rail.addEventListener('keydown', (e) => {
+      const items = [...rail.querySelectorAll('.settings-panel__rail-item')];
+      const idx = items.indexOf(document.activeElement);
       if (idx < 0) return;
       let next = -1;
-      if (e.key === 'ArrowRight') next = (idx + 1) % tabBtns.length;
-      else if (e.key === 'ArrowLeft') next = (idx - 1 + tabBtns.length) % tabBtns.length;
+      if (e.key === 'ArrowDown') next = (idx + 1) % items.length;
+      else if (e.key === 'ArrowUp') next = (idx - 1 + items.length) % items.length;
       else if (e.key === 'Home') next = 0;
-      else if (e.key === 'End') next = tabBtns.length - 1;
+      else if (e.key === 'End') next = items.length - 1;
       if (next >= 0) {
         e.preventDefault();
-        tabBtns[next].click();
+        items[next].click();
       }
     });
-    body.appendChild(tabBar);
+
+    // Scroll-spy: highlight the group whose section is currently at the top
+    // of the content column, so the rail keeps agreeing with what's on
+    // screen when the user scrolls rather than clicks.
+    this._railEl = rail;
+    this._contentEl = content;
+    content.addEventListener('scroll', () => this._syncRailGroupHighlight(), { passive: true });
+
+    layout.appendChild(rail);
+    layout.appendChild(content);
+    body.appendChild(layout);
 
     // Helper — wire the per-tab panel ARIA + id pairing so the
     // tab→panel relationship is screen-reader-traversable.
@@ -227,48 +368,43 @@ export class SettingsPanel {
       p.id = `settings-tabpanel-${id}`;
       p.setAttribute('role', 'tabpanel');
       p.setAttribute('aria-labelledby', `settings-tab-${id}`);
+      content.appendChild(p);
       return p;
     };
 
     // --- Sources Tab ---
     panels.sources = this._buildSourcesTab();
-    body.appendChild(wirePanel('sources'));
+    wirePanel('sources');
 
     // --- Playback Tab ---
     panels.playback = this._buildPlaybackTab();
-    body.appendChild(wirePanel('playback'));
+    wirePanel('playback');
 
     // --- Editor Tab — script-authoring settings (position keys; future
     //     home for other editor-specific tunables). Sits between Playback
     //     and Appearance because it's content-side work that belongs
     //     next to playback in mental model, not next to theme settings. ---
     panels.editor = this._buildEditorTab();
-    body.appendChild(wirePanel('editor'));
+    wirePanel('editor');
 
     // --- Appearance Tab (theme toggle) ---
     panels.appearance = this._buildAppearanceTab();
-    body.appendChild(wirePanel('appearance'));
+    wirePanel('appearance');
 
     // --- Data Tab ---
     panels.data = this._buildDataTab();
-    body.appendChild(wirePanel('data'));
+    wirePanel('data');
 
     // --- Help Tab ---
     panels.help = this._buildHelpTab();
-    body.appendChild(wirePanel('help'));
+    wirePanel('help');
 
-    // Activate the requested initial tab (defaults to 'sources' on first
-    // render, but is preserved across locale-change rebuilds).
+    // Activate the requested initial area (defaults to 'sources' on first
+    // render, but is preserved across locale-change rebuilds). No focus on
+    // the initial pass — stealing focus as the dialog opens would move it
+    // off whatever the modal itself focused.
     const activeId = panels[initialTabId] ? initialTabId : 'sources';
-    const initialBtn = tabBar.querySelector(`[data-tab="${activeId}"]`);
-    if (initialBtn) {
-      initialBtn.classList.add('settings-panel__tab--active');
-      initialBtn.setAttribute('aria-selected', 'true');
-      initialBtn.tabIndex = 0;
-    }
-    for (const id of Object.keys(panels)) {
-      panels[id].hidden = id !== activeId;
-    }
+    activateArea(activeId, { focus: false });
 
     // Done button — dedicated class (was borrowing
     // `.library__assoc-save-btn` from the library multi-select flow,
@@ -525,6 +661,7 @@ export class SettingsPanel {
     // Gap Skip
     const gapSection = document.createElement('div');
     gapSection.className = 'settings-panel__section';
+    gapSection.id = 'sp-sec-gapskip';
     gapSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.playback.gapSkipHeader')}</h2>
       <div class="settings-panel__field">
@@ -552,6 +689,7 @@ export class SettingsPanel {
     // for adjacent decisions).
     const upNextSection = document.createElement('div');
     upNextSection.className = 'settings-panel__section';
+    upNextSection.id = 'sp-sec-upnext';
     upNextSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.playback.upNextHeader')}</h2>
       <div class="settings-panel__field">
@@ -575,6 +713,15 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-upnext-hint">${t('settingsPanel.playback.upNextHint')}</div>
     `;
+    // Random variant fires on load, so it lives with the other
+    // "what plays next and how" settings rather than under smoothing.
+    upNextSection.insertAdjacentHTML('beforeend', `
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-random-variant">${t('settingsPanel.playback.randomVariantLabel')}</label>
+        <input type="checkbox" id="sp-random-variant" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-random-variant-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-random-variant-hint">${t('settingsPanel.playback.randomVariantHint')}</div>
+    `);
     panel.appendChild(upNextSection);
 
     // Multi-Axis — auto-promote eligible videos to multi-axis playback.
@@ -586,6 +733,7 @@ export class SettingsPanel {
     // directive); the hint copy makes that explicit.
     const multiAxisSection = document.createElement('div');
     multiAxisSection.className = 'settings-panel__section';
+    multiAxisSection.id = 'sp-sec-multiaxis';
     multiAxisSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.playback.multiHeader')}</h2>
       <div class="settings-panel__field">
@@ -600,14 +748,46 @@ export class SettingsPanel {
     `;
     panel.appendChild(multiAxisSection);
 
+    // --- Video & performance (Linux only) ---
+    // Hardware decode was filed under Appearance ▸ Library, where it had
+    // nothing to do with either. It's a decode/troubleshooting setting, so
+    // it belongs with playback. The whole group is omitted off Linux rather
+    // than left as an empty rail entry.
+    if (typeof window !== 'undefined' && window.funsync?.platform === 'linux') {
+      const videoSection = document.createElement('div');
+      videoSection.className = 'settings-panel__section';
+      videoSection.id = 'sp-sec-video';
+      videoSection.innerHTML = `
+        <h2 class="settings-panel__section-header">${t('settingsPanel.playback.videoHeader')}</h2>
+        <div class="settings-panel__field">
+          <label class="settings-panel__field-label" for="sp-hw-decode">${t('settingsPanel.appearance.hwDecodeLabel')}</label>
+          <input type="checkbox" id="sp-hw-decode" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.hwVideoDecode') !== false ? 'checked' : ''} aria-describedby="sp-hw-decode-hint">
+        </div>
+        <div class="settings-panel__hint" id="sp-hw-decode-hint">${t('settingsPanel.appearance.hwDecodeHint')}</div>
+      `;
+      videoSection.querySelector('#sp-hw-decode')
+        .addEventListener('change', (e) => {
+          this._settings.set('player.hwVideoDecode', !!e.target.checked);
+          // Chromium GPU flags are read once at launch (main.js, before
+          // whenReady), so this only takes effect after a restart.
+          showToast(t('settingsPanel.appearance.hwDecodeRestart'), 'info', 5000);
+        });
+      panel.appendChild(videoSection);
+    }
+
     // Smoothing — each control linked to the section hint via
     // aria-describedby so screen readers read the hint when the
     // input gets focus (Nielsen #4 standards — WCAG 1.3.1 Info and
     // Relationships).
-    const smoothSection = document.createElement('div');
-    smoothSection.className = 'settings-panel__section';
-    smoothSection.innerHTML = `
-      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.smoothingHeader')}</h2>
+    // --- Playback ---
+    // Was "Smoothing & limits", which had become a junk drawer: seven
+    // controls of which two were about smoothing. The orgasm settings moved
+    // to their own section below, random-variant moved to Up Next.
+    const playbackSection = document.createElement('div');
+    playbackSection.className = 'settings-panel__section';
+    playbackSection.id = 'sp-sec-playback';
+    playbackSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.playbackHeader')}</h2>
       <div class="settings-panel__field">
         <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldInterpolation')}</span>
         <select id="sp-smoothing" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-smoothing-hint">
@@ -632,43 +812,80 @@ export class SettingsPanel {
       <div class="settings-panel__hint" id="sp-range-extender-hint">${t('settingsPanel.playback.rangeExtenderHint')}</div>
       <div class="settings-panel__hint" id="sp-smoothing-hint">${t('settingsPanel.playback.smoothingHint')}</div>
       <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-inline-viz-opacity">${t('settingsPanel.playback.inlineVizOpacityLabel')}</label>
+        <input type="range" id="sp-inline-viz-opacity" class="settings-panel__input settings-panel__input--range" min="20" max="100" step="5" value="80" aria-describedby="sp-inline-viz-opacity-hint">
+        <span id="sp-inline-viz-opacity-val" class="settings-panel__field-value">80%</span>
+        <button type="button" id="sp-inline-viz-opacity-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.inlineVizOpacityResetTitle')}" aria-label="${t('settingsPanel.playback.inlineVizOpacityResetTitle')}">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-inline-viz-opacity-hint">${t('settingsPanel.playback.inlineVizOpacityHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
+        <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.miniPlayer') !== false ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-mini-player-hint">${t('settingsPanel.appearance.miniPlayerHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-remember-speed">${t('settingsPanel.playback.rememberSpeedLabel')}</label>
+        <input type="checkbox" id="sp-remember-speed" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.rememberPlaybackSpeed') === true ? 'checked' : ''} aria-describedby="sp-remember-speed-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-remember-speed-hint">${t('settingsPanel.playback.rememberSpeedHint')}</div>
+    `;
+    playbackSection.querySelector('#sp-mini-player')
+      .addEventListener('change', (e) => {
+        this._settings.set('player.miniPlayer', !!e.target.checked);
+      });
+    // No propagation needed — VideoPlayer reads this at each video load.
+    playbackSection.querySelector('#sp-remember-speed')
+      .addEventListener('change', (e) => {
+        this._settings.set('player.rememberPlaybackSpeed', !!e.target.checked);
+      });
+    panel.appendChild(playbackSection);
+
+    // --- Orgasm Switch ---
+    // Its own home at last. The script picker and the hold/toggle mode were
+    // buried in the smoothing section with no heading of their own, which
+    // made a feature with multi-axis and custom routing behind it read like
+    // an afterthought.
+    const orgasmSection = document.createElement('div');
+    orgasmSection.className = 'settings-panel__section';
+    orgasmSection.id = 'sp-sec-orgasm';
+    orgasmSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.orgasmHeader')}</h2>
+      <div class="settings-panel__field">
         <span class="settings-panel__field-label">${t('settingsPanel.playback.orgasmScriptLabel')}</span>
-        <span id="sp-orgasm-script-name" class="settings-panel__field-value" style="flex:1;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span>
         <button type="button" id="sp-orgasm-script-pick" class="settings-panel__add-btn">${t('settingsPanel.playback.orgasmScriptChoose')}</button>
         <button type="button" id="sp-orgasm-script-clear" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.orgasmScriptClear')}" aria-label="${t('settingsPanel.playback.orgasmScriptClear')}">✕</button>
       </div>
+      <!-- Chosen script(s) on their OWN line below the button. Inline in the
+           field row they were squeezed to nothing by "Configure…" (a multi-axis
+           or custom-routing config names several scripts, which never fit on
+           one line next to a button). -->
+      <div id="sp-orgasm-script-name" class="settings-panel__value-block" hidden></div>
       <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmScriptHint')}</div>
-    `;
-    panel.appendChild(smoothSection);
-
-    // Buttplug linear command strategy — BLE smoothness tuning
-    const bpSection = document.createElement('div');
-    bpSection.className = 'settings-panel__section';
-    bpSection.innerHTML = `
-      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.bpHeader')}</h2>
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldStrategy')}</span>
-        <select id="sp-linear-strategy" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-bp-hint">
-          <option value="action-boundary">${t('settingsPanel.playback.strategyActionBoundary')}</option>
-          <option value="interpolated">${t('settingsPanel.playback.strategyInterpolated')}</option>
+        <label class="settings-panel__field-label" for="sp-orgasm-mode">${t('settingsPanel.playback.orgasmModeLabel')}</label>
+        <select id="sp-orgasm-mode" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-orgasm-mode-hint">
+          <option value="hold">${t('settingsPanel.playback.orgasmModeHold')}</option>
+          <option value="toggle">${t('settingsPanel.playback.orgasmModeToggle')}</option>
         </select>
-        <button type="button" id="sp-linear-strategy-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.strategyResetTitle')}" aria-label="${t('settingsPanel.playback.strategyResetAria')}">↻</button>
       </div>
-      <div class="settings-panel__field" id="sp-lookahead-row">
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldLookahead')}</span>
-        <input type="range" id="sp-lookahead" class="settings-panel__input settings-panel__input--range" min="0" max="200" value="60" step="10" aria-describedby="sp-bp-hint">
-        <span id="sp-lookahead-val" class="settings-panel__field-value">60ms</span>
-        <button type="button" id="sp-lookahead-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.lookaheadResetTitle')}" aria-label="${t('settingsPanel.playback.lookaheadResetAria')}">↻</button>
-      </div>
-      <div class="settings-panel__field" id="sp-min-stroke-row">
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldMinStroke')}</span>
-        <input type="range" id="sp-min-stroke" class="settings-panel__input settings-panel__input--range" min="0" max="200" value="60" step="10" aria-describedby="sp-bp-hint">
-        <span id="sp-min-stroke-val" class="settings-panel__field-value">60ms</span>
-        <button type="button" id="sp-min-stroke-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.minStrokeResetTitle')}" aria-label="${t('settingsPanel.playback.minStrokeResetAria')}">↻</button>
-      </div>
-      <div class="settings-panel__hint" id="sp-bp-hint">${t('settingsPanel.playback.bpHint')}</div>
+      <div class="settings-panel__hint" id="sp-orgasm-mode-hint">${t('settingsPanel.playback.orgasmModeHint')}</div>
     `;
-    panel.appendChild(bpSection);
+    panel.appendChild(orgasmSection);
+
+
+    // Final order for the rail. Re-appending an existing child MOVES it, so
+    // this reorders without disturbing the creation/wiring above. Reads
+    // most-used first: how playback behaves, then what plays next.
+    for (const el of [
+      panel.querySelector('#sp-sec-playback'),
+      panel.querySelector('#sp-sec-upnext'),
+      panel.querySelector('#sp-sec-gapskip'),
+      panel.querySelector('#sp-sec-orgasm'),
+      panel.querySelector('#sp-sec-multiaxis'),
+      panel.querySelector('#sp-sec-video'),
+    ]) {
+      if (el) panel.appendChild(el);
+    }
 
     // Wire events after DOM is built
     setTimeout(() => {
@@ -829,9 +1046,47 @@ export class SettingsPanel {
       const orgasmPick = panel.querySelector('#sp-orgasm-script-pick');
       const orgasmClear = panel.querySelector('#sp-orgasm-script-clear');
       const refreshOrgasmName = () => {
-        const name = this.getOrgasmScriptName?.();
-        if (orgasmName) orgasmName.textContent = name || t('settingsPanel.playback.orgasmScriptNone');
-        if (orgasmClear) orgasmClear.hidden = !name;
+        // Returns either a plain string (single script) or a summary + one
+        // line per chosen script for multi-axis / custom-routing configs.
+        const info = this.getOrgasmScriptName?.();
+        if (orgasmName) {
+          orgasmName.innerHTML = '';
+          const raw = Array.isArray(info) ? info : (info ? [info] : []);
+          // Nothing configured still shows "None" — the row would otherwise
+          // read as though the setting didn't exist.
+          const lines = raw.length > 0 ? raw : [t('settingsPanel.playback.orgasmScriptNone')];
+          for (const line of lines) {
+            const row = document.createElement('div');
+            row.className = 'settings-panel__value-line';
+            if (typeof line === 'string') {
+              row.textContent = line;
+            } else {
+              // { label, name, missing } — axis/device prefix kept dim so
+              // the filenames stay the thing the eye lands on. `label` is
+              // null for a single-script config (nothing to prefix with).
+              if (line.label) {
+                const tag = document.createElement('span');
+                tag.className = 'settings-panel__value-tag';
+                tag.textContent = `${line.label}: `;
+                row.appendChild(tag);
+              }
+              row.appendChild(document.createTextNode(line.name));
+              // A script that no longer resolves has to SAY so — otherwise
+              // the row shows a stored filename while the switch is dead.
+              if (line.missing) {
+                row.classList.add('settings-panel__value-line--missing');
+                const warn = document.createElement('span');
+                warn.className = 'settings-panel__value-missing';
+                warn.textContent = ` ${t('settingsPanel.playback.orgasmScriptMissing')}`;
+                row.appendChild(warn);
+              }
+            }
+            orgasmName.appendChild(row);
+          }
+          orgasmName.hidden = false;
+          orgasmName.classList.toggle('settings-panel__value-block--empty', raw.length === 0);
+        }
+        if (orgasmClear) orgasmClear.hidden = !(Array.isArray(info) ? info.length : info);
       };
       refreshOrgasmName();
       orgasmPick?.addEventListener('click', async () => {
@@ -843,70 +1098,54 @@ export class SettingsPanel {
         refreshOrgasmName();
       });
 
-      // Linear strategy + lookahead + min-stroke
-      const linearStrategy = panel.querySelector('#sp-linear-strategy');
-      const lookahead = panel.querySelector('#sp-lookahead');
-      const lookaheadVal = panel.querySelector('#sp-lookahead-val');
-      const lookaheadRow = panel.querySelector('#sp-lookahead-row');
-      const minStroke = panel.querySelector('#sp-min-stroke');
-      const minStrokeVal = panel.querySelector('#sp-min-stroke-val');
-      const minStrokeRow = panel.querySelector('#sp-min-stroke-row');
-
-      const applyStrategyVisibility = (strategy) => {
-        // Lookahead + min-stroke only apply to action-boundary mode.
-        // Was `hidden = true` (silent disappearance — Nielsen #1
-        // violation: user couldn't tell those options existed). Now
-        // dimmed via --inert modifier so the option is visible and
-        // a "(action-boundary only)" suffix explains why it's not
-        // currently usable. Inputs aria-disabled for screen readers.
-        const isActionBoundary = strategy === 'action-boundary';
-        const setInert = (row, range) => {
-          if (!row) return;
-          row.classList.toggle('settings-panel__field--inert', !isActionBoundary);
-          if (range) {
-            range.disabled = !isActionBoundary;
-            range.setAttribute('aria-disabled', String(!isActionBoundary));
-          }
+      // Inline TL/HM overlay opacity. Live-applies on input so the user can
+      // see the effect against the video while dragging, rather than having
+      // to close the panel to judge it.
+      const vizOpacity = panel.querySelector('#sp-inline-viz-opacity');
+      const vizOpacityVal = panel.querySelector('#sp-inline-viz-opacity-val');
+      const vizOpacityReset = panel.querySelector('#sp-inline-viz-opacity-reset');
+      if (vizOpacity) {
+        const DEFAULT_OPACITY = 80;
+        const readOpacity = () => {
+          const v = Number(this._settings.get('player.inlineVizOpacity'));
+          return Number.isFinite(v) ? Math.min(100, Math.max(20, v)) : DEFAULT_OPACITY;
         };
-        setInert(lookaheadRow, lookahead);
-        setInert(minStrokeRow, minStroke);
-      };
-
-      if (linearStrategy) {
-        const savedStrategy = this._settings.get('player.linearStrategy') || 'action-boundary';
-        linearStrategy.value = savedStrategy;
-        applyStrategyVisibility(savedStrategy);
-        linearStrategy.addEventListener('change', () => {
-          const val = linearStrategy.value;
-          this._settings.set('player.linearStrategy', val);
-          applyStrategyVisibility(val);
-          if (this.onLinearStrategyChanged) this.onLinearStrategyChanged(val);
+        const paintOpacity = (v) => {
+          vizOpacity.value = String(v);
+          if (vizOpacityVal) vizOpacityVal.textContent = `${v}%`;
+          if (vizOpacityReset) vizOpacityReset.hidden = v === DEFAULT_OPACITY;
+        };
+        paintOpacity(readOpacity());
+        vizOpacity.addEventListener('input', () => {
+          const v = Number(vizOpacity.value);
+          this._settings.set('player.inlineVizOpacity', v);
+          paintOpacity(v);
+          if (this.onInlineVizOpacityChanged) this.onInlineVizOpacityChanged(v);
+        });
+        vizOpacityReset?.addEventListener('click', () => {
+          this._settings.set('player.inlineVizOpacity', DEFAULT_OPACITY);
+          paintOpacity(DEFAULT_OPACITY);
+          if (this.onInlineVizOpacityChanged) this.onInlineVizOpacityChanged(DEFAULT_OPACITY);
         });
       }
 
-      if (lookahead) {
-        const savedLookahead = this._settings.get('player.linearLookaheadMs');
-        const lookaheadDefault = savedLookahead != null ? savedLookahead : 60;
-        lookahead.value = lookaheadDefault;
-        if (lookaheadVal) lookaheadVal.textContent = `${lookaheadDefault}ms`;
-        lookahead.addEventListener('input', () => {
-          const val = parseInt(lookahead.value, 10) || 0;
-          if (lookaheadVal) lookaheadVal.textContent = `${val}ms`;
-          this._settings.set('player.linearLookaheadMs', val);
-          if (this.onLinearLookaheadChanged) this.onLinearLookaheadChanged(val);
+      // Orgasm Switch behaviour: hold-to-ride vs press-to-finish.
+      const orgasmMode = panel.querySelector('#sp-orgasm-mode');
+      if (orgasmMode) {
+        orgasmMode.value = this._settings.get('player.orgasmSwitchMode') || 'hold';
+        orgasmMode.addEventListener('change', () => {
+          this._settings.set('player.orgasmSwitchMode', orgasmMode.value);
         });
       }
 
-      if (minStroke) {
-        const savedMinStroke = this._settings.get('player.minStrokeMs');
-        const minStrokeDefault = savedMinStroke != null ? savedMinStroke : 60;
-        minStroke.value = minStrokeDefault;
-        if (minStrokeVal) minStrokeVal.textContent = `${minStrokeDefault}ms`;
-        minStroke.addEventListener('input', () => {
-          const val = parseInt(minStroke.value, 10) || 0;
-          if (minStrokeVal) minStrokeVal.textContent = `${val}ms`;
-          this._settings.set('player.minStrokeMs', val);
-          if (this.onMinStrokeChanged) this.onMinStrokeChanged(val);
+      // Random script variation on play (zaikechi #209) — when a video has
+      // 2+ variants, pick one at random each load. Beats pinned defaults
+      // while on; pins resume when turned off.
+      const randomVariant = panel.querySelector('#sp-random-variant');
+      if (randomVariant) {
+        randomVariant.checked = this._settings.get('player.randomVariantOnPlay') === true;
+        randomVariant.addEventListener('change', () => {
+          this._settings.set('player.randomVariantOnPlay', randomVariant.checked);
         });
       }
 
@@ -944,9 +1183,6 @@ export class SettingsPanel {
       wireDefault(preferMulti, null, panel.querySelector('#sp-prefer-multi-reset'), SETTINGS_DEFAULTS['player.preferMultiAxis']);
       wireDefault(smoothing, null, panel.querySelector('#sp-smoothing-reset'), SETTINGS_DEFAULTS['player.smoothing']);
       wireDefault(speedLimit, speedLimitVal, panel.querySelector('#sp-speed-limit-reset'), SETTINGS_DEFAULTS['player.speedLimit']);
-      wireDefault(linearStrategy, null, panel.querySelector('#sp-linear-strategy-reset'), SETTINGS_DEFAULTS['player.linearStrategy']);
-      wireDefault(lookahead, lookaheadVal, panel.querySelector('#sp-lookahead-reset'), SETTINGS_DEFAULTS['player.linearLookaheadMs']);
-      wireDefault(minStroke, minStrokeVal, panel.querySelector('#sp-min-stroke-reset'), SETTINGS_DEFAULTS['player.minStrokeMs']);
 
       // Checkbox variant — wireDefault reads/writes `.value` which is
       // useless for type=checkbox (the meaningful prop is `.checked`).
@@ -1013,6 +1249,7 @@ export class SettingsPanel {
 
     const themeSection = document.createElement('div');
     themeSection.className = 'settings-panel__section';
+    themeSection.id = 'sp-sec-theme';
 
     const current = this._settings.get('player.theme') || 'system';
     // Three radios — System default. We're explicit about "System" being a
@@ -1067,6 +1304,7 @@ export class SettingsPanel {
     // listener applies `data-style` automatically on change.
     const styleSection = document.createElement('div');
     styleSection.className = 'settings-panel__section';
+    styleSection.id = 'sp-sec-style';
     const currentStyle = this._settings.get('player.uiStyle') || 'classic';
     styleSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.styleHeader')}</h2>
@@ -1104,6 +1342,7 @@ export class SettingsPanel {
     // own (Nielsen #6 recognition over recall).
     const languageSection = document.createElement('div');
     languageSection.className = 'settings-panel__section';
+    languageSection.id = 'sp-sec-language';
     const currentLocale = this._settings.get('player.language') || getCurrentLocale() || 'en';
     const options = SUPPORTED_LOCALES.map(code => {
       const label = LOCALE_LABELS[code] || code;
@@ -1146,9 +1385,17 @@ export class SettingsPanel {
     // disables on an explicit `false`.
     const librarySection = document.createElement('div');
     librarySection.className = 'settings-panel__section';
+    librarySection.id = 'sp-sec-library';
     const movingOn = this._settings.get('library.movingPreviews') !== false;
     const folderPreviewsOn = this._settings.get('library.folderPreviews') !== false;
-    const miniPlayerOn = this._settings.get('player.miniPlayer') !== false;
+    // Default OFF (`=== true`), unlike the previews above: it adds a row to
+    // every card and needs a funscript read per card to compute bins.
+    const cardHeatmapOn = this._settings.get('library.showCardHeatmap') === true;
+    // Default ON (`!== false`): an invisible resume feature is no feature.
+    // Still switchable — the bar is a visible record of what you watched.
+    const resumeProgressOn = this._settings.get('library.showResumeProgress') !== false;
+    // Linux-only: VA-API hardware video decode. Surfaced so users on a broken
+    // GPU/VA-API driver (esp. nvidia-vaapi) can force software decode.
     librarySection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.libraryHeader')}</h2>
       <div class="settings-panel__field">
@@ -1162,15 +1409,21 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-folder-previews-hint">${t('settingsPanel.appearance.folderPreviewsHint')}</div>
       <div class="settings-panel__field">
-        <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
-        <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${miniPlayerOn ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
+        <label class="settings-panel__field-label" for="sp-card-heatmap">${t('settingsPanel.appearance.cardHeatmapLabel')}</label>
+        <input type="checkbox" id="sp-card-heatmap" class="settings-panel__input settings-panel__input--checkbox" ${cardHeatmapOn ? 'checked' : ''} aria-describedby="sp-card-heatmap-hint">
       </div>
-      <div class="settings-panel__hint" id="sp-mini-player-hint">${t('settingsPanel.appearance.miniPlayerHint')}</div>
+      <div class="settings-panel__hint" id="sp-card-heatmap-hint">${t('settingsPanel.appearance.cardHeatmapHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-resume-progress">${t('settingsPanel.appearance.resumeProgressLabel')}</label>
+        <input type="checkbox" id="sp-resume-progress" class="settings-panel__input settings-panel__input--checkbox" ${resumeProgressOn ? 'checked' : ''} aria-describedby="sp-resume-progress-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-resume-progress-hint">${t('settingsPanel.appearance.resumeProgressHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-hide-dupes">${t('settingsPanel.appearance.hideDupesLabel')}</label>
+        <input type="checkbox" id="sp-hide-dupes" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('library.hideDuplicateNames') === true ? 'checked' : ''} aria-describedby="sp-hide-dupes-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-hide-dupes-hint">${t('settingsPanel.appearance.hideDupesHint')}</div>
     `;
-    librarySection.querySelector('#sp-mini-player')
-      .addEventListener('change', (e) => {
-        this._settings.set('player.miniPlayer', !!e.target.checked);
-      });
     librarySection.querySelector('#sp-moving-previews')
       .addEventListener('change', (e) => {
         this._settings.set('library.movingPreviews', !!e.target.checked);
@@ -1178,6 +1431,25 @@ export class SettingsPanel {
     librarySection.querySelector('#sp-folder-previews')
       .addEventListener('change', (e) => {
         this._settings.set('library.folderPreviews', !!e.target.checked);
+      });
+    librarySection.querySelector('#sp-card-heatmap')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.showCardHeatmap', !!e.target.checked);
+        // Cards are built once; the row has to be added/removed by a re-render.
+        if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
+      });
+    librarySection.querySelector('#sp-resume-progress')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.showResumeProgress', !!e.target.checked);
+        // Same re-render requirement as the heatmap row above.
+        if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
+      });
+    librarySection.querySelector('#sp-hide-dupes')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.hideDuplicateNames', !!e.target.checked);
+        // Changes which videos are in the list, not just how they look —
+        // the grid has to re-filter, not merely re-render.
+        if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
       });
     panel.appendChild(librarySection);
 

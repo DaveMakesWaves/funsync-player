@@ -118,7 +118,8 @@
     },
     "toast": {
       "selfKey": "Das ist dein eigenes Handy — es wird bereits vom Handy-Tab gesteuert."
-    }
+    },
+    "popoutWindowTitle": "Publikumsraum"
   },
   "nav": {
     "library": "Bibliothek",
@@ -195,6 +196,8 @@
     "devicesConnectionShortcut": "Geräteverbindung (H)",
     "editor": "Editor",
     "scriptEditor": "Skript-Editor (E)",
+    "inlineTimeline": "Skript-Zeitleiste",
+    "inlineHeatmap": "Heatmap-Leiste",
     "screenshot": "Screenshot",
     "pictureInPicture": "Bild-in-Bild",
     "miniPlayPause": "Wiedergabe / Pause",
@@ -344,7 +347,18 @@
     "showingFolder": "Zeige: {folder}",
     "openFileLocation": "Dateipfad öffnen",
     "customThumbSet": "Vorschaubild-Frame festlegen…",
+    "customThumbUpload": "Vorschaubild hochladen…",
+    "customThumbUploadFailed": "Bild konnte nicht verwendet werden",
     "customThumbReset": "Vorschaubild zurücksetzen",
+    "variantDefault": "Standard",
+    "assignScriptBulk": "Skript zuweisen",
+    "bulkScriptAssigned": "{name} wurde {count} Videos zugewiesen",
+    "kebabGroupOrganize": "Organisieren",
+    "kebabGroupScripts": "Skripte & Untertitel",
+    "kebabGroupThumbnail": "Vorschaubild",
+    "kebabGroupVR": "VR",
+    "kebabExtractAxes": "Eingebettete Achsen extrahieren ({count})…",
+    "kebabExtractAxesTitle": "Speichert {axes} als separate .funscript-Dateien",
     "customThumbTitle": "Vorschaubild-Frame wählen",
     "customThumbHint": "Ziehe den Regler zum gewünschten Frame und verwende ihn als Kachel für dieses Video.",
     "customThumbUse": "Diesen Frame verwenden",
@@ -452,8 +466,10 @@
       "scriptNone": "(keins)",
       "selectScriptBtn": "Auswählen",
       "addRoute": "+ Route hinzufügen",
-      "variantSearchTitle": "Skript für Variante auswählen"
-    }
+      "variantSearchTitle": "Skript für Variante auswählen",
+      "searchEroScripts": "EroScripts durchsuchen..."
+    },
+    "heatmapUnavailable": "Heatmap nicht verfügbar"
   },
   "playlists": {
     "title": "Playlists",
@@ -482,7 +498,29 @@
     "gridView": "Rasteransicht",
     "listView": "Listenansicht",
     "detailEmpty": "Keine Videos in dieser Playlist",
-    "detailEmptyHint": "Füge Videos aus der Bibliothek über das Kebab-Menü hinzu"
+    "detailEmptyHint": "Füge Videos aus der Bibliothek über das Kebab-Menü hinzu",
+    "advanced": {
+      "openTitle": "Erweiterte Playlist-Einstellungen",
+      "title": "Erweiterte Playlist-Einstellungen",
+      "balanceLabel": "Jedem Skript gleich viele Chancen geben",
+      "balanceWhy": "Manche Skripte werden von mehreren Videos genutzt. Normalerweise kommen sie beim Zufallsmodus dadurch häufiger dran, einfach weil es mehr Videos dazu gibt.",
+      "balanceHow": "Ist das aktiviert, bekommt jedes Skript die gleiche Chance, egal wie viele Videos es teilen. Du bekommst weiterhin zufällig eines dieser Videos, und beim nächsten Durchlauf meist ein anderes.",
+      "balanceNeedsShuffleOn": "Das wirkt sich nur aus, solange der Zufallsmodus an ist.",
+      "balanceNeedsShuffleOff": "Schalte den Zufallsmodus ein, um das zu nutzen. Bei Wiedergabe in fester Reihenfolge hat es keine Wirkung.",
+      "unwatchedLabel": "Ungesehene bevorzugen",
+      "unwatchedWhy": "Der Zufallsmodus spielt noch nicht beendete Videos vor bereits gesehenen. Gesehene laufen weiterhin, nur zuletzt."
+    },
+    "lastWatched": "Zuletzt gesehen",
+    "continueWatching": "Fortsetzen",
+    "continueWatchingNamed": "Weiter mit {name}",
+    "resetProgress": "Fortschritt zurücksetzen",
+    "resetProgressHint": "Markierung und gespeicherte Positionen dieser Playlist löschen",
+    "resetProgressTitle": "Playlist-Fortschritt zurücksetzen?",
+    "resetProgressConfirm": "Damit werden die Markierung für \"{name}\" und die gespeicherte Position jedes Videos darin gelöscht. Videos, die in einer anderen Playlist liegen, verlieren ihre Position auch dort, da Positionen pro Video gespeichert werden.",
+    "watched": "Gesehen",
+    "watchedCount": "{watched} von {total} gesehen",
+    "timeLeft": "{time} übrig",
+    "continueNamed": "{name} fortsetzen"
   },
   "categories": {
     "title": "Kategorien",
@@ -549,6 +587,8 @@
       "sort": "Sortieren",
       "viewToggleAria": "Raster- oder Listenansicht umschalten",
       "viewToggleTitle": "Raster / Liste",
+      "playAll": "Alle abspielen",
+      "shufflePlay": "Zufällig",
       "folderAria": "Nach Ordner durchsuchen",
       "folderTitle": "Nach Ordner durchsuchen",
       "filters": "Filter"
@@ -639,6 +679,20 @@
       "connected": "Verbunden: {devices}",
       "noDevices": "Keine Geräte auf dem Desktop verbunden",
       "connectedCount": "{count, plural, one {Verbundenes Gerät · #} other {Verbundene Geräte · #}}",
+      "playPause": "Wiedergabe / Pause",
+      "seek": "Spulen",
+      "mute": "Stumm",
+      "fullscreen": "Vollbild",
+      "loopAB": "A-B-Schleife",
+      "skipGap": "Lücke überspringen",
+      "offset": "Versatz",
+      "orgasmHold": "Orgasm Switch - halten",
+      "orgasmRiding": "Loslassen zum Zurückkehren",
+      "orgasmTap": "Orgasm Switch - tippen",
+      "orgasmStop": "Tippen zum Stoppen",
+      "upNextIn": "Weiter in {seconds}s",
+      "upNextPlayNow": "Jetzt abspielen",
+      "upNextCancel": "Abbrechen",
       "intensity": "Funscript-Intensität",
       "avg": "Ø",
       "max": "Max",
@@ -794,6 +848,7 @@
     "orgasmNotConfigured": "Kein Orgasmus-Skript festgelegt — wähle eines unter Einstellungen ▸ Wiedergabe",
     "orgasmInvalidScript": "Diese Datei ist kein gültiges Funscript",
     "orgasmScriptSet": "Orgasmus-Skript festgelegt: {name}",
+    "randomVariant": "Zufälliges Skript: {name}",
     "videoErrorGeneric": "Video konnte nicht geladen werden",
     "mutexTakeover": "{incoming} hat von {evicted} übernommen",
     "added": "Hinzugefügt",
@@ -858,7 +913,9 @@
     "multiAxisFailed": "Mehrachsig: {suffix}-Skript konnte nicht geladen werden ({error})",
     "queueReadFailed": "Warteschlangenelement {name}: Skript {script} konnte nicht gelesen werden — Wiedergabe ohne Synchronisierung",
     "queueReadError": "Warteschlangenelement {name}: Skript-Lesen fehlgeschlagen ({error}) — Wiedergabe ohne Synchronisierung",
-    "handyUploadTimeout": "Handy-Skript-Upload hat das Zeitlimit überschritten — das Video läuft, aber das Handy ist nicht synchron. Prüfe deine Verbindung und lade das Video neu."
+    "handyUploadTimeout": "Handy-Skript-Upload hat das Zeitlimit überschritten — das Video läuft, aber das Handy ist nicht synchron. Prüfe deine Verbindung und lade das Video neu.",
+    "orgasmRoutingFallback": "Orgasmus-Schalter: {devices} nicht verbunden. Einzelachsen-Fallback aktiv, bis alles wieder da ist.",
+    "orgasmScriptRecovered": "{count} verschobene Finisher-Skript(e) gefunden, Pfad aktualisiert"
   },
   "modal": {
     "noItemsAvailable": "Keine Einträge verfügbar",
@@ -960,10 +1017,16 @@
       "rangeExtenderResetTitle": "Auf Standard zurücksetzen (aus)",
       "rangeExtenderResetAria": "Skripte strecken auf Standard zurücksetzen",
       "orgasmScriptLabel": "Orgasmus-Schalter-Skript",
-      "orgasmScriptChoose": "Wählen…",
+      "orgasmScriptChoose": "Einrichten…",
       "orgasmScriptClear": "Orgasmus-Skript entfernen",
       "orgasmScriptNone": "Keins",
       "orgasmScriptHint": "Halte während der Wiedergabe X gedrückt, um dein Gerät auf dieses kurze, sich wiederholende Skript umzuschalten; loslassen, um zurückzuwechseln. Funktioniert mit Handy, Buttplug und T-Code.",
+      "orgasmModeLabel": "Verhalten der X-Taste",
+      "orgasmModeHold": "Halten zum Abspielen (beim Loslassen zurück)",
+      "orgasmModeToggle": "Drücken zum Beenden (danach Stopp)",
+      "orgasmModeHint": "Halten zum Abspielen: Halte X, um das Loop-Skript abzuspielen; beim Loslassen kehrt es zum Hauptskript zurück. Drücken zum Beenden: Tippe X, um die Schleife zu starten, tippe erneut, um das Gerät zu stoppen — es kehrt nicht zum Hauptskript zurück.",
+      "randomVariantLabel": "Zufällige Skript-Variante",
+      "randomVariantHint": "Wenn ein Video mehrere Skript-Varianten hat, wird bei jeder Wiedergabe eine zufällig gewählt. Übersteuert angepinnte Standard-Varianten, solange aktiv.",
       "bpHeader": "Buttplug-Linearausgabe (BLE)",
       "fieldStrategy": "Strategie",
       "strategyActionBoundary": "Pro Stroke (glatter über BLE)",
@@ -976,7 +1039,18 @@
       "fieldMinStroke": "Min. Stroke",
       "minStrokeResetTitle": "Auf Standard zurücksetzen (60ms)",
       "minStrokeResetAria": "Min. Stroke auf Standard zurücksetzen",
-      "bpHint": "Pro Stroke sendet einen Befehl pro Aktion und lässt die Geräte-Firmware interpolieren — fühlt sich an wie das Handy WiFi API (HSSP). Vorausschau kompensiert BLE-Roundtrip; Min. Stroke streckt zu kurze Strokes, damit BLE sie verarbeiten kann. Für Handy über Verbindungscode (HSSP) haben diese Einstellungen keine Wirkung."
+      "bpHint": "Pro Stroke sendet einen Befehl pro Aktion und lässt die Geräte-Firmware interpolieren — fühlt sich an wie das Handy WiFi API (HSSP). Vorausschau kompensiert BLE-Roundtrip; Min. Stroke streckt zu kurze Strokes, damit BLE sie verarbeiten kann. Für Handy über Verbindungscode (HSSP) haben diese Einstellungen keine Wirkung.",
+      "orgasmSummaryMulti": "Multi-Achsen ({count} Achsen)",
+      "orgasmSummaryCustom": "Eigenes Routing ({count} Routen)",
+      "inlineVizOpacityLabel": "Deckkraft der Overlays",
+      "inlineVizOpacityResetTitle": "Standard-Deckkraft wiederherstellen",
+      "inlineVizOpacityHint": "Wie kräftig Skript-Zeitleiste und Heatmap über dem Video wirken. Einschalten über das ⋮-Menü im Player.",
+      "orgasmScriptMissing": "(Datei nicht gefunden)",
+      "playbackHeader": "Wiedergabe",
+      "orgasmHeader": "Orgasm Switch",
+      "videoHeader": "Video & Leistung",
+      "rememberSpeedLabel": "Wiedergabegeschwindigkeit merken",
+      "rememberSpeedHint": "Behält die aktuelle Geschwindigkeit beim Laden eines anderen Videos bei. Standardmäßig aus, jedes Video startet mit 1x."
     },
     "appearance": {
       "themeHeader": "Design",
@@ -1001,7 +1075,16 @@
       "folderPreviewsLabel": "Ordner-Vorschaubilder",
       "folderPreviewsHint": "Zeigt auf Ordnerkacheln eine Mosaikvorschau der enthaltenen Videos. Zum Verwenden eines einfachen Ordnersymbols ausschalten.",
       "miniPlayerLabel": "Beim Stöbern weiterspielen",
-      "miniPlayerHint": "Wenn du während der Wiedergabe zur Bibliothek zurückkehrst, schrumpft das Video zu einem Mini-Player in der Ecke und spielt weiter (und steuert dein Gerät weiter), statt zu stoppen."
+      "miniPlayerHint": "Wenn du während der Wiedergabe zur Bibliothek zurückkehrst, schrumpft das Video zu einem Mini-Player in der Ecke und spielt weiter (und steuert dein Gerät weiter), statt zu stoppen.",
+      "hwDecodeLabel": "Hardware-Videodekodierung",
+      "hwDecodeHint": "Standardmäßig an. Wenn Videos nicht abspielen (schwarzer Bildschirm oder Dekodierfehler – häufig bei NVIDIA + Linux), schalte dies aus, um Software-Dekodierung zu nutzen. Wird nach einem Neustart wirksam.",
+      "hwDecodeRestart": "Starte FunSync neu, um die Änderung der Videodekodierung anzuwenden.",
+      "cardHeatmapLabel": "Heatmap auf Bibliothekskarten",
+      "cardHeatmapHint": "Zeigt unter jedem Vorschaubild eine Heatmap der Stroke-Geschwindigkeit. Nutzt das Hauptskript des Videos. Standardmäßig aus, da pro Karte ein Skript gelesen wird.",
+      "resumeProgressLabel": "Fortschritt in Playlists",
+      "resumeProgressHint": "Zeigt als Balken auf Playlist-Karten und -Zeilen, wie weit du gekommen bist. Nur bei Playlist-Wiedergabe — die Hauptbibliothek bleibt unmarkiert.",
+      "hideDupesLabel": "Doppelte Namen ausblenden",
+      "hideDupesHint": "Zeigt nur einen Eintrag, wenn mehrere Videos denselben Dateinamen haben, etwa dieselbe Datei in zwei Quellordnern. Die Kopie mit Skript bleibt erhalten."
     },
     "data": {
       "backupHeader": "Backup & Wiederherstellung",
@@ -1126,7 +1209,20 @@
     "noAttachments": "Keine Funscript-Anhänge in diesem Thema gefunden",
     "downloadFailed": "Download fehlgeschlagen",
     "savedToast": "Skript gespeichert: {name}",
-    "sessionExpired": "EroScripts-Sitzung abgelaufen — bitte erneut über das EroScripts-Panel anmelden"
+    "sessionExpired": "EroScripts-Sitzung abgelaufen — bitte erneut über das EroScripts-Panel anmelden",
+    "inline": {
+      "title": "Skript auf EroScripts finden",
+      "axesLine": "Haupt + {count} Achsen ({list})",
+      "downloadAll": "Alle laden (Haupt + {count} Achsen)",
+      "downloadMainOnly": "Nur Haupt",
+      "download": "Laden & zuordnen",
+      "downloading": "Wird geladen...",
+      "multiBadge": "Multi-Achse",
+      "noAttachments": "Keine ladbaren Skripte in diesem Beitrag",
+      "noMain": "Nur Achsendateien, kein Hauptskript",
+      "zipNote": "{count} ZIP-Anhänge können noch nicht geöffnet werden",
+      "loadingPost": "Beitrag wird geladen..."
+    }
   },
   "upNext": {
     "regionAria": "Als Nächstes",
@@ -1143,7 +1239,10 @@
     "endText": "Keine weiteren Videos in dieser {source}.",
     "endCta": "Zurück zu {source}",
     "endSourceFallback": "Liste",
-    "sourcePlaylist": "Wiedergabeliste"
+    "sourcePlaylist": "Wiedergabeliste",
+    "resumeFrom": "Ab {time}",
+    "startOver": "Von vorne",
+    "resumeGroupAria": "Video fortsetzen oder von vorne beginnen"
   },
   "session": {
     "state": {
@@ -1383,7 +1482,8 @@
     "customKeysReservedWarn": "{key} ist für einen Editorbefehl reserviert",
     "customKeysDuplicateWarn": "{key} ist bereits auf Position {pos} belegt",
     "customKeysMidiHint": "MIDI-Keyboard-Nutzer kombinieren dies meist mit einem MIDI-zu-Taste-Übersetzer (z. B. MIDIKey2Key).",
-    "customKeysHelpGroup": "Benutzerdefinierte Positionstasten"
+    "customKeysHelpGroup": "Benutzerdefinierte Positionstasten",
+    "popoutWindowTitle": "Skript-Editor"
   },
   "connection": {
     "vibeHelp": {
@@ -1481,7 +1581,8 @@
       "badgeVibrate": "Vibration",
       "badgeRotate": "Rotation",
       "badgeEstim": "E-Stim",
-      "axisCustom": "Eigenem Routing folgen"
+      "axisCustom": "Eigenem Routing folgen",
+      "tuning": "Ausgabe-Feinabstimmung"
     },
     "tcode": {
       "l0Label": "Stroke (Haupt)",
@@ -1614,6 +1715,8 @@
     "jumpStartEnd": "Zum Anfang / Ende springen",
     "skipNextAction": "Zur nächsten Aktion springen (Lückenüberspringen)",
     "skipPrevAction": "Zur vorherigen Aktion springen",
+    "nextVideo": "Nächstes Video in der Warteschlange",
+    "prevVideo": "Vorheriges Video in der Warteschlange",
     "volume5": "Lautstärke ±5 %",
     "muteToggle": "Stummschalten / Ton ein",
     "fullscreen": "Vollbild",
@@ -1683,5 +1786,19 @@
     "editorSelectLeftRightOfCursor": "Alles vor/nach dem Abspielkopf auswählen",
     "editorEqualize": "Angleichen — mittlere Aktionen gleichmäßig in der Zeit verteilen",
     "editorMoveToPlayhead": "Einzeln ausgewählte Aktion zum Abspielkopf verschieben"
+  },
+  "orgasmConfig": {
+    "title": "Orgasmus-Schalter einrichten",
+    "mainScript": "Hauptskript:",
+    "hintMulti": "Achsen-Skripte sollten der Länge des Hauptskripts entsprechen. Kürzere Achsen halten ihre letzte Position.",
+    "hintCustom": "Das geroutete Setup spielt, wenn alle zugewiesenen Geräte verbunden sind. Fehlt eines, läuft das Hauptskript auf einer Achse, bis alle wieder verbunden sind."
+  },
+  "resume": {
+    "title": "Weiterschauen?",
+    "message": "Du hast bei {time} aufgehört.",
+    "startOver": "Von vorne",
+    "resumeAt": "Ab {time} fortsetzen",
+    "progressLabel": "{percent} % gesehen",
+    "resumedToast": "Fortgesetzt ab {time}"
   }
 }

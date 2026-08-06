@@ -107,6 +107,8 @@ export function getPlayerShortcutGroups() {
         ['Home / End',    t('kbd.jumpStartEnd')],
         ['G',             t('kbd.skipNextAction')],
         ['Shift+G',       t('kbd.skipPrevAction')],
+        ['N',             t('kbd.nextVideo')],
+        ['P',             t('kbd.prevVideo')],
       ],
     },
     {

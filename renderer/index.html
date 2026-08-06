@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com https://discuss.eroscripts.com; media-src 'self' file: blob: http://localhost:* http://127.0.0.1:*; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:* https://*.handyfeeling.com https://handyfeeling.com https://discuss.eroscripts.com; media-src 'self' file: blob: http://localhost:* http://127.0.0.1:*; img-src 'self' http://localhost:* data: https://discuss.eroscripts.com https://*.eroscripts.com; style-src 'self' 'unsafe-inline'; script-src 'self';">
   <title>FunSync Player</title>
   <link rel="stylesheet" href="styles/player.css">
   <link rel="stylesheet" href="styles/library.css">
@@ -255,6 +255,23 @@
                   <i data-lucide="repeat-1"></i>
                   <span data-i18n="player.loopVideo.menuLabel">Loop video</span>
                   <span class="controls-overflow__item-value" id="loop-video-state" data-i18n="player.loopVideo.stateOff">Off</span>
+                </button>
+                <!-- Inline visualisations (zaikechi #209): a windowed script
+                     timeline and a full-duration heatmap strip, drawn over the
+                     video. Were TL / HM tag buttons in the control bar; moved
+                     here 2026-08-04 (Dave) because two-letter tags read as
+                     jargon and the bar was crowded. Checkbox items: these are
+                     persistent on/off view state, not actions. Hidden until a
+                     script is loaded (same gating as the editor button). -->
+                <button id="btn-inline-tl" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.inlineTimeline" aria-label="Script timeline" hidden>
+                  <i data-lucide="activity"></i>
+                  <span data-i18n="player.inlineTimeline">Script timeline</span>
+                  <span class="controls-overflow__check" aria-hidden="true"></span>
+                </button>
+                <button id="btn-inline-hm" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.inlineHeatmap" aria-label="Heatmap strip" hidden>
+                  <i data-lucide="thermometer"></i>
+                  <span data-i18n="player.inlineHeatmap">Heatmap strip</span>
+                  <span class="controls-overflow__check" aria-hidden="true"></span>
                 </button>
                 <button id="btn-pip" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.pictureInPicture" aria-label="Picture in Picture">
                   <i data-lucide="picture-in-picture-2"></i>

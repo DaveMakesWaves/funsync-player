@@ -9,8 +9,15 @@
   <link rel="stylesheet" href="styles/modal.css">
   <link rel="stylesheet" href="styles/editor.css">
   <link rel="stylesheet" href="styles/modern.css">
+  <link rel="stylesheet" href="styles/popout-chrome.css">
 </head>
 <body>
+  <!-- Drag region + window name for the frameless (WCO) window. Shares the
+       main window's nav-bar surface and 48px height so the caption buttons
+       align identically. Collapses to nothing without the overlay. -->
+  <div class="popout-titlebar">
+    <span class="popout-titlebar__title" data-i18n="editor.popoutWindowTitle">Script Editor</span>
+  </div>
   <!-- The host becomes a `.script-editor.script-editor--popout-window`
        in editor-popout.js so all the existing editor.css rules apply
        unchanged. CSS handles full-window layout. -->

@@ -1,13 +1,23 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, GripVertical, ChevronUp, ChevronDown } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { computeSpeedStats } from '../js/library-search.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
 import { pathToFileURL } from '../js/path-utils.js';
+import { thumbRequestOpts, customThumbImagePath } from './library.js';
+import * as thumbCache from '../js/thumbnail-cache.js';
+import { dedupeThumbRequest } from '../js/thumb-inflight.js';
+import { applyResumeBar, createResumeBar } from './resume-bar.js';
+import { isFinished } from '../js/resume-position.js';
+import {
+  pickContinueTarget,
+  summarisePlaylistProgress,
+  formatRemaining,
+} from '../js/playlist-progress.js';
 
 export class Playlists {
   constructor({ settings, onPlayVideo, onPlayAll, library }) {
@@ -65,6 +75,9 @@ export class Playlists {
 
   _renderGrid() {
     const playlists = this._settings.getPlaylists();
+    // Fresh memo per render pass: durations can change when a scan
+    // completes, and a stale memo would pin an old "time left".
+    this._resetDurationMemo();
     this._container.innerHTML = '';
 
     const header = document.createElement('div');
@@ -137,9 +150,55 @@ export class Playlists {
     body.appendChild(name);
     body.appendChild(count);
 
+    // Progress summary — "4 of 12 watched · 2h 15m left". Rendered only
+    // once something has actually been watched, so untouched playlists
+    // look exactly as they did and the tile doesn't grow a permanent
+    // "0 of 12" that says nothing.
+    const summary = this._summariseProgress(pl);
+    if (this._showResumeProgress() && (summary.watched > 0 || summary.inProgress > 0)) {
+      const progressEl = document.createElement('div');
+      progressEl.className = 'playlists__card-progress';
+
+      const parts = [t('playlists.watchedCount', { watched: summary.watched, total: summary.total })];
+      const left = formatRemaining(summary.remainingSeconds);
+      if (left) parts.push(t('playlists.timeLeft', { time: left }));
+      progressEl.textContent = parts.join(' · ');
+      body.appendChild(progressEl);
+
+      // Progress bar across the tile — the same at-a-glance read as the
+      // per-video bar, one level up.
+      const track = document.createElement('div');
+      track.className = 'playlists__card-progress-track';
+      const fill = document.createElement('div');
+      fill.className = 'playlists__card-progress-fill';
+      fill.style.width = `${summary.total > 0 ? Math.round((summary.watched / summary.total) * 100) : 0}%`;
+      track.appendChild(fill);
+      body.appendChild(track);
+    }
+
     // Actions row
     const actions = document.createElement('div');
     actions.className = 'playlists__card-actions';
+
+    // Continue, right on the tile. The header button inside the detail
+    // view takes two clicks to reach; the grid is where you land.
+    // Deliberately NOT gated on _showResumeProgress: that setting hides the
+    // progress BARS, it doesn't disable resuming. Hiding the button too
+    // would remove functionality the user didn't ask to lose, and would
+    // disagree with the header Continue, which stays.
+    if (this._playlistHasProgress(pl) && pl.videoPaths.length > 0) {
+      const continueBtn = document.createElement('button');
+      continueBtn.type = 'button';
+      continueBtn.className = 'playlists__card-action-btn playlists__card-action-btn--continue';
+      continueBtn.appendChild(icon(History, { width: 14, height: 14 }));
+      continueBtn.title = t('playlists.continueWatching');
+      continueBtn.setAttribute('aria-label', t('playlists.continueNamed', { name: pl.name }));
+      continueBtn.addEventListener('click', (e) => {
+        e.stopPropagation(); // don't also open the playlist detail view
+        this._continueFromLastWatched(pl);
+      });
+      actions.appendChild(continueBtn);
+    }
 
     const renameBtn = document.createElement('button');
     renameBtn.className = 'playlists__card-action-btn';
@@ -214,6 +273,49 @@ export class Playlists {
       playAllBtn.addEventListener('click', () => this._playAll(pl));
       header.appendChild(playAllBtn);
 
+      // Continue from last watched — only rendered when there IS one, and
+      // only when that video is still in the playlist. A button that
+      // sometimes does nothing is worse than no button (Nielsen #1:
+      // visibility of system status; its presence IS the status).
+      // Gate on "has any progress" rather than "has a marker": Continue is
+      // also meaningful with no marker at all (first unwatched), and with a
+      // marker on a FINISHED video (skip past it). The tooltip names the
+      // video it will actually land on, resolved by the same targeting the
+      // click uses, so the two can't disagree.
+      const continueTarget = this._playlistHasProgress(pl)
+        ? pickContinueTarget(
+          pl.videoPaths,
+          this._playlistProgress(pl.id)?.lastVideoPath || null,
+          (p) => this._resumeEntryFor(p),
+        )
+        : null;
+      if (continueTarget) {
+        const continueBtn = document.createElement('button');
+        continueBtn.type = 'button';
+        continueBtn.className = 'playlists__continue-btn';
+        continueBtn.appendChild(icon(History, { width: 14, height: 14 }));
+        continueBtn.appendChild(document.createTextNode(' ' + t('playlists.continueWatching')));
+        const targetName = continueTarget.path.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+        continueBtn.title = t('playlists.continueWatchingNamed', { name: targetName });
+        continueBtn.setAttribute('aria-label', continueBtn.title);
+        continueBtn.addEventListener('click', () => this._continueFromLastWatched(pl));
+        header.appendChild(continueBtn);
+      }
+
+      // Reset — clears the marker and every member video's saved position.
+      // Only shown when there's something to clear.
+      if (this._playlistHasProgress(pl)) {
+        const resetBtn = document.createElement('button');
+        resetBtn.type = 'button';
+        resetBtn.className = 'playlists__reset-btn';
+        resetBtn.appendChild(icon(RotateCcw, { width: 14, height: 14 }));
+        resetBtn.appendChild(document.createTextNode(' ' + t('playlists.resetProgress')));
+        resetBtn.title = t('playlists.resetProgressHint');
+        resetBtn.setAttribute('aria-label', resetBtn.title);
+        resetBtn.addEventListener('click', () => this._confirmResetProgress(pl));
+        header.appendChild(resetBtn);
+      }
+
       // Loop toggle — adjacent to Play All because it's a "play
       // behaviour modifier" (Norman conceptual model: a control next
       // to the thing it modifies). Pressed state = aria-pressed AND
@@ -268,6 +370,21 @@ export class Playlists {
         setShuffleVisualState(next);
       });
       header.appendChild(shuffleBtn);
+
+      // Advanced settings (Dave 2026-08-04) — balance-by-script moved off the
+      // header into here. As a bare icon toggle it was undiscoverable and
+      // unexplainable: nothing on a 14px scale glyph can convey "collapses
+      // videos sharing a script into one shuffle slot", and it silently does
+      // nothing while Shuffle is off. A modal gives it a real name, a plain
+      // explanation, and somewhere to say that out loud.
+      const advancedBtn = document.createElement('button');
+      advancedBtn.type = 'button';
+      advancedBtn.className = 'playlists__loop-btn playlists__advanced-btn';
+      advancedBtn.appendChild(icon(SlidersHorizontal, { width: 14, height: 14 }));
+      advancedBtn.title = t('playlists.advanced.openTitle');
+      advancedBtn.setAttribute('aria-label', advancedBtn.title);
+      advancedBtn.addEventListener('click', () => this._openAdvancedSettings(pl));
+      header.appendChild(advancedBtn);
     }
 
     this._addViewToggle(header);
@@ -404,6 +521,35 @@ export class Playlists {
     });
     thumbnail.appendChild(removeBtn);
 
+    // Resume progress along the bottom of the thumbnail (see resume-bar.js).
+    if (this._showResumeProgress()) {
+      applyResumeBar(thumbnail, this._resumeEntryFor(videoPath));
+    }
+
+    // Watched check — set once a video has been played to the end, and
+    // sticky until Reset. Distinct from the resume bar: the bar says "part
+    // way through", this says "seen it".
+    if (this._showResumeProgress() && isFinished(this._resumeEntryFor(videoPath))) {
+      card.classList.add('playlists__video-card--watched');
+      const check = document.createElement('span');
+      check.className = 'playlists__watched-check';
+      check.title = t('playlists.watched');
+      check.setAttribute('aria-label', t('playlists.watched'));
+      check.appendChild(icon(Check, { width: 12, height: 12 }));
+      thumbnail.appendChild(check);
+    }
+
+    // "Last watched" marker — which video in THIS playlist you were on.
+    // Card-level class as well as the pill, so the marker survives being
+    // read at a glance across a grid (the pill alone is easy to miss).
+    if (this._playlistProgress(playlist.id)?.lastVideoPath === videoPath) {
+      card.classList.add('playlists__video-card--last-watched');
+      const marker = document.createElement('span');
+      marker.className = 'playlists__last-watched';
+      marker.textContent = t('playlists.lastWatched');
+      thumbnail.appendChild(marker);
+    }
+
     card.appendChild(thumbnail);
 
     const info = document.createElement('div');
@@ -520,16 +666,51 @@ export class Playlists {
    * backend isn't reachable. Mirrors the same change in library.js.
    */
   async _captureFrame(videoPath) {
+    // Shared in-memory cache FIRST (module-level map in thumbnail-cache.js).
+    // Without this, every switch from the Library into a playlist re-fetched
+    // every visible tile: the dedup below only collapses requests that are
+    // in flight at the same moment, it stores nothing between view switches.
+    // On a large library that meant a burst of simultaneous requests each
+    // time, which is what ProfKiwi reported as thumbnails "repopulating and
+    // often failing" (EroScripts #225).
+    //
+    // mtime key 0 matches library.js exactly, so all three views share the
+    // SAME entries — and the library's invalidation on a custom thumbnail or
+    // pin change (thumbCache.remove) clears them for every view at once.
+    const cached = thumbCache.getEntry(videoPath, 0);
+    if (cached) return cached;
+    // Deduped: shares in-flight captures with the library/categories views.
+    const result = await dedupeThumbRequest(videoPath, () => this._captureFrameUncached(videoPath));
+    const dataUrl = result?.dataUrl || result;
+    if (typeof dataUrl === 'string' && dataUrl) {
+      thumbCache.set(videoPath, 0, dataUrl, result?.duration);
+    }
+    return result;
+  }
+
+  async _captureFrameUncached(videoPath) {
+    // Honor a user-pinned thumbnail frame ("Set thumbnail frame…" in the
+    // library) so playlist cards show the same tile as the library grid.
+    const custom = (this._settings?.get?.('library.customThumbnails') || {})[videoPath];
+    // User-uploaded poster image wins outright (mirrors library.js).
+    const imagePath = customThumbImagePath(custom);
+    if (imagePath && window.funsync?.readCustomThumbnail) {
+      try {
+        const img = await window.funsync.readCustomThumbnail(imagePath);
+        if (img?.dataUrl) return { dataUrl: img.dataUrl, duration: 0 };
+      } catch { /* fall through to frame path */ }
+    }
+    const { seekPct, exact } = thumbRequestOpts(custom);
     if (window.funsync?.generateSingleThumbnail) {
       try {
-        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct: 0.1, width: 320 });
+        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct, width: 320, exact });
         if (result?.dataUrl) return { dataUrl: result.dataUrl, duration: result.duration || 0 };
       } catch { /* fall through */ }
     }
-    return this._captureFrameViaVideoElement(videoPath);
+    return this._captureFrameViaVideoElement(videoPath, exact ? seekPct : null);
   }
 
-  _captureFrameViaVideoElement(videoPath) {
+  _captureFrameViaVideoElement(videoPath, pinnedSeekPct = null) {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
@@ -550,7 +731,9 @@ export class Playlists {
       const timeout = setTimeout(() => { cleanup(); resolve(null); }, 8000);
 
       video.addEventListener('loadedmetadata', () => {
-        video.currentTime = Math.min(video.duration * 0.1, 5);
+        video.currentTime = (typeof pinnedSeekPct === 'number' && isFinite(pinnedSeekPct))
+          ? video.duration * pinnedSeekPct
+          : Math.min(video.duration * 0.1, 5);
       }, { once: true });
 
       video.addEventListener('seeked', () => {
@@ -724,10 +907,111 @@ export class Playlists {
       sourceContext: { kind: 'playlist', id: pl.id },
       loop: !!pl.loop,
       shuffle: !!pl.shuffle,
+      balanceByScript: !!pl.balanceByScript,
+      preferUnwatched: !!pl.preferUnwatched,
+      // Watched lookup travels with the request: app.js owns the queue
+      // build but has no reason to know how playlist entries are stored.
+      isWatched: (path) => isFinished(this._resumeEntryFor(path)),
     });
   }
 
   // --- View toggle ---
+
+  /**
+   * Advanced playlist settings modal. Currently one option (balance by
+   * script), but it exists so shuffle-modifying behaviour has a home with
+   * room to explain itself rather than living as an unlabelled header icon.
+   *
+   * The balance option is disabled while Shuffle is off, with the reason
+   * stated inline — it genuinely has no effect on a fixed order, and a
+   * toggle that silently does nothing is worse than one you can't press.
+   */
+  _openAdvancedSettings(pl) {
+    Modal.open({
+      title: t('playlists.advanced.title'),
+      onRender: (body, close) => {
+        const shuffleOn = !!pl.shuffle;
+
+        const section = document.createElement('div');
+        section.className = 'playlists__advanced-option';
+
+        // --- Balance by script ---
+        const row = document.createElement('label');
+        row.className = 'playlists__advanced-row';
+        const check = document.createElement('input');
+        check.type = 'checkbox';
+        check.checked = !!pl.balanceByScript;
+        check.disabled = !shuffleOn;
+        const label = document.createElement('span');
+        label.className = 'playlists__advanced-label';
+        label.textContent = t('playlists.advanced.balanceLabel');
+        row.appendChild(check);
+        row.appendChild(label);
+        section.appendChild(row);
+
+        // Plain-language explanation. Two short paragraphs: what goes wrong
+        // without it, then what it does about it.
+        const why = document.createElement('p');
+        why.className = 'playlists__advanced-desc';
+        why.textContent = t('playlists.advanced.balanceWhy');
+        section.appendChild(why);
+
+        const how = document.createElement('p');
+        how.className = 'playlists__advanced-desc';
+        how.textContent = t('playlists.advanced.balanceHow');
+        section.appendChild(how);
+
+        const note = document.createElement('p');
+        note.className = 'playlists__advanced-note';
+        note.textContent = shuffleOn
+          ? t('playlists.advanced.balanceNeedsShuffleOn')
+          : t('playlists.advanced.balanceNeedsShuffleOff');
+        section.appendChild(note);
+
+        check.addEventListener('change', () => {
+          pl.balanceByScript = check.checked;
+          this._settings.setPlaylistBalance(pl.id, check.checked);
+        });
+
+        // --- Prefer unwatched ---
+        // Same shuffle-only gating as balance above, for the same reason:
+        // it has no meaning on a fixed order.
+        const unwatchedRow = document.createElement('label');
+        unwatchedRow.className = 'playlists__advanced-row';
+        unwatchedRow.style.marginTop = '14px';
+        const unwatchedCheck = document.createElement('input');
+        unwatchedCheck.type = 'checkbox';
+        unwatchedCheck.checked = !!pl.preferUnwatched;
+        unwatchedCheck.disabled = !shuffleOn;
+        const unwatchedLabel = document.createElement('span');
+        unwatchedLabel.className = 'playlists__advanced-label';
+        unwatchedLabel.textContent = t('playlists.advanced.unwatchedLabel');
+        unwatchedRow.appendChild(unwatchedCheck);
+        unwatchedRow.appendChild(unwatchedLabel);
+        section.appendChild(unwatchedRow);
+
+        const unwatchedWhy = document.createElement('p');
+        unwatchedWhy.className = 'playlists__advanced-desc';
+        unwatchedWhy.textContent = t('playlists.advanced.unwatchedWhy');
+        section.appendChild(unwatchedWhy);
+
+        unwatchedCheck.addEventListener('change', () => {
+          pl.preferUnwatched = unwatchedCheck.checked;
+          this._settings.setPlaylistPreferUnwatched(pl.id, unwatchedCheck.checked);
+        });
+
+        body.appendChild(section);
+
+        const done = document.createElement('button');
+        done.type = 'button';
+        done.className = 'library__assoc-save-btn';
+        done.style.marginTop = '12px';
+        done.textContent = t('common.close');
+        done.addEventListener('click', () => close(null));
+        body.appendChild(done);
+      },
+    });
+  }
 
   _addViewToggle(header) {
     const group = document.createElement('div');
@@ -799,6 +1083,148 @@ export class Playlists {
     });
 
     return row;
+  }
+
+  /** Default ON, switchable in Settings ▸ Appearance. Playlists only. */
+  _showResumeProgress() {
+    return this._settings.get('library.showResumeProgress') !== false;
+  }
+
+  _resumeEntryFor(path) {
+    if (!path) return null;
+    return (this._settings.get('library.resumePositions') || {})[path] || null;
+  }
+
+  /**
+   * Play the last-watched video, picking up where it left off. Builds the
+   * same playContext a card click would, so prev/next, Up Next and the
+   * resume path all behave identically to arriving there by hand.
+   */
+  _continueFromLastWatched(pl) {
+    const validPaths = (pl.videoPaths || []).slice();
+    if (validPaths.length === 0) return;
+
+    // Targeting lives in playlist-progress.js — notably it skips PAST a
+    // marked video that was watched to the end, rather than replaying it.
+    const target = pickContinueTarget(
+      validPaths,
+      this._playlistProgress(pl.id)?.lastVideoPath || null,
+      (p) => this._resumeEntryFor(p),
+    );
+    if (!target) return;
+
+    this._playVideoByPath(target.path, {
+      source: 'playlist',
+      sourceLabel: `playlist "${pl.name}"`,
+      sourceContext: { playlistId: pl.id },
+      list: validPaths,
+      index: target.index,
+    });
+  }
+
+  /**
+   * Summary counts for a playlist, used by the grid tile.
+   *
+   * `library.getVideoByPath` is a linear scan over every scanned video, and
+   * this runs once per video per playlist on every grid render — on a big
+   * library with many playlists that multiplies into real work, and the
+   * same video appearing in several playlists paid for it each time. The
+   * memo below collapses it to one scan per distinct path per render pass.
+   */
+  _summariseProgress(pl) {
+    if (!this._durationMemo) this._durationMemo = new Map();
+    const memo = this._durationMemo;
+    return summarisePlaylistProgress(
+      pl.videoPaths || [],
+      (p) => this._resumeEntryFor(p),
+      (p) => {
+        if (memo.has(p)) return memo.get(p);
+        const d = this._library?.getVideoByPath?.(p)?.duration || 0;
+        memo.set(p, d);
+        return d;
+      },
+    );
+  }
+
+  /** Drop the per-render duration memo so a re-render sees fresh scans. */
+  _resetDurationMemo() {
+    this._durationMemo = null;
+  }
+
+  async _confirmResetProgress(pl) {
+    const ok = await Modal.open({
+      title: t('playlists.resetProgressTitle'),
+      onRender(body, close) {
+        const msg = document.createElement('div');
+        msg.className = 'modal-message';
+        msg.textContent = t('playlists.resetProgressConfirm', { name: pl.name });
+        body.appendChild(msg);
+
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.className = 'modal-btn modal-btn--secondary';
+        cancelBtn.textContent = t('common.cancel');
+        cancelBtn.addEventListener('click', () => close(false));
+
+        const confirmBtn = document.createElement('button');
+        confirmBtn.className = 'modal-btn modal-btn--danger';
+        confirmBtn.textContent = t('playlists.resetProgress');
+        confirmBtn.addEventListener('click', () => close(true));
+
+        actions.appendChild(cancelBtn);
+        actions.appendChild(confirmBtn);
+        body.appendChild(actions);
+      },
+    });
+
+    if (!ok) return;
+    this._resetPlaylistProgress(pl);
+    this._renderDetail(pl.id);
+  }
+
+  /** `{ lastVideoPath, updatedAt }` for a playlist, or null. */
+  _playlistProgress(playlistId) {
+    if (!playlistId) return null;
+    return (this._settings.get('library.playlistProgress') || {})[playlistId] || null;
+  }
+
+  /**
+   * Does this playlist carry any state a Reset would clear? True if there's
+   * a last-watched marker OR any member video has a stored position — the
+   * button is pointless otherwise, so it's only rendered when this is true.
+   */
+  _playlistHasProgress(pl) {
+    if (!pl) return false;
+    if (this._playlistProgress(pl.id)) return true;
+    const positions = this._settings.get('library.resumePositions') || {};
+    return (pl.videoPaths || []).some((p) => positions[p]);
+  }
+
+  /**
+   * Clear the last-watched marker and every member video's stored
+   * position. Scoped to this playlist: a video that also lives in another
+   * playlist keeps its position there... except it can't, because
+   * positions are keyed by video path and shared. That's the deliberate
+   * trade — one position per video everywhere — so resetting a playlist
+   * does drop positions for videos shared with another playlist. Called
+   * out in the confirm text rather than hidden.
+   */
+  _resetPlaylistProgress(pl) {
+    const progressMap = { ...(this._settings.get('library.playlistProgress') || {}) };
+    delete progressMap[pl.id];
+    this._settings.set('library.playlistProgress', progressMap);
+
+    const positions = { ...(this._settings.get('library.resumePositions') || {}) };
+    for (const p of pl.videoPaths || []) delete positions[p];
+    this._settings.set('library.resumePositions', positions);
+
+    // If a video from this playlist is playing RIGHT NOW, the tracker would
+    // write its position straight back within seconds and the bar would
+    // reappear — the Reset would look broken. Tell app.js to stop recording
+    // the current video until it changes.
+    eventBus.emit('playlist:progressReset', { playlistId: pl.id, videoPaths: (pl.videoPaths || []).slice() });
   }
 
   _createVideoListItem(videoPath, playlist, playContext) {
@@ -911,7 +1337,34 @@ export class Playlists {
     moveGroup.className = 'playlists__move-group';
     moveGroup.append(moveUp, moveDown);
 
-    row.append(handle, title, heatmap, badges, moveGroup, removeBtn);
+    // Resume progress. List rows have no thumbnail, so this is the inline
+    // variant sitting between the heatmap strip and the badges. Absent
+    // entirely when there's no stored position, like everywhere else.
+    const resumeBar = this._showResumeProgress()
+      ? createResumeBar(this._resumeEntryFor(videoPath), undefined, { inline: true })
+      : null;
+
+    // Watched check, same rule as the grid card.
+    if (this._showResumeProgress() && isFinished(this._resumeEntryFor(videoPath))) {
+      row.classList.add('playlists__list-item--watched');
+      const check = document.createElement('span');
+      check.className = 'playlists__watched-check playlists__watched-check--inline';
+      check.title = t('playlists.watched');
+      check.setAttribute('aria-label', t('playlists.watched'));
+      check.appendChild(icon(Check, { width: 12, height: 12 }));
+      badges.appendChild(check);
+    }
+
+    // Last-watched marker, same rule as the grid card.
+    if (this._playlistProgress(playlist.id)?.lastVideoPath === videoPath) {
+      row.classList.add('playlists__list-item--last-watched');
+      const marker = document.createElement('span');
+      marker.className = 'playlists__last-watched playlists__last-watched--inline';
+      marker.textContent = t('playlists.lastWatched');
+      badges.appendChild(marker);
+    }
+
+    row.append(handle, title, heatmap, ...(resumeBar ? [resumeBar] : []), badges, moveGroup, removeBtn);
 
     row.addEventListener('click', () => {
       this._playVideoByPath(videoPath, playContext);

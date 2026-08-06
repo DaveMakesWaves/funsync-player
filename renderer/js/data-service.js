@@ -166,6 +166,22 @@ class DataService {
     eventBus.emit('playlist:changed', { action: 'setShuffle', id, shuffle: !!shuffle });
   }
 
+  /** "Balance shuffle by script" per-playlist flag (zaikechi #221). */
+  setPlaylistBalance(id, balance) {
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) playlist.balanceByScript = !!balance;
+    window.funsync.setPlaylistBalance(id, !!balance);
+    eventBus.emit('playlist:changed', { action: 'setBalance', id, balance: !!balance });
+  }
+
+  /** Per-playlist "prefer unwatched" shuffle bias. Mirrors setPlaylistBalance. */
+  setPlaylistPreferUnwatched(id, prefer) {
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) playlist.preferUnwatched = !!prefer;
+    window.funsync.setPlaylistPreferUnwatched(id, !!prefer);
+    eventBus.emit('playlist:changed', { action: 'setPreferUnwatched', id, prefer: !!prefer });
+  }
+
   /**
    * Replace a playlist's video order (drag / Move reorder). `newVideoPaths`
    * must be a reordering of the existing paths. Updates cache synchronously

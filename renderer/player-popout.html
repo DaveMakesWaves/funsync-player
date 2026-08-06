@@ -8,8 +8,14 @@
   <link rel="stylesheet" href="styles/player.css">
   <link rel="stylesheet" href="styles/up-next.css">
   <link rel="stylesheet" href="styles/modern.css">
+  <link rel="stylesheet" href="styles/popout-chrome.css">
 </head>
 <body class="player-popout-body">
+  <!-- Drag handle for the frameless (WCO) window. No visible title bar here:
+       a permanent strip over a video window would eat the space the window
+       exists for, so the top edge just drags, exactly like the main window's
+       player view. Hidden entirely without the overlay. -->
+  <div class="ppo-dragstrip" aria-hidden="true"></div>
   <div id="player-popout-host">
     <!-- Waiting placeholder — shown until the main window sends a video. -->
     <div class="player-popout-loading" id="player-popout-loading"></div>
@@ -128,6 +134,18 @@
                   <i data-lucide="repeat-1"></i>
                   <span data-i18n="player.loopVideo.menuLabel">Loop video</span>
                   <span class="controls-overflow__item-value" id="loop-video-state" data-i18n="player.loopVideo.stateOff">Off</span>
+                </button>
+                <!-- Inline visualisations, same pair as the main window.
+                     Hidden until a script's actions arrive via HEATMAP. -->
+                <button id="btn-inline-tl" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.inlineTimeline" aria-label="Script timeline" hidden>
+                  <i data-lucide="activity"></i>
+                  <span data-i18n="player.inlineTimeline">Script timeline</span>
+                  <span class="controls-overflow__check" aria-hidden="true"></span>
+                </button>
+                <button id="btn-inline-hm" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.inlineHeatmap" aria-label="Heatmap strip" hidden>
+                  <i data-lucide="thermometer"></i>
+                  <span data-i18n="player.inlineHeatmap">Heatmap strip</span>
+                  <span class="controls-overflow__check" aria-hidden="true"></span>
                 </button>
                 <button id="btn-help" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.keyboardShortcuts" aria-label="Keyboard shortcuts">
                   <i data-lucide="keyboard"></i>

@@ -38,6 +38,28 @@ export class SyncEngine {
   }
 
   /**
+   * Force a re-anchor at the player's CURRENT time.
+   *
+   * `start()` only anchors when `player.paused` is false at that instant.
+   * That check is unreliable right after the Orgasm Switch releases: in a
+   * web-remote session `player` is the RemotePlaybackProxy, whose paused
+   * flag can still read true while the phone is mid-buffer. The logs showed
+   * "Sync engine started" with no following `[Sync] hsspPlay`, so the Handy
+   * simply stayed wherever the finisher had left it and the script ran out
+   * of step with the video until the next seek (Dave 2026-08-05). Buttplug
+   * never had this problem because ButtplugSync re-reads currentTime every
+   * tick and self-corrects within a frame — only the anchored HSSP path
+   * needs telling.
+   *
+   * @returns {Promise<boolean>} whether an anchor was attempted
+   */
+  async resync() {
+    if (!this._active || !this._scriptReady || !this.handy.connected) return false;
+    await this._handlePlaying();
+    return true;
+  }
+
+  /**
    * Stop the sync engine.
    */
   stop() {

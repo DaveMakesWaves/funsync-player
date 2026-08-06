@@ -5,6 +5,7 @@ import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
+import { AXIS_DEFINITIONS } from './multi-axis.js';
 import { HandyManager } from './handy-manager.js';
 import { AudienceBridge } from './audience-bridge.js';
 import * as AUDIENCE from './audience-popout-protocol.js';
@@ -34,7 +35,7 @@ import { matchButtplugRoute } from './custom-routing-match.js';
 import { extendRawScriptContent, clampRawScriptContent } from './device-transform-stack.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
-import { Library } from '../components/library.js';
+import { Library, thumbRequestOpts, customThumbImagePath } from '../components/library.js';
 import { QueuePanel } from '../components/queue-panel.js';
 import { NavBar } from '../components/nav-bar.js';
 import { Modal } from '../components/modal.js';
@@ -51,17 +52,38 @@ import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
   EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles,
   Maximize, Maximize2, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-  Pencil, FileCheck, Captions, RotateCcw, Columns2, X,
+  Pencil, FileCheck, Captions, RotateCcw, Columns2, X, Activity, Thermometer,
 } from './icons.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { installConsoleForwarding } from './logger.js';
 import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-guard.js';
-import { shouldEnterMiniplayer } from './miniplayer.js';
+import { shouldEnterMiniplayer, exitFullscreenForNav } from './miniplayer.js';
+import { pickRehomeCandidate, findMovedFile } from './association-rehome.js';
 import { classifyStereoFormat, isFlattenableStereo, isVRVideo } from './vr-detect.js';
 import { HandyHdspSync } from './handy-hdsp-sync.js';
 import { OrgasmSwitch } from './orgasm-switch.js';
-import { shuffle as shuffleArray, reshuffleAvoidingRepeat } from './shuffle.js';
+import { engageHandyFinisher, releaseHandyFinisher } from './orgasm-handy-engage.js';
+import { resolveOrgasmPlan, parseFinisherActions, collectOrgasmScriptPaths, describeOrgasmEntry } from './orgasm-plan.js';
+import { openOrgasmConfigModal } from '../components/orgasm-config-modal.js';
+import { pickVariantIndexOnLoad } from './variant-select.js';
+import { InlineViz } from '../components/inline-viz.js';
+import { shuffle as shuffleArray, reshuffleAvoidingRepeat, balancedShuffle, reshuffleBalancedAvoidingRepeat } from './shuffle.js';
+import { partitionByWatched } from './playlist-progress.js';
 import { initI18n, setLocale, translatePage, t, LOCALE_LABELS } from './i18n.js';
+import {
+  shouldRecordPosition,
+  shouldOfferResume,
+  formatResumeTime,
+  makeResumeEntry,
+  makeFinishedEntry,
+  isFinished,
+  endThreshold,
+  RESUME_WRITE_INTERVAL_MS,
+  RESUME_MIN_DELTA_SECONDS,
+} from './resume-position.js';
+
+/** Default opacity (percent) for the inline TL/HM overlays. */
+const INLINE_VIZ_OPACITY_DEFAULT = 80;
 
 class App {
   constructor() {
@@ -186,6 +208,10 @@ class App {
         // 'maximize-2' for the "Pop out player" overflow item (detached
         // player window, SCOPE-separate-player-window.md).
         Maximize2,
+        // Inline visualisation toggles in the overflow menu: 'activity' for
+        // the script timeline (pulse-line reads as a motion trace),
+        // 'thermometer' for the heatmap strip.
+        Activity, Thermometer,
       },
       attrs: { width: 20, height: 20, 'stroke-width': 1.75 },
     });
@@ -220,6 +246,14 @@ class App {
       containerElement: document.getElementById('player-container'),
     });
 
+    // "Remember playback speed" — read live at each video load rather than
+    // cached, so toggling it in Settings applies to the very next video with
+    // nothing to propagate. Wired here, not in the Handy block below, so a
+    // failed Handy init can't leave it unset.
+    this.videoPlayer.setRememberRateProvider(
+      () => this.settings?.get?.('player.rememberPlaybackSpeed') === true,
+    );
+
     // Initialize progress bar (thumbnails + heatmap)
     this.progressBar = new ProgressBar({
       containerElement: document.getElementById('progress-container'),
@@ -231,6 +265,27 @@ class App {
     this.funscriptEngine = new FunscriptEngine({
       backendPort: this.backendPort,
     });
+
+    // Windows Controls Overlay detection: when the native title bar is
+    // replaced by the tinted overlay (titleBarStyle hidden, main.js), the
+    // nav bar / player top bar double as the title bar — CSS scoped under
+    // html.has-wco adds drag regions + caption-button insets. False on
+    // Linux (native frame) and in pop-outs, so those styles never apply.
+    try {
+      document.documentElement.classList.toggle(
+        'has-wco',
+        !!(navigator.windowControlsOverlay && navigator.windowControlsOverlay.visible),
+      );
+    } catch { /* older runtime — no overlay */ }
+
+    // Inline script visualization (TL timeline + HM heatmap strip) —
+    // read-only overlays during normal playback (zaikechi #209). Visibility
+    // restored from settings; the TL/HM control-bar buttons toggle + persist.
+    this.inlineViz = new InlineViz({
+      container: document.getElementById('player-container'),
+      video: this.videoPlayer.video,
+    });
+    this._wireInlineVizToggles();
 
     // Initialize drag-and-drop EARLY — this must always work. Omit
     // `dropZoneElement` so the default `#drop-zone-overlay` element
@@ -305,14 +360,24 @@ class App {
         if (this.buttplugSync) this.buttplugSync.setRangeExtenderEnabled(enabled);
         if (this.tcodeSync) this.tcodeSync.setRangeExtenderEnabled(enabled);
       },
-      // Orgasm Switch (hold X) — pick / clear / display the global script.
-      onPickOrgasmScript: () => this._pickOrgasmScript(),
-      onClearOrgasmScript: () => this._clearOrgasmScript(),
-      getOrgasmScriptName: () => {
-        const p = this.settings?.get?.('player.orgasmScript');
-        if (!p) return null;
-        return p.split(/[\\/]/).pop();  // basename, cross-platform
+      // Inline TL/HM overlay opacity — live-applied while the slider moves.
+      onInlineVizOpacityChanged: (v) => this._applyInlineVizOpacity(v),
+      // Per-card heatmap strip: cards are built once, so the row can only
+      // appear/disappear via a re-render of the library view.
+      // Any library-display setting that changes WHAT is listed or how a
+      // card is built — card heatmap, resume bars, hide-duplicates.
+      // Cards are built once, so these need a re-render, not a repaint.
+      onLibraryDisplayChanged: () => {
+        if (this._currentView() === 'library') {
+          this.library.show(this._getViewEl('library'));
+        }
       },
+      // Orgasm Switch (hold X) — configure / clear / display the global
+      // config (single script, multi-axis bundle, or custom routing —
+      // same association shape videos use).
+      onPickOrgasmScript: () => this._configureOrgasm(),
+      onClearOrgasmScript: () => this._clearOrgasmScript(),
+      getOrgasmScriptName: () => this._orgasmSummaryText(),
       // Snapshot device-connection flags for the "Report a problem"
       // diagnostics bundle. Read defensively — managers may be null
       // (Handy SDK can fail to import; Buttplug isn't always inited).
@@ -405,6 +470,13 @@ class App {
     // the panel can resolve video metadata via library.getVideoByPath.
     this._initQueuePanel();
 
+    // Resume-position tracking. Bound to the local <video> for the sample
+    // triggers, but each sample reads the clock via _resumeClockSource so
+    // a detached pop-out is recorded correctly too — while detached the
+    // local element is paused and fires nothing, so the periodic tick
+    // below is what keeps a popped-out session up to date.
+    this._initResumeTracking();
+
     // Player back button
     const btnPlayerBack = document.getElementById('btn-player-back');
     if (btnPlayerBack) {
@@ -482,9 +554,14 @@ class App {
         overflowBtn.setAttribute('aria-expanded', 'true');
       });
       // Close after any item click — PiP / help both fire their own
-      // handler first, then the menu closes.
+      // handler first, then the menu closes. EXCEPT checkbox items
+      // (`--check`): they're paired view toggles, and closing after the
+      // first one would mean reopening the menu to set the second.
+      // Deliberately scoped to that class so Loop video (also a
+      // menuitemcheckbox) keeps its existing close-on-toggle behaviour.
       overflowMenu.addEventListener('click', (e) => {
-        if (e.target.closest('.controls-overflow__item')) closeOverflow();
+        const item = e.target.closest('.controls-overflow__item');
+        if (item && !item.classList.contains('controls-overflow__item--check')) closeOverflow();
       });
       // Outside-click + Escape dismissal.
       document.addEventListener('click', (e) => {
@@ -539,6 +616,15 @@ class App {
       }
     };
 
+    // Windows caption buttons follow the player chrome: transparent over the
+    // video, and fading out with the seek bar when the controls auto-hide.
+    this.videoPlayer.onControlsVisibilityChanged = (visible) => {
+      this._syncCaptionOverlay(visible);
+    };
+    // Fullscreen has no caption strip; re-sync on the way back out so the
+    // normal chrome (or the over-video chrome) is restored correctly.
+    document.addEventListener('fullscreenchange', () => this._syncCaptionOverlay());
+
     // Redraw heatmap on resize
     window.addEventListener('resize', () => this.progressBar.redraw());
     // Keep the library-view queue panel anchored to the filter/sort bar as
@@ -579,6 +665,7 @@ class App {
           this.funscriptEngine.getActions(),
           this.videoPlayer.duration,
         );
+        this._feedInlineViz();
         // Markers (chapters + bookmarks) can exist even with zero
         // actions (C-E19); push them whenever the engine is loaded,
         // and render the chapter strip against the video's own
@@ -801,7 +888,7 @@ class App {
         if (savedTcOffset != null) this.tcodeSync.setOffsetMs(savedTcOffset);
         // Output rate (advanced) — apply the saved Hz on boot so it's active
         // even if the connection panel is never opened this session.
-        const savedTcRate = Number(this.settings.get('tcode.updateRateHz')) || 25;
+        const savedTcRate = Number(this.settings.get('tcode.updateRateHz')) || 60;
         this.tcodeSync.setUpdateRate(savedTcRate);
       }
 
@@ -832,6 +919,7 @@ class App {
           console.log(`[Handy] Connected (native WiFi) — key ...${keySuffix}, firmware ${fw}`);
           this._registerKnownDevice('handy', 'The Handy', 'handy');
           this._onHandyConnected();
+          this._refreshOrgasmPlan();
         };
 
         const panelOnDisconnect = this.handyManager.onDisconnect;
@@ -841,6 +929,7 @@ class App {
           if (this.syncEngine) this.syncEngine.stop();
           this._updateHandyIndicators('disconnected');
           this._updateDeviceIndicators();
+          this._refreshOrgasmPlan();
         };
       }
 
@@ -860,6 +949,7 @@ class App {
           console.log('[Buttplug] Disconnected from Intiface — stopping sync engine');
           if (this.buttplugSync) this.buttplugSync.stop();
           this._updateDeviceIndicators();
+          this._refreshOrgasmPlan();
         };
 
         const panelBpDeviceAdded = this.buttplugManager.onDeviceAdded;
@@ -907,6 +997,10 @@ class App {
           this._updateDeviceIndicators();
           this._tryStartButtplugSync();
           if (this.connectionPanel) this.connectionPanel.updateVibControlState();
+          // Orgasm custom routing: a newly-connected device may satisfy the
+          // last missing route — re-resolve so the finisher promotes back
+          // from its single-axis fallback automatically.
+          this._refreshOrgasmPlan();
         };
 
         const panelBpDeviceRemoved = this.buttplugManager.onDeviceRemoved;
@@ -918,6 +1012,7 @@ class App {
           // inherit the removed device's axis / mode flags.
           this.buttplugSync?.clearDeviceState(dev.index);
           this._updateDeviceIndicators();
+          this._refreshOrgasmPlan();
         };
       }
 
@@ -932,6 +1027,7 @@ class App {
           this._registerKnownDevice('tcode', `TCode (${this.tcodeManager.portPath})`, 'tcode');
           this._updateDeviceIndicators();
           this._tryStartTCodeSync();
+          this._refreshOrgasmPlan();
         };
 
         const panelTCodeDisconnect = this.tcodeManager.onDisconnect;
@@ -940,6 +1036,7 @@ class App {
           console.log('[TCode] Disconnected — stopping sync engine');
           if (this.tcodeSync) this.tcodeSync.stop();
           this._updateDeviceIndicators();
+          this._refreshOrgasmPlan();
         };
       }
 
@@ -1039,6 +1136,8 @@ class App {
         onToggleQueue: () => { this._toggleQueuePanel(); },
         onJumpChapter: (direction) => this._jumpChapter(direction),
         onJumpBookmark: (direction) => this._jumpBookmark(direction),
+        onLoadNext: () => this._playNext(),
+        onLoadPrev: () => this._playPrev(),
       });
 
       // Auto-connect if a key is saved
@@ -1162,35 +1261,126 @@ class App {
     this.orgasmSwitch = new OrgasmSwitch({
       buttplugManager: this.buttplugManager,
       tcodeManager: this.tcodeManager,
-      handyManager: this.handyManager,
+      // NOTE: the Handy is deliberately NOT driven by the per-tick loop. It's
+      // cloud-connected, and streaming ~25 HDSP commands/sec over the cloud API
+      // can't keep up — the device just bumps. Instead the Handy plays the
+      // finisher via HSSP LOOP mode (uploaded once, looped device-side), set up
+      // in onActivate below. The loop here only drives local Buttplug/T-Code.
+      handyManager: null,
+      // Respect the per-device output limits the normal engines apply, so the
+      // finisher doesn't push the toy past the user's configured floor/ceiling.
+      getCutoff: (key) => this._cutoffFromSettings(key),
       onActivate: () => {
+        // Phone button parity (F2): broadcast the new state so the web
+        // remote's button reflects a keyboard-X press too. _active is
+        // already true when onActivate runs.
+        this._pushRemoteOrgasmState?.();
+        // The resolved plan decides which engines the finisher takes over.
+        // A custom plan can leave a kind untouched (stops* = false): those
+        // devices keep playing the MAIN video script through the hold — the
+        // user deliberately routed the finisher to other hardware.
+        const plan = this._orgasmPlan || null;
         this._orgasmStoppedEngines = [];
-        if (this.buttplugSync?._active) { this.buttplugSync.stop(); this._orgasmStoppedEngines.push('buttplug'); }
-        if (this.tcodeSync?._active) { this.tcodeSync.stop(); this._orgasmStoppedEngines.push('tcode'); }
-        // Handy: stop both HSSP + the rate-change HDSP engine so neither
-        // fights the orgasm loop, and halt cloud playback before HDSP takes
-        // over. The controller then drives hdspMove on the loop clock.
-        if (this.handyManager?.connected) {
+        if ((!plan || plan.stopsButtplug !== false) && this.buttplugSync?._active) {
+          this.buttplugSync.stop(); this._orgasmStoppedEngines.push('buttplug');
+        }
+        if ((!plan || plan.stopsTcode !== false) && this.tcodeSync?._active) {
+          this.tcodeSync.stop(); this._orgasmStoppedEngines.push('tcode');
+        }
+        // Handy: stop the main HSSP + rate-change HDSP engines, then upload the
+        // finisher (cached after first time) and LOOP it via HSSP — the same
+        // cloud-friendly path the main script uses. Which script the Handy
+        // plays comes from the plan (custom routing can give it its own);
+        // the target is LOCKED for this activation — a mid-hold plan swap
+        // never re-uploads (cloud round-trips would stall the finisher).
+        const handyPath = plan?.handyPath || null;
+        const handyContent = handyPath ? (this._orgasmContentCache?.get(handyPath) || null) : null;
+        if (this.handyManager?.connected && handyPath && handyContent) {
           this._orgasmHandyEngaged = true;
-          if (this.syncEngine?._active) this.syncEngine.stop();
+          const activation = (this._orgasmActivationId = (this._orgasmActivationId || 0) + 1);
+          // Stop UNCONDITIONALLY — do not gate on `_active`. That flag can
+          // drift out of step with the engine's bound video handlers: the
+          // web-remote path swaps `syncEngine.player` to the proxy and calls
+          // start() again, which early-returns when _active is already true.
+          // The logs showed `[Sync] correction hsspPlay` and `[Sync] seeked`
+          // firing DURING a finisher hold with no "Sync engine stopped" line,
+          // i.e. the guard skipped the stop while the handlers stayed live —
+          // so the main script kept yanking the device to video time while it
+          // was meant to be looping the finisher (Dave 2026-08-05).
+          // stop() is safe to call when already stopped.
+          this.syncEngine?.stop();
           if (this.handyHdspSync?.active) this.handyHdspSync.stop();
-          this.handyManager.hsspStop?.().catch?.(() => {});
+          // Fire-and-forget; the sequence + stale-activation aborts live in
+          // orgasm-handy-engage.js where the order is unit-tested.
+          // The output cutoff is baked into the upload (HSSP plays server-
+          // side), so a cached URL is only valid for the cutoff it was
+          // uploaded with — drop it if the sliders changed since.
+          const cutoff = this._cutoffFromSettings('handy');
+          // 'tiled-v2' — upload format version + the SCRIPT PATH: with
+          // multi/custom configs the Handy's script can differ per plan, so
+          // a cached URL is only valid for the exact script it uploaded.
+          const cutoffKey = `tiled-v2|${handyPath}|${JSON.stringify(cutoff ?? null)}`;
+          if (this._orgasmCloudUrl && this._orgasmCloudUrlCutoffKey !== cutoffKey) {
+            this._orgasmCloudUrl = null;
+          }
+          // Keep the promise: a quick release awaits it so the restore's
+          // setScript can never interleave with an in-flight engage.
+          this._orgasmEngagePromise = engageHandyFinisher({
+            handyManager: this.handyManager,
+            content: handyContent,
+            cachedUrl: this._orgasmCloudUrl,
+            cutoff,
+            onUrlCached: (url) => {
+              this._orgasmCloudUrl = url;
+              this._orgasmCloudUrlCutoffKey = cutoffKey;
+            },
+            isCurrent: () => activation === this._orgasmActivationId,
+          });
         }
       },
       onDeactivate: () => {
-        // Restart whichever local engines we stopped — they re-anchor at
-        // the current video time automatically on their next tick.
+        this._pushRemoteOrgasmState?.(); // phone button parity (F2)
+        this._orgasmActivationId = (this._orgasmActivationId || 0) + 1; // cancel any in-flight engage
+        // Finish mode (toggle): the user is "done" — leave the main engines
+        // stopped and halt the devices where they are, rather than snapping
+        // back to the main funscript.
+        if (this._orgasmFinishStop) {
+          this._orgasmFinishStop = false;
+          this._orgasmStoppedEngines = [];
+          this._orgasmHandyEngaged = false;
+          // "Finished" means EVERYTHING stops — including engines a custom
+          // plan left running on the main script (stops*=false kinds).
+          // Idempotent when already stopped by onActivate.
+          try { this.buttplugSync?.stop(); } catch { /* best-effort */ }
+          try { this.tcodeSync?.stop(); } catch { /* best-effort */ }
+          if (this.syncEngine?._active) this.syncEngine.stop();
+          this._stopAllDevicesIdle();
+          if (this.handyManager?.connected) {
+            // Stop the finisher; leave the device idle. Awaits any in-flight
+            // engage first so a stop can't land before a late hsspPlay.
+            Promise.resolve(this._orgasmEngagePromise)
+              .then(() => releaseHandyFinisher({ handyManager: this.handyManager }));
+          }
+          return;
+        }
+        // Hold mode: restart whichever local engines we stopped — they re-anchor
+        // at the current video time automatically on their next tick.
         if (this._orgasmStoppedEngines?.includes('buttplug')) this.buttplugSync.start();
         if (this._orgasmStoppedEngines?.includes('tcode')) this.tcodeSync.start();
         this._orgasmStoppedEngines = [];
         if (this._orgasmHandyEngaged) {
           this._orgasmHandyEngaged = false;
-          this._restoreHandyAfterOrgasm();
+          // Await any in-flight engage first (a quick tap can release while
+          // the engage's setScript is mid-flight — the engage aborts stale,
+          // and only then do we stop + restore so the calls never interleave).
+          Promise.resolve(this._orgasmEngagePromise)
+            .then(() => releaseHandyFinisher({ handyManager: this.handyManager }))
+            .then(() => this._restoreHandyAfterOrgasm());
         }
       },
     });
-    // Load the saved global orgasm script (if any) into the controller.
-    this._loadOrgasmScriptFromSettings();
+    // Load the saved global orgasm config (if any) into the controller.
+    this._reloadOrgasmScripts();
 
     // Editor toggle button
     const btnEditor = document.getElementById('btn-editor');
@@ -1288,6 +1478,7 @@ class App {
       try {
         if (this._sourcePollingInterval) clearInterval(this._sourcePollingInterval);
         if (this._vrActivityInterval) clearInterval(this._vrActivityInterval);
+        if (this._rescanPollInterval) clearInterval(this._rescanPollInterval);
         if (this.syncEngine) this.syncEngine.stop();
         if (this.buttplugSync) this.buttplugSync.stop();
         if (this.tcodeSync) this.tcodeSync.stop();
@@ -1332,6 +1523,15 @@ class App {
     // the only way to surface attempt counts live.
     this._vrTooltipInterval = setInterval(() => this._updateVRTooltip(), 2000);
     this._updateVRTooltip();
+
+    // Poll for phone-triggered rescan requests every 3s. The web remote's
+    // Refresh button bumps a backend counter; when it advances past what we
+    // last saw, force a library rescan + re-register so files the user just
+    // added reach the phone without touching the desktop. `_lastRescanSeq`
+    // starts null so the first poll only establishes a baseline (no rescan
+    // on launch).
+    this._lastRescanSeq = null;
+    this._rescanPollInterval = setInterval(() => this._pollRescanRequest(), 3000);
 
     // If we have a saved Quest host from a previous session, try to
     // reconnect directly — the in-memory backend _vr_activity record
@@ -2070,6 +2270,67 @@ class App {
         console.warn('[Remote] switch-variant handler failed:', err);
       });
     };
+    // Orgasm Switch remote trigger (SCOPE-web-remote-2.md F2) — routed
+    // into the exact keyboard-X path so mode logic (hold vs press-to-
+    // finish) lives in ONE place. State is re-broadcast from the
+    // controller's activate/deactivate hooks, so the phone button stays
+    // truthful regardless of which surface triggered the change.
+    this.remoteBridge.onPhoneOrgasmHold = (active) => {
+      this._onOrgasmHold(!!active);
+    };
+    // Per-device offset from the phone's sync pill (F4).
+    this.remoteBridge.onPhoneSetOffset = (device, ms) => {
+      this._applyRemoteOffset(device, ms);
+    };
+  }
+
+  /**
+   * Apply a phone-set per-device offset through the same persist + live
+   * paths the Sync tab uses. Clamped — LAN WS input is untrusted.
+   */
+  _applyRemoteOffset(device, msRaw) {
+    const ms = Math.max(-1000, Math.min(1000, Math.round(Number(msRaw) || 0)));
+    switch (device) {
+      case 'handy':
+        this.settings.set('handy.defaultOffset', ms);
+        this.settings.set('handy.defaultOffsetSource', 'user');
+        if (this.handyManager?.connected) {
+          Promise.resolve(this.handyManager.setOffset(ms)).catch(() => {});
+        }
+        break;
+      case 'buttplug':
+        this.settings.set('buttplug.defaultOffset', ms);
+        this.settings.set('buttplug.defaultOffsetSource', 'user');
+        this.buttplugSync?.setOffsetMs(ms);
+        break;
+      case 'tcode':
+        this.settings.set('tcode.defaultOffset', ms);
+        this.tcodeSync?.setOffsetMs(ms);
+        break;
+      case 'autoblow':
+        this.settings.set('autoblow.offset', ms);
+        this.autoblowSync?.setOffsetMs?.(ms);
+        break;
+      default:
+        return; // unknown device key — ignore
+    }
+    // Rebroadcast so the phone slider reflects the applied (clamped) value.
+    this._pushRemoteDeviceStatus();
+  }
+
+  /**
+   * Tell the phone the Orgasm Switch's current state (F2): whether a
+   * finisher script is configured (shows/hides the button), the mode,
+   * and whether it's currently active.
+   */
+  _pushRemoteOrgasmState() {
+    if (!this.remoteBridge?.connected) return;
+    this.remoteBridge.sendToPhone({
+      type: 'orgasm-state',
+      configured: !!this.orgasmSwitch?.configured,
+      active: !!this.orgasmSwitch?.active,
+      mode: this.settings?.get?.('player.orgasmSwitchMode') === 'toggle' ? 'toggle' : 'hold',
+    });
   }
 
   /**
@@ -2237,6 +2498,14 @@ class App {
     this._remoteActive = false;
     this._refreshLoopVideoVisibility?.();
 
+    // SAFETY (F2): a dead phone must never leave a hold-mode finisher
+    // running — the hold's release lives on the phone that just vanished.
+    // Toggle mode is a deliberate start/stop, so it survives disconnects.
+    if (this.orgasmSwitch?.active
+        && (this.settings?.get?.('player.orgasmSwitchMode') || 'hold') === 'hold') {
+      try { this.orgasmSwitch.deactivate(); } catch { /* best-effort */ }
+    }
+
     // Stop all device sync engines and rebind to the local player.
     if (this.syncEngine?._active) this.syncEngine.stop();
     if (this.buttplugSync?._active) this.buttplugSync.stop();
@@ -2271,21 +2540,28 @@ class App {
     // rendering "Connected: Buttplug" with no actual hardware present.
     const devices = [];
 
+    // Per-kind offsets included so the phone's sync-pill sliders (F4)
+    // seed from the live values and reflect desktop-side changes.
+    const offsetFor = (kind) => {
+      const key = kind === 'autoblow' ? 'autoblow.offset' : `${kind}.defaultOffset`;
+      const v = Number(this.settings?.get?.(key));
+      return Number.isFinite(v) ? v : 0;
+    };
     if (this.handyManager?.connected) {
-      devices.push({ kind: 'handy', label: 'The Handy' });
+      devices.push({ kind: 'handy', label: 'The Handy', offsetMs: offsetFor('handy') });
     }
     if (this.buttplugManager?.connected) {
       for (const d of this.buttplugManager.devices || []) {
-        devices.push({ kind: 'buttplug', label: d.name });
+        devices.push({ kind: 'buttplug', label: d.name, offsetMs: offsetFor('buttplug') });
       }
     }
     if (this.tcodeManager?.connected) {
       const port = this.tcodeManager.portPath || 'serial';
-      devices.push({ kind: 'tcode', label: `TCode (${port})` });
+      devices.push({ kind: 'tcode', label: `TCode (${port})`, offsetMs: offsetFor('tcode') });
     }
     if (this.autoblowManager?.connected) {
       const ab = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
-      devices.push({ kind: 'autoblow', label: ab });
+      devices.push({ kind: 'autoblow', label: ab, offsetMs: offsetFor('autoblow') });
     }
 
     // Tracker still expects the four-boolean summary. Derive it from the
@@ -2309,6 +2585,9 @@ class App {
       tcode: tcode ? 'connected' : 'disconnected',
       autoblow: autoblow ? 'connected' : 'disconnected',
     });
+    // Piggyback the Orgasm Switch state (F2) — sent whenever device
+    // status refreshes so a newly-connected phone learns availability.
+    this._pushRemoteOrgasmState();
   }
 
   _stopVRSync() {
@@ -2476,6 +2755,61 @@ class App {
       h,
       p,
     );
+  }
+
+  /**
+   * Poll the backend for a phone-triggered rescan request. The web remote's
+   * Refresh button bumps a monotonic counter; when it advances past the last
+   * value we saw, force a library rescan + re-register so the phone picks up
+   * files the user added to a source folder. Cheap local fetch, fire-and-forget
+   * on any error (backend not up yet, transient).
+   */
+  async _pollRescanRequest() {
+    if (!this.library) return;
+    try {
+      const port = this.settings.get('backend.port') || 5123;
+      const res = await fetch(`http://127.0.0.1:${port}/api/media/rescan-request`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const seq = data?.seq;
+      if (typeof seq !== 'number') return;
+      // First successful poll only establishes the baseline — never rescan on
+      // launch just because the counter was already non-zero from a prior run.
+      if (this._lastRescanSeq === null) {
+        this._lastRescanSeq = seq;
+        return;
+      }
+      // Counter went backwards → the backend process restarted and reset it.
+      // Re-baseline without rescanning (no user actually asked); a later bump
+      // past this fresh baseline still triggers a rescan.
+      if (seq < this._lastRescanSeq) {
+        this._lastRescanSeq = seq;
+        return;
+      }
+      if (seq === this._lastRescanSeq) return;
+      this._lastRescanSeq = seq;
+      await this._handleRescanRequest();
+    } catch {
+      // Backend not reachable yet / transient — next tick retries.
+    }
+  }
+
+  /**
+   * Forced rescan + re-register triggered by the phone. `ensureScanned` replaces
+   * `this.library._videos` and re-POSTs the full list to the backend (so the
+   * phone's next fetch sees the new files). Quietly re-render the desktop grid
+   * too if the library view is currently visible; other views pick up the fresh
+   * `_videos` on their next `show()`.
+   */
+  async _handleRescanRequest() {
+    try {
+      await this.library.ensureScanned({ forceRescan: true });
+      if (this._currentView() === 'library') {
+        this.library._applyFilters?.();
+      }
+    } catch (e) {
+      console.warn('[Rescan] phone-triggered rescan failed:', e);
+    }
   }
 
   async _pollVRActivity() {
@@ -3357,63 +3691,360 @@ class App {
   }
 
   /**
-   * Orgasm Switch hold callback (keyboard X). active=true on press,
-   * false on release. Toasts a hint if no orgasm script is configured.
+   * Orgasm Switch key callback (keyboard X). active=true on press, false on
+   * release. Behaviour depends on `player.orgasmSwitchMode`:
+   *   - 'hold'   (default): hold to ride the looping script, release snaps back
+   *              to the main funscript (edging model — the original behaviour).
+   *   - 'toggle' (finish):  first press starts the looping finisher; a second
+   *              press stops the device(s) and does NOT return to the main
+   *              script. Key release is ignored.
    */
   _onOrgasmHold(active) {
     if (!this.orgasmSwitch) return;
+    const mode = this.settings?.get?.('player.orgasmSwitchMode') || 'hold';
+
+    if (mode === 'toggle') {
+      if (!active) return; // ignore release — this is a press-to-toggle mode
+      if (this.orgasmSwitch.active) {
+        this._finishOrgasm();
+      } else {
+        const result = this.orgasmSwitch.activate();
+        if (result === 'not-configured') {
+          showToast(t('toast.orgasmNotConfigured'), 'info', 3500);
+        } else if (result === 'activated') {
+          this._maybeToastOrgasmDemotion();
+        }
+      }
+      return;
+    }
+
+    // Hold-to-ride (edging) — original behaviour.
     if (active) {
       const result = this.orgasmSwitch.activate();
       if (result === 'not-configured') {
         showToast(t('toast.orgasmNotConfigured'), 'info', 3500);
+      } else if (result === 'activated') {
+        this._maybeToastOrgasmDemotion();
       }
     } else {
       this.orgasmSwitch.deactivate();
     }
   }
 
-  /** Load the saved global orgasm script into the controller (startup). */
-  async _loadOrgasmScriptFromSettings() {
-    const path = this.settings?.get?.('player.orgasmScript');
-    if (!path || !this.orgasmSwitch) return;
-    try {
-      const content = await window.funsync.readFunscript(path);
-      if (!this.orgasmSwitch.loadScript(content)) {
-        console.warn('[OrgasmSwitch] saved script failed to load:', path);
-      }
-    } catch (err) {
-      console.warn('[OrgasmSwitch] could not read saved script:', err?.message || err);
-    }
+  /**
+   * Surface the custom→single demotion ONCE per distinct missing-device
+   * set, and only at activation (a launch-time toast before the user has
+   * even connected their devices would just be noise). The latch clears
+   * when the plan promotes back to custom, so a later demotion re-toasts.
+   */
+  _maybeToastOrgasmDemotion() {
+    if (!this._orgasmDemotionKey) return;
+    if (this._orgasmDemotionKey === this._orgasmDemotionToastShownKey) return;
+    this._orgasmDemotionToastShownKey = this._orgasmDemotionKey;
+    showToast(
+      t('toast.orgasmRoutingFallback', { devices: (this._orgasmMissingDevices || []).join(', ') }),
+      'warn',
+      4500,
+    );
   }
 
   /**
-   * Pick a global orgasm script via the native dialog, validate + load it
-   * into the controller, and persist the path. Returns the path or null.
-   * Wired to the Settings panel.
+   * Finish-mode stop: end the orgasm loop and STOP all devices without handing
+   * control back to the main funscript. Sets `_orgasmFinishStop` so the
+   * controller's onDeactivate skips the normal main-engine restart.
    */
-  async _pickOrgasmScript() {
-    const result = await window.funsync.selectFunscript();
-    const path = result?.path;
-    if (!path) return null;
-    try {
-      const content = await window.funsync.readFunscript(path);
-      if (!this.orgasmSwitch?.loadScript(content)) {
-        showToast(t('toast.orgasmInvalidScript'), 'error');
-        return null;
-      }
-    } catch {
-      showToast(t('toast.orgasmInvalidScript'), 'error');
-      return null;
-    }
-    this.settings.set('player.orgasmScript', path);
-    showToast(t('toast.orgasmScriptSet', { name: result.name || '' }), 'info', 2500);
-    return path;
+  _finishOrgasm() {
+    this._orgasmFinishStop = true;
+    this.orgasmSwitch.deactivate();
   }
 
-  /** Clear the configured orgasm script. */
+  /**
+   * Stop all connected devices and leave them idle — used when finishing (the
+   * orgasm loop drove Buttplug/T-Code directly, so their last command would
+   * otherwise hold at full intensity/position). The Handy is playing the
+   * tiled finisher via HSSP and is stopped separately by the sequenced
+   * releaseHandyFinisher (hsspStop) in onDeactivate's finish branch.
+   */
+  _stopAllDevicesIdle() {
+    try { if (this.buttplugManager?.connected) this.buttplugManager.stopAll(); } catch { /* best-effort */ }
+    try { if (this.tcodeManager?.connected) this.tcodeManager.stop(); } catch { /* best-effort */ }
+  }
+
+  /**
+   * The orgasm config as a normalized association entry (same parallel-slot
+   * shape videos use). Falls back to the legacy `player.orgasmScript` string
+   * (read-through — normalizeAssociation turns a bare string into a single
+   * entry), so pre-0.8.1 configs keep working untouched.
+   */
+  _getOrgasmEntry() {
+    const cfg = this.settings?.get?.('player.orgasmConfig');
+    if (cfg) {
+      const entry = normalizeAssociation(cfg);
+      if (entry.active) return entry;
+    }
+    const legacy = this.settings?.get?.('player.orgasmScript');
+    return legacy ? normalizeAssociation(legacy) : null;
+  }
+
+  /**
+   * (Re)load every script the orgasm config references into the content/
+   * actions caches, then resolve the plan. ALL slots preload (not just the
+   * active one) so mode switches and demotion fallbacks never wait on I/O —
+   * bounded at ~a dozen small JSON files.
+   */
+  async _reloadOrgasmScripts(allowRecovery = true) {
+    const entry = this._getOrgasmEntry();
+    this._orgasmEntry = entry;
+    this._orgasmContentCache = new Map();
+    this._orgasmActionsCache = new Map();
+    if (entry) {
+      const paths = collectOrgasmScriptPaths(entry);
+      await Promise.all(paths.map(async (p) => {
+        try {
+          const raw = await window.funsync.readFunscript(p);
+          const actions = parseFinisherActions(raw);
+          if (actions) {
+            this._orgasmContentCache.set(p, raw);
+            this._orgasmActionsCache.set(p, actions);
+          } else {
+            console.warn('[OrgasmSwitch] config script unusable (bad JSON / < 2 actions):', p);
+          }
+        } catch (err) {
+          console.warn('[OrgasmSwitch] could not read config script:', p, err?.message || err);
+        }
+      }));
+
+      // A finisher script that MOVED used to fail silently: the settings row
+      // kept showing its filename (read from the stored path, never checked)
+      // while the switch quietly went unconfigured, so pressing X toasted
+      // "no orgasm script set" while the panel said otherwise (Dave
+      // 2026-08-05). Try to re-point at it before giving up.
+      const missing = collectOrgasmScriptPaths(entry)
+        .filter((p) => !this._orgasmActionsCache.has(p));
+      if (missing.length > 0 && allowRecovery && this._recoverOrgasmPaths(missing)) {
+        return this._reloadOrgasmScripts(false); // one retry, never loops
+      }
+      this._orgasmMissingPaths = new Set(missing);
+    } else {
+      this._orgasmMissingPaths = new Set();
+    }
+    this._orgasmCloudUrl = null; // scripts may have changed → stale upload
+    this._refreshOrgasmPlan();
+  }
+
+  /**
+   * Re-point orgasm-config paths at moved files. Unlike the video-side
+   * recovery there is no owning directory to search beside, so the library
+   * scan's funscript list is the candidate pool — and only an unambiguous
+   * single filename match is accepted (see findMovedFile). Ambiguous or
+   * absent matches are left broken on purpose; the settings row now shows
+   * them as missing rather than pretending.
+   *
+   * @param {string[]} missing — paths that failed to load
+   * @returns {boolean} true if anything was re-pointed (caller re-reads)
+   */
+  _recoverOrgasmPaths(missing) {
+    const pool = this.library?.getAllFunscriptPaths?.() || [];
+    if (pool.length === 0) return false;
+    const entry = this._orgasmEntry;
+    if (!entry) return false;
+
+    const remap = new Map();
+    for (const p of missing) {
+      const found = findMovedFile(pool, p);
+      if (found) remap.set(p, found);
+    }
+    if (remap.size === 0) return false;
+
+    const swap = (p) => (p && remap.has(p) ? remap.get(p) : p);
+    const next = buildAssociationEntry(
+      entry.active,
+      swap(entry.single),
+      entry.multi
+        ? {
+          ...entry.multi,
+          main: swap(entry.multi.main),
+          axes: Object.fromEntries(
+            Object.entries(entry.multi.axes || {}).map(([k, v]) => [k, swap(v)]),
+          ),
+        }
+        : entry.multi,
+      entry.custom
+        ? {
+          ...entry.custom,
+          routes: (entry.custom.routes || []).map((r) => (
+            r?.scriptPath && remap.has(r.scriptPath)
+              ? { ...r, scriptPath: remap.get(r.scriptPath) }
+              : r
+          )),
+        }
+        : entry.custom,
+    );
+    this._saveOrgasmConfigQuiet(next);
+    for (const [from, to] of remap) {
+      console.log(`[OrgasmSwitch] Re-pointed moved finisher script: ${from} → ${to}`);
+    }
+    showToast(t('toast.orgasmScriptRecovered', { count: remap.size }), 'info', 4000);
+    return true;
+  }
+
+  /** Persist an orgasm config entry without the "script set" toast or a
+   *  reload (the caller re-reads). Used by the moved-file recovery. */
+  _saveOrgasmConfigQuiet(entry) {
+    this.settings.set('player.orgasmConfig', entry);
+    const mainRoute = entry.custom?.routes?.find?.((r) => r?.role === 'main' && r.scriptPath);
+    const legacyPath = entry.active === 'single' ? entry.single
+      : entry.active === 'multi' ? (entry.multi?.main || null)
+        : (entry.single || mainRoute?.scriptPath || null);
+    this.settings.set('player.orgasmScript', legacyPath);
+  }
+
+  /**
+   * Resolve the orgasm entry + current device connections into a drive plan
+   * and load it into the controller. Called on config change and on EVERY
+   * device connect/disconnect — that's what makes custom routing demote to
+   * single-axis while its devices are missing and promote straight back
+   * the moment they're all connected again.
+   *
+   * Mid-hold: local channels swap live on the running clock
+   * (preserveClock); the Handy engage target stays locked until release.
+   */
+  _refreshOrgasmPlan() {
+    if (!this.orgasmSwitch) return;
+    const snapshot = {
+      buttplugDevices: (this.buttplugManager?.connected && this.buttplugManager.devices) || [],
+      tcodeConnected: !!this.tcodeManager?.connected,
+      handyConnected: !!this.handyManager?.connected,
+    };
+    const { plan, demotedFrom, missing } = resolveOrgasmPlan(
+      this._orgasmEntry || null,
+      snapshot,
+      (p) => this._orgasmActionsCache?.get(p) || null,
+    );
+    this._orgasmPlan = plan;
+    if (demotedFrom === 'custom') {
+      this._orgasmDemotionKey = missing.slice().sort().join('|');
+      this._orgasmMissingDevices = missing;
+      console.log(`[OrgasmSwitch] custom routing demoted to single-axis — missing: ${missing.join(', ') || '(unknown)'}`);
+    } else {
+      // Promoted (or not custom): clear the toast latch so a LATER
+      // demotion surfaces again.
+      if (this._orgasmDemotionKey && plan?.mode === 'custom') {
+        console.log('[OrgasmSwitch] custom routing restored — all routed devices connected');
+      }
+      this._orgasmDemotionKey = null;
+      this._orgasmMissingDevices = null;
+      this._orgasmDemotionToastShownKey = null;
+    }
+    this.orgasmSwitch.loadPlan(plan, { preserveClock: this.orgasmSwitch.active });
+    this._pushRemoteOrgasmState?.();
+  }
+
+  /**
+   * Open the orgasm config modal (single / multi-axis / custom routing —
+   * assignment parity with videos) and persist the result.
+   */
+  async _configureOrgasm() {
+    const entry = await openOrgasmConfigModal({
+      entry: this._getOrgasmEntry(),
+      knownDevices: this.settings?.get?.('knownDevices') || [],
+    });
+    if (entry === undefined) return; // cancelled
+    await this._saveOrgasmConfig(entry);
+  }
+
+  /** Persist a new orgasm config entry (null clears) and reload. */
+  async _saveOrgasmConfig(entry) {
+    if (!entry || !entry.active) { this._clearOrgasmScript(); return; }
+    this.settings.set('player.orgasmConfig', entry);
+    // Downgrade mirror: older builds only read `player.orgasmScript`
+    // (string) — keep it pointing at the closest single-axis equivalent,
+    // same philosophy as the association-shape mirror fields.
+    const mainRoute = entry.custom?.routes?.find?.((r) => r?.role === 'main' && r.scriptPath);
+    const legacyPath = entry.active === 'single' ? entry.single
+      : entry.active === 'multi' ? (entry.multi?.main || null)
+        : (entry.single || mainRoute?.scriptPath || null);
+    this.settings.set('player.orgasmScript', legacyPath);
+    await this._reloadOrgasmScripts();
+    const d = describeOrgasmEntry(entry);
+    if (d) showToast(t('toast.orgasmScriptSet', { name: d.name || '' }), 'info', 2500);
+  }
+
+  /**
+   * Lines for the Settings row's script block, rendered UNDER the Configure
+   * button (inline beside it they were squeezed to nothing).
+   *
+   * Single mode → one bare filename. Multi / custom → a mode summary line
+   * followed by one `{label, name}` line per chosen script, so the user can
+   * see WHICH scripts are configured without reopening the modal.
+   *
+   * @returns {Array<string|{label: string, name: string}>}
+   */
+  _orgasmSummaryText() {
+    const entry = this._getOrgasmEntry();
+    const d = describeOrgasmEntry(entry);
+    if (!d) return [];
+    const base = (p) => (p ? String(p).split(/[\\/]/).pop() : '');
+    // Mark scripts that failed to load. Without this the row shows a stored
+    // filename whether or not the file is still there, so a moved script
+    // reads as configured while the switch is actually dead.
+    const gone = (p) => !!(p && this._orgasmMissingPaths?.has(p));
+
+    if (d.mode === 'single') {
+      return [{ label: null, name: d.name, missing: gone(entry.single) }];
+    }
+
+    const lines = [
+      d.mode === 'multi'
+        ? t('settingsPanel.playback.orgasmSummaryMulti', { count: d.count })
+        : t('settingsPanel.playback.orgasmSummaryCustom', { count: d.count }),
+    ];
+
+    if (d.mode === 'multi' && entry.multi) {
+      if (entry.multi.main) {
+        lines.push({
+          label: t('library.assoc.axisMain'),
+          name: base(entry.multi.main),
+          missing: gone(entry.multi.main),
+        });
+      }
+      for (const [suffix, p] of Object.entries(entry.multi.axes || {})) {
+        if (!p) continue;
+        const def = AXIS_DEFINITIONS.find((a) => a.suffix === suffix);
+        lines.push({ label: def?.label || suffix, name: base(p), missing: gone(p) });
+      }
+    } else if (d.mode === 'custom') {
+      for (const r of entry.custom?.routes || []) {
+        if (!r?.scriptPath) continue;
+        // Device label from knownDevices where possible, so the row reads
+        // "Hush: finisher.funscript" rather than "buttplug:Hush: ...".
+        const known = this._findKnownDeviceForRoute(r);
+        const label = known?.label
+          || (r.deviceId?.startsWith('buttplug:') ? r.deviceId.slice('buttplug:'.length) : r.deviceId)
+          || t('library.assoc.scriptNone');
+        lines.push({
+          label,
+          name: r.scriptName || base(r.scriptPath),
+          missing: gone(r.scriptPath),
+        });
+      }
+    }
+    return lines;
+  }
+
+  /** Clear the configured orgasm script/config entirely. */
   _clearOrgasmScript() {
+    this.settings.set('player.orgasmConfig', null);
     this.settings.set('player.orgasmScript', null);
-    if (this.orgasmSwitch) this.orgasmSwitch.loadScript('');
+    this._orgasmEntry = null;
+    this._orgasmContentCache = new Map();
+    this._orgasmActionsCache = new Map();
+    this._orgasmPlan = null;
+    this._orgasmCloudUrl = null;
+    this._orgasmDemotionKey = null;
+    this._orgasmDemotionToastShownKey = null;
+    if (this.orgasmSwitch) this.orgasmSwitch.loadPlan(null);
+    this._pushRemoteOrgasmState?.();
   }
 
   /** Open the Load-from-URL (remote video) modal. Shared by the nav-bar
@@ -3478,7 +4109,13 @@ class App {
       }
       if (ok) {
         this.syncEngine._scriptReady = true;
-        this.syncEngine.start();  // _handlePlaying → hsspPlay at current video time
+        this.syncEngine.start();
+        // start() only anchors when `player.paused` reads false at that
+        // instant, which is unreliable here (remote proxy mid-buffer), so
+        // force the anchor at the CURRENT time. Without it the Handy stayed
+        // where the finisher left it and drifted from the video until the
+        // next seek — the "not synced after release" report. See resync().
+        await this.syncEngine.resync();
       } else {
         // No cached URL (script never uploaded this session) → full path.
         await this._uploadAndStartSync();
@@ -3589,6 +4226,7 @@ class App {
     }
     this._hideScriptLoadingOverlay();
     this.progressBar.clearHeatmap();
+    this._feedInlineViz(); // no script yet → clears viz + hides TL/HM buttons
     this.progressBar.setGaps(null);
     this.progressBar.setMarkers({ chapters: [], bookmarks: [] });
     const fsBadge = document.getElementById('funscript-badge');
@@ -3646,6 +4284,11 @@ class App {
     // Remote streams have no local path — keep _currentVideoPath null so
     // local-only paths (remux-on-error, recent files, library lookup) stay off.
     this._currentVideoPath = file._remote ? null : (file.path || null);
+    // A Reset only suppresses the video it was aimed at; loading anything
+    // else lifts it so normal recording resumes.
+    if (this._resumeSuppressedPath && this._resumeSuppressedPath !== this._currentVideoPath) {
+      this._resumeSuppressedPath = null;
+    }
     this._currentIsRemote = !!file._remote;
     this.videoPlayer.loadSource(videoUrl, file.name, loadOpts);
     this.progressBar.setVideoSource(videoUrl);
@@ -3853,7 +4496,18 @@ class App {
       if (this.funscriptEngine.isLoaded) return;
 
       const query = videoName.replace(/\.[^/.]+$/, ''); // strip extension
-      const { results } = await window.funsync.eroscriptsSearch(query);
+      const { results, authExpired } = await window.funsync.eroscriptsSearch(query);
+
+      // The API reports a dead session; act on it instead of dropping it.
+      // This path used to destructure `results` ONLY, so a 403 arrived as an
+      // empty array and was indistinguishable from "no script exists for
+      // this video" — no toast, no warning, and the panel still claiming to
+      // be connected. The symptom was script-found notifications silently
+      // never appearing again.
+      if (authExpired) {
+        await this.eroscriptsPanel?.handleSessionExpired?.();
+        return;
+      }
 
       if (results && results.length > 0 && !this.funscriptEngine.isLoaded) {
         const top = results[0];
@@ -3930,6 +4584,7 @@ class App {
           this.funscriptEngine.getActions(),
           this.videoPlayer.duration,
         );
+        this._feedInlineViz();
         this.progressBar.setMarkers({
           chapters: this.funscriptEngine.getChapters(),
           bookmarks: this.funscriptEngine.getBookmarks(),
@@ -4118,6 +4773,10 @@ class App {
     const appEl = document.getElementById('app');
     if (appEl) appEl.dataset.view = viewId;
 
+    // Caption strip follows the view: transparent over the player's video,
+    // normal themed chrome everywhere else.
+    this._syncCaptionOverlay();
+
     // Show/hide nav bar (hidden during player)
     if (viewId === 'player') {
       // Entering the full player always clears the docked mini-player
@@ -4154,6 +4813,13 @@ class App {
   /** Hook called when leaving a view. */
   _onLeaveView(viewId) {
     if (viewId === 'player') {
+      // Drop OS fullscreen FIRST, before any of the branches below. Leaving
+      // the player while fullscreen otherwise left the container as
+      // `document.fullscreenElement`, so it kept filling the display no
+      // matter what CSS said — the mini-player docked at "full screen" with
+      // its corner styling ignored, the back arrow hidden with the top bar,
+      // and the library unreachable behind it. See exitFullscreenForNav.
+      exitFullscreenForNav();
       // PiP guard: if the user popped the video into Picture-in-Picture and
       // is navigating away, they explicitly opted into continued playback in
       // a floating window. Tearing the video + sync engines down here breaks
@@ -4328,6 +4994,20 @@ class App {
         .catch((err) => console.warn('[PlayerWindow] variant switch failed:', err));
       return;
     }
+    if (type === PLAYERWIN.SET_INLINE_VIZ) {
+      // Pop-out toggled a TL/HM overlay. Main owns the settings store, so
+      // persist it here and mirror it onto the inline player's own overlay
+      // and menu items — the two windows stay in step either way round.
+      const key = payload.key === 'heatmap' ? 'heatmap' : 'timeline';
+      const on = !!payload.on;
+      const settingKey = key === 'heatmap' ? 'player.inlineHeatmap' : 'player.inlineTimeline';
+      this.settings.set(settingKey, on);
+      if (key === 'heatmap') this.inlineViz?.setHeatmapVisible(on);
+      else this.inlineViz?.setTimelineVisible(on);
+      const btn = document.getElementById(key === 'heatmap' ? 'btn-inline-hm' : 'btn-inline-tl');
+      btn?.setAttribute('aria-checked', String(on));
+      return;
+    }
     if (type === PLAYERWIN.LOAD_PREV) { this._playPrev(); return; }
     if (type === PLAYERWIN.LOAD_NEXT) { this._playNext(); return; }
     if (type === PLAYERWIN.UP_NEXT_ACTION) { this._handlePopoutUpNextAction(payload.action); return; }
@@ -4389,6 +5069,9 @@ class App {
     if (!eng) return;
     switch (action) {
       case 'play': eng.playNext(); break;
+      // Same consume-once flag the main-window card sets — the advance
+      // itself runs through the identical path either way.
+      case 'start-over': this._upNextStartOver = true; eng.playNext(); break;
       case 'dismiss': eng.dismiss(); break;
       case 'pause': eng.pauseCountdown(); break;
       case 'resume': eng.resumeCountdown(); break;
@@ -4429,6 +5112,13 @@ class App {
       uiStyle: document.documentElement.dataset.style || 'classic',
       locale: this.settings?.get?.('player.language') || 'en',
       backendPort: this.backendPort || null,
+      // Inline TL/HM state so the pop-out opens with the same overlays (and
+      // the same opacity) the inline player was showing.
+      inlineViz: {
+        timeline: this.settings?.get?.('player.inlineTimeline') === true,
+        heatmap: this.settings?.get?.('player.inlineHeatmap') === true,
+        opacity: Number(this.settings?.get?.('player.inlineVizOpacity')) || INLINE_VIZ_OPACITY_DEFAULT,
+      },
       video: null, // sent separately via LOAD_VIDEO (unified first-open + re-route)
     }));
   }
@@ -4508,9 +5198,15 @@ class App {
     if (!this._playerWindowActive) return;
     const v = this.library?.getVideoByPath?.(path);
     const name = v?.name || String(path || '').split(/[\\/]/).pop() || '';
+    // The pop-out's card can't read settings or the play context, so the
+    // resume label is resolved here and streamed with the rest of the meta.
+    // Absent (null) means the detached card renders no resume row, exactly
+    // like the main one.
+    const resumeChoice = this._upNextResumeChoice(path);
     this._relayUpNext({
       action: 'show', path, countdownSec, name,
       duration: v?.duration || 0, hasFunscript: !!v?.hasFunscript,
+      resumeLabel: resumeChoice?.label || null,
     });
     // Cache-first thumbnail (usually instant); stream it when ready as long
     // as the same card is still up.
@@ -5321,6 +6017,14 @@ class App {
     // corner (navigating to the player would expand it to full-screen).
     const keepMini = this._miniActive && this._autoAdvancing;
     if (!this._playerWindowActive && !keepMini) this._navigateTo('player');
+
+    // Flush the OUTGOING video's position before anything swaps it out —
+    // `_currentVideoPath` is overwritten inside loadVideo, so this is the
+    // last moment the old path and its clock still line up.
+    const outgoing = this._currentVideoPath;
+    if (outgoing && outgoing !== (videoData?.path || null)) {
+      this._recordResumePosition({ force: true, path: outgoing });
+    }
     this._playQueue = [];
     this._playQueueIndex = -1;
     this._playQueueSource = null;
@@ -5336,6 +6040,10 @@ class App {
     // context and Up Next stays silent.
     this._currentPlayContext = videoData?._playContext || null;
     this._setUpNextContext(this._currentPlayContext);
+    // Re-run now that the context exists: the call above (before the queue
+    // reset) can only see `_playQueue`, so without this the prev/next
+    // buttons stay hidden for context-driven playback.
+    this._updateQueueUI();
 
     this._currentMultiAxis = null;
 
@@ -5363,7 +6071,52 @@ class App {
     if (autoPlayOnLoad && funscriptData?.textContent) {
       this._markCloudUploadsPending();
     }
+
+    // Resume. Two arrival kinds, deliberately different:
+    //
+    //  - DELIBERATE (clicked this specific video) → ask. The user picked
+    //    one thing; a choice about that one thing is proportionate.
+    //  - FLOW-THROUGH (next/prev keys or buttons, Play All, Up Next) →
+    //    resume silently and say so in a toast. A modal in a repeat-press
+    //    path is an obstacle course: press N three times, get three
+    //    blocking dialogs. Worse for auto-advance, where a dialog would
+    //    strand unattended playback waiting for a click nobody will make.
+    //
+    // Flow-through resumes rather than restarting for a non-obvious
+    // reason: starting at zero would immediately overwrite the stored
+    // position with a low one as soon as playback passed the 10s
+    // threshold, silently destroying a 40-minute bookmark nobody asked to
+    // discard. Resuming preserves it, and the seek bar is a one-gesture
+    // undo if the user did want the start.
+    // `_currentPlayContext` is already the INCOMING context by this point
+    // (assigned above), so this gates on where the new video is being
+    // played FROM — playlists only.
+    let resumeAt = null;
+    const arrivalPath = videoData?.path || null;
+    const flowThrough = !!this._autoAdvancing || (this._navigationalArrivals || 0) > 0;
+    // Consumed once, and unconditionally, so a Start over chosen on the Up
+    // Next card can never leak into the video after it.
+    const startOverRequested = this._upNextStartOver === true;
+    this._upNextStartOver = false;
+
+    if (!this._isPlaylistContext(this._currentPlayContext)) {
+      resumeAt = null;
+    } else if (flowThrough) {
+      const entry = this.getResumeEntry(arrivalPath);
+      if (!startOverRequested && shouldOfferResume(entry, videoData?.duration)) {
+        resumeAt = entry.position;
+        showToast(t('resume.resumedToast', { time: formatResumeTime(entry.position) }), 'info', 4000);
+      }
+    } else {
+      resumeAt = await this._maybeOfferResume(arrivalPath, videoData?.duration);
+    }
+
     this.loadVideo(videoData, { skipViewSwitch: true, autoPlay: autoPlayOnLoad });
+
+    // Seek before playback starts, so the sync engine's play-anchor lands
+    // at the resumed position rather than the seek-correction path having
+    // to fix it up afterwards (see SCOPE-playlist-resume.md pitfall 4).
+    if (resumeAt) this._applyPendingResumeSeek(resumeAt);
 
     // Set variants AFTER loadVideo (which resets them)
     this._currentVariants = variants || [];
@@ -5510,6 +6263,7 @@ class App {
       });
       if (isFinite(this.videoPlayer.duration) && this.videoPlayer.duration > 0) {
         this.progressBar.renderHeatmap(firstLoadedScript.actions, this.videoPlayer.duration);
+        this._feedInlineViz(firstLoadedScript.actions, this.videoPlayer.duration);
         this.progressBar.setMarkers({
           chapters: this.funscriptEngine.getChapters(),
           bookmarks: this.funscriptEngine.getBookmarks(),
@@ -6096,6 +6850,11 @@ class App {
       onHoverEnter: () => this.upNextEngine.pauseCountdown(),
       onHoverLeave: () => this.upNextEngine.resumeCountdown(),
       onBackToSource: (sourceContext) => this._upNextBackToSource(sourceContext),
+      getResumeChoice: (path) => this._upNextResumeChoice(path),
+      onStartOver: () => {
+        this._upNextStartOver = true;
+        this.upNextEngine.playNext();
+      },
     });
 
     // Engine → card + queue panel chip. The card is CSS-hidden when the
@@ -6231,8 +6990,13 @@ class App {
       if (isWrap && this._playQueueShuffle && this._playQueue.length > 1) {
         // New loop cycle on a shuffled queue → reshuffle for variety, avoiding
         // an immediate repeat of the item that just played (the last one).
+        // Balanced queues redraw from the FULL list so each cycle can pick
+        // different representatives of each script group (that's the point:
+        // same track, different visuals), avoiding the just-played GROUP.
         const justPlayed = this._playQueue[this._playQueueIndex];
-        this._playQueue = reshuffleAvoidingRepeat(this._playQueue, justPlayed);
+        this._playQueue = this._playQueueBalance
+          ? reshuffleBalancedAvoidingRepeat(this._playQueueFullList || this._playQueue, (v) => this._scriptKeyOf(v), justPlayed)
+          : reshuffleAvoidingRepeat(this._playQueue, justPlayed);
       }
       const wrappedIdx = looping && this._playQueue.length > 0
         ? rawNext % this._playQueue.length
@@ -6611,7 +7375,23 @@ class App {
     }
     if (window.funsync?.generateSingleThumbnail) {
       try {
-        const result = await window.funsync.generateSingleThumbnail(path, { seekPct: 0.1, width: 320 });
+        // Honor a user-pinned thumbnail frame or uploaded poster image
+        // (parity with the library path above, which resolves both inside
+        // _captureVideoFrame).
+        const custom = (this.settings?.get?.('library.customThumbnails') || {})[path];
+        const imagePath = customThumbImagePath(custom);
+        if (imagePath && window.funsync?.readCustomThumbnail) {
+          const img = await window.funsync.readCustomThumbnail(imagePath).catch(() => null);
+          if (img?.dataUrl) {
+            try {
+              const mod = await import('./thumbnail-cache.js');
+              mod.set(path, 0, img.dataUrl);
+            } catch { /* non-fatal */ }
+            return { dataUrl: img.dataUrl };
+          }
+        }
+        const { seekPct, exact } = thumbRequestOpts(custom);
+        const result = await window.funsync.generateSingleThumbnail(path, { seekPct, width: 320, exact });
         if (result?.dataUrl) {
           try {
             const mod = await import('./thumbnail-cache.js');
@@ -7254,16 +8034,21 @@ class App {
     const manualVariants = this.settings.get('library.manualVariants') || {};
     let manual = videoPath && manualVariants[videoPath] ? manualVariants[videoPath] : [];
     if (manual.length === 0 && videoPath) {
-      const videoName = videoPath.split(/[\\/]/).pop().toLowerCase();
-      for (const [oldPath, oldVariants] of Object.entries(manualVariants)) {
-        if (oldPath === videoPath) continue;
-        if (oldPath.split(/[\\/]/).pop().toLowerCase() === videoName && oldVariants.length > 0) {
-          manual = oldVariants;
-          manualVariants[videoPath] = manual;
-          delete manualVariants[oldPath];
-          this.settings.set('library.manualVariants', manualVariants);
-          break;
-        }
+      // Guarded re-home (see association-rehome.js). This used to take the
+      // FIRST basename match and delete it — in a library with two
+      // `intro.mp4`s that stole a live video's variants and persisted the
+      // mistake straight away, since this path writes settings.
+      const from = pickRehomeCandidate({
+        storedPaths: Object.keys(manualVariants).filter((p) => manualVariants[p]?.length > 0),
+        videoPath,
+        isLive: (p) => !!this.library?.getVideoByPath?.(p),
+      });
+      if (from) {
+        manual = manualVariants[from];
+        manualVariants[videoPath] = manual;
+        delete manualVariants[from];
+        this.settings.set('library.manualVariants', manualVariants);
+        console.log(`[Variants] Re-homed moved video's variants: ${from} → ${videoPath}`);
       }
     }
     // Merge base + manual, deduplicating by path (manual variants may overlap with auto-detected)
@@ -7344,16 +8129,22 @@ class App {
     if (!videoPath) return null;
     const map = this.settings.get('library.preferredVariants') || {};
     if (map[videoPath]) return map[videoPath];
-    const videoName = videoPath.split(/[\\/]/).pop().toLowerCase();
-    for (const [oldPath, label] of Object.entries(map)) {
-      if (oldPath === videoPath) continue;
-      if (oldPath.split(/[\\/]/).pop().toLowerCase() === videoName && label) {
-        // Rehome onto the current path so future lookups are direct.
-        map[videoPath] = label;
-        delete map[oldPath];
-        this.settings.set('library.preferredVariants', map);
-        return label;
-      }
+    // Guarded re-home (see association-rehome.js): refuses when several
+    // stored entries share the filename, or when the candidate's video is
+    // still in the library. Previously took the first match and deleted it,
+    // persisting a wrong pin immediately.
+    const from = pickRehomeCandidate({
+      storedPaths: Object.keys(map).filter((p) => map[p]),
+      videoPath,
+      isLive: (p) => !!this.library?.getVideoByPath?.(p),
+    });
+    if (from) {
+      const label = map[from];
+      map[videoPath] = label;
+      delete map[from];
+      this.settings.set('library.preferredVariants', map);
+      console.log(`[Variants] Re-homed pinned default variant: ${from} → ${videoPath}`);
+      return label;
     }
     return null;
   }
@@ -7368,22 +8159,32 @@ class App {
   }
 
   /**
-   * After a video loads its auto-default script, switch to the user's
-   * pinned variant for this video if one is set and present. No-op when
-   * none is pinned, when it's already the active default, or when the
-   * pinned script is missing (file moved/renamed → not in the detected
-   * list) — in which case the auto-default that already loaded stands.
+   * After a video loads its auto-default script, resolve which variant
+   * should actually play (pickVariantIndexOnLoad):
+   *   - Random-variant toggle ON (`player.randomVariantOnPlay`, zaikechi
+   *     #209/#221): pick one of the variants at random — once per load,
+   *     so seeks/pauses never re-roll — and toast which one won. Random
+   *     beats a pinned default while the toggle is on (the toggle exists
+   *     to inject variety; pins resume when it's turned off).
+   *   - Otherwise: switch to the pinned variant if set and present.
+   * No-op when the video has fewer than 2 variants, or when the resolved
+   * choice is the auto-default that already loaded.
    */
   async _applyPreferredVariant() {
     const videoPath = this._currentVideoPath;
     if (!videoPath) return;
     const variants = this._allVariantsWithManual || [];
     if (variants.length < 2) return;
-    const preferred = this._getPreferredVariantLabel(videoPath);
-    if (!preferred) return;
-    const idx = variants.findIndex(v => (v.label || '').trim() === preferred.trim());
-    if (idx <= 0) return; // not found, or already the active default (index 0)
-    await this._switchVariant(idx);
+    const randomOn = this.settings.get('player.randomVariantOnPlay') === true;
+    const idx = pickVariantIndexOnLoad(variants, {
+      randomOn,
+      preferredLabel: this._getPreferredVariantLabel(videoPath),
+    });
+    if (idx > 0) await this._switchVariant(idx);
+    if (randomOn) {
+      const label = variants[idx]?.label || t('library.variantDefault');
+      showToast(t('toast.randomVariant', { name: label }), 'info', 2500);
+    }
   }
 
   _showVariantDropdown() {
@@ -7614,8 +8415,20 @@ class App {
       return;
     }
 
-    const scanResult = await window.funsync.scanDirectory(dirPath);
-    const allScripts = scanResult?.allFunscripts || [];
+    // Reuse the library's cached scan. This used to call scanDirectory()
+    // directly on every click, re-walking every source recursively and
+    // re-statting every file just to list funscripts the library already
+    // had in memory — so opening "Add variation" from the PLAYER froze the
+    // app for seconds on a large library, while the same modal in the
+    // library view (which reads the cache) was instant. Dave 2026-08-05.
+    // ensureScanned() is a no-op once a scan exists.
+    let allScripts = this.library?.getAllFunscripts?.() || [];
+    if (allScripts.length === 0 && this.library?.ensureScanned) {
+      try {
+        await this.library.ensureScanned();
+        allScripts = this.library.getAllFunscripts() || [];
+      } catch { /* fall through to the file dialog below */ }
+    }
 
     if (allScripts.length === 0) {
       const result = await window.funsync.selectFunscript();
@@ -7863,6 +8676,7 @@ class App {
           this.funscriptEngine.getActions(),
           this.videoPlayer.duration,
         );
+        this._feedInlineViz();
         this.progressBar.setMarkers({
           chapters: this.funscriptEngine.getChapters(),
           bookmarks: this.funscriptEngine.getBookmarks(),
@@ -7962,15 +8776,180 @@ class App {
     this._switchVariant(next);
   }
 
+  /**
+   * Wire the inline-visualization toggles, which live in the ⋮ overflow
+   * menu as `role="menuitemcheckbox"` items (moved out of the control bar
+   * 2026-08-04). Restores the persisted state, and on click flips
+   * visibility + persists + reflects state via aria-checked (the CSS
+   * checkbox tick keys off that attribute).
+   */
+  _wireInlineVizToggles() {
+    const wire = (btnId, settingKey, apply) => {
+      const btn = document.getElementById(btnId);
+      if (!btn) return;
+      const setState = (on) => btn.setAttribute('aria-checked', String(on));
+      const initial = this.settings.get(settingKey) === true;
+      apply(initial);
+      setState(initial);
+      btn.addEventListener('click', () => {
+        const next = !(this.settings.get(settingKey) === true);
+        this.settings.set(settingKey, next);
+        apply(next);
+        setState(next);
+      });
+    };
+    wire('btn-inline-tl', 'player.inlineTimeline', (on) => this.inlineViz.setTimelineVisible(on));
+    wire('btn-inline-hm', 'player.inlineHeatmap', (on) => this.inlineViz.setHeatmapVisible(on));
+    this._applyInlineVizOpacity();
+  }
+
+  /**
+   * Keep the Windows caption strip in step with the player.
+   *
+   * In the player view the nav bar is hidden, so a solid nav-bar-coloured
+   * caption block sits over the video looking pasted-on. There it goes
+   * transparent (white symbols, since the video behind is dark) and the
+   * symbols hide entirely while the controls are auto-hidden, so the buttons
+   * come and go with the seek bar.
+   *
+   * No-ops off the player view and outside Windows (the main handler ignores
+   * the overlay on other platforms). Fullscreen has no caption strip at all,
+   * so it's skipped rather than fighting the OS for it.
+   *
+   * @param {boolean|null} visible — controls state; null re-reads the DOM.
+   */
+  _syncCaptionOverlay(visible = null) {
+    if (!window.funsync?.updateWindowChrome) return;
+    const theme = this.settings?.get?.('player.theme') || 'dark';
+    const inPlayer = this._currentView?.() === 'player' && !document.fullscreenElement;
+    if (!inPlayer) {
+      // Back to the normal themed chrome (idempotent).
+      if (this._captionOverlayState !== 'normal') {
+        this._captionOverlayState = 'normal';
+        try { window.funsync.updateWindowChrome(theme); } catch { /* non-fatal */ }
+      }
+      return;
+    }
+    const shown = visible === null
+      ? !!document.querySelector('.player-container.controls-visible')
+      : !!visible;
+    const next = shown ? 'over-video' : 'over-video-hidden';
+    if (this._captionOverlayState === next) return;
+    this._captionOverlayState = next;
+    try {
+      window.funsync.updateWindowChrome(theme, {
+        overVideo: true,
+        hideSymbols: !shown,
+        // Main needs the caption strip's geometry to tell whether the cursor
+        // is over the buttons (they're OS-drawn, so the page gets no hover
+        // events there). The draggable titlebar area starts at the left edge;
+        // whatever is left of the window width is the caption strip.
+        captionRect: this._captionRect(),
+      });
+    } catch { /* non-fatal */ }
+  }
+
+  /**
+   * Caption-button strip in CSS px relative to the content area, or null
+   * when the Window Controls Overlay isn't active (non-Windows, or a frame
+   * fallback build).
+   */
+  _captionRect() {
+    const wco = navigator.windowControlsOverlay;
+    if (!wco?.visible) return null;
+    try {
+      const r = wco.getTitlebarAreaRect();
+      const left = r.x + r.width;
+      const width = Math.max(0, window.innerWidth - left);
+      if (width <= 0) return null;
+      return { x: left, y: 0, width, height: r.height || 48 };
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Push the configured inline-viz opacity onto the overlay. Stored 20-100
+   * (percent) under `player.inlineVizOpacity`, defaulting to 80 so the
+   * overlays sit over the video without fully obscuring it.
+   */
+  _applyInlineVizOpacity(value = null) {
+    const raw = value !== null ? value : this.settings?.get?.('player.inlineVizOpacity');
+    const pct = Number.isFinite(Number(raw)) ? Number(raw) : INLINE_VIZ_OPACITY_DEFAULT;
+    const clamped = Math.min(100, Math.max(20, pct));
+    document.documentElement.style.setProperty('--inline-viz-opacity', String(clamped / 100));
+  }
+
+  /**
+   * Feed the inline viz alongside the seek-bar heatmap (same data), and
+   * show/hide the TL/HM buttons with script availability. Optional
+   * overrides for paths that render a script not yet in the engine
+   * (multi-axis first-loaded script).
+   */
+  _feedInlineViz(actionsOverride = null, durationOverride = null) {
+    if (!this.inlineViz) return;
+    const actions = actionsOverride
+      || (this.funscriptEngine?.isLoaded ? this.funscriptEngine.getActions() : null);
+    const has = !!(actions && actions.length >= 2);
+    if (has) {
+      this.inlineViz.setScript(actions, durationOverride || this.videoPlayer?.duration || 0);
+    } else {
+      this.inlineViz.clear();
+    }
+    const tlBtn = document.getElementById('btn-inline-tl');
+    const hmBtn = document.getElementById('btn-inline-hm');
+    if (tlBtn) tlBtn.hidden = !has;
+    if (hmBtn) hmBtn.hidden = !has;
+  }
+
+  /**
+   * Grouping key for balance-by-script: the associated funscript path,
+   * case-folded (Windows paths are case-insensitive). Scriptless videos
+   * return null → they participate individually.
+   */
+  _scriptKeyOf(item) {
+    const p = item?.funscriptPath;
+    return p ? String(p).toLowerCase() : null;
+  }
+
   /** Play a list of videos sequentially (Play All). */
   _playAll(videoList, opts = {}) {
     if (!videoList || videoList.length === 0) return;
     this._playQueueShuffle = !!opts.shuffle;
+    // Balance-by-script (zaikechi #221): only meaningful when shuffling —
+    // videos sharing an associated script collapse into one slot with a
+    // random member drawn per cycle, so a track with 6 matching videos
+    // isn't weighted 6×. The FULL list is kept for loop-wrap redraws
+    // (fresh representatives each cycle).
+    this._playQueueBalance = this._playQueueShuffle && !!opts.balanceByScript;
+    this._playQueueFullList = videoList;
     // Bag model: shuffle the whole list ONCE at Play All so there are no
     // repeats within a cycle (per-track random would produce back-to-back
     // repeats that read as "broken shuffle"). Reshuffled on each loop wrap
     // below. SCOPE-playlist-shuffle-reorder.md §7.
-    this._playQueue = this._playQueueShuffle ? shuffleArray(videoList) : videoList;
+    const drawShuffled = (list) => (this._playQueueBalance
+      ? balancedShuffle(list, (v) => this._scriptKeyOf(v))
+      : shuffleArray(list));
+
+    if (!this._playQueueShuffle) {
+      this._playQueue = videoList;
+    } else if (opts.preferUnwatched && typeof opts.isWatched === 'function') {
+      // Unwatched first, each half shuffled independently so the bag model
+      // (and balance-by-script within it) still applies. Watched items are
+      // moved to the back rather than dropped — a marathon of a fully-seen
+      // playlist must still play.
+      const { unwatched: unseen, watched: seen } = partitionByWatched(
+        videoList,
+        (p) => (opts.isWatched(p) ? { finished: true } : null),
+        (v) => v.path,
+      );
+      this._playQueue = [
+        ...(unseen.length ? drawShuffled(unseen) : []),
+        ...(seen.length ? drawShuffled(seen) : []),
+      ];
+    } else {
+      this._playQueue = drawShuffled(videoList);
+    }
     this._playQueueIndex = 0;
     this._playQueueLoop = !!opts.loop;
     this._playQueueSource = {
@@ -7985,6 +8964,18 @@ class App {
     if (index >= this._playQueue.length) return;
     const item = this._playQueue[index];
     this._playQueueIndex = index;
+
+    // Flush the OUTGOING video's position while `_currentPlayContext` still
+    // describes it — the assignment below replaces it. Queue advances do
+    // NOT route through `_playFromLibrary` (they call `loadVideo` directly),
+    // so without this and the resume application further down, the whole
+    // resume feature was dead during Play All: positions accumulated and
+    // were never used, and the Up Next card's Resume / Start over buttons
+    // silently did nothing.
+    const outgoing = this._currentVideoPath;
+    if (outgoing && outgoing !== item.path) {
+      this._recordResumePosition({ force: true, path: outgoing });
+    }
 
     // Feed the Up Next engine the queue context so the card shows the
     // correct "next" item and only fires end-of-list on the actual last
@@ -8010,8 +9001,27 @@ class App {
       this._markCloudUploadsPending();
     }
 
+    // Resume. A queue advance is always a flow-through arrival — nobody
+    // clicked this specific video — so it resumes silently with a toast
+    // rather than prompting, matching every other flow-through path.
+    // `_upNextStartOver` is consumed unconditionally so a Start over chosen
+    // on the Up Next card can't leak into the item after this one.
+    const startOverRequested = this._upNextStartOver === true;
+    this._upNextStartOver = false;
+    let resumeAt = null;
+    if (this._isPlaylistContext(this._currentPlayContext)) {
+      const entry = this.getResumeEntry(item.path);
+      if (!startOverRequested && shouldOfferResume(entry)) {
+        resumeAt = entry.position;
+        showToast(t('resume.resumedToast', { time: formatResumeTime(entry.position) }), 'info', 4000);
+      }
+    }
+
     const fileData = { name: item.name, path: item.path, _isPathBased: true };
     this.loadVideo(fileData, { skipViewSwitch: true });
+    // Before playback starts, so the sync engine anchors at the resumed
+    // position instead of the seek-correction path fixing it up after.
+    if (resumeAt) this._applyPendingResumeSeek(resumeAt);
 
     if (item.funscriptPath) {
       window.funsync.readFunscript(item.funscriptPath).then((content) => {
@@ -8091,40 +9101,435 @@ class App {
   _playPrev() {
     if (this._playQueueIndex > 0) {
       this._playQueueItem(this._playQueueIndex - 1);
+      return true;
     }
+    return this._stepPlayContext(-1);
   }
 
   _playNext() {
     if (this._playQueueIndex + 1 < this._playQueue.length) {
       this._playQueueItem(this._playQueueIndex + 1);
+      return true;
     }
+    return this._stepPlayContext(+1);
+  }
+
+  /**
+   * Step to the neighbouring video in the current PLAY CONTEXT — the
+   * library/playlist/category list snapshot taken when playback started.
+   *
+   * Without this, prev/next only ever worked inside a Play All queue,
+   * because `_playFromLibrary` clears `_playQueue` on every direct click.
+   * A user who opened a video from the library had the buttons hidden and
+   * (once the N/P keys landed) two dead shortcuts, which is not what
+   * "next video" means to anyone.
+   *
+   * Uses the same override mechanism as an Up Next advance so the snapshot
+   * travels with the new video (same list, moved index) rather than being
+   * rebuilt from a possibly re-filtered view mid-session.
+   *
+   * Queue-sourced contexts are skipped: the queue branch above owns those,
+   * and their index counts queue slots, not list entries.
+   */
+  _stepPlayContext(delta) {
+    const ctx = this._currentPlayContext;
+    if (!ctx || ctx.source === 'queue') return false;
+    // PLAYLISTS ONLY (Dave, 2026-08-06). Stepping through a 1471-video
+    // library in scan order isn't a real workflow, and an "N / 1471"
+    // counter on a plain library play is noise. A playlist is a curated,
+    // ordered list where prev/next means something.
+    if (!this._isPlaylistContext(ctx)) return false;
+    const list = ctx.list;
+    if (!Array.isArray(list) || list.length < 2) return false;
+
+    const targetIdx = (ctx.index || 0) + delta;
+    if (targetIdx < 0 || targetIdx >= list.length) return false;
+
+    const path = list[targetIdx];
+    if (!path || !this.library) return false;
+
+    const video = this.library.getVideoByPath?.(path);
+    if (!video) {
+      // Present in the snapshot but gone from the current scan (deleted,
+      // or an unplugged drive). Say so rather than failing silently.
+      showToast(t('toast.nextNotFound'), 'warn', 3000);
+      return false;
+    }
+
+    video._playContextOverride = { ...ctx, index: targetIdx };
+    // Manual prev/next is an explicit request to watch that video, so it
+    // auto-plays regardless of the autoplayOnAdvance setting — that
+    // setting governs UNATTENDED advances, which this is not.
+    video._autoPlayOnNextLoad = true;
+
+    // Mark this as a flow-through arrival so the resume prompt stays out
+    // of the way (see _playFromLibrary).
+    //
+    // A COUNTER, not a boolean: mashing N starts overlapping loads, and
+    // with a boolean the first load's `finally` would clear the flag while
+    // a later press was still in flight — so a rapid skip would suddenly
+    // pop the resume modal, which is exactly the obstacle course this flag
+    // exists to prevent.
+    this._navigationalArrivals = (this._navigationalArrivals || 0) + 1;
+    Promise.resolve(this.library._playVideo(video))
+      .finally(() => {
+        this._navigationalArrivals = Math.max(0, (this._navigationalArrivals || 1) - 1);
+      });
+    return true;
+  }
+
+  // --- Resume position: "continue where you left off" (community, 2026-08-05) ---
+
+  _initResumeTracking() {
+    const video = this.videoPlayer?.video;
+    if (!video) return;
+
+    video.addEventListener('timeupdate', () => this._recordResumePosition());
+    video.addEventListener('pause', () => this._recordResumePosition({ force: true }));
+
+    // Natural end clears the entry outright — `_recordResumePosition`
+    // lands in the trailing zone and deletes it. Explicit rather than
+    // implicit because this is the rule that stops finished videos
+    // resuming at their own credits.
+    video.addEventListener('ended', () => this._recordResumePosition({ force: true }));
+
+    // A detached pop-out owns the only playing <video>, so none of the
+    // listeners above fire while it drives. This tick samples the proxy
+    // instead. Cheap: one throttled check per interval, and
+    // _recordResumePosition no-ops without a loaded video.
+    this._resumeTickTimer = setInterval(() => {
+      const clock = this._resumeClockSource();
+      if (clock && !clock.paused) this._recordResumePosition();
+    }, RESUME_WRITE_INTERVAL_MS);
+
+    // Last write on the way out — closing mid-video is exactly when a
+    // user expects the position to have been kept.
+    window.addEventListener('beforeunload', () => {
+      this._recordResumePosition({ force: true });
+    });
+
+    // A playlist Reset must actually look reset. Without this the tracker
+    // rewrites the currently-playing video's position within seconds and
+    // the bar reappears, which reads as "the button did nothing".
+    // Suppression is per-path and lifts as soon as another video loads, so
+    // continuing to watch after a Reset starts recording again normally.
+    eventBus.on('playlist:progressReset', ({ videoPaths }) => {
+      if (this._currentVideoPath && (videoPaths || []).includes(this._currentVideoPath)) {
+        this._resumeSuppressedPath = this._currentVideoPath;
+      }
+    });
+  }
+
+  /**
+   * Clock to read position from. Deliberately routed through the Up Next
+   * engine's player reference, which `_activatePlayerWindow` /
+   * `_deactivatePlayerWindow` already swap between the local `<video>` and
+   * the RemotePlaybackProxy. Reading `videoPlayer.video` directly would
+   * record zeros the whole time the pop-out is driving playback — the same
+   * trap that broke Up Next auto-advance when the pop-out shipped.
+   */
+  _resumeClockSource() {
+    // A phone controlling playback is the third surface (after the desktop
+    // element and the pop-out). Unlike the pop-out, the web-remote path
+    // does NOT repoint `upNextEngine.player`, so without this branch every
+    // sample during a phone session would read the intentionally-paused
+    // desktop element: no recording while the phone plays, and a stale
+    // position written over a good one at the next video change.
+    if (this._remoteActive && this._remoteProxy) {
+      if (!this._remoteResumeClock || this._remoteResumeClockFor !== this._remoteProxy) {
+        this._remoteResumeClock = this._remoteProxy.asVideoPlayerWrapper();
+        this._remoteResumeClockFor = this._remoteProxy;
+      }
+      return this._remoteResumeClock;
+    }
+    return this.upNextEngine?.player || this.videoPlayer?.video || null;
+  }
+
+  /**
+   * Resume is a PLAYLIST feature, deliberately. Dave's call: the main
+   * library is a browsing surface and shouldn't carry watch-progress
+   * marks, so nothing is recorded, displayed or prompted for a plain
+   * library or category play.
+   *
+   * Two shapes count as playlist playback: a direct play from a playlist
+   * (`source: 'playlist'`), and a Play All queue started FROM a playlist,
+   * which reports `source: 'queue'` but carries the playlist id forward in
+   * its sourceContext.
+   */
+  _isPlaylistContext(ctx) {
+    return !!this._playlistIdOf(ctx);
+  }
+
+  /**
+   * Playlist id behind a play context, or null.
+   *
+   * Two sourceContext shapes exist and both have to be understood, which
+   * is easy to miss: a direct playlist play carries `{ playlistId }`, but
+   * Play All builds a QUEUE whose context carries `{ kind: 'playlist', id }`.
+   * Reading only the first meant Play All — the main way anyone watches a
+   * playlist — recorded nothing at all.
+   */
+  _playlistIdOf(ctx) {
+    if (!ctx) return null;
+    const sc = ctx.sourceContext || {};
+    if (ctx.source === 'playlist') return sc.playlistId || sc.id || null;
+    if (ctx.source === 'queue') {
+      if (sc.playlistId) return sc.playlistId;
+      if (sc.kind === 'playlist' && sc.id) return sc.id;
+    }
+    return null;
+  }
+
+  _resumeMap() {
+    return this.settings?.get?.('library.resumePositions') || {};
+  }
+
+  /** Public-ish read for library / playlists card rendering. */
+  getResumeEntry(path) {
+    if (!path) return null;
+    return this._resumeMap()[path] || null;
+  }
+
+  _writeResumeEntry(path, entry) {
+    if (!path) return;
+    const map = { ...this._resumeMap() };
+    if (entry) map[path] = entry;
+    else if (!(path in map)) return; // nothing to clear — skip the write
+    else delete map[path];
+    this.settings?.set?.('library.resumePositions', map);
+  }
+
+  /**
+   * Sample the current position and persist it if it's worth keeping.
+   *
+   * @param {object} [opts]
+   * @param {boolean} [opts.force] bypass the write throttle (pause, ended,
+   *   video change, app teardown — the moments where losing the last few
+   *   seconds would actually be noticed)
+   * @param {string} [opts.path] record against this path instead of the
+   *   currently-loaded one, for flushing the OUTGOING video mid-swap
+   */
+  _recordResumePosition({ force = false, path } = {}) {
+    const target = path || this._currentVideoPath;
+    if (!target) return;
+
+    // Suppressed by a playlist Reset until this video is swapped out.
+    if (this._resumeSuppressedPath && this._resumeSuppressedPath === target) return;
+
+    // Playlist playback only. A library or category play leaves no trace,
+    // and critically does NOT overwrite a position saved from a playlist —
+    // watching something from the library can't clobber your bookmark.
+    if (!this._isPlaylistContext(this._currentPlayContext)) return;
+
+    const now = Date.now();
+    if (!force && now - (this._lastResumeWriteAt || 0) < RESUME_WRITE_INTERVAL_MS) return;
+
+    const clock = this._resumeClockSource();
+    if (!clock) return;
+    const position = Number(clock.currentTime);
+    const duration = Number(clock.duration);
+
+    const prev = this.getResumeEntry(target);
+
+    if (shouldRecordPosition(position, duration)) {
+      // Skip a write that wouldn't meaningfully change what's stored. The
+      // store rewrites the entire config file per write, so a no-op save is
+      // real disk cost for nothing.
+      // The watched mark can't change in this branch (it's carried forward
+      // from `prev` either way), so position drift is the only thing that
+      // decides whether a write is worth making.
+      const unchanged = Number.isFinite(prev?.position)
+        && Math.abs(prev.position - position) < RESUME_MIN_DELTA_SECONDS;
+      if (unchanged && !force) {
+        this._lastResumeWriteAt = now;
+        return;
+      }
+      // No watched mark: recording a position means this video is in
+      // progress, which clears "watched". Rewatching something and stopping
+      // half way must show where you got to, not a tick — and Continue must
+      // not skip a video you're actively part-way through.
+      this._writeResumeEntry(target, makeResumeEntry(position, duration, now));
+      this._markPlaylistLastWatched(target, now);
+      this._lastResumeWriteAt = now;
+      return;
+    }
+
+    if (!Number.isFinite(duration) || duration <= 0) return;
+
+    // Past the tail — watched. The position is dropped (a finished video
+    // must not resume at its own credits) but the fact of having watched
+    // it is KEPT, which is what drives the watched marks, the playlist
+    // summary, unwatched-first shuffle, and Continue skipping past it.
+    if (position >= endThreshold(duration)) {
+      this._writeResumeEntry(target, makeFinishedEntry(duration, now));
+      // The marker still moves here. Finishing is very much "where I got
+      // to"; leaving it on an earlier video would point backwards.
+      this._markPlaylistLastWatched(target, now);
+      this._lastResumeWriteAt = now;
+      return;
+    }
+
+    // Before the minimum — a glance. Any stored POSITION is stale, but a
+    // watched mark must survive: opening something you've seen and closing
+    // it after five seconds shouldn't un-watch it.
+    if (isFinished(prev)) {
+      this._writeResumeEntry(target, makeFinishedEntry(prev.duration || duration, prev.updatedAt || now));
+    } else {
+      this._writeResumeEntry(target, null);
+    }
+    this._lastResumeWriteAt = now;
+  }
+
+  /**
+   * Record which video in the current playlist was last watched. Survives
+   * restarts (it's in the store), and drives the playlist's "Last watched"
+   * marker and Continue button.
+   */
+  /**
+   * Resume choice for the Up Next card: `{ label }` when the NEXT video has
+   * a saved position worth offering, else null (which renders no row).
+   *
+   * Playlists only, same gate as everything else in this feature — the
+   * current context is the right thing to test because Up Next advances
+   * within the context it's already playing.
+   */
+  _upNextResumeChoice(path) {
+    if (!path) return null;
+    if (!this._isPlaylistContext(this._currentPlayContext)) return null;
+    const entry = this.getResumeEntry(path);
+    if (!shouldOfferResume(entry)) return null;
+    return { label: formatResumeTime(entry.position), position: entry.position };
+  }
+
+  _markPlaylistLastWatched(videoPath, now) {
+    const playlistId = this._playlistIdOf(this._currentPlayContext);
+    if (!playlistId || !videoPath) return;
+    const map = { ...(this.settings?.get?.('library.playlistProgress') || {}) };
+    const prev = map[playlistId];
+    if (prev?.lastVideoPath === videoPath) return; // no-op write guard
+    map[playlistId] = { lastVideoPath: videoPath, updatedAt: now };
+    this.settings?.set?.('library.playlistProgress', map);
+  }
+
+  /**
+   * Ask whether to resume, and return the position to seek to (or null to
+   * start from the beginning). Called before the video loads so the seek
+   * can be applied on `loadedmetadata`, i.e. BEFORE playback starts — that
+   * way the sync engine's normal play-anchor does the work instead of the
+   * seek-correction path, which is the fragile one for cloud HSSP devices.
+   */
+  async _maybeOfferResume(videoPath, knownDuration) {
+    if (!videoPath) return null;
+    const entry = this.getResumeEntry(videoPath);
+    if (!shouldOfferResume(entry, knownDuration)) return null;
+
+    const label = formatResumeTime(entry.position);
+    const choice = await Modal.open({
+      title: t('resume.title'),
+      onRender(body, close) {
+        const msg = document.createElement('div');
+        msg.className = 'modal-message';
+        msg.textContent = t('resume.message', { time: label });
+        body.appendChild(msg);
+
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
+
+        const startOverBtn = document.createElement('button');
+        startOverBtn.className = 'modal-btn modal-btn--secondary';
+        startOverBtn.textContent = t('resume.startOver');
+        startOverBtn.addEventListener('click', () => close('start-over'));
+
+        const resumeBtn = document.createElement('button');
+        resumeBtn.className = 'modal-btn';
+        resumeBtn.textContent = t('resume.resumeAt', { time: label });
+        resumeBtn.addEventListener('click', () => close('resume'));
+
+        actions.appendChild(startOverBtn);
+        actions.appendChild(resumeBtn);
+        body.appendChild(actions);
+        // Resume is the reason they clicked the thing they were watching,
+        // so it takes initial focus and Enter picks it.
+        requestAnimationFrame(() => resumeBtn.focus());
+      },
+    });
+
+    // Escape / backdrop / close-button all resolve null. Treat that as
+    // resume rather than start-over: dismissing a dialog should not
+    // silently discard the position they had.
+    if (choice === 'start-over') return null;
+    return entry.position;
+  }
+
+  /**
+   * Apply a pending resume seek once the video knows its own duration.
+   * One-shot: the listener removes itself so a later manual seek or a
+   * subsequent load can't re-trigger it.
+   */
+  _applyPendingResumeSeek(seconds) {
+    const video = this.videoPlayer?.video;
+    if (!video || !Number.isFinite(seconds) || seconds <= 0) return;
+    const seek = () => {
+      video.removeEventListener('loadedmetadata', seek);
+      // Re-validate against the duration we now actually know.
+      if (Number.isFinite(video.duration) && video.duration > 0 && seconds < video.duration) {
+        video.currentTime = seconds;
+      }
+    };
+    if (Number.isFinite(video.duration) && video.duration > 0) seek();
+    else video.addEventListener('loadedmetadata', seek);
   }
 
   _updateQueueUI() {
     const hasQueue = this._playQueue.length > 1;
+    // Fall back to the play context so prev/next are live during ordinary
+    // library playback, not just inside a Play All queue. Queue-sourced
+    // contexts are excluded — the queue branch above already describes them.
+    const ctx = this._currentPlayContext;
+    // Same playlist-only gate as _stepPlayContext: no buttons and no
+    // "N / total" indicator for library or category playback.
+    const ctxList = (ctx && ctx.source !== 'queue' && this._isPlaylistContext(ctx) && Array.isArray(ctx.list))
+      ? ctx.list
+      : null;
+    const hasContext = !hasQueue && !!ctxList && ctxList.length > 1;
+    const ctxIndex = ctx?.index || 0;
+    const show = hasQueue || hasContext;
+
     const btnPrev = document.getElementById('btn-prev');
     const btnNext = document.getElementById('btn-next');
     const indicator = document.getElementById('queue-indicator');
     if (btnPrev) {
-      btnPrev.hidden = !hasQueue;
-      btnPrev.disabled = this._playQueueIndex <= 0;
+      btnPrev.hidden = !show;
+      btnPrev.disabled = hasQueue
+        ? this._playQueueIndex <= 0
+        : ctxIndex <= 0;
     }
     if (btnNext) {
-      btnNext.hidden = !hasQueue;
-      btnNext.disabled = this._playQueueIndex >= this._playQueue.length - 1;
+      btnNext.hidden = !show;
+      btnNext.disabled = hasQueue
+        ? this._playQueueIndex >= this._playQueue.length - 1
+        : ctxIndex >= (ctxList ? ctxList.length - 1 : 0);
     }
     if (indicator) {
-      indicator.hidden = !hasQueue;
+      indicator.hidden = !show;
       if (hasQueue) {
         indicator.textContent = `${this._playQueueIndex + 1} / ${this._playQueue.length}`;
+      } else if (hasContext) {
+        indicator.textContent = `${ctxIndex + 1} / ${ctxList.length}`;
       }
     }
-    // Mirror the queue state into the detached player window.
+    // Mirror the queue state into the detached player window. Context-driven
+    // playback counts too — the pop-out relays its prev/next (and its own n/p
+    // keys) straight back to _playPrev/_playNext, which now handle both.
     if (this._playerWindowOpen) {
       window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.QUEUE_STATE, {
-        hasPrev: hasQueue && this._playQueueIndex > 0,
-        hasNext: hasQueue && this._playQueueIndex < this._playQueue.length - 1,
-        label: hasQueue ? `${this._playQueueIndex + 1} / ${this._playQueue.length}` : '',
+        hasPrev: hasQueue ? this._playQueueIndex > 0 : (hasContext && ctxIndex > 0),
+        hasNext: hasQueue
+          ? this._playQueueIndex < this._playQueue.length - 1
+          : (hasContext && ctxIndex < ctxList.length - 1),
+        label: hasQueue
+          ? `${this._playQueueIndex + 1} / ${this._playQueue.length}`
+          : (hasContext ? `${ctxIndex + 1} / ${ctxList.length}` : ''),
       }));
     }
   }

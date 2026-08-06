@@ -11,6 +11,22 @@
   flex-shrink: 0;
 }
 
+/* ---- Windows Controls Overlay chrome (html.has-wco, set in app.js) ----
+   With titleBarStyle:hidden the nav bar IS the title bar: it becomes the
+   window drag region, interactive children opt back out, and padding-right
+   reserves the native caption-button strip (min/max/close overlay). The
+   env() math: titlebar-area-width = window width minus the caption strip,
+   so (100vw - that) = exactly the strip's width; falls back to 0 extra
+   when the overlay isn't active (Linux, pop-outs, fullscreen). */
+html.has-wco .nav-bar {
+  -webkit-app-region: drag;
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw) + 16px);
+}
+
+html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+
 .nav-bar__item {
   display: flex;
   align-items: center;

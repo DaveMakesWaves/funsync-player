@@ -297,3 +297,59 @@ export function filterVideos(videos, filters = {}) {
     return true;
   });
 }
+
+/**
+ * Collapse videos that share an identical filename down to one entry.
+ *
+ * For the "Hide duplicate names" toggle. On a large library the same file
+ * often sits in more than one source folder, and the grid shows it once per
+ * copy. This keeps ONE and drops the rest — it never hides a video
+ * entirely, which would make the content unreachable rather than tidier.
+ *
+ * Matching is on the full filename INCLUDING extension, case-insensitively.
+ * Two files differing only in case are the same name on Windows, while
+ * `Clip.mp4` and `Clip.mkv` are deliberately NOT duplicates — they may be
+ * different encodes the user wants to tell apart.
+ *
+ * Which copy survives: the first one that has a funscript, otherwise the
+ * first encountered. A copy with a script associated is strictly more
+ * useful than one without, and preserving input order everywhere else keeps
+ * the result stable across renders.
+ *
+ * @param {Array<{name?: string, path?: string, hasFunscript?: boolean}>} videos
+ * @returns {Array} deduplicated list, in the original relative order
+ */
+export function dedupeByName(videos) {
+  if (!Array.isArray(videos) || videos.length < 2) {
+    return Array.isArray(videos) ? videos : [];
+  }
+
+  const keyOf = (v) => {
+    const name = v?.name || String(v?.path || '').split(/[\/]/).pop() || '';
+    return name.toLowerCase();
+  };
+
+  // First pass: choose the winner per name, remembering where it should sit.
+  const winners = new Map(); // key → { video, index }
+  videos.forEach((video, index) => {
+    const key = keyOf(video);
+    if (!key) return;
+    const current = winners.get(key);
+    if (!current) {
+      winners.set(key, { video, index });
+      return;
+    }
+    // Upgrade only from "no script" to "has script"; never reorder past a
+    // winner that already has one.
+    if (!current.video?.hasFunscript && video?.hasFunscript) {
+      winners.set(key, { video, index: current.index });
+    }
+  });
+
+  // Videos with no usable name can't be compared — pass them through
+  // untouched rather than collapsing them into one anonymous entry.
+  const unnamed = videos.filter((v) => !keyOf(v));
+  const kept = [...winners.values(), ...unnamed.map((video) => ({ video, index: videos.indexOf(video) }))];
+  kept.sort((a, b) => a.index - b.index);
+  return kept.map((entry) => entry.video);
+}

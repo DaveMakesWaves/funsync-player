@@ -118,7 +118,8 @@
     },
     "toast": {
       "selfKey": "본인의 Handy입니다 — 이미 Handy 탭에서 제어 중입니다."
-    }
+    },
+    "popoutWindowTitle": "오디언스 룸"
   },
   "nav": {
     "library": "라이브러리",
@@ -195,6 +196,8 @@
     "devicesConnectionShortcut": "장치 연결 (H)",
     "editor": "에디터",
     "scriptEditor": "스크립트 에디터 (E)",
+    "inlineTimeline": "스크립트 타임라인",
+    "inlineHeatmap": "히트맵 바",
     "screenshot": "스크린샷",
     "pictureInPicture": "PIP",
     "miniPlayPause": "재생 / 일시정지",
@@ -344,7 +347,18 @@
     "showingFolder": "표시 중: {folder}",
     "openFileLocation": "파일 위치 열기",
     "customThumbSet": "썸네일 프레임 설정…",
+    "customThumbUpload": "썸네일 이미지 업로드…",
+    "customThumbUploadFailed": "해당 이미지를 사용할 수 없습니다",
     "customThumbReset": "썸네일 초기화",
+    "variantDefault": "기본",
+    "assignScriptBulk": "스크립트 할당",
+    "bulkScriptAssigned": "{name}을(를) {count}개 동영상에 할당했습니다",
+    "kebabGroupOrganize": "정리",
+    "kebabGroupScripts": "스크립트 및 자막",
+    "kebabGroupThumbnail": "썸네일",
+    "kebabGroupVR": "VR",
+    "kebabExtractAxes": "내장된 축 추출 ({count})…",
+    "kebabExtractAxesTitle": "{axes}을(를) 별도 .funscript 파일로 저장",
     "customThumbTitle": "썸네일 프레임 선택",
     "customThumbHint": "슬라이더를 원하는 프레임으로 드래그한 다음 이 동영상의 타일로 사용하세요.",
     "customThumbUse": "이 프레임 사용",
@@ -452,8 +466,10 @@
       "scriptNone": "(없음)",
       "selectScriptBtn": "선택",
       "addRoute": "+ 경로 추가",
-      "variantSearchTitle": "변형용 스크립트 선택"
-    }
+      "variantSearchTitle": "변형용 스크립트 선택",
+      "searchEroScripts": "EroScripts 검색..."
+    },
+    "heatmapUnavailable": "히트맵을 사용할 수 없음"
   },
   "playlists": {
     "title": "재생 목록",
@@ -482,7 +498,29 @@
     "gridView": "그리드 보기",
     "listView": "목록 보기",
     "detailEmpty": "이 재생 목록에 동영상이 없습니다",
-    "detailEmptyHint": "케밥 메뉴를 사용하여 라이브러리에서 동영상을 추가하세요"
+    "detailEmptyHint": "케밥 메뉴를 사용하여 라이브러리에서 동영상을 추가하세요",
+    "advanced": {
+      "openTitle": "재생목록 고급 설정",
+      "title": "재생목록 고급 설정",
+      "balanceLabel": "모든 스크립트에 동일한 기회 주기",
+      "balanceWhy": "하나의 스크립트를 여러 영상이 함께 쓰는 경우가 있습니다. 그대로 두면 단순히 영상 수가 많다는 이유로 섞어서 재생할 때 그 스크립트가 더 자주 나옵니다.",
+      "balanceHow": "이 옵션을 켜면 몇 개의 영상이 같은 스크립트를 쓰든 스크립트마다 같은 확률로 선택됩니다. 그중 한 영상이 무작위로 재생되고, 다음 바퀴에는 보통 다른 영상이 나옵니다.",
+      "balanceNeedsShuffleOn": "셔플이 켜져 있을 때만 적용됩니다.",
+      "balanceNeedsShuffleOff": "사용하려면 셔플을 켜세요. 순서대로 재생할 때는 효과가 없습니다.",
+      "unwatchedLabel": "안 본 영상 우선",
+      "unwatchedWhy": "셔플에서 아직 다 보지 않은 영상을 먼저 재생합니다. 이미 본 영상도 재생되지만 마지막에 나옵니다."
+    },
+    "lastWatched": "마지막 시청",
+    "continueWatching": "이어보기",
+    "continueWatchingNamed": "{name}부터 이어보기",
+    "resetProgress": "진행 상황 초기화",
+    "resetProgressHint": "이 재생목록의 표시와 저장된 위치를 지웁니다",
+    "resetProgressTitle": "재생목록 진행 상황을 초기화할까요?",
+    "resetProgressConfirm": "\"{name}\"의 표시와 포함된 모든 영상의 저장 위치를 지웁니다. 위치는 영상별로 저장되므로 다른 재생목록에 있는 영상도 위치를 잃습니다.",
+    "watched": "시청함",
+    "watchedCount": "{total}개 중 {watched}개 시청",
+    "timeLeft": "{time} 남음",
+    "continueNamed": "{name} 이어보기"
   },
   "categories": {
     "title": "카테고리",
@@ -562,6 +600,7 @@
     "orgasmNotConfigured": "오르가즘 스크립트가 없습니다 — 설정 ▸ 재생에서 선택하세요",
     "orgasmInvalidScript": "유효한 funscript 파일이 아닙니다",
     "orgasmScriptSet": "오르가즘 스크립트 설정됨: {name}",
+    "randomVariant": "무작위 스크립트: {name}",
     "videoErrorGeneric": "동영상 로딩 실패",
     "mutexTakeover": "{incoming}이(가) {evicted}에서 인계받음",
     "added": "추가됨",
@@ -626,7 +665,9 @@
     "multiAxisFailed": "다중 축: {suffix} 스크립트 로드 실패 ({error})",
     "queueReadFailed": "대기열 항목 {name}: 스크립트 {script}를 읽을 수 없음 — 동기화 없이 재생",
     "queueReadError": "대기열 항목 {name}: 스크립트 읽기 실패 ({error}) — 동기화 없이 재생",
-    "handyUploadTimeout": "Handy 스크립트 업로드 시간 초과 — 동영상은 재생되지만 Handy는 동기화되지 않습니다. 연결을 확인하고 동영상을 다시 로드하세요."
+    "handyUploadTimeout": "Handy 스크립트 업로드 시간 초과 — 동영상은 재생되지만 Handy는 동기화되지 않습니다. 연결을 확인하고 동영상을 다시 로드하세요.",
+    "orgasmRoutingFallback": "오르가즘 스위치: {devices} 미연결. 모두 연결될 때까지 단일 축으로 동작합니다.",
+    "orgasmScriptRecovered": "이동된 피니셔 스크립트 {count}개를 찾아 경로를 업데이트했습니다"
   },
   "modal": {
     "noItemsAvailable": "사용 가능한 항목 없음",
@@ -672,6 +713,8 @@
       "sort": "정렬",
       "viewToggleAria": "그리드 또는 목록 보기 전환",
       "viewToggleTitle": "그리드 / 목록",
+      "playAll": "모두 재생",
+      "shufflePlay": "셔플",
       "folderAria": "폴더로 탐색",
       "folderTitle": "폴더로 탐색",
       "filters": "필터"
@@ -762,6 +805,20 @@
       "connected": "연결됨: {devices}",
       "noDevices": "데스크톱에 연결된 장치 없음",
       "connectedCount": "{count, plural, other {연결된 장치 · #}}",
+      "playPause": "재생 / 일시정지",
+      "seek": "탐색",
+      "mute": "음소거",
+      "fullscreen": "전체 화면",
+      "loopAB": "A-B 반복",
+      "skipGap": "공백 건너뛰기",
+      "offset": "오프셋",
+      "orgasmHold": "Orgasm Switch - 길게 누르기",
+      "orgasmRiding": "놓으면 돌아갑니다",
+      "orgasmTap": "Orgasm Switch - 탭",
+      "orgasmStop": "탭하여 정지",
+      "upNextIn": "{seconds}초 후 다음 재생",
+      "upNextPlayNow": "지금 재생",
+      "upNextCancel": "취소",
       "intensity": "Funscript 강도",
       "avg": "평균",
       "max": "최대",
@@ -960,10 +1017,16 @@
       "rangeExtenderResetTitle": "기본값으로 재설정 (끔)",
       "rangeExtenderResetAria": "범위가 좁은 스크립트 늘이기를 기본값으로 재설정",
       "orgasmScriptLabel": "오르가즘 스위치 스크립트",
-      "orgasmScriptChoose": "선택…",
+      "orgasmScriptChoose": "설정…",
       "orgasmScriptClear": "오르가즘 스크립트 지우기",
       "orgasmScriptNone": "없음",
       "orgasmScriptHint": "재생 중 X를 누르고 있으면 기기를 이 짧은 반복 스크립트로 전환하고, 놓으면 원래대로 돌아갑니다. Handy, Buttplug, T-Code 지원.",
+      "orgasmModeLabel": "X 키 동작",
+      "orgasmModeHold": "누르는 동안 재생(놓으면 복귀)",
+      "orgasmModeToggle": "눌러서 마무리(이후 정지)",
+      "orgasmModeHint": "누르는 동안 재생: X를 누르고 있는 동안 반복 스크립트를 재생하고, 놓으면 메인 스크립트로 돌아갑니다. 눌러서 마무리: X를 누르면 반복 시작, 다시 누르면 기기를 정지합니다(메인 스크립트로 돌아가지 않음).",
+      "randomVariantLabel": "무작위 스크립트 변형",
+      "randomVariantHint": "여러 스크립트 변형이 있는 동영상은 재생할 때마다 무작위로 하나를 선택합니다. 켜져 있는 동안 고정된 기본 변형보다 우선합니다.",
       "bpHeader": "Buttplug 선형 출력 (BLE)",
       "fieldStrategy": "전략",
       "strategyActionBoundary": "스트로크별 (BLE에서 더 부드러움)",
@@ -976,7 +1039,18 @@
       "fieldMinStroke": "최소 스트로크",
       "minStrokeResetTitle": "기본값으로 재설정 (60ms)",
       "minStrokeResetAria": "최소 스트로크를 기본값으로 재설정",
-      "bpHint": "스트로크별은 액션당 하나의 명령을 보내고 장치 펌웨어가 보간하도록 합니다 — Handy의 WiFi API (HSSP)와 비슷한 느낌입니다. 선행은 BLE 왕복 시간을 보상합니다. 최소 스트로크는 너무 짧은 스트로크를 늘려 BLE가 처리할 수 있게 합니다. 연결 코드 (HSSP)를 통한 Handy의 경우 이 설정은 효과가 없습니다."
+      "bpHint": "스트로크별은 액션당 하나의 명령을 보내고 장치 펌웨어가 보간하도록 합니다 — Handy의 WiFi API (HSSP)와 비슷한 느낌입니다. 선행은 BLE 왕복 시간을 보상합니다. 최소 스트로크는 너무 짧은 스트로크를 늘려 BLE가 처리할 수 있게 합니다. 연결 코드 (HSSP)를 통한 Handy의 경우 이 설정은 효과가 없습니다.",
+      "orgasmSummaryMulti": "다축 ({count}개 축)",
+      "orgasmSummaryCustom": "커스텀 라우팅 ({count}개 경로)",
+      "inlineVizOpacityLabel": "오버레이 불투명도",
+      "inlineVizOpacityResetTitle": "기본 불투명도로 되돌리기",
+      "inlineVizOpacityHint": "영상 위에 표시되는 스크립트 타임라인과 히트맵 띠의 진하기입니다. 플레이어의 ⋮ 메뉴에서 켜세요.",
+      "orgasmScriptMissing": "(파일을 찾을 수 없음)",
+      "playbackHeader": "재생",
+      "orgasmHeader": "Orgasm Switch",
+      "videoHeader": "비디오 및 성능",
+      "rememberSpeedLabel": "재생 속도 기억",
+      "rememberSpeedHint": "다른 영상을 불러와도 현재 속도를 유지합니다. 기본값은 꺼짐이며, 각 영상은 1배속으로 시작합니다."
     },
     "appearance": {
       "themeHeader": "테마",
@@ -1001,7 +1075,16 @@
       "folderPreviewsLabel": "폴더 미리보기 썸네일",
       "folderPreviewsHint": "폴더 타일에 내부 동영상의 모자이크를 표시합니다. 끄면 일반 폴더 아이콘을 사용합니다.",
       "miniPlayerLabel": "탐색 중에도 재생 유지",
-      "miniPlayerHint": "동영상 재생 중 라이브러리로 돌아가면 멈추지 않고 구석의 미니 플레이어로 축소되어 계속 재생됩니다(장치 구동도 유지)."
+      "miniPlayerHint": "동영상 재생 중 라이브러리로 돌아가면 멈추지 않고 구석의 미니 플레이어로 축소되어 계속 재생됩니다(장치 구동도 유지).",
+      "hwDecodeLabel": "하드웨어 비디오 디코딩",
+      "hwDecodeHint": "기본값은 켜짐입니다. 영상이 재생되지 않으면(검은 화면 또는 디코딩 오류, NVIDIA + Linux에서 흔함) 이 옵션을 꺼서 소프트웨어 디코딩을 사용하세요. 앱을 다시 시작하면 적용됩니다.",
+      "hwDecodeRestart": "비디오 디코딩 변경을 적용하려면 FunSync를 다시 시작하세요.",
+      "cardHeatmapLabel": "라이브러리 카드에 히트맵",
+      "cardHeatmapHint": "각 썸네일 아래에 스트로크 속도 히트맵을 표시합니다. 영상의 메인 스크립트를 사용합니다. 카드마다 스크립트를 읽으므로 기본값은 꺼짐입니다.",
+      "resumeProgressLabel": "재생목록에 재생 위치 표시",
+      "resumeProgressHint": "재생목록 카드와 행에 막대로 시청 위치를 표시합니다. 재생목록 재생에만 적용되며 메인 라이브러리에는 표시되지 않습니다.",
+      "hideDupesLabel": "중복 이름 숨기기",
+      "hideDupesHint": "여러 영상이 같은 파일 이름을 가질 때 하나만 표시합니다(같은 파일이 두 소스 폴더에 있는 경우 등). 스크립트가 있는 사본이 유지됩니다."
     },
     "data": {
       "backupHeader": "백업 및 복구",
@@ -1126,7 +1209,20 @@
     "noAttachments": "이 주제에 펀스크립트 첨부 파일이 없습니다",
     "downloadFailed": "다운로드 실패",
     "savedToast": "스크립트 저장됨: {name}",
-    "sessionExpired": "EroScripts 세션 만료됨 — EroScripts 패널을 통해 다시 로그인하세요"
+    "sessionExpired": "EroScripts 세션 만료됨 — EroScripts 패널을 통해 다시 로그인하세요",
+    "inline": {
+      "title": "EroScripts에서 스크립트 찾기",
+      "axesLine": "메인 + {count}개 축 ({list})",
+      "downloadAll": "모두 다운로드 (메인 + {count}개 축)",
+      "downloadMainOnly": "메인만",
+      "download": "다운로드 후 연결",
+      "downloading": "다운로드 중...",
+      "multiBadge": "멀티축",
+      "noAttachments": "이 게시물에는 다운로드할 스크립트가 없습니다",
+      "noMain": "축 파일만 있고 메인 스크립트가 없습니다",
+      "zipNote": "zip 첨부 {count}개는 아직 열 수 없습니다",
+      "loadingPost": "게시물 불러오는 중..."
+    }
   },
   "upNext": {
     "regionAria": "다음 항목",
@@ -1143,7 +1239,10 @@
     "endText": "이 {source}에 더 이상 동영상이 없습니다.",
     "endCta": "{source}로 돌아가기",
     "endSourceFallback": "목록",
-    "sourcePlaylist": "재생 목록"
+    "sourcePlaylist": "재생 목록",
+    "resumeFrom": "{time}부터",
+    "startOver": "처음부터",
+    "resumeGroupAria": "이어서 보기 또는 처음부터 보기"
   },
   "session": {
     "state": {
@@ -1383,7 +1482,8 @@
     "customKeysReservedWarn": "{key}는 에디터 명령에 예약되어 있습니다",
     "customKeysDuplicateWarn": "{key}는 이미 위치 {pos}에 바인딩되어 있습니다",
     "customKeysMidiHint": "MIDI 키보드 사용자는 보통 MIDI-키 변환 소프트웨어 (예: MIDIKey2Key) 와 함께 사용합니다.",
-    "customKeysHelpGroup": "사용자 정의 위치 키"
+    "customKeysHelpGroup": "사용자 정의 위치 키",
+    "popoutWindowTitle": "스크립트 편집기"
   },
   "connection": {
     "vibeHelp": {
@@ -1481,7 +1581,8 @@
       "badgeVibrate": "진동",
       "badgeRotate": "회전",
       "badgeEstim": "전기 자극",
-      "axisCustom": "사용자 정의 라우팅 따르기"
+      "axisCustom": "사용자 정의 라우팅 따르기",
+      "tuning": "출력 조정"
     },
     "tcode": {
       "l0Label": "스트로크 (메인)",
@@ -1614,6 +1715,8 @@
     "jumpStartEnd": "시작 / 끝으로 이동",
     "skipNextAction": "다음 동작으로 건너뛰기 (간격 건너뛰기)",
     "skipPrevAction": "이전 동작으로 건너뛰기",
+    "nextVideo": "대기열의 다음 영상",
+    "prevVideo": "대기열의 이전 영상",
     "volume5": "음량 ±5%",
     "muteToggle": "음소거 / 음소거 해제",
     "fullscreen": "전체 화면",
@@ -1683,5 +1786,19 @@
     "editorSelectLeftRightOfCursor": "재생 헤드 앞/뒤 모두 선택",
     "editorEqualize": "균등화 — 중간 액션을 시간상 균등 재배치",
     "editorMoveToPlayhead": "단일 선택 액션을 재생 헤드로 이동"
+  },
+  "orgasmConfig": {
+    "title": "오르가즘 스위치 설정",
+    "mainScript": "메인 스크립트:",
+    "hintMulti": "축 스크립트는 메인 스크립트와 길이가 같은 것이 좋습니다. 짧은 축은 마지막 위치를 유지합니다.",
+    "hintCustom": "라우팅 설정은 지정한 기기가 모두 연결되어 있을 때 재생됩니다. 하나라도 없으면 다시 연결될 때까지 단일 축으로 메인 스크립트를 재생합니다."
+  },
+  "resume": {
+    "title": "이어서 볼까요?",
+    "message": "{time}에서 멈췄습니다.",
+    "startOver": "처음부터",
+    "resumeAt": "{time}부터 재생",
+    "progressLabel": "{percent}% 시청함",
+    "resumedToast": "{time}부터 이어서 재생"
   }
 }

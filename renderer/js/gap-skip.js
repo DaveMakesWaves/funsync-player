@@ -139,13 +139,25 @@ export class GapSkipEngine {
     this._skipOrigin = timeMs;
     const skippedMs = targetMs - timeMs;
 
-    this.player.video.currentTime = targetMs / 1000;
-
+    // Tear the overlay down BEFORE issuing the seek, not after.
+    //
+    // Assigning `currentTime` starts a keyframe decode, and on a large file
+    // at fullscreen resolution that starves the renderer of frames for a
+    // noticeable stretch. With the hide queued AFTERWARDS, the DOM said
+    // "hidden" but the paint carrying that change had to wait behind the
+    // decode — so the button visibly sat there for a beat after the click,
+    // which read as the whole feature being slow to respond (Dave,
+    // 2026-08-06). Committing the DOM change first lets it land in a frame
+    // before the decoder takes over.
     this._lastSkipTime = performance.now();
     this._clearCountdown();
     this._hideOverlay();
     this._currentGap = null;
 
+    this.player.video.currentTime = targetMs / 1000;
+
+    // Fires last either way — it builds a toast, which is more main-thread
+    // work that shouldn't sit between the click and the overlay clearing.
     if (this.onSkipped) this.onSkipped(skippedMs);
 
     return { skippedMs };

@@ -101,6 +101,26 @@ export class RemoteSyncClient {
     this._send({ type: 'switch-variant', label });
   }
 
+  /**
+   * Orgasm Switch remote trigger (F2). Hold mode: active=true on press,
+   * false on release. Toggle mode: send active=true per tap — the
+   * desktop's mode handler flips start/stop itself (single source of
+   * truth; the `orgasm-state` broadcast keeps the button honest).
+   */
+  sendOrgasmHold(active) {
+    this._send({ type: 'orgasm-hold', active: !!active });
+  }
+
+  /**
+   * Per-device offset adjustment from the phone (F4). `device` is the
+   * kind key the desktop's device-status list uses (handy/buttplug/
+   * tcode/autoblow); ms is clamped desktop-side (untrusted LAN input).
+   */
+  sendSetOffset(device, ms) {
+    if (typeof device !== 'string' || !device) return;
+    this._send({ type: 'set-offset', device, ms: Math.round(Number(ms) || 0) });
+  }
+
   /** Cleanly signal disconnect and tear down. */
   stop() {
     this._detachVideoHandlers();

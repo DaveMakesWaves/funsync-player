@@ -52,6 +52,8 @@ export class UpNextCard {
     onHoverEnter,
     onHoverLeave,
     onBackToSource,
+    getResumeChoice,
+    onStartOver,
   }) {
     this._el = element;
     this._library = library || null;
@@ -61,6 +63,14 @@ export class UpNextCard {
     this.onHoverEnter = onHoverEnter || null;
     this.onHoverLeave = onHoverLeave || null;
     this.onBackToSource = onBackToSource || null;
+    // Resume choice (playlists only — the provider returns null everywhere
+    // else). Returns `{ label }` for a video with a saved position, which
+    // turns the card into a per-video Resume / Start over decision instead
+    // of silently resuming. Callback rather than a value so the SAME card
+    // class serves the main window (reads settings) and the pop-out (reads
+    // the relayed label) without either knowing about the other.
+    this.getResumeChoice = getResumeChoice || null;
+    this.onStartOver = onStartOver || null;
 
     this._countdownLabelEl = null;
     this._currentPath = null;
@@ -130,6 +140,13 @@ export class UpNextCard {
     }
 
     const meta = this._resolveMeta(nextPath);
+    // Playlists only, and only when this video actually has a saved
+    // position. Everywhere else the row is absent and the card is exactly
+    // what it was before.
+    let resumeChoice = null;
+    try {
+      resumeChoice = this.getResumeChoice ? this.getResumeChoice(nextPath) : null;
+    } catch { resumeChoice = null; }
 
     this._el.innerHTML = `
       <div class="up-next__header">
@@ -152,6 +169,11 @@ export class UpNextCard {
           </div>
         </div>
       </div>
+      ${resumeChoice ? `
+      <div class="up-next__resume" role="group" aria-label="${_esc(t('upNext.resumeGroupAria'))}">
+        <button type="button" class="up-next__resume-btn up-next__resume-btn--primary" data-resume="resume">${_esc(t('upNext.resumeFrom', { time: resumeChoice.label }))}</button>
+        <button type="button" class="up-next__resume-btn" data-resume="start-over">${_esc(t('upNext.startOver'))}</button>
+      </div>` : ''}
     `;
 
     // Mount Lucide icons after innerHTML reset.
@@ -177,6 +199,25 @@ export class UpNextCard {
         if (this.onPlayNext) this.onPlayNext();
       }
     });
+
+    // Resume / Start over. Either one plays IMMEDIATELY with that choice
+    // rather than only setting a preference for when the countdown expires
+    // — the user has made the decision, so making them wait out the timer
+    // would be a second, pointless step. Letting the countdown run out
+    // keeps the default (resume), matching every other flow-through
+    // advance.
+    if (resumeChoice) {
+      for (const btn of this._el.querySelectorAll('.up-next__resume-btn')) {
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (btn.dataset.resume === 'start-over') {
+            if (this.onStartOver) this.onStartOver();
+          } else if (this.onPlayNext) {
+            this.onPlayNext();
+          }
+        });
+      }
+    }
 
     // Lazy-load thumbnail (skeleton stays until then).
     this._loadThumbnail(nextPath);

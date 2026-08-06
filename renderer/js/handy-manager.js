@@ -21,6 +21,12 @@ export class HandyManager {
     this._deviceInfo = null;
     this._syncQuality = null;
     this._lastCloudUrl = null; // last uploaded script URL (for re-setup after mode switch)
+    // Tracks the device's current SDK mode (0=HAMP, 1=HSSP, 2=HDSP) so hdspMove
+    // can lazily switch INTO HDSP before its first send. Without this, driving
+    // HDSP straight after an hsspStop (e.g. the Orgasm Switch) left the device
+    // in HSSP mode with the HDSP commands ignored — "it just stops the device".
+    this._mode = null;
+    this._hdspErrorLogged = false;
 
     // Cloud-reachability health check. The SDK's 'disconnect' event only
     // fires for client-side socket drops — it does NOT fire when the
@@ -187,7 +193,9 @@ export class HandyManager {
     try {
       const result = await this._handy.setScript(scriptUrl);
       // HSSPSetupResult: 0 = USING_CACHED, 1 = DOWNLOADED
-      return result?.result === 0 || result?.result === 1;
+      const ok = result?.result === 0 || result?.result === 1;
+      if (ok) this._mode = 1; // setScript auto-switches the device to HSSP mode
+      return ok;
     } catch (err) {
       this._emitError(`Script setup failed: ${err.message}`);
       return false;
@@ -221,6 +229,7 @@ export class HandyManager {
       const ok = result?.result === 0 || result?.result === 1;
 
       if (ok) {
+        this._mode = 1; // setScript auto-switches the device to HSSP mode
         const state = this._handy.getState();
         console.log('[Handy] After setScript — mode:', state?.mode, 'scriptSet:', state?.hssp?.scriptSet);
       }
@@ -233,6 +242,24 @@ export class HandyManager {
   }
 
   /**
+   * Upload funscript JSON to the cloud and return its URL WITHOUT setting it on
+   * the device (so it doesn't disturb the currently-playing main script). Used
+   * to pre-cache the Orgasm Switch's finisher script, which is then set + looped
+   * via HSSP on activate. Returns null on failure.
+   * @param {string} funscriptContent - Raw funscript JSON string
+   * @returns {Promise<string|null>}
+   */
+  async uploadScriptOnly(funscriptContent) {
+    if (!this._connected || !HandySDK?.uploadDataToServer) return null;
+    try {
+      return await HandySDK.uploadDataToServer(funscriptContent);
+    } catch (err) {
+      console.warn('[Handy] Orgasm script upload failed:', err.message);
+      return null;
+    }
+  }
+
+  /**
    * Start HSSP playback at a given time position.
    * @param {number} startTimeMs - Video current time in milliseconds
    * @returns {boolean} True if play started
@@ -240,18 +267,38 @@ export class HandyManager {
   async hsspPlay(startTimeMs = 0) {
     if (!this._handy || !this._connected) return false;
 
+    const est = HandySDK?.getEstimatedServerTime
+      ? HandySDK.getEstimatedServerTime()
+      : Date.now();
+
     try {
       // Check SDK internal state before calling
       const state = this._handy.getState();
       console.log(`[Handy] hsspPlay(${startTimeMs}) — mode: ${state?.mode}, scriptSet: ${state?.hssp?.scriptSet}`);
 
-      const est = HandySDK?.getEstimatedServerTime
-        ? HandySDK.getEstimatedServerTime()
-        : Date.now();
       const result = await this._handy.hsspPlay(startTimeMs, est);
       console.log('[Handy] hsspPlay result:', JSON.stringify(result));
       return result?.result === 0;
     } catch (err) {
+      // Self-heal: HDSP (Orgasm Switch, scrub preview) clears HSSP's scriptSet,
+      // so resuming can fail with "Script set is required". Re-set the cached
+      // cloud script and retry once — this is the reliable fix for the device
+      // going silent after the Orgasm Switch releases.
+      if (/script\s*set\s*is\s*required/i.test(err?.message || '') && this._lastCloudUrl) {
+        console.warn('[Handy] hsspPlay: scriptSet lost — re-setting cached script and retrying');
+        try {
+          const r = await this._handy.setScript(this._lastCloudUrl);
+          if (r?.result === 0 || r?.result === 1) {
+            this._mode = 1;
+            const result = await this._handy.hsspPlay(startTimeMs, est);
+            console.log('[Handy] hsspPlay retry result:', JSON.stringify(result));
+            return result?.result === 0;
+          }
+        } catch (err2) {
+          this._emitError(`HSSP re-setScript+play failed: ${err2.message}`);
+          return false;
+        }
+      }
       this._emitError(`HSSP play failed: ${err.message}`);
       return false;
     }
@@ -351,6 +398,7 @@ export class HandyManager {
 
     try {
       await this._handy.setMode(0); // HAMP mode
+      this._mode = 0;
       await this._handy.setHampVelocity(velocity);
       await this._handy.hampPlay();
     } catch (err) {
@@ -386,6 +434,28 @@ export class HandyManager {
   }
 
   /**
+   * Explicitly switch the device into HDSP mode (2) and remember it. Used to
+   * SEQUENCE the HSSP→HDSP handoff for the Orgasm Switch: await hsspStop, THEN
+   * await enterHdsp, THEN start driving. Without this ordering an un-awaited
+   * hsspStop could land after the first hdsp and silently re-stop the device
+   * (and the _mode cache would then skip re-switching, so it stays dead).
+   * @returns {boolean} true if the mode switch succeeded
+   */
+  async enterHdsp() {
+    if (!this._handy || !this._connected) return false;
+    try {
+      await this._handy.setMode(2);
+      this._mode = 2;
+      console.log('[Handy] Entered HDSP mode (2)');
+      return true;
+    } catch (err) {
+      this._mode = null;
+      console.warn('[Handy] enterHdsp (setMode 2) failed:', err.message);
+      return false;
+    }
+  }
+
+  /**
    * Set HDSP (direct position) — move device to a specific position immediately.
    * Useful for scrub preview during seeking.
    * @param {number} position - Target position 0–100
@@ -395,11 +465,27 @@ export class HandyManager {
     if (!this._handy || !this._connected) return;
 
     try {
+      // Ensure the device is actually in HDSP mode (2) before sending. The SDK
+      // does NOT reliably auto-switch when we come straight from a stopped-HSSP
+      // state, so an explicit, awaited setMode is required — otherwise the hdsp
+      // commands are ignored and the device just sits stopped. Only switched on
+      // a real transition (tracked by _mode), so steady-state ticks stay cheap.
+      if (this._mode !== 2) {
+        await this._handy.setMode(2);
+        this._mode = 2;
+      }
       // hdsp(position, speed, positionType, speedType, stopOnTarget, immediateResponse)
       await this._handy.hdsp(position, durationMs, 'percent', 'time', true, true);
+      this._hdspErrorLogged = false;
     } catch (err) {
-      // HDSP errors are non-critical, don't spam the user
-      console.debug('HDSP move error:', err.message);
+      // Force a mode re-check next tick. Log once per failure streak at WARN so
+      // it reaches the log file (renderer console is forwarded; debug is not) —
+      // this path was previously undiagnosable when it silently failed.
+      this._mode = null;
+      if (!this._hdspErrorLogged) {
+        console.warn('[Handy] HDSP move failed (device may not have entered HDSP mode):', err.message);
+        this._hdspErrorLogged = true;
+      }
     }
   }
 

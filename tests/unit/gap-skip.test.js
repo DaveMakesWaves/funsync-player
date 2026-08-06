@@ -511,3 +511,59 @@ describe('GapSkipEngine', () => {
     });
   });
 });
+
+// --- Overlay must clear before the seek is issued (Dave, 2026-08-06) ---
+//
+// The hide used to run AFTER `currentTime` was assigned. The DOM said
+// hidden, but the paint carrying that change queued behind the keyframe
+// decode the seek had just started — so at fullscreen resolution the button
+// visibly lingered after the click and the whole feature felt unresponsive.
+describe('GapSkipEngine skip ordering', () => {
+  function setup() {
+    const player = mockVideoPlayer(2, false, 120);
+    const actions = makeActions([0, 500, 20000, 20500]);
+    const engine = new GapSkipEngine({
+      videoPlayer: player,
+      funscriptEngine: mockFunscriptEngine(actions),
+    });
+    engine._actions = actions;
+    return { player, engine };
+  }
+
+  it('hides the overlay BEFORE assigning currentTime', () => {
+    const { player, engine } = setup();
+    const order = [];
+    engine.onHideOverlay = () => order.push('hide');
+
+    let ct = 2;
+    Object.defineProperty(player.video, 'currentTime', {
+      get: () => ct,
+      set: (v) => { ct = v; order.push('seek'); },
+      configurable: true,
+    });
+
+    engine.skipToNextAction();
+
+    expect(order).toEqual(['hide', 'seek']);
+  });
+
+  it('fires onSkipped after the overlay is cleared', () => {
+    // The callback builds a toast — that main-thread work must not sit
+    // between the click and the button disappearing.
+    const { engine } = setup();
+    const order = [];
+    engine.onHideOverlay = () => order.push('hide');
+    engine.onSkipped = () => order.push('skipped');
+
+    engine.skipToNextAction();
+
+    expect(order).toEqual(['hide', 'skipped']);
+  });
+
+  it('still performs the seek', () => {
+    const { player, engine } = setup();
+    const result = engine.skipToNextAction();
+    expect(result.skippedMs).toBeGreaterThan(0);
+    expect(player.video.currentTime).toBeCloseTo(18.5, 1);
+  });
+});

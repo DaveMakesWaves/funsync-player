@@ -142,6 +142,28 @@ describe('TCodeManager — sendAxes', () => {
     mgr.stop();
     expect(window.funsync.tcodeSend).toHaveBeenCalledWith('DSTOP\n');
   });
+
+  it('serial stop sends ONLY DSTOP — no violent 50% recenter frame', () => {
+    // Regression (OSR2+ report): a bare neutral-50% frame after DSTOP made the
+    // device slam to center on pause. Serial firmware halts in place on DSTOP,
+    // so nothing else must be sent.
+    mgr.stop(); // mgr connected via 'COM3' (serial) in beforeEach
+    const sends = window.funsync.tcodeSend.mock.calls.map((c) => c[0]);
+    expect(sends).toEqual(['DSTOP\n']);
+    expect(sends.some((s) => s.includes('500'))).toBe(false);
+  });
+
+  it('non-serial (ws) stop still sends the neutral frame for MFP consumers', async () => {
+    vi.clearAllMocks();
+    window.funsync.tcodeConnect.mockResolvedValue({ success: true });
+    const wsMgr = new TCodeManager();
+    await wsMgr.connect('websocket', { url: 'ws://restim.local:81' });
+    wsMgr.stop();
+    const sends = window.funsync.tcodeSend.mock.calls.map((c) => c[0]);
+    expect(sends[0]).toBe('DSTOP\n');
+    // restim/Howl need explicit axis values → the neutral frame is preserved.
+    expect(sends.some((s) => s.includes('L0500'))).toBe(true);
+  });
 });
 
 // --- TCodeSync Tests ---
@@ -202,8 +224,8 @@ describe('TCodeSync', () => {
   });
 
   describe('setUpdateRate', () => {
-    it('defaults to ~25Hz (40ms tick)', () => {
-      expect(sync._tickIntervalMs).toBe(40);
+    it('defaults to ~60Hz (17ms tick)', () => {
+      expect(sync._tickIntervalMs).toBe(Math.round(1000 / 60));
     });
 
     it('converts Hz to a tick interval', () => {
@@ -220,9 +242,9 @@ describe('TCodeSync', () => {
       expect(sync._tickIntervalMs).toBe(Math.round(1000 / 15)); // floor
     });
 
-    it('coerces garbage to the 25Hz default', () => {
+    it('coerces garbage to the 60Hz default', () => {
       sync.setUpdateRate('nonsense');
-      expect(sync._tickIntervalMs).toBe(40);
+      expect(sync._tickIntervalMs).toBe(Math.round(1000 / 60));
     });
 
     it('keeps the scheduler live (restarted) when the rate changes mid-run', () => {
@@ -254,31 +276,57 @@ describe('TCodeSync', () => {
     expect(axes.L0).toBeLessThanOrEqual(100);
   });
 
-  it('sends a positive interval (I-suffix) so the device paces the move', () => {
-    // Regression: bare position commands made fast strokes under-travel on
-    // wired OSR/SR6. The tick must pass a move interval to sendAxes.
+  it('sends a per-axis interval (I-suffix) so the device paces the move', () => {
+    // The tick must pass a move interval per axis (3rd sendAxes arg) so the
+    // firmware interpolates instead of snapping.
     sync.start();
     sync.player.currentTime = 0.5;
     sync.player.paused = false;
     sync._lastSendTime = 0;
     sync._tick();
     expect(tcode.sendAxes).toHaveBeenCalled();
-    const interval = tcode.sendAxes.mock.calls[0][1];
-    expect(interval).toBeGreaterThan(0);
-    expect(interval).toBeLessThanOrEqual(150); // capped (MOVE_INTERVAL_CAP_MS)
+    const axisIntervals = tcode.sendAxes.mock.calls[0][2];
+    expect(axisIntervals.L0).toBeGreaterThan(0);
   });
 
-  it('caps the interval after a long gap instead of crawling', () => {
-    // A stale _lastSendTime (post-seek/pause) must not produce a multi-second
-    // interval that makes the device creep toward the target.
+  it('steady-state interval tracks the time to the next keyframe', () => {
+    // After the first-send snap, the move interval should be the actual time to
+    // the next keyframe (keyframe-driven), NOT a fixed tick-length window.
     sync.start();
-    sync.player.currentTime = 0.5;
     sync.player.paused = false;
-    sync._lastSendTime = performance.now() - 10000; // 10s stale gap
+    // First tick consumes the post-start snap (short, one-tick interval).
+    sync.player.currentTime = 0.2; // 200ms — inside [0,1000]
     sync._tick();
-    expect(tcode.sendAxes).toHaveBeenCalled();
-    const interval = tcode.sendAxes.mock.calls[0][1];
-    expect(interval).toBeLessThanOrEqual(150);
+    // Second tick, well before the next keyframe at 1000ms.
+    sync.player.currentTime = 0.3; // 300ms → 700ms to next keyframe
+    sync._tick();
+    const call = tcode.sendAxes.mock.calls.at(-1);
+    expect(call[2].L0).toBeGreaterThan(150); // far bigger than any old cap
+    expect(call[2].L0).toBeCloseTo(700, -1); // ≈ 1000 - 300
+  });
+
+  it('preserves fast low-amplitude "vibration" peaks (evicol/SR6 regression)', () => {
+    // Fast oscillation: peaks/troughs every 20ms. The keyframe-driven output
+    // must send the actual peak position (100), not an aliased mid-value.
+    const vib = mockFunscript([
+      { at: 0, pos: 0 },
+      { at: 20, pos: 100 },
+      { at: 40, pos: 0 },
+      { at: 60, pos: 100 },
+      { at: 80, pos: 0 },
+    ]);
+    sync = new TCodeSync({ videoPlayer: mockPlayer(), tcodeManager: tcode, funscriptEngine: vib });
+    sync.start();
+    sync.player.paused = false;
+    // First tick at t=0 consumes the snap (interpolated ~0).
+    sync.player.currentTime = 0;
+    sync._tick();
+    // Now just inside [0,20] heading to the pos=100 peak — must target 100.
+    sync.player.currentTime = 0.001; // 1ms
+    sync._tick();
+    const call = tcode.sendAxes.mock.calls.at(-1);
+    expect(call[0].L0).toBeCloseTo(100, 5); // the peak reaches the device
+    expect(call[2].L0).toBeGreaterThan(0);  // over a short (~19ms) interval
   });
 
   it('does not send when disconnected', () => {
@@ -291,12 +339,16 @@ describe('TCodeSync', () => {
     expect(tcode.sendAxes).not.toHaveBeenCalled();
   });
 
-  it('rate limits sends', () => {
+  it('suppresses re-sending an unchanged target (one send per keyframe)', () => {
+    // Within a single keyframe interval the target is the same endpoint, so
+    // after it is sent once, repeat ticks at the same time must not re-send.
     sync.start();
-    sync.player.currentTime = 0.5;
     sync.player.paused = false;
-    sync._lastSendTime = performance.now(); // just sent
-    sync._tick();
+    sync.player.currentTime = 0.3; // 300ms, inside [0,1000]
+    sync._tick(); // first-send snap
+    sync._tick(); // heads to the 1000ms keyframe → sends target
+    tcode.sendAxes.mockClear();
+    sync._tick(); // same time, same target → suppressed
     expect(tcode.sendAxes).not.toHaveBeenCalled();
   });
 });

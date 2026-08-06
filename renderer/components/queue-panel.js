@@ -99,6 +99,23 @@ export class QueuePanel {
     // Re-render on locale change so section labels update without a
     // panel re-instantiation.
     eventBus.on('language:changed', () => this._render());
+
+    // Fullscreen reparenting — same fix the connection panel carries.
+    // The panel mounts at top level (sibling of the view containers) so it
+    // can slide in over ANY view, but the Fullscreen API only paints the
+    // fullscreen element and its descendants. With the player fullscreened
+    // the panel sits outside that subtree: `hidden` clears and the open
+    // class applies, so the TOGGLE animates, but nothing is ever painted
+    // (Dave 2026-08-04: "the toggle button moves but the queue doesn't
+    // appear"). Move it into whichever element is fullscreen on every
+    // change, and back to #app on exit. Idempotent — re-appending to the
+    // same parent is a no-op.
+    document.addEventListener('fullscreenchange', () => {
+      const target = document.fullscreenElement || document.getElementById('app');
+      if (target && this._el.parentElement !== target) {
+        target.appendChild(this._el);
+      }
+    });
   }
 
   // --- Public API ---

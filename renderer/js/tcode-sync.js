@@ -11,19 +11,26 @@ import {
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from './device-transform-stack.js';
 
-const TICK_INTERVAL_MS = 40;     // ~25Hz — default output rate (user-tunable)
+// Poll/detect rate. This is NOT the number of moves sent — moves are emitted
+// per funscript keyframe (see _tick). It's how often we sample the clock to
+// catch the next keyframe crossing, so it caps the fastest motion we can
+// represent (60Hz → keyframes as close as ~17ms, i.e. vibration up to ~30Hz).
+// Default 60Hz: fast "vibration" script sections (high-speed, low-distance
+// moves) were flattened at the old 25Hz because the tick aliased them below
+// Nyquist. Higher = catches faster keyframes; cheap at 115200 baud.
+const TICK_INTERVAL_MS = Math.round(1000 / 60);  // ~60Hz default
 const MIN_UPDATE_HZ = 15;        // clamp floor for the tunable rate
 const MAX_UPDATE_HZ = 60;        // clamp ceiling (well within 115200 baud)
-// Floor for the interpolation window to the NEXT keyframe (target/speed
-// computation) — independent of the output rate. Keeps a 0-duration move
-// from producing a divide-by-zero / instant snap.
-const MIN_SEND_INTERVAL_MS = 50;
+// Treat a next-keyframe further away than this as an idle gap — don't drive
+// the device toward it (it'd crawl for seconds). Playback resumes driving
+// when keyframes get dense again.
 const MAX_GAP_MS = 5000;
+// Suppress re-sending a target that hasn't moved (serial economy). Also the
+// per-keyframe send gate: one send per keyframe, when the target changes.
 const MIN_POS_DELTA = 0.5;
-// Ceiling for the per-move TCode interval (I-suffix). A stale gap
-// (first send, post-seek/pause) must not make the device crawl toward
-// the target over seconds — cap it so it catches up within ~one frame.
-const MOVE_INTERVAL_CAP_MS = 150;
+// Floor for a per-move interval (I-suffix). Keeps a fast keyframe from being
+// told to move in ~0ms (jitter / divide issues) without slowing it materially.
+const MIN_MOVE_MS = 10;
 
 export class TCodeSync {
   /**
@@ -39,10 +46,10 @@ export class TCodeSync {
 
     this._active = false;
     this._intervalId = null;
-    // Output rate (ms per tick). User-tunable via setUpdateRate — higher
-    // rates smooth wired OSR2+/SR6 motion (more points per stroke). Also used
-    // as the per-move interval floor so the TCode I-suffix tracks the send
-    // cadence at any rate (a fixed floor above the tick caused under-travel).
+    // Poll/detect interval (ms). User-tunable via setUpdateRate — higher rates
+    // catch faster keyframe crossings (fast vibration sections survive). Moves
+    // are emitted per keyframe in _tick, so this is a sampling ceiling, not the
+    // send cadence. Also the first-send snap interval after start/seek.
     this._tickIntervalMs = TICK_INTERVAL_MS;
 
     // Main axis (L0) tracking
@@ -289,13 +296,14 @@ export class TCodeSync {
   // --- Scheduler ---
 
   /**
-   * Set the T-Code output rate in Hz (default 25). Higher rates give smoother
-   * motion on wired OSR2+/SR6 — each fast stroke gets more points — at a
-   * negligible serial cost (a few KB/s at 115200 baud). Clamped to 15–60 Hz.
-   * Restarts the scheduler live if currently syncing.
+   * Set the T-Code poll/detect rate in Hz (default 60). Higher rates catch
+   * faster keyframe crossings, so fast "vibration" script sections survive
+   * (60Hz represents motion up to ~30Hz). Moves are still emitted per keyframe,
+   * so serial cost stays low. Clamped to 15–60 Hz. Restarts the scheduler live
+   * if currently syncing.
    */
   setUpdateRate(hz) {
-    const clamped = Math.max(MIN_UPDATE_HZ, Math.min(MAX_UPDATE_HZ, Number(hz) || 25));
+    const clamped = Math.max(MIN_UPDATE_HZ, Math.min(MAX_UPDATE_HZ, Number(hz) || 60));
     this._tickIntervalMs = Math.round(1000 / clamped);
     if (this._intervalId) {
       this._stopScheduler();
@@ -318,51 +326,67 @@ export class TCodeSync {
     }
   }
 
+  /** Clamp a per-move interval to the valid [MIN_MOVE_MS, MAX_GAP_MS] window. */
+  _clampMove(ms) {
+    return Math.round(Math.max(MIN_MOVE_MS, Math.min(MAX_GAP_MS, ms)));
+  }
+
   /**
-   * Main tick — compute positions for all axes and send as a single TCode command.
+   * Main tick — KEYFRAME-DRIVEN output (matches XTEngine's model, the fix for
+   * flattened "vibration" sections on OSR2/SR6).
+   *
+   * Instead of resampling the interpolated position at a fixed rate — which
+   * aliased fast, low-distance script motion below Nyquist and rounded off the
+   * peaks — each axis aims at its NEXT keyframe's actual position over the exact
+   * time to reach it (`L0<pos>I<time-to-next>`), letting the device firmware
+   * interpolate. One send per keyframe (gated by MIN_POS_DELTA), so fast peaks
+   * survive. The scheduler still polls at _tickIntervalMs; that only bounds how
+   * finely we can catch keyframe crossings, not how the move is shaped.
+   *
+   * On the first send after start/seek (_lastSentPos < 0) we instead snap to the
+   * current interpolated position over one tick, so the device lands correctly
+   * before keyframe-driven motion resumes (avoids crawling toward a far keyframe
+   * from a stale post-seek position).
    */
   _tick() {
     if (!this.tcode.connected) return;
 
     const now = performance.now();
-    // Rate-limit sends to the configured output rate. Use a fraction of the
-    // tick so scheduler jitter (a tick firing a hair early) doesn't drop a
-    // send, while a manual/extra _tick() call within the window is still
-    // suppressed. The scheduler itself paces at this._tickIntervalMs.
-    if (now - this._lastSendTime < this._tickIntervalMs * 0.5) return;
-
     const timeMs = this._currentTimeMs();
     const axisValues = {};
-    let durationMs = MIN_SEND_INTERVAL_MS;
+    const axisIntervals = {}; // per-axis I-suffix (time to that axis's next keyframe)
 
     // Main axis (L0)
     if (this._actions && this._actions.length >= 2 && this.isAxisEnabled('L0')) {
-      // Catch up
+      // Catch up to the interval containing timeMs.
       while (this._lastActionIndex + 1 < this._actions.length &&
              this._actions[this._lastActionIndex + 1].at <= timeMs) {
         this._lastActionIndex++;
       }
 
-      if (this._lastActionIndex >= 0 && this._lastActionIndex + 1 < this._actions.length) {
-        const nextAction = this._actions[this._lastActionIndex + 1];
-        durationMs = Math.max(MIN_SEND_INTERVAL_MS, nextAction.at - timeMs);
+      const i = this._lastActionIndex;
+      if (i >= 0 && i + 1 < this._actions.length) {
+        const next = this._actions[i + 1];
+        const remaining = next.at - timeMs; // time to reach the next keyframe
 
-        if (durationMs <= MAX_GAP_MS) {
-          let targetPos = this._interpolator(this._actions, timeMs);
-          if (targetPos !== null) {
-            // Stack order: extender → invert → speed-limit → range.
-            // Extender stretches before anything else so subsequent
-            // transforms operate on a 0-100-normalised value.
-            targetPos = applyExtender(
-              targetPos, this._naturalRange,
+        if (remaining > 0 && remaining <= MAX_GAP_MS) {
+          const firstSend = this._lastSentPos < 0;
+          // Steady state: target = the next keyframe's real position (so peaks
+          // and troughs reach the device intact). First send: snap to the
+          // current interpolated position over one tick.
+          let rawPos = firstSend ? this._interpolator(this._actions, timeMs) : next.pos;
+          const moveMs = firstSend ? this._tickIntervalMs : remaining;
+
+          if (rawPos !== null) {
+            // Stack order: extender → invert → speed-limit → range → cutoff.
+            let targetPos = applyExtender(
+              rawPos, this._naturalRange,
               this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
             );
-            // Invert first, BEFORE speed-limit + range. Velocity magnitude
-            // is unchanged by direction-flip so the speed-limit clamp
-            // still produces the same physical-stroke-rate limit; range
-            // then operates on the inverted-then-clamped value.
             targetPos = applyInvert(targetPos, this.isAxisInverted('L0'));
 
+            // Optional damping (off by default) — a user-enabled velocity clamp,
+            // parity with XTEngine's damping. Left off, fast motion is untouched.
             if (this._speedLimit > 0 && this._lastSentPos >= 0) {
               const deltaMs = now - this._lastSendTime;
               targetPos = applySpeedLimit(targetPos, this._lastSentPos, deltaMs, this._speedLimit);
@@ -370,11 +394,11 @@ export class TCodeSync {
 
             const range = this.getAxisRange('L0');
             targetPos = range.min + (targetPos / 100) * (range.max - range.min);
-            // Hard floor/ceiling clamp after the remap (no-op at defaults).
             targetPos = applyCutoff(targetPos, this._axisCutoff.get('L0'));
 
             if (this._lastSentPos < 0 || Math.abs(targetPos - this._lastSentPos) >= MIN_POS_DELTA) {
               axisValues.L0 = targetPos;
+              axisIntervals.L0 = this._clampMove(moveMs);
               this._lastSentPos = targetPos;
             }
           }
@@ -382,12 +406,11 @@ export class TCodeSync {
       }
     }
 
-    // Companion axes
+    // Companion axes — same keyframe-driven model, each with its own interval.
     for (const [tcode, state] of this._axisActions) {
       if (!this.isAxisEnabled(tcode)) continue;
       if (!state.actions || state.actions.length < 2) continue;
 
-      // Catch up
       while (state.index + 1 < state.actions.length &&
              state.actions[state.index + 1].at <= timeMs) {
         state.index++;
@@ -395,50 +418,43 @@ export class TCodeSync {
 
       if (state.index < 0 || state.index + 1 >= state.actions.length) continue;
 
-      const action = state.actions[state.index];
-      const nextAction = state.actions[state.index + 1];
-      const axisDur = Math.max(MIN_SEND_INTERVAL_MS, nextAction.at - timeMs);
-      if (axisDur > MAX_GAP_MS) continue;
+      const cur = state.actions[state.index];
+      const next = state.actions[state.index + 1];
+      const remaining = next.at - timeMs;
+      if (remaining <= 0 || remaining > MAX_GAP_MS) continue;
 
-      // Linear interpolation
-      const span = nextAction.at - action.at;
-      const t = span > 0 ? (timeMs - action.at) / span : 0;
-      let value = Math.max(0, Math.min(100, action.pos + t * (nextAction.pos - action.pos)));
+      const firstSend = state.lastSentValue < 0;
+      let rawVal, moveMs;
+      if (firstSend) {
+        // Snap to the current interpolated position over one tick.
+        const span = next.at - cur.at;
+        const t = span > 0 ? (timeMs - cur.at) / span : 0;
+        rawVal = Math.max(0, Math.min(100, cur.pos + t * (next.pos - cur.pos)));
+        moveMs = this._tickIntervalMs;
+      } else {
+        rawVal = next.pos;
+        moveMs = remaining;
+      }
 
-      // Extender → invert → range, matching L0's stack order so every
-      // axis transforms identically. Per-axis natural range cached on
-      // the axis state entry by setAxisActions.
-      value = applyExtender(
-        value, state.naturalRange,
+      // Extender → invert → range → cutoff, matching L0's stack order.
+      let value = applyExtender(
+        rawVal, state.naturalRange,
         this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
       );
       value = applyInvert(value, this.isAxisInverted(tcode));
-
-      // Apply range, then hard cutoff clamp (no-op at defaults).
       const range = this.getAxisRange(tcode);
       value = range.min + (value / 100) * (range.max - range.min);
       value = applyCutoff(value, this._axisCutoff.get(tcode));
 
       if (state.lastSentValue < 0 || Math.abs(value - state.lastSentValue) >= MIN_POS_DELTA) {
         axisValues[tcode] = value;
+        axisIntervals[tcode] = this._clampMove(moveMs);
         state.lastSentValue = value;
       }
     }
 
-    // Only send if there are changed values. Attach an interval (I-suffix)
-    // so the firmware paces each move to the target over roughly one update
-    // period instead of snapping. Bare position commands made fast strokes
-    // under-travel on wired OSR/SR6: at ~20Hz a fast stroke gets only a few
-    // points, and with no timing hint the device rounds off the peaks it's
-    // given. Use the realized send period (self-correcting if the cadence
-    // drifts), floored at the rate-limit and capped so a stale gap doesn't
-    // make the device crawl.
     if (Object.keys(axisValues).length > 0) {
-      const sendDelta = this._lastSendTime > 0 ? (now - this._lastSendTime) : this._tickIntervalMs;
-      const moveInterval = Math.round(
-        Math.min(MOVE_INTERVAL_CAP_MS, Math.max(this._tickIntervalMs, sendDelta)),
-      );
-      this.tcode.sendAxes(axisValues, moveInterval);
+      this.tcode.sendAxes(axisValues, undefined, axisIntervals);
       this._lastSendTime = now;
     }
   }

@@ -108,6 +108,7 @@ jobs:
             dist/*.exe
             dist/*.AppImage
             dist/*.yml
+            dist/*.blockmap
 
   release:
     needs: build
@@ -123,7 +124,11 @@ jobs:
         with:
           files: |
             artifacts/funsync-win/*.exe
+            artifacts/funsync-win/*.blockmap
+            artifacts/funsync-win/latest.yml
             artifacts/funsync-linux/*.AppImage
+            artifacts/funsync-linux/*.blockmap
+            artifacts/funsync-linux/latest-linux.yml
           draft: false
           # Auto-detect pre-release from the tag name. Any semver suffix
           # (e.g. v0.8.0-experimental.0, v1.0.0-rc.1) marks the GitHub

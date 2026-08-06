@@ -237,4 +237,47 @@ describe('SyncEngine', () => {
       await vi.waitFor(() => expect(onStatus).toHaveBeenCalledWith('synced'));
     });
   });
+
+  // Re-anchor after the Orgasm Switch releases. `start()` only anchors when
+  // player.paused reads false at that instant, which is unreliable straight
+  // after a release (in a web-remote session the proxy can still report
+  // paused while the phone buffers). The logs showed "Sync engine started"
+  // with no following hsspPlay, leaving the Handy where the finisher left
+  // it. Buttplug never showed this because its per-tick engine re-reads
+  // currentTime every frame.
+  describe('resync — forced re-anchor', () => {
+    it('anchors at the CURRENT player time even when start() skipped it', async () => {
+      engine._scriptReady = true;
+      engine.start();
+      handy.hsspPlay.mockClear();
+      player.video.currentTime = 42;
+      await engine.resync();
+      expect(handy.hsspPlay).toHaveBeenCalledWith(42000);
+    });
+
+    it('does nothing when the engine is stopped', async () => {
+      engine._scriptReady = true;
+      engine.stop();
+      handy.hsspPlay.mockClear();
+      expect(await engine.resync()).toBe(false);
+      expect(handy.hsspPlay).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when no script is set up', async () => {
+      engine._scriptReady = false;
+      engine.start();
+      handy.hsspPlay.mockClear();
+      expect(await engine.resync()).toBe(false);
+      expect(handy.hsspPlay).not.toHaveBeenCalled();
+    });
+
+    it('does nothing when the Handy is disconnected', async () => {
+      engine._scriptReady = true;
+      engine.start();
+      handy.connected = false;
+      handy.hsspPlay.mockClear();
+      expect(await engine.resync()).toBe(false);
+      expect(handy.hsspPlay).not.toHaveBeenCalled();
+    });
+  });
 });

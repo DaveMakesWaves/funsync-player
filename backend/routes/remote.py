@@ -22,10 +22,24 @@ from routes.media import (
     get_categories,
     get_video_categories,
     get_sources,
+    bump_rescan_request,
     _path_to_id,
 )
 
 router = APIRouter()
+
+
+@router.post("/request-rescan")
+async def request_rescan():
+    """Ask the desktop to rescan its source folders and re-register videos.
+
+    The phone can only see the snapshot the desktop last pushed, so a file the
+    user just dropped into a source folder is invisible until the desktop
+    rescans. The Refresh button on the web remote calls this; the desktop polls
+    the counter (via /api/media/rescan-request) and rescans when it advances.
+    Returns the new counter so the phone could correlate if it wanted to.
+    """
+    return {"seq": bump_rescan_request()}
 
 
 @router.get("/videos")

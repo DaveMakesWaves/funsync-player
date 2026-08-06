@@ -5,13 +5,17 @@
 // and (Phase 2) web-remote all route through setPlaybackRate. The HSSP↔
 // HDSP mode switch that keeps Handy in sync at non-1× rates lives here.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VideoPlayer, PLAYBACK_RATE_PRESETS } from '../../renderer/js/video-player.js';
 import { eventBus } from '../../renderer/js/event-bus.js';
 
 function makePlayer() {
   const player = Object.create(VideoPlayer.prototype);
   player.video = { playbackRate: 1 };
+  // Mirrors the constructor. `_currentRate` — not `video.playbackRate` — is
+  // what the load-time reset checks, because the browser resets the element
+  // itself when a new resource loads.
+  player._currentRate = 1;
   return player;
 }
 
@@ -166,7 +170,12 @@ describe('VideoPlayer reset on new video load', () => {
     player.timeDuration = { textContent: '' };
     player.video.duration = 100;
     player.video.videoHeight = 1080;
-    player.video.playbackRate = 1.5;
+    // Realistic post-load state: the browser has ALREADY reset the element
+    // to 1, and only our tracked rate still remembers the previous video's
+    // 1.5. Asserting on `video.playbackRate = 1.5` here described a state
+    // that cannot occur, which is why the bug survived this test.
+    player._currentRate = 1.5;
+    player.video.playbackRate = 1;
     const setSpy = vi.spyOn(player, 'setPlaybackRate');
     player._formatTime = () => '1:40';
 
@@ -188,4 +197,88 @@ describe('VideoPlayer reset on new video load', () => {
 
     expect(setSpy).not.toHaveBeenCalled();
   });
+});
+
+// --- Rate reset on new video load (community report, 2026-08-05) ---
+//
+// "Playback speed other than 1x appears to persist on screen across videos
+// but doesn't really — you have to reselect it for each video for it to
+// take effect."
+//
+// The element's `playbackRate` is reset to `defaultPlaybackRate` by the
+// browser as part of loading a new resource, so by the time
+// `_onMetadataLoaded` runs it already reads 1. Guarding the reset on the
+// ELEMENT therefore never fired, and `playback:rate-changed` was never
+// emitted — leaving the speed chip showing the previous video's rate.
+
+function makeLoadedPlayer(trackedRate, elementRate) {
+  const player = Object.create(VideoPlayer.prototype);
+  // Only the bits `_onMetadataLoaded` touches before the rate block.
+  player.video = { playbackRate: elementRate, duration: 120, videoHeight: 1080, videoWidth: 1920 };
+  player._currentRate = trackedRate;
+  player.timeDuration = { textContent: '' };
+  player._formatTime = () => '2:00';
+  return player;
+}
+
+describe('rate reset on new video load', () => {
+  let events;
+  let off;
+
+  beforeEach(() => {
+    events = [];
+    off = (rate) => events.push(rate);
+    eventBus.on('playback:rate-changed', off);
+  });
+
+  afterEach(() => {
+    eventBus.off?.('playback:rate-changed', off);
+  });
+
+  it('re-applies the tracked rate when "remember playback speed" is on', () => {
+    // The element was reset to 1 by the browser, so remembering still means
+    // WRITING the rate back — not simply leaving it alone.
+    const player = makeLoadedPlayer(1.5, 1);
+    player.setRememberRateProvider(() => true);
+    player.setPlaybackRate = vi.fn(function (r) {
+      this.video.playbackRate = r;
+      this._currentRate = r;
+      eventBus.emit('playback:rate-changed', r);
+    });
+
+    player._onMetadataLoaded();
+
+    expect(player.setPlaybackRate).toHaveBeenCalledWith(1.5);
+    expect(player.video.playbackRate).toBe(1.5);
+    expect(events).toContain(1.5);
+  });
+
+  it('falls back to resetting when the remember provider throws', () => {
+    // 1x is the safe direction — never leave a video stuck at 2x because a
+    // settings read blew up.
+    const player = makeLoadedPlayer(2, 1);
+    player.setRememberRateProvider(() => { throw new Error('settings gone'); });
+    player.setPlaybackRate = vi.fn();
+
+    expect(() => player._onMetadataLoaded()).not.toThrow();
+    expect(player.setPlaybackRate).toHaveBeenCalledWith(1);
+  });
+
+  it('announces the drop to 1x even though the element already reads 1', () => {
+    // The regression: tracked rate is 1.5 from the previous video, the
+    // element has already been reset to 1 by the browser.
+    const player = makeLoadedPlayer(1.5, 1);
+    player.setPlaybackRate = vi.fn(function (r) {
+      this.video.playbackRate = r;
+      this._currentRate = r;
+      eventBus.emit('playback:rate-changed', r);
+    });
+
+    player._onMetadataLoaded();
+
+    expect(player.setPlaybackRate).toHaveBeenCalledWith(1);
+    expect(events).toContain(1);
+    expect(player._currentRate).toBe(1);
+  });
+
 });

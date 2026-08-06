@@ -141,6 +141,11 @@ function _applyFromSetting(setting) {
     ? window.matchMedia('(prefers-color-scheme: dark)').matches
     : true;
   applyTheme(resolveEffectiveTheme(setting, prefersDark));
+  // Retint the OS window chrome (background + Windows title-bar overlay)
+  // to follow the theme — passes the setting straight through so main
+  // doesn't race the async settings write. Best-effort: absent in pop-out
+  // preloads and tests.
+  try { window?.funsync?.updateWindowChrome?.(setting); } catch { /* non-fatal */ }
 }
 
 /** Test helper — reset module-level state. */

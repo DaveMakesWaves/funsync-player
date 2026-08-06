@@ -9,6 +9,9 @@ import { pathToFileURL } from '../js/path-utils.js';
 import { promptCreateCategory, PRESET_COLORS } from '../js/category-create-modal.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
+import { thumbRequestOpts, customThumbImagePath } from './library.js';
+import * as thumbCache from '../js/thumbnail-cache.js';
+import { dedupeThumbRequest } from '../js/thumb-inflight.js';
 
 export class Categories {
   constructor({ settings, onPlayVideo, library }) {
@@ -400,16 +403,45 @@ export class Categories {
    * backend isn't reachable. Mirrors the same change in library.js.
    */
   async _captureFrame(videoPath) {
+    // Shared in-memory cache FIRST — same rationale as playlists.js: the
+    // dedup below only collapses concurrent in-flight requests, so without
+    // this every Library → Categories switch re-fetched every visible tile.
+    // mtime key 0 matches library.js so all three views share one set of
+    // entries, including the library's invalidation on thumbnail changes.
+    const cached = thumbCache.getEntry(videoPath, 0);
+    if (cached) return cached;
+    // Deduped: shares in-flight captures with the library/playlists views.
+    const result = await dedupeThumbRequest(videoPath, () => this._captureFrameUncached(videoPath));
+    const dataUrl = result?.dataUrl || result;
+    if (typeof dataUrl === 'string' && dataUrl) {
+      thumbCache.set(videoPath, 0, dataUrl, result?.duration);
+    }
+    return result;
+  }
+
+  async _captureFrameUncached(videoPath) {
+    // Honor a user-pinned thumbnail frame ("Set thumbnail frame…" in the
+    // library) so category cards show the same tile as the library grid.
+    const custom = (this._settings?.get?.('library.customThumbnails') || {})[videoPath];
+    // User-uploaded poster image wins outright (mirrors library.js).
+    const imagePath = customThumbImagePath(custom);
+    if (imagePath && window.funsync?.readCustomThumbnail) {
+      try {
+        const img = await window.funsync.readCustomThumbnail(imagePath);
+        if (img?.dataUrl) return { dataUrl: img.dataUrl, duration: 0 };
+      } catch { /* fall through to frame path */ }
+    }
+    const { seekPct, exact } = thumbRequestOpts(custom);
     if (window.funsync?.generateSingleThumbnail) {
       try {
-        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct: 0.1, width: 320 });
+        const result = await window.funsync.generateSingleThumbnail(videoPath, { seekPct, width: 320, exact });
         if (result?.dataUrl) return { dataUrl: result.dataUrl, duration: result.duration || 0 };
       } catch { /* fall through */ }
     }
-    return this._captureFrameViaVideoElement(videoPath);
+    return this._captureFrameViaVideoElement(videoPath, exact ? seekPct : null);
   }
 
-  _captureFrameViaVideoElement(videoPath) {
+  _captureFrameViaVideoElement(videoPath, pinnedSeekPct = null) {
     return new Promise((resolve) => {
       const video = document.createElement('video');
       video.preload = 'metadata';
@@ -430,7 +462,9 @@ export class Categories {
       const timeout = setTimeout(() => { cleanup(); resolve(null); }, 8000);
 
       video.addEventListener('loadedmetadata', () => {
-        video.currentTime = Math.min(video.duration * 0.1, 5);
+        video.currentTime = (typeof pinnedSeekPct === 'number' && isFinite(pinnedSeekPct))
+          ? video.duration * pinnedSeekPct
+          : Math.min(video.duration * 0.1, 5);
       }, { once: true });
 
       video.addEventListener('seeked', () => {

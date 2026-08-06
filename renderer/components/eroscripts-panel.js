@@ -3,6 +3,8 @@
 import { icon, X } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
+import { recordScriptTags } from '../js/script-tags.js';
+import { joinPath, dirOfPath } from '../js/path-utils.js';
 
 export class EroScriptsPanel {
   constructor({ settings }) {
@@ -11,6 +13,8 @@ export class EroScriptsPanel {
     this._visible = false;
     this._searching = false;
     this._loggedIn = false;
+    // One expiry toast per dead session, not one per failed request.
+    this._expiredNotified = false;
     this._username = '';
 
     // Callbacks
@@ -93,6 +97,8 @@ export class EroScriptsPanel {
 
   _setLoggedIn(username) {
     this._loggedIn = true;
+    // Fresh session — a future expiry should announce itself again.
+    this._expiredNotified = false;
     this._username = username;
 
     const label = this._panel.querySelector('#es-auth-label');
@@ -139,6 +145,31 @@ export class EroScriptsPanel {
     this._setLoggedOut();
   }
 
+  /**
+   * The server has told us the stored session is dead (401/403 on any
+   * call). Drop it and say so, once.
+   *
+   * Before this existed, `_loggedIn` was a snapshot taken at app start and
+   * never revisited, so an expired session left the panel reading
+   * "connected" indefinitely. The auto-match path discarded the API's
+   * error entirely, so the only symptom was script-found notifications
+   * quietly never appearing again — which is a terrible way to learn you
+   * have been logged out.
+   *
+   * Idempotent: several calls can fail in quick succession, and the user
+   * should get one toast, not one per request.
+   */
+  async handleSessionExpired() {
+    if (!this._loggedIn && this._expiredNotified) return;
+    this._expiredNotified = true;
+    this._settings.set('eroscripts.session', null);
+    try {
+      await window.funsync.eroscriptsLogout();
+    } catch { /* already gone in main — the local state is what matters */ }
+    this._setLoggedOut();
+    showToast(t('eroscripts.sessionExpired'), 'warn', 6000);
+  }
+
   async _loginViaWindow() {
     // Open the real eroscripts login page in a child Electron window.
     // The user authenticates via Discourse's own UI, so whatever 2FA
@@ -182,8 +213,12 @@ export class EroScriptsPanel {
     const resultsEl = this._panel.querySelector('#es-results');
     resultsEl.innerHTML = `<div class="eroscripts-panel__placeholder">${t('eroscripts.searching')}</div>`;
 
-    const { results, error } = await window.funsync.eroscriptsSearch(query);
+    const { results, error, authExpired } = await window.funsync.eroscriptsSearch(query);
     this._searching = false;
+
+    // A dead session self-corrects here rather than waiting for a restart,
+    // which was the only thing that used to re-check it.
+    if (authExpired) await this.handleSessionExpired();
 
     if (error) {
       resultsEl.innerHTML = `<div class="eroscripts-panel__placeholder eroscripts-panel__placeholder--error">${this._esc(error)}</div>`;
@@ -218,9 +253,23 @@ export class EroScriptsPanel {
       const thumb = document.createElement('img');
       thumb.className = 'eroscripts-panel__result-thumb';
       thumb.alt = '';
+      // Handler BEFORE src: assigning src can fail synchronously (a CSP
+      // block, a cached 404), and a listener attached afterwards misses the
+      // event entirely — leaving Chromium's broken-image glyph on screen
+      // forever instead of the fallback below.
+      let triedAvatarFallback = false;
+      thumb.addEventListener('error', () => {
+        // A dead thumbnail shouldn't mean a dead row: drop back to the
+        // poster's avatar, and only hide if that fails too.
+        if (!triedAvatarFallback && topic.avatar && thumb.src !== topic.avatar) {
+          triedAvatarFallback = true;
+          thumb.src = topic.avatar;
+          return;
+        }
+        thumb.style.display = 'none';
+      });
       thumb.src = topic.thumbnail || topic.avatar || '';
       if (!thumb.src) thumb.style.display = 'none';
-      thumb.addEventListener('error', () => { thumb.style.display = 'none'; });
       card.appendChild(thumb);
 
       // Lazy-load actual topic image (replaces avatar)
@@ -289,7 +338,11 @@ export class EroScriptsPanel {
     btn.disabled = true;
     btn.textContent = t('eroscripts.fetching');
 
-    const { attachments, error } = await window.funsync.eroscriptsTopic(topic.id);
+    const { attachments, error, authExpired } = await window.funsync.eroscriptsTopic(topic.id);
+
+    // Same self-correction as search: a dead session shouldn't survive
+    // until the next app restart.
+    if (authExpired) await this.handleSessionExpired();
 
     if (error || attachments.length === 0) {
       btn.disabled = false;
@@ -299,17 +352,17 @@ export class EroScriptsPanel {
     }
 
     if (attachments.length === 1) {
-      await this._downloadAttachment(attachments[0], btn);
+      await this._downloadAttachment(attachments[0], btn, topic);
       return;
     }
 
     // Multiple attachments — show picker
     btn.disabled = false;
     btn.textContent = t('eroscripts.getScript');
-    this._showAttachmentPicker(attachments, btn.parentElement);
+    this._showAttachmentPicker(attachments, btn.parentElement, topic);
   }
 
-  _showAttachmentPicker(attachments, parentEl) {
+  _showAttachmentPicker(attachments, parentEl, topic) {
     parentEl.querySelector('.eroscripts-panel__attachment-list')?.remove();
 
     const list = document.createElement('div');
@@ -322,7 +375,7 @@ export class EroScriptsPanel {
       item.addEventListener('click', async () => {
         list.remove();
         const btn = parentEl.querySelector('.eroscripts-panel__btn');
-        await this._downloadAttachment(att, btn);
+        await this._downloadAttachment(att, btn, topic);
       });
       list.appendChild(item);
     }
@@ -330,7 +383,7 @@ export class EroScriptsPanel {
     parentEl.appendChild(list);
   }
 
-  async _downloadAttachment(attachment, btn) {
+  async _downloadAttachment(attachment, btn, topic = null) {
     if (btn) { btn.disabled = true; btn.textContent = t('eroscripts.savingScript'); }
 
     const sources = (this._settings.get('library.sources') || []).filter(s => s.enabled !== false);
@@ -344,10 +397,10 @@ export class EroScriptsPanel {
       const videoDir = videoPath.replace(/[\\/][^\\/]+$/, '');
       const videoBase = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
       savedName = `${videoBase}.funscript`;
-      savePath = `${videoDir}/${savedName}`;
+      savePath = joinPath(videoDir, savedName);
     } else if (sources.length === 1) {
       // Exactly one source → safe to save there without asking
-      savePath = `${sources[0].path}/${attachment.name}`;
+      savePath = joinPath(sources[0].path, attachment.name);
     } else {
       // No open video, OR multi-source library — ask the user where to save rather
       // than arbitrarily picking sources[0]. Dialog pre-fills the attachment name.
@@ -356,13 +409,20 @@ export class EroScriptsPanel {
       savePath = result;
     }
 
-    savePath = savePath.replace(/\//g, '\\');
+    // No separator rewrite: this used to force every '/' to '\\', which on
+    // Linux turned an absolute path into one backslash-laden filename.
+    // `joinPath` above already used the right separator for the platform.
 
     const { success, error } = await window.funsync.eroscriptsDownload(attachment.url, savePath);
 
     if (btn) { btn.disabled = false; btn.textContent = success ? t('eroscripts.scriptSaved') : t('eroscripts.getScript'); }
 
     if (success) {
+      // Record the post's tags against the video this script just became
+      // associated with. Only meaningful when a video is actually loaded —
+      // saving into a source folder with nothing playing associates with
+      // nothing, so there is no key to file the tags under.
+      if (videoPath && topic) recordScriptTags(this._settings, videoPath, topic);
       showToast(t('eroscripts.savedToast', { name: savedName }), 'info');
       if (this.onScriptDownloaded) this.onScriptDownloaded(savePath, savedName);
     } else {
