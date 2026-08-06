@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests that audio, video, and funscript timing stay matched when the
 // playback rate changes.
 //

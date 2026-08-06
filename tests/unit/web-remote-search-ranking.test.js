@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Regression — the mobile (web-remote) search applyFilters() pipeline
 // must NOT re-sort fuzzySearch's output by name/duration/etc. when a
 // search query is active. fuzzySearch already returns results ranked

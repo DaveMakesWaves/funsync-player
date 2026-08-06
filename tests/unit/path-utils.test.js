@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 import { describe, it, expect } from 'vitest';
 import { canonicalPath, isSubpath, classifyOverlap, commonAncestorOfFiles, pathToFileURL } from '../../renderer/js/path-utils.js';
 

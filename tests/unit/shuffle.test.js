@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the shuffle helpers (playlist/queue random playback).
 // See SCOPE-playlist-shuffle-reorder.md §7 for the algorithm-bias rationale.
 

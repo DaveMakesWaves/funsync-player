@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Random-script-variation-on-play decision logic (zaikechi #209/#221).
 //
 // pickVariantIndexOnLoad resolves which variant a freshly loaded video

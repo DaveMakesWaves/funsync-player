@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // EroScripts session-expiry contract.
 //
 // Regression (Dave, 2026-08-05): his session expired server-side, but

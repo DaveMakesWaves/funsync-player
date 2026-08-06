@@ -732,3 +732,85 @@
   color: var(--text-muted);
   font-style: italic;
 }
+
+/* --- Unavailable videos (drive unplugged) -------------------------------
+ *
+ * Distinct from `--broken`, which means "this file is gone". Unavailable is
+ * TEMPORARY: the entry is intact and comes back when the volume does. So it
+ * reads as dimmed-but-present rather than errored, and deliberately keeps the
+ * thumbnail, resume bar and watched tick visible — blanking them would look
+ * like the data loss this whole feature exists to prevent.
+ */
+.playlists__video--unavailable {
+  opacity: 0.45;
+  filter: grayscale(0.85);
+  cursor: not-allowed;
+}
+
+/* Not a hard block: the remove button must stay usable so a genuinely dead
+ * entry can still be cleared by hand, and the reorder controls keep working. */
+.playlists__video--unavailable .playlists__video-overlay {
+  display: none;
+}
+
+.playlists__video--unavailable .playlists__video-remove-btn,
+.playlists__video--unavailable .playlists__move-btn {
+  opacity: 1;
+  filter: none;
+  cursor: pointer;
+}
+
+.playlists__unavailable-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--text-secondary, #b8b8c0);
+  /* The badge itself must not be greyed by the parent filter, or the one
+   * affordance explaining the dimming is the hardest thing to see. */
+  filter: none;
+}
+
+.playlists__unavailable-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #33333d);
+  background: var(--bg-elevated, #232330);
+  color: var(--text-primary, #e8e8ee);
+  font-size: 13px;
+}
+
+.playlists__unavailable-notice svg {
+  flex-shrink: 0;
+  color: var(--text-secondary, #b8b8c0);
+}
+
+.playlists__unavailable-hint {
+  color: var(--text-secondary, #b8b8c0);
+  /* Pushed to its own line on narrow panes rather than truncating the count,
+   * which is the part that carries the meaning. */
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* List rows have no thumbnail to overlay, so the marker sits inline in the
+ * row flow rather than absolutely positioned over an image. */
+.playlists__unavailable-badge--inline {
+  position: static;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  margin-right: 4px;
+}

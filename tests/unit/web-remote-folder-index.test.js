@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Web-remote port of folder-index — parity check against the desktop
 // version. The phone's module is a copy of renderer/js/folder-index.js
 // (plus the canonicalPath helper inlined). This test locks in the

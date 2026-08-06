@@ -1,7 +1,7 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check, Unplug } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { computeSpeedStats } from '../js/library-search.js';
@@ -18,6 +18,12 @@ import {
   summarisePlaylistProgress,
   formatRemaining,
 } from '../js/playlist-progress.js';
+import {
+  probeAvailability,
+  availabilityPredicate,
+  partitionByAvailability,
+  groupByVolume,
+} from '../js/playlist-availability.js';
 
 export class Playlists {
   constructor({ settings, onPlayVideo, onPlayAll, library }) {
@@ -78,6 +84,11 @@ export class Playlists {
     // Fresh memo per render pass: durations can change when a scan
     // completes, and a stale memo would pin an old "time left".
     this._resetDurationMemo();
+    // Probe every playlist's paths in ONE batch, off the render path. Tiles
+    // render immediately using whatever the last probe knew (all-available on
+    // first paint); when the answer lands we re-render so counts settle. Doing
+    // it inline would make the whole grid wait on a possibly-spun-down drive.
+    this._refreshGridAvailability(playlists);
     this._container.innerHTML = '';
 
     const header = document.createElement('div');
@@ -132,6 +143,39 @@ export class Playlists {
     this._container.appendChild(wrapper);
   }
 
+  /**
+   * Batch-probe every path across every playlist, then re-render once if the
+   * answer changed. Kept off the synchronous render path deliberately: an
+   * unplugged or spun-down volume can make a stat call slow, and the grid must
+   * not block on it.
+   *
+   * `_availabilityProbeToken` guards against overlapping probes racing each
+   * other into a re-render loop when the user flips views quickly.
+   */
+  _refreshGridAvailability(playlists) {
+    const paths = [...new Set((playlists || []).flatMap((pl) => pl.videoPaths || []))];
+    if (paths.length === 0) return;
+    const token = (this._availabilityProbeToken || 0) + 1;
+    this._availabilityProbeToken = token;
+
+    probeAvailability(paths).then((set) => {
+      if (this._availabilityProbeToken !== token) return; // superseded
+      const before = this._availablePaths;
+      const changed = !before
+        || before.size !== set.size
+        || [...set].some((p) => !before.has(p));
+      this._availablePaths = set;
+      // Only re-render when the picture actually changed, and only while the
+      // grid is still the visible view.
+      if (changed && this._container && this._view === 'grid') this._renderGrid();
+    }).catch(() => { /* fail open — predicate stays permissive */ });
+  }
+
+  /** Predicate over the last probe. Permissive until one has completed. */
+  _isAvailable() {
+    return availabilityPredicate(this._availablePaths);
+  }
+
   _createPlaylistCard(pl) {
     const card = document.createElement('div');
     card.className = 'playlists__card';
@@ -145,7 +189,7 @@ export class Playlists {
 
     const count = document.createElement('div');
     count.className = 'playlists__card-count';
-    count.textContent = `${pl.videoPaths.length} video${pl.videoPaths.length !== 1 ? 's' : ''}`;
+    count.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
 
     body.appendChild(name);
     body.appendChild(count);
@@ -259,7 +303,7 @@ export class Playlists {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'playlists__detail-count';
-    countSpan.textContent = `${pl.videoPaths.length} video${pl.videoPaths.length !== 1 ? 's' : ''}`;
+    countSpan.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
 
     header.appendChild(backBtn);
     header.appendChild(title);
@@ -394,19 +438,22 @@ export class Playlists {
     const wrapper = document.createElement('div');
     wrapper.className = 'playlists__grid-wrapper';
 
-    // Filter out videos that no longer exist on disk
-    const validPaths = [];
-    for (const vp of pl.videoPaths) {
-      const exists = await window.funsync.fileExists(vp);
-      if (exists) validPaths.push(vp);
-    }
-
-    // Clean up dead paths from the playlist data
-    if (validPaths.length < pl.videoPaths.length) {
-      for (const dead of pl.videoPaths.filter(p => !validPaths.includes(p))) {
-        this._settings.removeVideoFromPlaylist(pl.id, dead);
-      }
-    }
+    // Availability, NOT a purge.
+    //
+    // This block used to call removeVideoFromPlaylist() on every path that
+    // failed fileExists — so opening a playlist with its external drive
+    // unplugged PERMANENTLY DELETED every entry, and reconnecting the drive
+    // could not bring them back because config.json had already been
+    // rewritten. Absence of a volume is not deletion of a file.
+    //
+    // Now every path keeps its slot, order, resume position and watched mark.
+    // Unreachable ones render greyed out and are skipped by anything that
+    // would play them. Re-probed on each render, so a reconnect just works.
+    const availableSet = await probeAvailability(pl.videoPaths);
+    const isAvailable = availabilityPredicate(availableSet);
+    this._availablePaths = availableSet;
+    const validPaths = pl.videoPaths.slice();
+    const { unavailable } = partitionByAvailability(pl.videoPaths, isAvailable);
 
     if (validPaths.length === 0) {
       wrapper.innerHTML = `
@@ -417,6 +464,13 @@ export class Playlists {
       `;
       this._container.appendChild(wrapper);
       return;
+    }
+
+    // Explain the greyed rows rather than leaving the user to wonder why some
+    // tiles are dim and Play All is short. Grouped by volume, because "3
+    // videos on E: are unavailable" is actionable and three filenames aren't.
+    if (unavailable.length > 0) {
+      wrapper.appendChild(this._createUnavailableNotice(unavailable));
     }
 
     const grid = document.createElement('div');
@@ -430,10 +484,15 @@ export class Playlists {
         sourceContext: { playlistId: pl.id },
         list: validPaths.slice(),
         index: validPaths.indexOf(videoPath),
+        // Snapshot of what was reachable when playback started. app.js's
+        // prev/next stepping reads this so N/P skip over an unplugged drive
+        // instead of dead-ending on it.
+        unavailablePaths: unavailable.slice(),
       };
       const el = this._viewMode === 'list'
         ? this._createVideoListItem(videoPath, pl, playContext)
         : this._createVideoCard(videoPath, pl, playContext);
+      if (!isAvailable(videoPath)) this._markUnavailable(el, videoPath);
       grid.appendChild(el);
     }
 
@@ -449,6 +508,79 @@ export class Playlists {
     this._reorderLive = live;
 
     this._container.appendChild(wrapper);
+  }
+
+  /**
+   * Banner above the grid: why some tiles are dim and why Play All is short.
+   *
+   * Grouped by volume so the message names the thing the user can act on —
+   * "3 videos on E: are unavailable" — instead of listing filenames they'd
+   * have to decode. Falls back to a count-only message when the paths don't
+   * yield a recognisable root, rather than inventing a location.
+   */
+  _createUnavailableNotice(unavailablePaths) {
+    const notice = document.createElement('div');
+    notice.className = 'playlists__unavailable-notice';
+    notice.setAttribute('role', 'status');
+
+    notice.appendChild(icon(Unplug, { width: 16, height: 16 }));
+
+    const text = document.createElement('span');
+    const groups = groupByVolume(unavailablePaths);
+    const named = [...groups.entries()].filter(([root]) => root);
+    if (named.length === 1 && named[0][1].length === unavailablePaths.length) {
+      text.textContent = t('playlists.unavailableOnVolume', {
+        count: unavailablePaths.length,
+        volume: named[0][0],
+      });
+    } else {
+      text.textContent = t('playlists.unavailableCount', { count: unavailablePaths.length });
+    }
+    notice.appendChild(text);
+
+    const hint = document.createElement('span');
+    hint.className = 'playlists__unavailable-hint';
+    hint.textContent = t('playlists.unavailableHint');
+    notice.appendChild(hint);
+
+    return notice;
+  }
+
+  /**
+   * Grey out one card/row and take it out of play.
+   *
+   * Deliberately keeps the thumbnail, the resume bar and the watched tick —
+   * the entry is still yours, it's just not reachable right now, and blanking
+   * it would look like the data loss this whole change exists to prevent.
+   * The remove button stays live so a genuinely dead entry can still be
+   * cleared by hand.
+   */
+  _markUnavailable(el, videoPath) {
+    el.classList.add('playlists__video--unavailable');
+    el.dataset.unavailable = 'true';
+    el.title = t('playlists.unavailableTooltip', { path: videoPath });
+
+    const badge = document.createElement('span');
+    badge.className = 'playlists__unavailable-badge';
+    badge.appendChild(icon(Unplug, { width: 12, height: 12 }));
+
+    // Grid tiles have a thumbnail to overlay. LIST ROWS DO NOT — they are
+    // handle + title + badges, with no image — so the badge goes inline
+    // before the title instead. Without this branch the marker silently
+    // vanished in list view, leaving a dimmed row with no explanation.
+    const thumb = el.querySelector('.playlists__video-thumbnail');
+    if (thumb) {
+      thumb.appendChild(badge);
+      return;
+    }
+    badge.classList.add('playlists__unavailable-badge--inline');
+    const title = el.querySelector('.playlists__list-name')
+      || el.querySelector('.playlists__video-title');
+    if (title && title.parentNode) {
+      title.parentNode.insertBefore(badge, title);
+    } else {
+      el.insertBefore(badge, el.firstChild);
+    }
   }
 
   /** Announce a reorder to the aria-live region (screen-reader feedback). */
@@ -570,10 +702,32 @@ export class Playlists {
 
     card.addEventListener('click', () => {
       if (card.classList.contains('playlists__video-card--broken')) return;
+      // Unreachable right now (drive unplugged). Explain instead of opening a
+      // player that will fail — the entry is intact, just not loadable.
+      if (card.dataset.unavailable === 'true') {
+        this._notifyUnavailable(videoPath);
+        return;
+      }
       this._playVideoByPath(videoPath, playContext);
     });
 
     return card;
+  }
+
+  /**
+   * Tell the user why a click did nothing. Re-probes first: the most likely
+   * reason someone clicks a greyed tile is that they just plugged the drive
+   * back in, and refusing at that point would be plainly wrong.
+   */
+  async _notifyUnavailable(videoPath) {
+    const set = await probeAvailability([videoPath]);
+    if (set.has(videoPath)) {
+      // It's back — re-render so the whole playlist un-greys, then play it.
+      if (this._detailPlaylistId) await this._renderDetail(this._detailPlaylistId);
+      return;
+    }
+    const { showToast } = await import('../js/toast.js');
+    showToast(t('toast.videoUnavailable'), 'warn');
   }
 
   async _playVideoByPath(videoPath, playContext) {
@@ -884,17 +1038,24 @@ export class Playlists {
   }
 
   async _playAll(pl) {
-    // Filter out broken/missing files before building queue
-    const validPaths = [];
-    for (const p of pl.videoPaths) {
-      const exists = await window.funsync.fileExists(p);
-      if (exists) validPaths.push(p);
-    }
+    // Unreachable files are excluded from the QUEUE but never removed from the
+    // playlist — see playlist-availability.js for why that distinction is the
+    // whole point. One batch probe instead of one invoke per video.
+    const isAvailable = availabilityPredicate(await probeAvailability(pl.videoPaths));
+    const { available: validPaths, unavailable } =
+      partitionByAvailability(pl.videoPaths, isAvailable);
 
     if (validPaths.length === 0) {
       const { showToast } = await import('../js/toast.js');
-      showToast(t('toast.playlistNoPlayable'), 'warn');
+      showToast(t('toast.playlistAllUnavailable'), 'warn');
       return;
+    }
+
+    // Silently playing a short queue looks like data loss — which is exactly
+    // the bug this change fixes. Say what was skipped and why.
+    if (unavailable.length > 0) {
+      const { showToast } = await import('../js/toast.js');
+      showToast(t('toast.playlistSkippedUnavailable', { count: unavailable.length }), 'info');
     }
 
     const videoList = validPaths.map((p) => {
@@ -1056,7 +1217,7 @@ export class Playlists {
 
     const count = document.createElement('span');
     count.className = 'playlists__list-count';
-    count.textContent = `${pl.videoPaths.length} video${pl.videoPaths.length !== 1 ? 's' : ''}`;
+    count.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
 
     const actions = document.createElement('div');
     actions.className = 'playlists__list-actions';
@@ -1100,18 +1261,30 @@ export class Playlists {
    * same playContext a card click would, so prev/next, Up Next and the
    * resume path all behave identically to arriving there by hand.
    */
-  _continueFromLastWatched(pl) {
+  async _continueFromLastWatched(pl) {
     const validPaths = (pl.videoPaths || []).slice();
     if (validPaths.length === 0) return;
 
+    // Probe fresh rather than trusting the grid's last snapshot: this is a
+    // deliberate click, and landing the user on a video that can't open is
+    // worse than the round trip. Also covers "drive reconnected since the
+    // grid rendered", which is the whole point of the fix.
+    const isAvailable = availabilityPredicate(await probeAvailability(validPaths));
+
     // Targeting lives in playlist-progress.js — notably it skips PAST a
-    // marked video that was watched to the end, rather than replaying it.
+    // marked video that was watched to the end, rather than replaying it,
+    // and now also past anything unreachable.
     const target = pickContinueTarget(
       validPaths,
       this._playlistProgress(pl.id)?.lastVideoPath || null,
       (p) => this._resumeEntryFor(p),
+      isAvailable,
     );
-    if (!target) return;
+    if (!target) {
+      const { showToast } = await import('../js/toast.js');
+      showToast(t('toast.playlistAllUnavailable'), 'warn');
+      return;
+    }
 
     this._playVideoByPath(target.path, {
       source: 'playlist',
@@ -1119,6 +1292,7 @@ export class Playlists {
       sourceContext: { playlistId: pl.id },
       list: validPaths,
       index: target.index,
+      unavailablePaths: validPaths.filter((p) => !isAvailable(p)),
     });
   }
 
@@ -1143,6 +1317,7 @@ export class Playlists {
         memo.set(p, d);
         return d;
       },
+      this._isAvailable(),
     );
   }
 
@@ -1367,6 +1542,11 @@ export class Playlists {
     row.append(handle, title, heatmap, ...(resumeBar ? [resumeBar] : []), badges, moveGroup, removeBtn);
 
     row.addEventListener('click', () => {
+      // Same rule as the grid tile: unreachable explains, it doesn't open.
+      if (row.dataset.unavailable === 'true') {
+        this._notifyUnavailable(videoPath);
+        return;
+      }
       this._playVideoByPath(videoPath, playContext);
     });
 

@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Pure-JS mirrors of the GLSL projection math.
 //
 // Since jsdom can't run real shaders, we verify the algorithm by

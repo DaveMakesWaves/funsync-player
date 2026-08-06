@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Playlist resume state — last-watched marker, Continue, and Reset.
 // Imports the real Playlists component (its constructor touches no DOM).
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -129,8 +134,8 @@ describe('_continueFromLastWatched', () => {
     view._playVideoByPath = vi.fn();
   });
 
-  it('plays the last-watched video with a playlist context at the right index', () => {
-    view._continueFromLastWatched(PL);
+  it('plays the last-watched video with a playlist context at the right index', async () => {
+    await view._continueFromLastWatched(PL);
     expect(view._playVideoByPath).toHaveBeenCalledTimes(1);
     const [path, ctx] = view._playVideoByPath.mock.calls[0];
     expect(path).toBe('C:/v/b.mp4');
@@ -144,20 +149,20 @@ describe('_continueFromLastWatched', () => {
   // Both cases below used to no-op. They now fall back to the first
   // unwatched video, which is what "continue this playlist" should mean
   // when the marker can't be honoured.
-  it('falls back to the first unwatched when there is no marker', () => {
+  it('falls back to the first unwatched when there is no marker', async () => {
     const bare = makeView(makeSettings({}));
     bare._playVideoByPath = vi.fn();
-    bare._continueFromLastWatched(PL);
+    await bare._continueFromLastWatched(PL);
     expect(bare._playVideoByPath.mock.calls[0][0]).toBe('C:/v/a.mp4');
   });
 
-  it('falls back to the first unwatched when the marked video has left the playlist', () => {
-    view._continueFromLastWatched({ ...PL, videoPaths: ['C:/v/a.mp4', 'C:/v/c.mp4'] });
+  it('falls back to the first unwatched when the marked video has left the playlist', async () => {
+    await view._continueFromLastWatched({ ...PL, videoPaths: ['C:/v/a.mp4', 'C:/v/c.mp4'] });
     expect(view._playVideoByPath.mock.calls[0][0]).toBe('C:/v/a.mp4');
   });
 
-  it('does nothing for an empty playlist', () => {
-    view._continueFromLastWatched({ ...PL, videoPaths: [] });
+  it('does nothing for an empty playlist', async () => {
+    await view._continueFromLastWatched({ ...PL, videoPaths: [] });
     expect(view._playVideoByPath).not.toHaveBeenCalled();
   });
 });
@@ -167,7 +172,7 @@ describe('_continueFromLastWatched', () => {
 const finishedEntry = () => ({ duration: 3600, updatedAt: 1, finished: true });
 
 describe('_continueFromLastWatched with watched state', () => {
-  it('skips past a FINISHED marked video instead of replaying it', () => {
+  it('skips past a FINISHED marked video instead of replaying it', async () => {
     const settings = makeSettings({
       'library.playlistProgress': { 'pl-1': { lastVideoPath: 'C:/v/a.mp4', updatedAt: 5 } },
       'library.resumePositions': { 'C:/v/a.mp4': finishedEntry() },
@@ -175,14 +180,14 @@ describe('_continueFromLastWatched with watched state', () => {
     const view = makeView(settings);
     view._playVideoByPath = vi.fn();
 
-    view._continueFromLastWatched(PL);
+    await view._continueFromLastWatched(PL);
 
     const [path, ctx] = view._playVideoByPath.mock.calls[0];
     expect(path).toBe('C:/v/b.mp4');
     expect(ctx.index).toBe(1);
   });
 
-  it('still resumes a marked video that is only part-watched', () => {
+  it('still resumes a marked video that is only part-watched', async () => {
     const settings = makeSettings({
       'library.playlistProgress': { 'pl-1': { lastVideoPath: 'C:/v/a.mp4', updatedAt: 5 } },
       'library.resumePositions': { 'C:/v/a.mp4': { position: 600, duration: 3600 } },
@@ -190,18 +195,18 @@ describe('_continueFromLastWatched with watched state', () => {
     const view = makeView(settings);
     view._playVideoByPath = vi.fn();
 
-    view._continueFromLastWatched(PL);
+    await view._continueFromLastWatched(PL);
     expect(view._playVideoByPath.mock.calls[0][0]).toBe('C:/v/a.mp4');
   });
 
-  it('plays the first unwatched when there is no marker at all', () => {
+  it('plays the first unwatched when there is no marker at all', async () => {
     const settings = makeSettings({
       'library.resumePositions': { 'C:/v/a.mp4': finishedEntry() },
     });
     const view = makeView(settings);
     view._playVideoByPath = vi.fn();
 
-    view._continueFromLastWatched(PL);
+    await view._continueFromLastWatched(PL);
     expect(view._playVideoByPath.mock.calls[0][0]).toBe('C:/v/b.mp4');
   });
 });

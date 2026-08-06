@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Pins the "can this video be popped out?" guard used in app.js
 // (_currentPopoutVideo / _togglePlayerWindow). Phase 2b supports local
 // library files only, and never while another external source (phone /

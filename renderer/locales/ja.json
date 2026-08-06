@@ -469,7 +469,8 @@
       "variantSearchTitle": "バリエーション用スクリプトを選択",
       "searchEroScripts": "EroScripts を検索..."
     },
-    "heatmapUnavailable": "ヒートマップは利用できません"
+    "heatmapUnavailable": "ヒートマップは利用できません",
+    "sortSwitchTo": "{order} に切り替え"
   },
   "playlists": {
     "title": "プレイリスト",
@@ -477,7 +478,7 @@
     "playlistNamePlaceholder": "プレイリスト名",
     "emptyTitle": "プレイリストはまだありません",
     "emptyCta": "最初のプレイリストを作成",
-    "videoCount": "{count, plural, other {# 本の動画}}",
+    "videoCount": "{count, plural, other {# 件の動画}}",
     "playAll": "すべて再生",
     "loopOnTitle": "ループ オン — 最後の動画の後、項目 1 から再開",
     "loopOffTitle": "ループ オフ — 最後の動画の後に停止",
@@ -520,7 +521,11 @@
     "watched": "視聴済み",
     "watchedCount": "{total} 本中 {watched} 本視聴済み",
     "timeLeft": "残り {time}",
-    "continueNamed": "{name} の続きから"
+    "continueNamed": "{name} の続きから",
+    "unavailableCount": "{count, plural, other {# 本の動画が利用できません}}",
+    "unavailableOnVolume": "{count, plural, other {{volume} にある # 本の動画が利用できません}}",
+    "unavailableHint": "ドライブを再接続すると再生できます。プレイリストからは削除されません。",
+    "unavailableTooltip": "現在利用できません: {path}"
   },
   "categories": {
     "title": "カテゴリ",
@@ -667,7 +672,11 @@
     "queueReadError": "キュー項目 {name}: スクリプトの読み取りに失敗 ({error}) — 同期なしで再生します",
     "handyUploadTimeout": "Handy スクリプトのアップロードがタイムアウトしました — 動画は再生されますが Handy は同期されません。接続を確認して動画を再読み込みしてください。",
     "orgasmRoutingFallback": "オーガズムスイッチ: {devices} が未接続です。すべて接続されるまで単軸で動作します。",
-    "orgasmScriptRecovered": "移動されたフィニッシャースクリプトを{count}件見つけ、パスを更新しました"
+    "orgasmScriptRecovered": "移動されたフィニッシャースクリプトを{count}件見つけ、パスを更新しました",
+    "videoUnavailable": "この動画は現在利用できません。保存先のドライブを再接続してください。",
+    "playlistAllUnavailable": "これらの動画はいずれも現在利用できません。ドライブを再接続してください。",
+    "playlistSkippedUnavailable": "{count, plural, other {利用できない動画 # 本をスキップしました}}",
+    "nextAllUnavailable": "その方向に再生できる動画がありません。残りを再生するにはドライブを再接続してください。"
   },
   "modal": {
     "noItemsAvailable": "利用可能な項目がありません",
@@ -754,7 +763,8 @@
       "avgSpeedAsc": "平均速度 遅→速",
       "avgSpeedDesc": "平均速度 速→遅",
       "maxSpeedAsc": "最大速度 遅→速",
-      "maxSpeedDesc": "最大速度 速→遅"
+      "maxSpeedDesc": "最大速度 速→遅",
+      "switchTo": "{order} に切り替え"
     },
     "badge": {
       "script": "スクリプト",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "回転",
       "badgeEstim": "電気刺激",
       "axisCustom": "カスタムルーティングに従う",
-      "tuning": "出力調整"
+      "tuning": "出力調整",
+      "badgeMachine": "マシン",
+      "machineModeTitle": "マシン速度モード"
     },
     "tcode": {
       "l0Label": "ストローク (メイン)",

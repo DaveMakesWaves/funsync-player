@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Registering newly-created funscripts into the cached scan list.
 //
 // Regression (Dave, live test 2026-08-06): downloading a multi-axis set from

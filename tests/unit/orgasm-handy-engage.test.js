@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Orgasm Switch — Handy HSSP engage/release ORDER contract + finisher tiling.
 //
 // The finisher plays on the Handy via a TILED HSSP upload (the pattern

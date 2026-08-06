@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for Custom Routing — multi-device script assignment scenarios
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { ButtplugSync } from '../../renderer/js/buttplug-sync.js';

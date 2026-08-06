@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the auto-offset helpers. The source-tag logic gates whether
 // a user's hand-tuned offset gets silently overwritten by a preset, so
 // it's covered exhaustively — a regression there would be very annoying.

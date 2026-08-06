@@ -469,7 +469,8 @@
       "variantSearchTitle": "选择变体脚本",
       "searchEroScripts": "搜索 EroScripts..."
     },
-    "heatmapUnavailable": "热力图不可用"
+    "heatmapUnavailable": "热力图不可用",
+    "sortSwitchTo": "切换为 {order}"
   },
   "playlists": {
     "title": "播放列表",
@@ -477,7 +478,7 @@
     "playlistNamePlaceholder": "播放列表名称",
     "emptyTitle": "暂无播放列表",
     "emptyCta": "创建第一个播放列表",
-    "videoCount": "{count} 个视频",
+    "videoCount": "{count, plural, other {# 个视频}}",
     "playAll": "全部播放",
     "loopOnTitle": "循环开 — 最后一个视频后从第 1 项重新开始",
     "loopOffTitle": "循环关 — 最后一个视频后停止",
@@ -520,7 +521,11 @@
     "watched": "已观看",
     "watchedCount": "已观看 {watched}/{total}",
     "timeLeft": "剩余 {time}",
-    "continueNamed": "继续观看 {name}"
+    "continueNamed": "继续观看 {name}",
+    "unavailableCount": "{count, plural, other {# 个视频当前不可用}}",
+    "unavailableOnVolume": "{count, plural, other {{volume} 上的 # 个视频当前不可用}}",
+    "unavailableHint": "重新连接驱动器即可播放。它们仍保留在播放列表中。",
+    "unavailableTooltip": "当前不可用：{path}"
   },
   "categories": {
     "title": "分类",
@@ -667,7 +672,11 @@
     "queueReadError": "队列项 {name}:脚本读取失败 ({error}) — 无同步播放",
     "handyUploadTimeout": "Handy 脚本上传超时 — 视频正在播放但 Handy 无法同步。请检查连接并重新加载视频。",
     "orgasmRoutingFallback": "高潮开关：{devices} 未连接。在全部连接前将使用单轴模式。",
-    "orgasmScriptRecovered": "已找到 {count} 个移动过的收尾脚本并更新了路径"
+    "orgasmScriptRecovered": "已找到 {count} 个移动过的收尾脚本并更新了路径",
+    "videoUnavailable": "此视频当前不可用。请重新连接存储它的驱动器。",
+    "playlistAllUnavailable": "这些视频当前均不可用。请重新连接驱动器。",
+    "playlistSkippedUnavailable": "{count, plural, other {已跳过 # 个不可用的视频}}",
+    "nextAllUnavailable": "该方向没有更多可用视频。请重新连接驱动器以播放其余视频。"
   },
   "modal": {
     "noItemsAvailable": "无可用项",
@@ -754,7 +763,8 @@
       "avgSpeedAsc": "平均速度 慢-快",
       "avgSpeedDesc": "平均速度 快-慢",
       "maxSpeedAsc": "最大速度 慢-快",
-      "maxSpeedDesc": "最大速度 快-慢"
+      "maxSpeedDesc": "最大速度 快-慢",
+      "switchTo": "切换为 {order}"
     },
     "badge": {
       "script": "脚本",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "旋转",
       "badgeEstim": "电刺激",
       "axisCustom": "跟随自定义路由",
-      "tuning": "输出调节"
+      "tuning": "输出调节",
+      "badgeMachine": "机器",
+      "machineModeTitle": "机器速度模式"
     },
     "tcode": {
       "l0Label": "冲程 (主)",

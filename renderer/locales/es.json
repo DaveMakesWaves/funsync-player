@@ -469,7 +469,8 @@
       "variantSearchTitle": "Seleccionar script para variación",
       "searchEroScripts": "Buscar en EroScripts..."
     },
-    "heatmapUnavailable": "Mapa de calor no disponible"
+    "heatmapUnavailable": "Mapa de calor no disponible",
+    "sortSwitchTo": "Cambiar a {order}"
   },
   "playlists": {
     "title": "Listas de reproducción",
@@ -520,7 +521,11 @@
     "watched": "Visto",
     "watchedCount": "{watched} de {total} vistos",
     "timeLeft": "quedan {time}",
-    "continueNamed": "Continuar {name}"
+    "continueNamed": "Continuar {name}",
+    "unavailableCount": "{count, plural, one {# vídeo no está disponible} other {# vídeos no están disponibles}}",
+    "unavailableOnVolume": "{count, plural, one {# vídeo en {volume} no está disponible} other {# vídeos en {volume} no están disponibles}}",
+    "unavailableHint": "Vuelve a conectar la unidad para reproducirlos. Siguen en la lista.",
+    "unavailableTooltip": "No disponible ahora mismo: {path}"
   },
   "categories": {
     "title": "Categorías",
@@ -667,7 +672,11 @@
     "queueReadError": "Elemento de cola {name}: lectura del script falló ({error}) — reproduciendo sin sincronización",
     "handyUploadTimeout": "La subida del script a Handy expiró — el vídeo se está reproduciendo pero Handy no estará sincronizado. Verifica tu conexión e intenta recargar el vídeo.",
     "orgasmRoutingFallback": "Orgasm Switch: {devices} sin conectar. Se usa un solo eje hasta que todo vuelva a estar conectado.",
-    "orgasmScriptRecovered": "Se encontraron {count} script(s) de finisher movidos y se actualizó la ruta"
+    "orgasmScriptRecovered": "Se encontraron {count} script(s) de finisher movidos y se actualizó la ruta",
+    "videoUnavailable": "Este vídeo no está disponible ahora mismo. Vuelve a conectar la unidad donde está guardado.",
+    "playlistAllUnavailable": "Ninguno de estos vídeos está disponible ahora mismo. Vuelve a conectar la unidad.",
+    "playlistSkippedUnavailable": "{count, plural, one {Se omitió # vídeo no disponible} other {Se omitieron # vídeos no disponibles}}",
+    "nextAllUnavailable": "No hay más vídeos disponibles en esa dirección. Vuelve a conectar la unidad para reproducir el resto."
   },
   "modal": {
     "noItemsAvailable": "Sin elementos disponibles",
@@ -754,7 +763,8 @@
       "avgSpeedAsc": "Vel. media lenta-rápida",
       "avgSpeedDesc": "Vel. media rápida-lenta",
       "maxSpeedAsc": "Vel. máx. lenta-rápida",
-      "maxSpeedDesc": "Vel. máx. rápida-lenta"
+      "maxSpeedDesc": "Vel. máx. rápida-lenta",
+      "switchTo": "Cambiar a {order}"
     },
     "badge": {
       "script": "Script",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "Rotar",
       "badgeEstim": "E-Stim",
       "axisCustom": "Seguir enrutamiento personalizado",
-      "tuning": "Ajuste de salida"
+      "tuning": "Ajuste de salida",
+      "badgeMachine": "Máquina",
+      "machineModeTitle": "Modo de velocidad de la máquina"
     },
     "tcode": {
       "l0Label": "Estocada (principal)",

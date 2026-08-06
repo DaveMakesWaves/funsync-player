@@ -290,7 +290,7 @@ export async function openOrgasmConfigModal({ entry, knownDevices = [] } = {}) {
         });
 
         const addBtn = document.createElement('button');
-        addBtn.className = 'modal-list-item library__browse-fallback';
+        addBtn.className = 'modal-list-item library__assoc-action';
         addBtn.textContent = t('library.assoc.addRoute');
         addBtn.addEventListener('click', () => {
           routes.push({ deviceId: '', scriptPath: '', scriptName: '', role: 'axis' });

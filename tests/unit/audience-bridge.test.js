@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // AudienceBridge — fan-out + lifecycle + per-viewer status.
 // SCOPE: notes/features/SCOPE-audience-broadcast.md §5 + §7.
 //

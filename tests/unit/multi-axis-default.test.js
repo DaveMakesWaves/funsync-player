@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the multi-axis auto-promotion feature on Library.
 // Calls the real Library prototype methods against a hand-rolled `this`
 // with the minimum state each method actually reads. This pins behavior

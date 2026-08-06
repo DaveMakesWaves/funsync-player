@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for orgasm-plan.js — resolution of the orgasm config entry
 // (single / multi / custom, association-shape) + device snapshot into a
 // drive plan, including the custom→single demotion when routed devices are

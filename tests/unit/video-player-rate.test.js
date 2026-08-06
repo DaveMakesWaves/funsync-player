@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the playback-rate API on VideoPlayer.
 //
 // VideoPlayer is the single source of truth for rate state. The editor

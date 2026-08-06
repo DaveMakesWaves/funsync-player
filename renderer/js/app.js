@@ -964,6 +964,7 @@ class App {
           if (dev.canVibrate) caps.push('vibrate');
           if (dev.canRotate) caps.push('rotate');
           if (dev.canScalar) caps.push('scalar');
+          if (dev.canOscillate) caps.push('oscillate');
           console.log(
             `[Buttplug] Device added: "${dev.name}" (index ${dev.index}, caps: ${caps.join(',') || 'none'})`
           );
@@ -3173,6 +3174,12 @@ class App {
           await this.buttplugManager.sendLinear(dev.index, 70, 500);
           await new Promise(r => setTimeout(r, 550));
           await this.buttplugManager.sendLinear(dev.index, 20, 500);
+        } else if (dev.canOscillate) {
+          // Brief, low nudge — enough to prove routing without spinning a
+          // flywheel up. Mirrors the connection panel's machine test.
+          await this.buttplugManager.sendOscillate(dev.index, 20);
+          await new Promise(r => setTimeout(r, 600));
+          await this.buttplugManager.sendOscillate(dev.index, 0);
         } else if (dev.canScalar) {
           await this.buttplugManager.sendScalar(dev.index, 0.3);
           await new Promise(r => setTimeout(r, 500));
@@ -8474,7 +8481,7 @@ class App {
         body.appendChild(divider);
 
         const browseRow = document.createElement('button');
-        browseRow.className = 'modal-list-item library__browse-fallback';
+        browseRow.className = 'modal-list-item library__assoc-action';
         browseRow.textContent = t('variants.browse');
         browseRow.addEventListener('click', async () => {
           const result = await window.funsync.selectFunscript();
@@ -9142,17 +9149,38 @@ class App {
     const list = ctx.list;
     if (!Array.isArray(list) || list.length < 2) return false;
 
-    const targetIdx = (ctx.index || 0) + delta;
-    if (targetIdx < 0 || targetIdx >= list.length) return false;
+    if (!this.library) return false;
 
-    const path = list[targetIdx];
-    if (!path || !this.library) return false;
+    // STEP OVER unreachable entries rather than dead-ending on them.
+    //
+    // A playlist that spans an external drive keeps every entry when the
+    // drive is unplugged (they render greyed — see playlist-availability.js),
+    // so N/P must walk past them to the next thing that can actually play.
+    // Stopping at the first one would strand the user mid-playlist with a
+    // "not found" toast and no way forward.
+    //
+    // `unavailablePaths` is the snapshot taken when playback started; the
+    // library lookup is the live check. Either one disqualifies an entry.
+    const skipped = new Set(ctx.unavailablePaths || []);
+    let targetIdx = (ctx.index || 0) + delta;
+    let video = null;
+    let passedOver = 0;
 
-    const video = this.library.getVideoByPath?.(path);
+    while (targetIdx >= 0 && targetIdx < list.length) {
+      const path = list[targetIdx];
+      const candidate = path ? this.library.getVideoByPath?.(path) : null;
+      if (path && candidate && !skipped.has(path)) {
+        video = candidate;
+        break;
+      }
+      passedOver += 1;
+      targetIdx += delta;
+    }
+
     if (!video) {
-      // Present in the snapshot but gone from the current scan (deleted,
-      // or an unplugged drive). Say so rather than failing silently.
-      showToast(t('toast.nextNotFound'), 'warn', 3000);
+      // Nothing playable in that direction. Distinguish "the drive is
+      // unplugged" from "you're at the end" — they need different actions.
+      if (passedOver > 0) showToast(t('toast.nextAllUnavailable'), 'warn', 3000);
       return false;
     }
 

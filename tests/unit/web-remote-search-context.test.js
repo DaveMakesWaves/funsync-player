@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for buildContextMapFromGroupings — the inversion that lets the
 // mobile fuzzy search match a video by the name of a collection /
 // playlist / category it belongs to (parity with the desktop's

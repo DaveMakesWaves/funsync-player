@@ -66,6 +66,11 @@ export class ButtplugSync {
     this._vibeModeMap = new Map();          // deviceIndex → 'speed'|'position'|'intensity'
     this._scalarModeMap = new Map();        // deviceIndex → 'speed'|'position'|'intensity'
     this._rotateModeMap = new Map();        // deviceIndex → 'speed'|'position'|'intensity'
+    // Flywheel machines. Default 'speed' and NOT 'position': stroke length
+    // is mechanically fixed, so a position value would be read as raw power
+    // — turning a slow deep stroke into a violent one. Position mode exists
+    // only for scripts already converted to power levels.
+    this._oscillateModeMap = new Map();
     this._maxIntensityMap = new Map();      // deviceIndex → 0-100 (safety cap for e-stim)
     this._rampUpMap = new Map();            // deviceIndex → true/false
     // Per-device range: linearly remaps script 0-100 into user's
@@ -175,9 +180,16 @@ export class ButtplugSync {
     this._lastLinearSentForIdx = -1;
     this._axisLastLinearSentIdx.clear();
 
+    // Clear the source-change pairing so a later `playing` can't emit a
+    // bogus RE-ARMED line for a swap that never completed.
+    this._awaitingResume = false;
+
     if (this.buttplug?.stopAll) {
       Promise.resolve(this.buttplug.stopAll()).catch((err) => {
-        console.debug('[ButtplugSync] StopAll on stop() failed:', err?.message || err);
+        // error, not debug: this is the path that leaves a device running.
+        console.error(
+          `[ButtplugSync] STOP-ALL FAILED on stop() — devices may still be running: ${err?.message || err}`
+        );
       });
     }
 
@@ -255,11 +267,13 @@ export class ButtplugSync {
     this._onPause = () => this._handlePause();
     this._onSeeked = () => this._handleSeeked();
     this._onEnded = () => this._handleEnded();
+    this._onEmptied = () => this._handleSourceChange();
 
     video.addEventListener('playing', this._onPlaying);
     video.addEventListener('pause', this._onPause);
     video.addEventListener('seeked', this._onSeeked);
     video.addEventListener('ended', this._onEnded);
+    video.addEventListener('emptied', this._onEmptied);
   }
 
   _unbindVideoEvents() {
@@ -268,6 +282,64 @@ export class ButtplugSync {
     if (this._onPause) video.removeEventListener('pause', this._onPause);
     if (this._onSeeked) video.removeEventListener('seeked', this._onSeeked);
     if (this._onEnded) video.removeEventListener('ended', this._onEnded);
+    if (this._onEmptied) video.removeEventListener('emptied', this._onEmptied);
+  }
+
+  /**
+   * The video's source was replaced — a manual next/prev, or picking a
+   * different video mid-playback.
+   *
+   * `loadSource()` does `video.src = url; video.load()`, and the HTML media
+   * load algorithm sets `paused = true` WITHOUT firing a `pause` event. The
+   * video also didn't end, so `ended` doesn't fire either. Neither existing
+   * handler ran, and `_tryStartButtplugSync()` then took its `_active` branch
+   * into `reloadActions()`, which restarts the scheduler but never stops the
+   * device.
+   *
+   * With a script on the new video the next tick overwrote the value within
+   * ~50ms and nobody noticed. WITHOUT one, `_tryStartButtplugSync()` bails at
+   * its `isLoaded` check and the device held its last commanded value
+   * indefinitely. That is the unfixed half of the community "kept buzzing
+   * after switching videos" report — adding stopAll to `stop()` only ever
+   * covered the `ended` path (natural end / Play All auto-advance).
+   *
+   * `emptied` IS fired by the load algorithm whenever an already-loaded
+   * source is replaced, which makes it the correct hook. It does not fire on
+   * the very first load, when there is nothing to stop anyway.
+   *
+   * Deliberately does NOT clear `_active` or unbind events: the engine has to
+   * re-arm itself for the new video. Both `_handlePlaying()` and
+   * `_tryStartButtplugSync()`'s `reloadActions()` branch gate on `_active`,
+   * so clearing it here would silence the device until the user reconnected.
+   */
+  _handleSourceChange() {
+    if (!this._active) return;
+    // Logged at `log` level (forwarded to main.log; `debug` is not) and paired
+    // with the RE-ARMED line in _handlePlaying. This hook is new as of
+    // 2026-08-06, so if it breaks a previously-working setup the report needs
+    // to show whether the stop fired and whether the engine came back.
+    const count = this.buttplug?.devices?.length ?? 0;
+    console.log(
+      `[ButtplugSync] Video source changed — stopping ${count} device(s), ` +
+      'holding until the new video plays'
+    );
+    this._awaitingResume = true;
+    this._sourceChangeAt = performance.now();
+
+    this._stopScheduler();
+    this.buttplug.stopAll();
+    this._lastSentPos = -1;
+    this._lastVibSentIntensity = -1;
+    this._resetIndex();
+    this._resetVibIndex();
+    this._resetAxisIndices();
+    this._lastLinearSentForIdx = -1;
+    this._axisLastLinearSentIdx.clear();
+    // Re-arm the ramp so the new video eases in from zero rather than picking
+    // up at the previous video's intensity. Matters most for a flywheel
+    // machine, which has real inertia.
+    this._rampUpStartTime = performance.now();
+    this._emitStatus('idle');
   }
 
   _handlePlaying() {
@@ -282,6 +354,25 @@ export class ButtplugSync {
     this._rampUpStartTime = performance.now();
     this._startScheduler();
     this._emitStatus('synced');
+
+    // Close the source-change log pair. A STOP line with no matching RE-ARMED
+    // line is the exact signature of "devices went dead after I changed video"
+    // — the failure mode this hook could plausibly introduce.
+    if (this._awaitingResume) {
+      this._awaitingResume = false;
+      const gap = Math.round(performance.now() - (this._sourceChangeAt || 0));
+      console.log(`[ButtplugSync] RE-ARMED after source change (${gap}ms gap)`);
+      // Cached actions are refreshed by reloadActions(), which app.js only
+      // calls when a script is loaded for the NEW video. If none was, the
+      // scheduler is about to drive the previous video's actions against the
+      // new timeline. Pre-existing, but this is where it would surface.
+      if (this.funscript && !this.funscript.isLoaded && this._actions?.length) {
+        console.warn(
+          '[ButtplugSync] Re-armed with no funscript loaded for the new video — ' +
+          `still holding ${this._actions.length} action(s) from the previous one.`
+        );
+      }
+    }
   }
 
   _handlePause() {
@@ -596,7 +687,10 @@ export class ButtplugSync {
         this.buttplug.sendLinear(dev.index, pos, durationMs);
       }
       // Only drive vibrate from main script if no separate vib script is loaded
-      if (dev.canVibrate && !this._vibActions) {
+      // `!dev.canOscillate` gives Oscillate precedence on hardware exposing
+      // both (some Lovense): it is the more specific actuator, and driving
+      // both would fight over one motor.
+      if (dev.canVibrate && !dev.canOscillate && !this._vibActions) {
         const mode = this._vibeModeMap.get(dev.index) || 'speed';
         const intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
         this.buttplug.sendVibrate(dev.index, intensity);
@@ -607,6 +701,16 @@ export class ButtplugSync {
         let intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
         intensity = this._applyScalarSafety(dev.index, intensity);
         this.buttplug.sendScalar(dev.index, intensity);
+      }
+      // Flywheel machines. Routed through the SCALAR safety path, not the
+      // vibrate one: vibrate has no cap and no ramp, while a machine needs
+      // both — full power is dangerous and a flywheel has real inertia.
+      // Same treatment e-stim gets, for the same reason.
+      if (dev.canOscillate && !this._vibActions) {
+        const mode = this._oscillateModeMap.get(dev.index) || 'speed';
+        let speed = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+        speed = this._applyScalarSafety(dev.index, speed);
+        this.buttplug.sendOscillate(dev.index, speed);
       }
       // Rotation devices
       if (dev.canRotate) {
@@ -947,6 +1051,18 @@ export class ButtplugSync {
 
   getScalarMode(deviceIndex) {
     return this._scalarModeMap.get(deviceIndex) || 'position';
+  }
+
+  /**
+   * Per-device oscillate mode. See `_oscillateModeMap` for why the default
+   * is 'speed' — 'position' is only correct for pre-converted power scripts.
+   */
+  setOscillateMode(deviceIndex, mode) {
+    this._oscillateModeMap.set(deviceIndex, mode);
+  }
+
+  getOscillateMode(deviceIndex) {
+    return this._oscillateModeMap.get(deviceIndex) || 'speed';
   }
 
   setRotateMode(deviceIndex, mode) {

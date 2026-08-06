@@ -1544,13 +1544,22 @@
 }
 
 /* Browse Fallback */
-.library__browse-fallback {
-  opacity: 0.7;
-  font-style: italic;
+/* Actions that sit BELOW the ranked suggestions in the association modal
+   — "Browse...", "Search EroScripts...", "+ Add Variation...".
+   These were `opacity: 0.7; font-style: italic` under the class name
+   `browse-fallback`, which read as a dimmed footnote for the empty case.
+   A community member asked us to add a browse-for-script button that had
+   been sitting there the whole time (2026-08-06), so the styling was
+   actively costing us. Now they read as actions: full opacity, accent
+   colour, upright. */
+.library__assoc-action {
+  color: var(--accent);
+  font-weight: 500;
 }
 
-.library__browse-fallback:hover {
-  opacity: 1;
+.library__assoc-action:hover {
+  color: var(--accent-hover, var(--accent));
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
 }
 
 /* Collection creation modal */
@@ -2164,4 +2173,51 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Sort rows carry their own direction: the wording states it and the arrow
+   repeats it at a glance. Re-clicking the selected row flips both. */
+.library__picker-item--sort {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.library__picker-item--sort .library__picker-item-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.library__sort-arrow {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* The selected row is the only one that flips on click, so it gets the
+   affordance: a stronger arrow and a pointer. */
+.library__picker-item--selected .library__sort-arrow {
+  color: var(--accent);
+}
+
+.library__picker-item--selected {
+  cursor: pointer;
+}
+
+/* Let the browser skip layout/paint for cards scrolled out of view.
+ *
+ * Complements virtual scrolling rather than replacing it: virtual scrolling
+ * bounds how many cards EXIST, this bounds the work done on the ones that do
+ * but aren't visible (the overscan rows, and everything during a fast range
+ * change). `contain-intrinsic-size` supplies a placeholder box so skipped
+ * cards still occupy the right space and the scrollbar doesn't jump. */
+.library__card {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 260px;
+}
+
+.library__list-item {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 72px;
 }

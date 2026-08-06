@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Unit tests for HandyManager — imports from real source with mocked SDK
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 

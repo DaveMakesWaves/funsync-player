@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Pins the per-video "preferred default variant" resolution logic from
 // app.js (_getPreferredVariantLabel + _applyPreferredVariant index pick).
 // Those methods live on the App class (full Electron/DOM harness makes a

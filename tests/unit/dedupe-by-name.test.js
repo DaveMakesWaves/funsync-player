@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // "Hide duplicate names" — collapse videos sharing an identical filename.
 //
 // Dave, 2026-08-06, prompted by a 1471-video library where the same file

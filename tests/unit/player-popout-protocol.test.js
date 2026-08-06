@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Player pop-out protocol — envelope + classify helpers (Phase 2a shell).
 // The message-type set is shared by both renderers, so pin the contract.
 

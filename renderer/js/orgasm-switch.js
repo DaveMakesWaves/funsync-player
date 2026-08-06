@@ -285,9 +285,12 @@ export class OrgasmSwitch {
    * stroke; vibe devices take the dedicated vib channel when the plan has
    * one (position IS intensity — it's an intensity script), else the main
    * stroke's speed-formula intensity; rotate devices take the speed formula.
-   * E-stim (canScalar-only) is deliberately NEVER driven — its max-cap +
-   * ramp-up safety lives in the sync engine and the finisher must not
-   * bypass it.
+   * E-stim (canScalar-only) and flywheel MACHINES (canOscillate) are
+   * deliberately NEVER driven — their max-cap + ramp-up safety lives in the
+   * sync engine and the finisher must not bypass it. For a machine that
+   * matters more than for e-stim: the finisher is a sustained hold at high
+   * speed, and a flywheel has inertia it cannot shed on release. Revisit
+   * only after real-hardware time (SCOPE-fuck-machine-oscillate.md §6).
    */
   _sendBpBroadcast(bp, plan, pos, prevPos, mainMoved, loopMs, dur) {
     const cutoff = this._getCutoff('buttplug');
@@ -305,6 +308,10 @@ export class OrgasmSwitch {
     if (plan.vib) vibCh = this._chanPos('bp:vib', plan.vib, loopMs);
 
     for (const dev of bp.devices) {
+      // Machines sit out the finisher entirely — see the note above. Guarded
+      // explicitly rather than relying on them lacking canVibrate, because
+      // some hardware exposes both.
+      if (dev?.canOscillate) continue;
       if (dev?.canLinear) {
         if (p !== null && mainMoved) {
           try { bp.sendLinear(dev.index, p, dur); } catch { /* per-device best-effort */ }
@@ -338,6 +345,9 @@ export class OrgasmSwitch {
       if (!ch || !ch.moved) continue;
       const dev = bp.devices.find((d) => d && d.index === r.deviceIndex);
       if (!dev) continue;
+      // Same exclusion as the broadcast path: a routed machine still sits
+      // out the finisher.
+      if (dev.canOscillate) continue;
       const p = applyCutoff(ch.pos, cutoff);
       const pPrev = applyCutoff(ch.prev, cutoff);
       const speed = dur > 0 ? (Math.abs(p - pPrev) / dur) * 1000 : 0;

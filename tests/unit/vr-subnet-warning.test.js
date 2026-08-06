@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Unit tests for the VR Device-Sync subnet-mismatch guard.
 //
 // Motivated by a 2026-07 HereSphere support report: user copied the IP

@@ -52,6 +52,10 @@ export class ButtplugManager {
     this._reconnectAttempts = 0;
     this._maxReconnectAttempts = 3;
     this._connecting = false;
+    // Keys already warned about, so a failure inside a 20Hz send loop is
+    // reported once rather than thousands of times. Cleared on disconnect
+    // so a reconnect re-reports a still-broken device.
+    this._warnedKeys = new Set();
 
     // Callbacks
     this.onConnect = null;      // () => {}
@@ -111,6 +115,7 @@ export class ButtplugManager {
       this._client.addListener('disconnect', () => {
         this._connected = false;
         this._devices.clear();
+        this._warnedKeys.clear();
         if (this.onDisconnect) this.onDisconnect();
         // Auto-reconnect with exponential backoff
         this._attemptReconnect();
@@ -199,7 +204,10 @@ export class ButtplugManager {
       const cmd = ButtplugSDK.DeviceOutput.Vibrate.percent(pct);
       await device.runOutput(cmd);
     } catch (err) {
-      console.debug('[Buttplug] Vibrate error:', err?.message || err);
+      this._warnOnce(
+        `send-vibrate-${deviceIndex}`,
+        `[Buttplug] Vibrate command to "${device.name}" failed: ${err?.message || err}`
+      );
     }
   }
 
@@ -220,7 +228,10 @@ export class ButtplugManager {
       const cmd = ButtplugSDK.DeviceOutput.PositionWithDuration.percent(pct, dur);
       await device.runOutput(cmd);
     } catch (err) {
-      console.debug('[Buttplug] Linear error:', err?.message || err);
+      this._warnOnce(
+        `send-linear-${deviceIndex}`,
+        `[Buttplug] Linear command to "${device.name}" failed: ${err?.message || err}`
+      );
     }
   }
 
@@ -240,13 +251,84 @@ export class ButtplugManager {
       const cmd = ButtplugSDK.DeviceOutput.Rotate.percent(pct, clockwise);
       await device.runOutput(cmd);
     } catch (err) {
-      console.debug('[Buttplug] Rotate error:', err?.message || err);
+      this._warnOnce(
+        `send-rotate-${deviceIndex}`,
+        `[Buttplug] Rotate command to "${device.name}" failed: ${err?.message || err}`
+      );
     }
   }
 
   /**
-   * Send a scalar command to a device (v4: DeviceOutput.Scalar).
+   * Send an oscillation (speed) command to a flywheel machine
+   * (v4: DeviceOutput.Oscillate.percent).
+   *
+   * The value is a SPEED, not a position — the machine's stroke length is
+   * fixed. Callers must derive it from stroke rate, not pass a raw script
+   * position; see ButtplugSync's oscillate dispatch.
+   *
+   * @param {number} deviceIndex — device index
+   * @param {number} speed — 0–100 (funscript scale)
+   */
+  async sendOscillate(deviceIndex, speed) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return;
+
+    const pct = Math.max(0, Math.min(1, speed / 100));
+
+    try {
+      const cmd = ButtplugSDK.DeviceOutput.Oscillate.percent(pct);
+      await device.runOutput(cmd);
+    } catch (err) {
+      this._warnOnce(
+        `send-oscillate-${deviceIndex}`,
+        `[Buttplug] Oscillate command to "${device.name}" failed: ${err?.message || err}`
+      );
+    }
+  }
+
+  /**
+   * Resolve which CONCRETE scalar output type a device actually exposes.
+   *
+   * There is no `Scalar` output type in buttplug-js v4 — the enum is
+   * Vibrate / Rotate / Oscillate / Constrict / Inflate / Position /
+   * HwPositionWithDuration / Temperature / Spray / Led. `DeviceOutput.Scalar`
+   * is therefore `undefined`, and reading `.percent()` off it throws.
+   * Callers must send the specific type the hardware advertises.
+   *
+   * @param {object} device
+   * @returns {'Constrict'|'Inflate'|null}
+   */
+  _scalarOutputType(device) {
+    for (const type of ['Constrict', 'Inflate']) {
+      try {
+        if (device.hasOutput(type)) return type;
+      } catch { /* probe failure — try the next type */ }
+    }
+    return null;
+  }
+
+  /**
+   * Log a message once per key, so an error inside a 20Hz send loop surfaces
+   * without flooding the log.
+   * @param {string} key
+   * @param {string} message
+   */
+  _warnOnce(key, message) {
+    if (this._warnedKeys.has(key)) return;
+    this._warnedKeys.add(key);
+    console.warn(message);
+  }
+
+  /**
+   * Send a scalar command to a device.
    * Used for e-stim (DG-LAB Coyote, MK-312BT, ET-312), inflate, constrict, etc.
+   *
+   * Sends the concrete output type the device advertises (Constrict or
+   * Inflate). Until 2026-08-06 this sent `DeviceOutput.Scalar`, which does
+   * not exist in v4 — every call threw a TypeError that was swallowed into
+   * console.debug, so e-stim devices connected, appeared routed in the UI,
+   * and silently did nothing.
+   *
    * @param {number} deviceIndex — device index
    * @param {number} intensity — scalar intensity 0–100 (funscript scale)
    */
@@ -254,13 +336,28 @@ export class ButtplugManager {
     const device = this._devices.get(deviceIndex);
     if (!device || !ButtplugSDK) return;
 
+    const type = this._scalarOutputType(device);
+    if (!type) {
+      this._warnOnce(
+        `scalar-type-${deviceIndex}`,
+        `[Buttplug] Device "${device.name}" is flagged as scalar-capable but ` +
+        `exposes neither Constrict nor Inflate. Scalar commands cannot be sent.`
+      );
+      return;
+    }
+
     const pct = Math.max(0, Math.min(1, intensity / 100));
 
     try {
-      const cmd = ButtplugSDK.DeviceOutput.Scalar.percent(pct);
+      const cmd = ButtplugSDK.DeviceOutput[type].percent(pct);
       await device.runOutput(cmd);
     } catch (err) {
-      console.debug('[Buttplug] Scalar error:', err?.message || err);
+      // Warn (not debug) and once per device: a silent failure here is
+      // indistinguishable from a device that simply isn't responding.
+      this._warnOnce(
+        `scalar-send-${deviceIndex}`,
+        `[Buttplug] ${type} command to "${device.name}" failed: ${err?.message || err}`
+      );
     }
   }
 
@@ -275,7 +372,13 @@ export class ButtplugManager {
     try {
       await device.stop();
     } catch (err) {
-      console.debug('[Buttplug] Stop device error:', err?.message || err);
+      // Not once-guarded and not debug: a failed stop means the device is
+      // STILL RUNNING. Every occurrence matters, and console.debug is not
+      // forwarded to main.log, so a swallowed one leaves no trace at all.
+      console.error(
+        `[Buttplug] STOP FAILED for "${device.name}" (index ${deviceIndex}) — ` +
+        `device may still be running: ${err?.message || err}`
+      );
     }
   }
 
@@ -288,7 +391,11 @@ export class ButtplugManager {
     try {
       await this._client.stopAllDevices();
     } catch (err) {
-      console.debug('[Buttplug] StopAll error:', err?.message || err);
+      // See stopDevice: never swallowed. If this fails, every connected
+      // device is potentially still running — including a flywheel machine.
+      console.error(
+        `[Buttplug] STOP-ALL FAILED — devices may still be running: ${err?.message || err}`
+      );
     }
   }
 
@@ -318,16 +425,24 @@ export class ButtplugManager {
     // device is routable through L0 / the main stroke axis.
     const canLinear = probe('HwPositionWithDuration') || probe('Position');
     const canRotate = probe('Rotate');
-    // Scalar umbrella: older buttplug had a unified Scalar type; v4 split
-    // it into Constrict / Inflate / Vibrate. Keep the legacy name check
-    // for backward compat and also accept Constrict/Inflate so e-stim +
-    // inflation devices keep getting picked up.
+    // Flywheel "fuck machines" (Hismith, Auxfun, some Lovense) expose
+    // Oscillate: a scalar SPEED, not a position. Stroke length is
+    // mechanically fixed, so this is the only controllable quantity.
+    // Detected but never routed until 2026-08-06 — the device connected
+    // and sat inert, which is what the community report was.
+    const canOscillate = probe('Oscillate');
+    // Scalar umbrella. NOTE: v4 has no `Scalar` output type at all — the
+    // enum is Vibrate / Rotate / Oscillate / Constrict / Inflate / Position /
+    // HwPositionWithDuration / Temperature / Spray / Led. `probe('Scalar')`
+    // is therefore always false; it stays only as a forward-guard in case a
+    // driver ever advertises it. The real detection is Constrict / Inflate.
+    // sendScalar() resolves the concrete type — it must never send `Scalar`.
     const canScalar = probe('Scalar') || probe('Constrict') || probe('Inflate');
 
     // Diagnostic — when a device connects but no known capability matches,
     // dump the set of output types it actually exposes so we can add the
     // mapping without guessing. Catches driver renames + new device types.
-    if (!canVibrate && !canLinear && !canRotate && !canScalar) {
+    if (!canVibrate && !canLinear && !canRotate && !canScalar && !canOscillate) {
       const ALL_TYPES = [
         'Vibrate', 'Rotate', 'Oscillate', 'Constrict', 'Inflate',
         'Position', 'HwPositionWithDuration', 'Temperature', 'Spray', 'Led',
@@ -347,6 +462,7 @@ export class ButtplugManager {
       canLinear,
       canRotate,
       canScalar,
+      canOscillate,
     };
   }
 
@@ -371,7 +487,8 @@ export class ButtplugManager {
   get primaryDevice() {
     for (const device of this._devices.values()) {
       const info = this._serializeDevice(device);
-      if (info.canVibrate || info.canLinear || info.canScalar || info.canRotate) return device.index;
+      if (info.canVibrate || info.canLinear || info.canScalar || info.canRotate
+          || info.canOscillate) return device.index;
     }
     return null;
   }

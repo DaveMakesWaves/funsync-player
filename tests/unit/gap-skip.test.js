@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Unit tests for GapSkipEngine — imports from real source
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { GapSkipEngine, DEFAULT_THRESHOLD_MS, LEAD_TIME_MS, COOLDOWN_MS } from '../../renderer/js/gap-skip.js';

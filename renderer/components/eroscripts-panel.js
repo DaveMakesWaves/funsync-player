@@ -4,6 +4,7 @@ import { icon, X } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
 import { recordScriptTags } from '../js/script-tags.js';
+import { createResultThumb } from './result-thumb.js';
 import { joinPath, dirOfPath } from '../js/path-utils.js';
 
 export class EroScriptsPanel {
@@ -249,27 +250,13 @@ export class EroScriptsPanel {
       const card = document.createElement('div');
       card.className = 'eroscripts-panel__result';
 
-      // Thumbnail — show avatar immediately, lazy-load topic image
-      const thumb = document.createElement('img');
-      thumb.className = 'eroscripts-panel__result-thumb';
-      thumb.alt = '';
-      // Handler BEFORE src: assigning src can fail synchronously (a CSP
-      // block, a cached 404), and a listener attached afterwards misses the
-      // event entirely — leaving Chromium's broken-image glyph on screen
-      // forever instead of the fallback below.
-      let triedAvatarFallback = false;
-      thumb.addEventListener('error', () => {
-        // A dead thumbnail shouldn't mean a dead row: drop back to the
-        // poster's avatar, and only hide if that fails too.
-        if (!triedAvatarFallback && topic.avatar && thumb.src !== topic.avatar) {
-          triedAvatarFallback = true;
-          thumb.src = topic.avatar;
-          return;
-        }
-        thumb.style.display = 'none';
+      // Thumbnail. Shared with the Associate-modal search so the
+      // listener-before-src ordering lives in exactly one place.
+      const thumb = createResultThumb({
+        thumbnail: topic.thumbnail,
+        avatar: topic.avatar,
+        className: 'eroscripts-panel__result-thumb',
       });
-      thumb.src = topic.thumbnail || topic.avatar || '';
-      if (!thumb.src) thumb.style.display = 'none';
       card.appendChild(thumb);
 
       // Lazy-load actual topic image (replaces avatar)

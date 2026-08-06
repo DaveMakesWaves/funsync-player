@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Pure playlist-progress helpers — Continue targeting, summary counts,
 // watched partitioning. Imports real source.
 import { describe, it, expect } from 'vitest';
@@ -142,7 +147,7 @@ describe('summarisePlaylistProgress', () => {
 
   it('handles an empty playlist', () => {
     expect(summarisePlaylistProgress([], () => null, () => 0)).toEqual({
-      watched: 0, inProgress: 0, total: 0, remainingSeconds: 0,
+      watched: 0, inProgress: 0, total: 0, remainingSeconds: 0, unavailable: 0,
     });
   });
 });

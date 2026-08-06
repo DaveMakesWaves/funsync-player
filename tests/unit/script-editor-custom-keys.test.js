@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Integration: end-to-end that a user's custom position binding fires
 // in the editor's key handler, that defaults still fire, and that
 // overrides win.

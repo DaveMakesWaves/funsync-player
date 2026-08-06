@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Voice-activity detection — pure threshold/merge/drop logic tests.
 //
 // `extractVAD` itself spins up an OfflineAudioContext (via the

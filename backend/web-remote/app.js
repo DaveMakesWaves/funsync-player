@@ -163,13 +163,79 @@ let activeSyncClient = null;  // torn down on view change / unload
 
 // Persisted filter/sort state
 const storedState = loadFilterState();
+// Sort: five FIELDS with direction held separately, mirroring the desktop
+// picker. `uiState.sort` stays `field:dir` so the list-building code below
+// (which splits on ':') is untouched.
+const SORT_FIELDS = [
+  { field: 'name',      defaultDir: 'asc' },
+  { field: 'dateAdded', defaultDir: 'desc' },
+  { field: 'duration',  defaultDir: 'asc' },
+  { field: 'avgSpeed',  defaultDir: 'desc' },
+  { field: 'maxSpeed',  defaultDir: 'desc' },
+];
+
+// `field:dir` -> the existing directional string. Reused so a row still
+// reads "Name A-Z" rather than a vaguer "Name, ascending".
+const SORT_LABELS = {
+  'name:asc': 'webRemote.sortSheet.nameAsc',
+  'name:desc': 'webRemote.sortSheet.nameDesc',
+  'dateAdded:desc': 'webRemote.sortSheet.dateAddedDesc',
+  'dateAdded:asc': 'webRemote.sortSheet.dateAddedAsc',
+  'duration:asc': 'webRemote.sortSheet.durationAsc',
+  'duration:desc': 'webRemote.sortSheet.durationDesc',
+  'avgSpeed:asc': 'webRemote.sortSheet.avgSpeedAsc',
+  'avgSpeed:desc': 'webRemote.sortSheet.avgSpeedDesc',
+  'maxSpeed:asc': 'webRemote.sortSheet.maxSpeedAsc',
+  'maxSpeed:desc': 'webRemote.sortSheet.maxSpeedDesc',
+};
+
+const DEFAULT_SORT_DIRS = Object.fromEntries(SORT_FIELDS.map((o) => [o.field, o.defaultDir]));
+
 let uiState = {
   search: '',
   tab: storedState.tab || 'all',          // matched | unmatched | all
   sort: storedState.sort || 'name:asc',
+  // Remembered per field: set Name to Z-A, go to Duration and back, and
+  // Name is still Z-A.
+  sortDirs: { ...DEFAULT_SORT_DIRS, ...(storedState.sortDirs || {}) },
   vr: storedState.vr || 'all',             // all | vr | flat
   view: storedState.view || 'grid',        // grid | list
 };
+
+/** Current sort as `[field, dir]`, tolerant of an old or malformed value. */
+function sortParts() {
+  const [field, dir] = String(uiState.sort || 'name:asc').split(':');
+  return [field || 'name', dir === 'desc' ? 'desc' : 'asc'];
+}
+
+/**
+ * Fill the sort rows: wording and arrow both follow that field's current
+ * direction, so every row describes itself. Called on render and after any
+ * change, including a locale switch.
+ */
+function syncSortSheet() {
+  const [curField] = sortParts();
+  for (const input of document.querySelectorAll('.sheet__option--sort input[name="sort"]')) {
+    const field = input.value;
+    const dir = uiState.sortDirs[field] || DEFAULT_SORT_DIRS[field] || 'asc';
+    const row = input.closest('.sheet__option');
+    const labelEl = row?.querySelector('.sheet__option-label');
+    const arrowEl = row?.querySelector('.sheet__option-arrow');
+    const selected = field === curField;
+
+    input.checked = selected;
+    if (labelEl) labelEl.textContent = t(SORT_LABELS[`${field}:${dir}`]);
+    if (arrowEl) arrowEl.textContent = dir === 'asc' ? '↑' : '↓';
+    row?.classList.toggle('sheet__option--selected', selected);
+    // Only the selected row flips on tap, so only it advertises that.
+    if (row) {
+      const flipped = SORT_LABELS[`${field}:${dir === 'asc' ? 'desc' : 'asc'}`];
+      row.setAttribute('aria-label', selected && flipped
+        ? t('webRemote.sortSheet.switchTo', { order: t(flipped) })
+        : t(SORT_LABELS[`${field}:${dir}`]));
+    }
+  }
+}
 
 backBtn.addEventListener('click', () => {
   // Hash navigation — triggers hashchange → renders list.
@@ -216,6 +282,10 @@ window.addEventListener('load', async () => {
   try {
     await initWebRemoteI18n();
     translatePage(document);
+    // Sort row labels are built from `t()` rather than `data-i18n`, because
+    // their wording changes with direction — `translatePage` can't reach
+    // them, so fill them once i18n is live.
+    syncSortSheet();
   } catch (err) {
     console.warn('[i18n] init failed; falling back to English defaults', err);
   }
@@ -1427,15 +1497,45 @@ for (const group of document.querySelectorAll('.sheet__options')) {
   group.addEventListener('change', (e) => {
     const input = e.target;
     if (!(input instanceof HTMLInputElement) || input.type !== 'radio') return;
-    uiState[key] = input.value;
+    if (key === 'sort') {
+      // The radio value is a FIELD; direction comes from the per-field
+      // memory. Writing the raw value here would drop the direction and
+      // leave `uiState.sort` a bare field, which the list-builder's
+      // `split(':')` would read as an undefined direction.
+      const field = input.value;
+      uiState.sort = `${field}:${uiState.sortDirs[field] || DEFAULT_SORT_DIRS[field] || 'asc'}`;
+    } else {
+      uiState[key] = input.value;
+    }
     saveFilterState();
     syncControlsUI();
     renderListIfActive();
-    // Sort sheet closes immediately on selection — single-choice flow,
-    // closure should follow the choice. Filter sheet stays open so the
-    // user can stack filter changes in one visit.
+    // Sort sheet closes on picking a different field — single-choice flow,
+    // closure follows the choice. Flipping direction (below) keeps it open.
+    // Filter sheet stays open so filter changes can be stacked.
     if (key === 'sort') closeSheet(sortSheetEl);
   });
+
+  // Re-tapping the ALREADY-selected sort row flips its direction. `change`
+  // never fires for an already-checked radio, so this doesn't overlap with
+  // the handler above. Bound to the RADIO, not the row: a label forwards a
+  // synthetic click to its control which bubbles back up, so a row-mounted
+  // handler would run twice and the flip would undo itself.
+  if (key === 'sort') {
+    group.addEventListener('click', (e) => {
+      const input = e.target;
+      if (!(input instanceof HTMLInputElement) || input.type !== 'radio') return;
+      const [curField] = sortParts();
+      if (input.value !== curField) return; // selection — `change` handles it
+      const dir = uiState.sortDirs[curField] === 'asc' ? 'desc' : 'asc';
+      uiState.sortDirs[curField] = dir;
+      uiState.sort = `${curField}:${dir}`;
+      saveFilterState();
+      syncSortSheet();
+      renderListIfActive();
+      // Sheet stays open so the wording change is visible and reversible.
+    });
+  }
 }
 
 viewToggle.addEventListener('click', () => {
@@ -1765,8 +1865,12 @@ function syncControlsUI() {
     const group = input.closest('.sheet__options');
     const key = group?.dataset.filter;
     if (!key) continue;
-    input.checked = uiState[key] === input.value;
+    // Sort rows hold a bare field; the rest hold their whole value.
+    input.checked = key === 'sort'
+      ? sortParts()[0] === input.value
+      : uiState[key] === input.value;
   }
+  syncSortSheet();
   // Search input
   if (searchInput.value !== uiState.search) searchInput.value = uiState.search;
   searchClear.hidden = !uiState.search;
@@ -1811,6 +1915,7 @@ function saveFilterState() {
     localStorage.setItem('funsync.remote.ui', JSON.stringify({
       tab: uiState.tab,
       sort: uiState.sort,
+      sortDirs: uiState.sortDirs,
       vr: uiState.vr,
       view: uiState.view,
     }));

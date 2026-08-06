@@ -469,7 +469,8 @@
       "variantSearchTitle": "Skript für Variante auswählen",
       "searchEroScripts": "EroScripts durchsuchen..."
     },
-    "heatmapUnavailable": "Heatmap nicht verfügbar"
+    "heatmapUnavailable": "Heatmap nicht verfügbar",
+    "sortSwitchTo": "Wechseln zu {order}"
   },
   "playlists": {
     "title": "Playlists",
@@ -520,7 +521,11 @@
     "watched": "Gesehen",
     "watchedCount": "{watched} von {total} gesehen",
     "timeLeft": "{time} übrig",
-    "continueNamed": "{name} fortsetzen"
+    "continueNamed": "{name} fortsetzen",
+    "unavailableCount": "{count, plural, one {# Video ist nicht verfügbar} other {# Videos sind nicht verfügbar}}",
+    "unavailableOnVolume": "{count, plural, one {# Video auf {volume} ist nicht verfügbar} other {# Videos auf {volume} sind nicht verfügbar}}",
+    "unavailableHint": "Laufwerk wieder verbinden, um sie abzuspielen. Sie bleiben in der Playlist.",
+    "unavailableTooltip": "Derzeit nicht verfügbar: {path}"
   },
   "categories": {
     "title": "Kategorien",
@@ -628,7 +633,8 @@
       "avgSpeedAsc": "Ø Geschw. langsam-schnell",
       "avgSpeedDesc": "Ø Geschw. schnell-langsam",
       "maxSpeedAsc": "Max. Geschw. langsam-schnell",
-      "maxSpeedDesc": "Max. Geschw. schnell-langsam"
+      "maxSpeedDesc": "Max. Geschw. schnell-langsam",
+      "switchTo": "Wechseln zu {order}"
     },
     "badge": {
       "script": "Skript",
@@ -915,7 +921,11 @@
     "queueReadError": "Warteschlangenelement {name}: Skript-Lesen fehlgeschlagen ({error}) — Wiedergabe ohne Synchronisierung",
     "handyUploadTimeout": "Handy-Skript-Upload hat das Zeitlimit überschritten — das Video läuft, aber das Handy ist nicht synchron. Prüfe deine Verbindung und lade das Video neu.",
     "orgasmRoutingFallback": "Orgasmus-Schalter: {devices} nicht verbunden. Einzelachsen-Fallback aktiv, bis alles wieder da ist.",
-    "orgasmScriptRecovered": "{count} verschobene Finisher-Skript(e) gefunden, Pfad aktualisiert"
+    "orgasmScriptRecovered": "{count} verschobene Finisher-Skript(e) gefunden, Pfad aktualisiert",
+    "videoUnavailable": "Dieses Video ist derzeit nicht verfügbar. Verbinde das Laufwerk erneut.",
+    "playlistAllUnavailable": "Keines dieser Videos ist derzeit verfügbar. Verbinde das Laufwerk erneut.",
+    "playlistSkippedUnavailable": "{count, plural, one {# nicht verfügbares Video übersprungen} other {# nicht verfügbare Videos übersprungen}}",
+    "nextAllUnavailable": "Keine weiteren verfügbaren Videos in dieser Richtung. Verbinde das Laufwerk, um den Rest abzuspielen."
   },
   "modal": {
     "noItemsAvailable": "Keine Einträge verfügbar",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "Rotation",
       "badgeEstim": "E-Stim",
       "axisCustom": "Eigenem Routing folgen",
-      "tuning": "Ausgabe-Feinabstimmung"
+      "tuning": "Ausgabe-Feinabstimmung",
+      "badgeMachine": "Maschine",
+      "machineModeTitle": "Maschinengeschwindigkeit"
     },
     "tcode": {
       "l0Label": "Stroke (Haupt)",

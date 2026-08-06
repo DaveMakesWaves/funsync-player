@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the Sync-with-Source collection helpers. These are pure
 // functions — no DOM, no settings — so they're cheap to exhaustively
 // cover, which matters because the membership semantics gate what

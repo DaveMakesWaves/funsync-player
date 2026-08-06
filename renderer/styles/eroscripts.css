@@ -463,7 +463,12 @@
 }
 
 .eroscripts-inline__result-head {
-  display: block;
+  /* Row, so the preview sits beside the title block. A filename-seeded
+     query can return 50 similar titles — the frame is the fastest way to
+     tell which post is the right video. */
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
   width: 100%;
   text-align: left;
   background: none;
@@ -532,8 +537,24 @@
   margin-top: 6px;
 }
 
-/* Sits alongside "Browse..." but reads as an action, not a dimmed footnote
-   — the mistake the existing browse row makes. */
-.library__ero-search-row {
-  color: var(--accent);
+
+
+/* Fixed width with the height derived from it, so there's no feedback loop
+   into the info column's wrapping (the trap avoided in the panel's own
+   thumbnail rule). 120px matches the panel, and the source picker already
+   fetches a 400px image, which stays sharp at 2x. */
+.eroscripts-inline__result-thumb {
+  width: 120px;
+  aspect-ratio: 16 / 9;
+  flex: 0 0 auto;
+  object-fit: cover;
+  border-radius: 4px;
+  background: #111;
+}
+
+.eroscripts-inline__result-info {
+  /* minmax-equivalent for flex: without this a long unbroken title pushes
+     the row wider than the modal instead of ellipsing. */
+  min-width: 0;
+  flex: 1;
 }

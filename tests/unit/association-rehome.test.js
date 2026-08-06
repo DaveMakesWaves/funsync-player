@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Re-homing manual associations when a video moves to a different source.
 //
 // The library has always had a filename fallback here, but it matched on

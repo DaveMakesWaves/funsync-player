@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Unit tests for IPC handler logic from electron/main.js
 //
 // main.js registers handlers via ipcMain.handle() — we can't call them

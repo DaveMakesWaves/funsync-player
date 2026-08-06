@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment jsdom
+ * Needs a DOM: remote-sync.js reads the `location` global.
+ * Do NOT switch this to `node` — see notes/CLAUDE.md "Test environments".
+ */
 // Regression-style tests for the web-remote variant-switching client.
 // These pin the WebSocket protocol contract (`switch-variant` request,
 // `variant-changed` reply) on RemoteSyncClient so future refactors of

@@ -469,7 +469,8 @@
       "variantSearchTitle": "변형용 스크립트 선택",
       "searchEroScripts": "EroScripts 검색..."
     },
-    "heatmapUnavailable": "히트맵을 사용할 수 없음"
+    "heatmapUnavailable": "히트맵을 사용할 수 없음",
+    "sortSwitchTo": "{order}(으)로 전환"
   },
   "playlists": {
     "title": "재생 목록",
@@ -477,7 +478,7 @@
     "playlistNamePlaceholder": "재생 목록 이름",
     "emptyTitle": "아직 재생 목록이 없습니다",
     "emptyCta": "첫 재생 목록 만들기",
-    "videoCount": "{count, plural, other {동영상 #개}}",
+    "videoCount": "{count, plural, other {영상 #개}}",
     "playAll": "모두 재생",
     "loopOnTitle": "반복 켜짐 — 마지막 동영상 이후 1번 항목부터 다시 시작",
     "loopOffTitle": "반복 꺼짐 — 마지막 동영상 이후 중지",
@@ -520,7 +521,11 @@
     "watched": "시청함",
     "watchedCount": "{total}개 중 {watched}개 시청",
     "timeLeft": "{time} 남음",
-    "continueNamed": "{name} 이어보기"
+    "continueNamed": "{name} 이어보기",
+    "unavailableCount": "{count, plural, other {동영상 #개를 사용할 수 없습니다}}",
+    "unavailableOnVolume": "{count, plural, other {{volume}에 있는 동영상 #개를 사용할 수 없습니다}}",
+    "unavailableHint": "드라이브를 다시 연결하면 재생할 수 있습니다. 재생목록에는 그대로 남아 있습니다.",
+    "unavailableTooltip": "현재 사용할 수 없음: {path}"
   },
   "categories": {
     "title": "카테고리",
@@ -667,7 +672,11 @@
     "queueReadError": "대기열 항목 {name}: 스크립트 읽기 실패 ({error}) — 동기화 없이 재생",
     "handyUploadTimeout": "Handy 스크립트 업로드 시간 초과 — 동영상은 재생되지만 Handy는 동기화되지 않습니다. 연결을 확인하고 동영상을 다시 로드하세요.",
     "orgasmRoutingFallback": "오르가즘 스위치: {devices} 미연결. 모두 연결될 때까지 단일 축으로 동작합니다.",
-    "orgasmScriptRecovered": "이동된 피니셔 스크립트 {count}개를 찾아 경로를 업데이트했습니다"
+    "orgasmScriptRecovered": "이동된 피니셔 스크립트 {count}개를 찾아 경로를 업데이트했습니다",
+    "videoUnavailable": "이 동영상은 지금 사용할 수 없습니다. 저장된 드라이브를 다시 연결하세요.",
+    "playlistAllUnavailable": "이 동영상 중 지금 사용할 수 있는 것이 없습니다. 드라이브를 다시 연결하세요.",
+    "playlistSkippedUnavailable": "{count, plural, other {사용할 수 없는 동영상 #개를 건너뛰었습니다}}",
+    "nextAllUnavailable": "해당 방향에 재생할 수 있는 동영상이 없습니다. 나머지를 재생하려면 드라이브를 다시 연결하세요."
   },
   "modal": {
     "noItemsAvailable": "사용 가능한 항목 없음",
@@ -754,7 +763,8 @@
       "avgSpeedAsc": "평균 속도 느린-빠른",
       "avgSpeedDesc": "평균 속도 빠른-느린",
       "maxSpeedAsc": "최대 속도 느린-빠른",
-      "maxSpeedDesc": "최대 속도 빠른-느린"
+      "maxSpeedDesc": "최대 속도 빠른-느린",
+      "switchTo": "{order}(으)로 전환"
     },
     "badge": {
       "script": "스크립트",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "회전",
       "badgeEstim": "전기 자극",
       "axisCustom": "사용자 정의 라우팅 따르기",
-      "tuning": "출력 조정"
+      "tuning": "출력 조정",
+      "badgeMachine": "머신",
+      "machineModeTitle": "머신 속도 모드"
     },
     "tcode": {
       "l0Label": "스트로크 (메인)",

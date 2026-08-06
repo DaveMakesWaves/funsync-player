@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Pins the funscript variant-classification logic in
 // electron/main.js::scan-directory. The classifier is currently inline
 // in main.js (CJS + Electron deps make direct import hostile); this

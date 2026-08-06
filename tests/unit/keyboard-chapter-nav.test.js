@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for chapter + bookmark keyboard nav.
 // SCOPE: notes/features/SCOPE-chapters-bookmarks.md §6 C-E22, C-E23.
 //

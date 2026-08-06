@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // EroScripts search-result parsing, against the REAL response shape.
 //
 // The fixture below mirrors an actual /search.json payload captured from

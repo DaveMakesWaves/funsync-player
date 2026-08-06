@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Range Extender (Tier 2a) — script-side stretch integration.
 //
 // The pure functions (computeNaturalRange, applyExtender,

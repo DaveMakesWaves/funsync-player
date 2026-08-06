@@ -2141,3 +2141,23 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
   25% { opacity: 1; transform: translateY(-50%) scale(1); }
   100% { opacity: 0; transform: translateY(-50%) scale(1); }
 }
+
+/* Sort rows carry their own direction: the wording states it, the arrow
+   repeats it at a glance, and re-tapping the selected row flips both.
+   Mirrors the desktop picker. */
+.sheet__option--sort .sheet__option-label {
+  flex: 1;
+  min-width: 0;
+}
+
+.sheet__option-arrow {
+  flex-shrink: 0;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--text-secondary);
+}
+
+/* The selected row is the only one that flips, so it gets the affordance. */
+.sheet__option--selected .sheet__option-arrow {
+  color: var(--accent);
+}

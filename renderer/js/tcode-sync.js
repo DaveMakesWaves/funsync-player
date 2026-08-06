@@ -108,6 +108,7 @@ export class TCodeSync {
 
   stop() {
     this._active = false;
+    this._awaitingResume = false;
     this._unbindVideoEvents();
     this._stopScheduler();
     this.tcode.stop();
@@ -275,14 +276,42 @@ export class TCodeSync {
 
   _bindVideoEvents() {
     const v = this.player.video;
-    this._onPlaying = () => { if (!this._active) return; this._resetIndices(); this._startScheduler(); this._emitStatus('synced'); };
+    this._onPlaying = () => {
+      if (!this._active) return;
+      this._resetIndices();
+      this._startScheduler();
+      this._emitStatus('synced');
+      // Closes the pair logged by _onEmptied. A "source changed" line with no
+      // matching "RE-ARMED" is the signature of axes going dead after a video
+      // change — the failure this hook could plausibly introduce.
+      if (this._awaitingResume) {
+        this._awaitingResume = false;
+        console.log('[TCodeSync] RE-ARMED after source change');
+      }
+    };
     this._onPause = () => { if (!this._active) return; this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle'); };
     this._onSeeked = () => { if (!this._active) return; this._resetIndices(); };
     this._onEnded = () => { if (!this._active) return; this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle'); };
+    // Source replaced (manual next/prev, or picking another video mid-play).
+    // The media load algorithm sets paused = true WITHOUT firing `pause`, and
+    // the video didn't end — so neither handler above runs and the axes would
+    // hold their last commanded value. `emptied` is the load algorithm's own
+    // signal that a loaded source was torn down. Leaves `_active` set so the
+    // new video re-arms via `playing` / reloadActions.
+    this._onEmptied = () => {
+      if (!this._active) return;
+      console.log('[TCodeSync] Video source changed — stopping axes, holding until the new video plays');
+      this._awaitingResume = true;
+      this._stopScheduler();
+      this.tcode.stop();
+      this._resetIndices();
+      this._emitStatus('idle');
+    };
     v.addEventListener('playing', this._onPlaying);
     v.addEventListener('pause', this._onPause);
     v.addEventListener('seeked', this._onSeeked);
     v.addEventListener('ended', this._onEnded);
+    v.addEventListener('emptied', this._onEmptied);
   }
 
   _unbindVideoEvents() {
@@ -291,6 +320,7 @@ export class TCodeSync {
     if (this._onPause) v.removeEventListener('pause', this._onPause);
     if (this._onSeeked) v.removeEventListener('seeked', this._onSeeked);
     if (this._onEnded) v.removeEventListener('ended', this._onEnded);
+    if (this._onEmptied) v.removeEventListener('emptied', this._onEmptied);
   }
 
   // --- Scheduler ---

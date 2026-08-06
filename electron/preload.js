@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // File utilities
   fileExists: (filePath) => ipcRenderer.invoke('file-exists', filePath),
+  filesExist: (filePaths) => ipcRenderer.invoke('files-exist', filePaths),
 
   // Data export/import
   exportData: () => ipcRenderer.invoke('export-data'),

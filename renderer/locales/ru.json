@@ -469,7 +469,8 @@
       "variantSearchTitle": "Выберите скрипт для варианта",
       "searchEroScripts": "Поиск на EroScripts..."
     },
-    "heatmapUnavailable": "Тепловая карта недоступна"
+    "heatmapUnavailable": "Тепловая карта недоступна",
+    "sortSwitchTo": "Переключить на {order}"
   },
   "playlists": {
     "title": "Плейлисты",
@@ -520,7 +521,11 @@
     "watched": "Просмотрено",
     "watchedCount": "Просмотрено {watched} из {total}",
     "timeLeft": "осталось {time}",
-    "continueNamed": "Продолжить {name}"
+    "continueNamed": "Продолжить {name}",
+    "unavailableCount": "{count, plural, one {# видео недоступно} few {# видео недоступны} other {# видео недоступны}}",
+    "unavailableOnVolume": "{count, plural, one {# видео на {volume} недоступно} few {# видео на {volume} недоступны} other {# видео на {volume} недоступны}}",
+    "unavailableHint": "Подключите диск, чтобы воспроизвести их. Они остаются в плейлисте.",
+    "unavailableTooltip": "Сейчас недоступно: {path}"
   },
   "categories": {
     "title": "Категории",
@@ -667,7 +672,11 @@
     "queueReadError": "Элемент очереди {name}: ошибка чтения скрипта ({error}) — воспроизведение без синхронизации",
     "handyUploadTimeout": "Время загрузки скрипта на Handy истекло — видео воспроизводится, но Handy не будет синхронизирован. Проверьте подключение и попробуйте перезагрузить видео.",
     "orgasmRoutingFallback": "Переключатель оргазма: {devices} не подключено. Используется одна ось, пока всё не подключится снова.",
-    "orgasmScriptRecovered": "Найдено перемещённых скриптов финишера: {count}. Путь обновлён"
+    "orgasmScriptRecovered": "Найдено перемещённых скриптов финишера: {count}. Путь обновлён",
+    "videoUnavailable": "Это видео сейчас недоступно. Подключите диск, на котором оно хранится.",
+    "playlistAllUnavailable": "Ни одно из этих видео сейчас недоступно. Подключите диск.",
+    "playlistSkippedUnavailable": "{count, plural, one {Пропущено # недоступное видео} few {Пропущено # недоступных видео} other {Пропущено # недоступных видео}}",
+    "nextAllUnavailable": "В этом направлении больше нет доступных видео. Подключите диск, чтобы воспроизвести остальные."
   },
   "modal": {
     "noItemsAvailable": "Нет доступных элементов",
@@ -754,7 +763,8 @@
       "avgSpeedAsc": "Ср. скорость медл.-быстр.",
       "avgSpeedDesc": "Ср. скорость быстр.-медл.",
       "maxSpeedAsc": "Макс. скорость медл.-быстр.",
-      "maxSpeedDesc": "Макс. скорость быстр.-медл."
+      "maxSpeedDesc": "Макс. скорость быстр.-медл.",
+      "switchTo": "Переключить на {order}"
     },
     "badge": {
       "script": "Скрипт",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "Вращение",
       "badgeEstim": "E-Stim",
       "axisCustom": "Следовать пользовательской маршрутизации",
-      "tuning": "Настройка вывода"
+      "tuning": "Настройка вывода",
+      "badgeMachine": "Машина",
+      "machineModeTitle": "Режим скорости машины"
     },
     "tcode": {
       "l0Label": "Ход (основной)",

@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Property-based / fuzz tests for the retention math.
 //
 // The unit tests in `data-backup.test.js` cover the hand-picked edges

@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the Orgasm Switch controller (hold-to-activate looping override).
 //
 // Community request shy4649 (2026-06-08): a held key swaps the device(s)
@@ -444,6 +449,32 @@ describe('OrgasmSwitch — loadPlan (custom routing)', () => {
     os.activate();
     clock.t = 500; os._tick();
     expect(deps.buttplugManager.sendScalar).not.toHaveBeenCalled();
+    expect(deps.buttplugManager.sendVibrate).not.toHaveBeenCalled();
+  });
+
+  it('never drives a flywheel MACHINE from a route', () => {
+    // Same reasoning as e-stim, and it matters more: the finisher is a
+    // sustained hold at high speed, the cap + ramp safety lives in the sync
+    // engine, and a flywheel has inertia it cannot shed on release.
+    deps.buttplugManager.sendOscillate = vi.fn();
+    deps.buttplugManager.devices = [{ index: 2, name: 'Hismith', canOscillate: true }];
+    os.loadPlan(customPlan({ bpRoutes: [{ deviceIndex: 2, actions: MAIN, name: 'Hismith' }] }));
+    os.activate();
+    clock.t = 500; os._tick();
+    expect(deps.buttplugManager.sendOscillate).not.toHaveBeenCalled();
+  });
+
+  it('never drives a machine from the broadcast path either', () => {
+    // Guarded explicitly rather than relying on the device lacking
+    // canVibrate — some hardware exposes both.
+    deps.buttplugManager.sendOscillate = vi.fn();
+    deps.buttplugManager.devices = [
+      { index: 2, name: 'Hismith', canOscillate: true, canVibrate: true },
+    ];
+    os.loadPlan(customPlan({ bpMode: 'broadcast', bpRoutes: null }));
+    os.activate();
+    clock.t = 500; os._tick();
+    expect(deps.buttplugManager.sendOscillate).not.toHaveBeenCalled();
     expect(deps.buttplugManager.sendVibrate).not.toHaveBeenCalled();
   });
 

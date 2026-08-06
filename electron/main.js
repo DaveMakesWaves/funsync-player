@@ -1991,6 +1991,25 @@ ipcMain.handle('file-exists', (_event, filePath) => {
   }
 });
 
+/**
+ * Batch existence check. One IPC round trip for a whole playlist instead of
+ * one per video — a 500-entry playlist on an external drive was 500 invokes,
+ * each of which can block on a spun-down or disconnected volume.
+ *
+ * Returns an array of booleans positionally matching the input. Never throws:
+ * an unreadable path is `false`, which is exactly how callers treat it.
+ */
+ipcMain.handle('files-exist', (_event, filePaths) => {
+  if (!Array.isArray(filePaths)) return [];
+  return filePaths.map((p) => {
+    try {
+      return typeof p === 'string' && p.length > 0 && fs.existsSync(p);
+    } catch {
+      return false;
+    }
+  });
+});
+
 // --- IPC Handlers: Shell ---
 
 ipcMain.handle('open-external', async (_event, url) => {

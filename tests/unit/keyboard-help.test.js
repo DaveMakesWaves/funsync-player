@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for keyboard-help — the shared `?` overlay used by both the
 // editor and the player view. Pure rendering helper; the interesting
 // behaviours to pin down:

@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Regression test — every key present in en.json must also exist in every
 // other shipped locale bundle. If a translator misses a key, ICU MessageFormat
 // would silently fall back to English at runtime — but that's a translation

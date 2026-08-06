@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the main-process TCode transport classes.
 //
 // Community feedback (GGEZGitGud, 2026-05-15) drove two new transports

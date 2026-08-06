@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Round-trip tests for EDIT_OP routing — pop-out sends an op via the
 // relay, parent's `_applyPopoutEdit` dispatches to EditableScript.
 //

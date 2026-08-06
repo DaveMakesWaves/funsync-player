@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Pins the variant merge + switcher-visibility rule that App._updateVariantSelector
 // applies (renderer/js/app.js). Mirrored as pure functions because app.js
 // carries DOM/Electron deps that make direct import hostile.

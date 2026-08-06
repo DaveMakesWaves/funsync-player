@@ -83,9 +83,14 @@ describe('ButtplugSync', () => {
     });
 
     it('does not double-start', () => {
+      // Compare against a single start rather than a hardcoded listener
+      // count — the point is that the second start() binds nothing more,
+      // which shouldn't need editing every time an event is added.
       sync.start();
+      const afterFirst = mockPlayer.video.addEventListener.mock.calls.length;
+      expect(afterFirst).toBeGreaterThan(0);
       sync.start();
-      expect(mockPlayer.video.addEventListener).toHaveBeenCalledTimes(4);
+      expect(mockPlayer.video.addEventListener).toHaveBeenCalledTimes(afterFirst);
     });
 
     it('resets lastSentPos on stop', () => {

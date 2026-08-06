@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // TCode per-axis settings — enable, range, invert.
 //
 // Existing tcode.test.js covered command formatting only; per-audit

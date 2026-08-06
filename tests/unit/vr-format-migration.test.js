@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Schema migration tests for the new library.vrFormat shape.
 //
 // Old shape (kept indefinitely for downgrade safety):

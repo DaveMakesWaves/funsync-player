@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Unit tests for electron/store.js — main process data store
 // We mock electron-conf with an in-memory Map-based implementation
 import { describe, it, expect, beforeEach, vi } from 'vitest';

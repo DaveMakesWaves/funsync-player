@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // End-to-end scenario tests for the backup/recovery layer.
 // These read like user stories rather than unit tests — each one
 // simulates a real-world failure mode the system has to survive.

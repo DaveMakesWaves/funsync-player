@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Audience pop-out protocol — message-type constants, envelope shape,
 // classifier.
 // SCOPE: notes/features/SCOPE-audience-broadcast.md §3.3 + §5.

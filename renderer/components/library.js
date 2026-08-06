@@ -3,6 +3,13 @@
 import { Modal } from './modal.js';
 import { rankFunscriptMatches, fuzzyMatchScore } from '../js/fuzzy-match.js';
 import { computeGridRange, hasRangeChanged } from '../js/virtual-scroll.js';
+import {
+  shouldDeferLoads,
+  smoothVelocity,
+  prioritiseByDistance,
+  chunk,
+  SLOT_STALL_MS,
+} from '../js/scroll-load-policy.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from '../js/vr-detect.js';
 import { icon, FolderOpen, Folder, ChevronRight, ArrowLeft, X, Clapperboard, Play, EllipsisVertical, FileCheck, Gauge, Captions, LayoutGrid, LayoutList, ArrowDownAZ, SlidersHorizontal, Search, RotateCcw, Layers2, Cable, Shuffle, Columns2 } from '../js/icons.js';
 import { t } from '../js/i18n.js';
@@ -1253,23 +1260,44 @@ export class Library {
       });
     }
 
-    // Throttled scroll handler with preview suppression
+    // Throttled scroll handler with preview suppression.
+    //
+    // `_scrolling` still means "the view is moving" (previews stay suppressed
+    // for the whole gesture). What changed is that LOADING is no longer gated
+    // on it: `_scrollVelocity` decides that, so a slow continuous scroll —
+    // trackpad, or dragging the scrollbar — fills tiles as it goes instead of
+    // waiting for a full stop that a continuous gesture never produces.
+    // See scroll-load-policy.js for the reasoning.
     let ticking = false;
+    this._scrollVelocity = 0;
+    this._lastScrollTop = wrapper.scrollTop;
     this._scrollHandler = () => {
       this._scrolling = true;
       clearTimeout(this._previewHoverTimer);
       clearTimeout(this._scrollEndTimer);
       this._scrollEndTimer = setTimeout(() => {
         this._scrolling = false;
-        // Now that scrolling has settled, fire any thumbnail / speed-
-        // stats loads we deferred. Stops backend calls + main-thread
-        // image decodes from competing with the scroll itself.
+        this._scrollVelocity = 0;
+        // Settled: fire anything still deferred. Fast flings land here.
         this._drainPendingThumbnailsOnScrollEnd();
       }, 150);
       if (!ticking) {
         ticking = true;
         requestAnimationFrame(() => {
+          // Measure per FRAME, not per scroll event — event cadence varies by
+          // input device, frames don't.
+          const top = wrapper.scrollTop;
+          this._scrollVelocity = smoothVelocity(
+            this._scrollVelocity, top - (this._lastScrollTop || 0),
+          );
+          this._lastScrollTop = top;
+
           this._virtualScrollUpdate(wrapper, grid);
+
+          // Below the fling threshold, keep feeding the queue mid-scroll.
+          if (!shouldDeferLoads(this._scrollVelocity)) {
+            this._drainPendingThumbnailsOnScrollEnd();
+          }
           ticking = false;
         });
       }
@@ -1399,7 +1427,8 @@ export class Library {
     // the scroll settles via _drainPendingThumbnailsOnScrollEnd. Cache
     // hits ARE handled inline by _createCard, so already-rendered
     // thumbnails persist across scroll without delay.
-    const skipForScroll = !!this._scrolling;
+    // Defer on speed, not on the mere fact of scrolling — see the handler.
+    const skipForScroll = !!this._scrolling && shouldDeferLoads(this._scrollVelocity);
     for (const card of cards) {
       const videoPath = card.dataset.videoPath;
       if (videoPath && !card.dataset.loaded) {
@@ -1439,15 +1468,37 @@ export class Library {
       card.dataset.loaded = 'pending';
       this._queueThumbnail(card, videoPath);
     }
-    // Speed-stats too — mirror the deferred-during-scroll behaviour.
-    const speedCards = grid.querySelectorAll('.library__card:not([data-speed-loaded]), .library__list-item:not([data-speed-loaded])');
+    // Speed-stats too — mirror the deferred-during-scroll behaviour, but
+    // SPREAD ACROSS FRAMES. This used to run as one synchronous loop over
+    // every rendered card at the exact moment the scroll settled — precisely
+    // when the main thread is needed to paint the newly-settled view. Bounded
+    // by the rendered range, so tens rather than hundreds, but it landed at
+    // the worst possible instant.
+    const speedCards = [...grid.querySelectorAll(
+      '.library__card:not([data-speed-loaded]), .library__list-item:not([data-speed-loaded])'
+    )];
+    if (speedCards.length === 0) return;
+
+    // Claim them all up front so a second drain (another scroll settling)
+    // can't queue the same cards twice.
     for (const card of speedCards) {
-      const videoPath = card.dataset.videoPath;
-      if (!videoPath) continue;
-      card.dataset.speedLoaded = 'pending';
-      const video = this._videosByPath?.get(videoPath);
-      if (video) this._loadSpeedStatsForVideo(video, card);
+      if (card.dataset.videoPath) card.dataset.speedLoaded = 'pending';
     }
+
+    const batches = chunk(speedCards, 8);
+    let i = 0;
+    const runBatch = () => {
+      const batch = batches[i++];
+      if (!batch) return;
+      for (const card of batch) {
+        const videoPath = card.dataset.videoPath;
+        if (!videoPath || !card.isConnected) continue;
+        const video = this._videosByPath?.get(videoPath);
+        if (video) this._loadSpeedStatsForVideo(video, card);
+      }
+      if (i < batches.length) requestAnimationFrame(runBatch);
+    };
+    requestAnimationFrame(runBatch);
   }
 
   _setViewMode(mode) {
@@ -1605,18 +1656,69 @@ export class Library {
 
   // Translation keys, not literal labels — resolved at render time so a
   // locale switch updates the picker without rebuilding the option list.
+  // Five FIELDS, with direction on a separate toggle — the list was ten
+  // entries that were really 5 x 2 (Dave, 2026-08-06). `defaultDir` is the
+  // direction each field is normally wanted in, applied when you pick it:
+  // newest-first for date, A-Z for name, fastest-first for speed.
   static _SORT_OPTIONS = [
-    { value: 'name:asc',         labelKey: 'library.sortNameAsc' },
-    { value: 'name:desc',        labelKey: 'library.sortNameDesc' },
-    { value: 'dateAdded:desc',   labelKey: 'library.sortDateAddedDesc' },
-    { value: 'dateAdded:asc',    labelKey: 'library.sortDateAddedAsc' },
-    { value: 'duration:asc',     labelKey: 'library.sortDurationAsc' },
-    { value: 'duration:desc',    labelKey: 'library.sortDurationDesc' },
-    { value: 'avgSpeed:asc',     labelKey: 'library.sortAvgSpeedAsc', isSpeed: true },
-    { value: 'avgSpeed:desc',    labelKey: 'library.sortAvgSpeedDesc', isSpeed: true },
-    { value: 'maxSpeed:asc',     labelKey: 'library.sortMaxSpeedAsc', isSpeed: true },
-    { value: 'maxSpeed:desc',    labelKey: 'library.sortMaxSpeedDesc', isSpeed: true },
+    { value: 'name',      defaultDir: 'asc' },
+    { value: 'dateAdded', defaultDir: 'desc' },
+    { value: 'duration',  defaultDir: 'asc' },
+    { value: 'avgSpeed',  defaultDir: 'desc', isSpeed: true },
+    { value: 'maxSpeed',  defaultDir: 'desc', isSpeed: true },
   ];
+
+  // `field:dir` -> the existing directional string. Reused for the trigger
+  // button so it still reads "Name A-Z" / "Duration Long-Short" rather than
+  // a vaguer "Name, descending" — the specific wording is more useful than
+  // the generic one, and these strings already exist in all 8 locales.
+  static _SORT_LABELS = {
+    'name:asc': 'library.sortNameAsc',
+    'name:desc': 'library.sortNameDesc',
+    'dateAdded:desc': 'library.sortDateAddedDesc',
+    'dateAdded:asc': 'library.sortDateAddedAsc',
+    'duration:asc': 'library.sortDurationAsc',
+    'duration:desc': 'library.sortDurationDesc',
+    'avgSpeed:asc': 'library.sortAvgSpeedAsc',
+    'avgSpeed:desc': 'library.sortAvgSpeedDesc',
+    'maxSpeed:asc': 'library.sortMaxSpeedAsc',
+    'maxSpeed:desc': 'library.sortMaxSpeedDesc',
+  };
+
+  /**
+   * The sort to actually apply, as `[field, dir]`.
+   *
+   * The FIELD comes from the visible selection where there is one, so the
+   * grid can never disagree with the picker. The DIRECTION comes from the
+   * per-field memory — it is NOT in the radio's value.
+   *
+   * That split is the whole point: radio values used to be `name:asc`, and
+   * `_applyFilters` read `checked.value` straight into `_sortKey`. When the
+   * picker moved to five bare fields those values became `name`, so the
+   * direction was silently dropped, `_sortKey` was clobbered to a
+   * direction-less string, and `split(':')` handed `undefined` to the
+   * sorter, which fell back to ascending every time. The label flipped
+   * (that happens before this runs) while the grid never re-sorted.
+   */
+  _effectiveSort() {
+    const checked = this._container?.querySelector(
+      '#library-sort-pop input[name="library-sort"]:checked',
+    );
+    const [storedField, storedDir] = this._sortParts();
+    const field = checked?.value || storedField;
+    const dir = this._sortDirs?.[field]
+      // Only trust the stored direction when it belongs to this field.
+      || (field === storedField ? storedDir : null)
+      || Library._SORT_OPTIONS.find((o) => o.value === field)?.defaultDir
+      || 'asc';
+    return [field, dir];
+  }
+
+  /** Current sort as `[field, dir]`. `_sortKey` stays the source of truth. */
+  _sortParts() {
+    const [field, dir] = String(this._sortKey || 'name:asc').split(':');
+    return [field || 'name', dir === 'desc' ? 'desc' : 'asc'];
+  }
 
   /**
    * Build the Sort dropdown picker. The picker's options match the
@@ -1631,37 +1733,102 @@ export class Library {
     const iconSlot = btn.querySelector('.library__picker-icon');
     iconSlot.replaceChildren(icon(ArrowDownAZ, { width: 14, height: 14 }));
 
-    const updateButtonLabel = () => {
-      const cur = Library._SORT_OPTIONS.find(o => o.value === this._sortKey);
-      labelEl.firstChild?.remove?.();
-      labelEl.textContent = cur ? t(cur.labelKey) : t('library.sort');
+    // Per-field direction, remembered. Flipping Name to Z-A and coming back
+    // to it later should still be Z-A, not silently reset.
+    if (!this._sortDirs) {
+      this._sortDirs = Object.fromEntries(
+        Library._SORT_OPTIONS.map((o) => [o.value, o.defaultDir]),
+      );
+      const [curField, curDir] = this._sortParts();
+      if (this._sortDirs[curField]) this._sortDirs[curField] = curDir;
+    }
+
+    const labelFor = (field, dir) => {
+      const key = Library._SORT_LABELS[`${field}:${dir}`];
+      return key ? t(key) : t('library.sort');
     };
-    updateButtonLabel();
 
     pop.replaceChildren();
+    const rows = [];
+
+    // Redraw every row: wording, arrow and checked state all follow the
+    // field's current direction, so each row describes itself.
+    const refresh = () => {
+      const [curField] = this._sortParts();
+      for (const row of rows) {
+        const dir = this._sortDirs[row.field];
+        const selected = row.field === curField;
+        row.radio.checked = selected;
+        row.text.textContent = labelFor(row.field, dir);
+        row.arrow.textContent = dir === 'asc' ? '↑' : '↓';
+        row.item.classList.toggle('library__picker-item--selected', selected);
+        // Only the selected row is re-clickable to flip, so only it needs
+        // to advertise that.
+        row.item.title = selected
+          ? t('library.sortSwitchTo', { order: labelFor(row.field, dir === 'asc' ? 'desc' : 'asc') })
+          : '';
+      }
+      labelEl.firstChild?.remove?.();
+      labelEl.textContent = labelFor(curField, this._sortDirs[curField]);
+    };
+
     for (const opt of Library._SORT_OPTIONS) {
       const item = document.createElement('label');
-      item.className = 'library__picker-item';
+      item.className = 'library__picker-item library__picker-item--sort';
       item.dataset.value = opt.value;
       if (opt.isSpeed) item.dataset.isSpeed = 'true';
+
       const radio = document.createElement('input');
       radio.type = 'radio';
       radio.name = 'library-sort';
       radio.value = opt.value;
-      radio.checked = this._sortKey === opt.value;
+
+      const text = document.createElement('span');
+      text.className = 'library__picker-item-label';
+
+      const arrow = document.createElement('span');
+      arrow.className = 'library__sort-arrow';
+      // Decorative — the wording already states the direction.
+      arrow.setAttribute('aria-hidden', 'true');
+
+      item.append(radio, text, arrow);
+      pop.appendChild(item);
+      rows.push({ field: opt.value, item, radio, text, arrow });
+
+      // Selecting a DIFFERENT field. Fires for mouse (via the label) and for
+      // keyboard arrow-key navigation, which a click handler alone misses.
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
-        this._sortKey = opt.value;
-        updateButtonLabel();
+        this._sortKey = `${opt.value}:${this._sortDirs[opt.value]}`;
+        refresh();
         this._closePicker(pop, btn);
         if (!this._scanning) this._applyFilters();
       });
-      const txt = document.createElement('span');
-      txt.textContent = t(opt.labelKey);
-      item.appendChild(radio);
-      item.appendChild(txt);
-      pop.appendChild(item);
+
+      // Re-clicking the ALREADY-selected row flips its direction. `change`
+      // never fires for an already-checked radio, so these two don't
+      // overlap. Popover stays open so the wording change is visible and
+      // reversible in place.
+      //
+      // Listener on the RADIO, not the label. Clicking a label forwards a
+      // synthetic click to its control, which bubbles back up — so a
+      // label-mounted handler runs TWICE for one user click and the flip
+      // undid itself (Dave, 2026-08-06). `preventDefault` suppressed the
+      // forward under jsdom, which is why the tests passed while the real
+      // thing did nothing. On the radio it is exactly one invocation
+      // whether the user hits the dot, the words, or the row padding.
+      radio.addEventListener('click', () => {
+        if (radio.disabled) return;
+        const [curField] = this._sortParts();
+        if (curField !== opt.value) return; // selection — `change` handles it
+        this._sortDirs[opt.value] = this._sortDirs[opt.value] === 'asc' ? 'desc' : 'asc';
+        this._sortKey = `${opt.value}:${this._sortDirs[opt.value]}`;
+        refresh();
+        if (!this._scanning) this._applyFilters();
+      });
     }
+
+    refresh();
 
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -2132,6 +2299,11 @@ export class Library {
       }
     });
 
+    // Restore BOTH halves of the selected look. Must run after the checkbox
+    // is in the DOM — the class add near the top of this method happens
+    // before it exists, which is exactly how the tick went missing.
+    this._applySelectionState(row, video.path);
+
     return row;
   }
 
@@ -2295,7 +2467,7 @@ export class Library {
     // (new cards use the _createCard check added in fix #1; existing DOM needs updating)
     this._container.querySelectorAll('[data-video-path]').forEach((cardEl) => {
       const p = cardEl.dataset.videoPath;
-      if (p && this._selectedPaths.has(p)) cardEl.classList.add('library__card--selected');
+      if (p) this._applySelectionState(cardEl, p);
     });
     this._updateSelectionCount();
   }
@@ -2506,16 +2678,41 @@ export class Library {
       this._stopPreview();
     });
 
+    // Restore BOTH halves of the selected look, after the checkbox exists.
+    // See _applySelectionState — the border-only restore at the top of this
+    // method is what made the tick disappear on every re-render.
+    this._applySelectionState(card, video.path);
+
     return card;
   }
 
   // Thumbnail concurrency limiter
   _queueThumbnail(cardEl, videoPath) {
-    this._pendingThumbnails.push({ cardEl, videoPath });
+    // `top` is captured once, here, so the priority sort at dequeue time is
+    // pure arithmetic. Reading offsetTop per candidate inside the dequeue loop
+    // would force a layout flush on every iteration — the opposite of what a
+    // scroll-performance fix should do.
+    this._pendingThumbnails.push({ cardEl, videoPath, top: cardEl?.offsetTop || 0 });
     this._processThumbnailQueue();
   }
 
+  /** Viewport centre in the scroll container's coordinate space. */
+  _viewportCentre() {
+    const wrapper = this._container?.querySelector('.library__grid-wrapper');
+    if (!wrapper) return 0;
+    return wrapper.scrollTop + (wrapper.clientHeight / 2);
+  }
+
   _processThumbnailQueue() {
+    // Serve what the user is LOOKING AT first. The queue is filled in DOM
+    // order, which means the overscan rows above the viewport were being
+    // fetched before the row under the cursor.
+    if (this._pendingThumbnails.length > 1) {
+      this._pendingThumbnails = prioritiseByDistance(
+        this._pendingThumbnails, this._viewportCentre(),
+      );
+    }
+
     while (this._activeThumbnails < MAX_CONCURRENT_THUMBNAILS && this._pendingThumbnails.length > 0) {
       const { cardEl, videoPath } = this._pendingThumbnails.shift();
       // Skip cards that have already scrolled out of view since they
@@ -2526,9 +2723,36 @@ export class Library {
       // to win the queue priority.
       if (!cardEl.isConnected) continue;
       this._activeThumbnails++;
-      this._loadThumbnail(cardEl, videoPath).finally(() => {
+
+      // Release the slot if this one stalls.
+      //
+      // THIS IS THE HANG (community #198, multi-drive libraries). A path on a
+      // spun-down or disconnected volume blocks in the backend for its full
+      // 30s ffmpeg timeout while holding one of four slots. Four such paths
+      // and the queue stops entirely — indistinguishable from a frozen app,
+      // and only reproducible on a library spanning several drives.
+      //
+      // The request is NOT cancelled: it keeps running and still populates the
+      // cache if it ever completes. Only the SLOT is freed, so responsive
+      // drives keep flowing past an unresponsive one.
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
         this._activeThumbnails--;
         this._processThumbnailQueue();
+      };
+      const stallTimer = setTimeout(() => {
+        if (released) return;
+        console.warn(
+          `[Library] Thumbnail slot stalled >${SLOT_STALL_MS}ms, releasing it: ${videoPath}`
+        );
+        release();
+      }, SLOT_STALL_MS);
+
+      this._loadThumbnail(cardEl, videoPath).finally(() => {
+        clearTimeout(stallTimer);
+        release();
       });
     }
     // Queue fully drained — end the initial post-scan phase (timing marks
@@ -4318,7 +4542,7 @@ export class Library {
         singlePanel.appendChild(divider);
 
         const browseRow = document.createElement('button');
-        browseRow.className = 'modal-list-item library__browse-fallback';
+        browseRow.className = 'modal-list-item library__assoc-action';
         browseRow.textContent = t('library.assoc.browse');
         browseRow.addEventListener('click', async () => {
           const result = await window.funsync.selectFunscript();
@@ -4332,7 +4556,7 @@ export class Library {
         // again. Hands control back to the caller like addVariantFlow does,
         // rather than nesting a modal inside a modal.
         const eroRow = document.createElement('button');
-        eroRow.className = 'modal-list-item library__ero-search-row';
+        eroRow.className = 'modal-list-item library__assoc-action library__assoc-action--ero';
         eroRow.textContent = t('library.assoc.searchEroScripts');
         eroRow.addEventListener('click', () => close({ mode: 'eroSearchFlow' }));
         singlePanel.appendChild(eroRow);
@@ -4431,7 +4655,7 @@ export class Library {
         }
 
         const addVarBtn = document.createElement('button');
-        addVarBtn.className = 'modal-list-item library__browse-fallback';
+        addVarBtn.className = 'modal-list-item library__assoc-action';
         addVarBtn.textContent = t('library.assoc.addVariation');
         addVarBtn.addEventListener('click', async () => {
           close({ mode: 'addVariantFlow' });
@@ -4727,7 +4951,7 @@ export class Library {
 
           // Add Route button
           const addBtn = document.createElement('button');
-          addBtn.className = 'modal-list-item library__browse-fallback';
+          addBtn.className = 'modal-list-item library__assoc-action';
           addBtn.textContent = t('library.assoc.addRoute');
           addBtn.addEventListener('click', () => {
             routes.push({ deviceId: '', scriptPath: '', scriptName: '', role: 'axis' });
@@ -4890,7 +5114,7 @@ export class Library {
         body.appendChild(divider);
 
         const browseRow = document.createElement('button');
-        browseRow.className = 'modal-list-item library__browse-fallback';
+        browseRow.className = 'modal-list-item library__assoc-action';
         browseRow.textContent = t('library.assoc.browse');
         browseRow.addEventListener('click', async () => {
           const result = await window.funsync.selectFunscript();
@@ -5234,11 +5458,12 @@ export class Library {
     if (reset) {
       this._sortKey = 'name:asc';
       pop.querySelectorAll('input[name="library-sort"]').forEach((r) => {
-        r.checked = r.value === this._sortKey;
+        r.checked = r.value === 'name';
       });
-      // Also update the trigger button label.
       const labelEl = this._container.querySelector('#library-sort-btn .library__picker-label');
       if (labelEl) labelEl.textContent = t('library.sortNameAsc');
+      // Direction memory resets with the sort itself.
+      this._sortDirs = null;
     }
     // Disable speed-sort options when the user has filtered to the
     // unmatched tab (those videos have no funscripts → no speed stats).
@@ -5373,14 +5598,10 @@ export class Library {
     // when the picker isn't in the DOM yet (early renders). Updated
     // 2026-04-27: now reads the checked radio in the new sort
     // popover instead of a `<select>`'s value.
-    const checkedSort = this._container?.querySelector(
-      '#library-sort-pop input[name="library-sort"]:checked'
-    );
-    const effectiveSortKey = checkedSort?.value || this._sortKey || 'name:asc';
+    const [sortField, sortDir] = this._effectiveSort();
     // Keep `_sortKey` in sync so the next show()/_renderWithHeader pass
     // restores the right value when it (re)builds the picker.
-    this._sortKey = effectiveSortKey;
-    const [sortField, sortDir] = effectiveSortKey.split(':');
+    this._sortKey = `${sortField}:${sortDir}`;
     const countEl = this._container.querySelector('.library__video-count');
 
     // Keep the search-scope + folder-scope pills in sync with current state.
@@ -5751,7 +5972,7 @@ export class Library {
           body.appendChild(divider);
 
           const browseRow = document.createElement('button');
-          browseRow.className = 'modal-list-item library__browse-fallback';
+          browseRow.className = 'modal-list-item library__assoc-action';
           browseRow.textContent = t('library.assoc.browse');
           browseRow.addEventListener('click', async () => {
             const result = await window.funsync.selectSubtitle();
@@ -6148,18 +6369,40 @@ export class Library {
     });
   }
 
+  /**
+   * Push `_selectedPaths` onto one card's DOM — border AND tick together.
+   *
+   * Bug, 2026-08-06 (Dave): selecting items showed the border and the tick,
+   * then the tick vanished as soon as anything caused a re-render. Card
+   * creation restored `library__card--selected` from `_selectedPaths` but
+   * never re-applied `library__card-checkbox--checked`, so the two halves of
+   * "this is selected" drifted apart on every rebuild — and with virtual
+   * scrolling, cards rebuild constantly.
+   *
+   * Both states now come from ONE place, so they cannot disagree. Called on
+   * creation, on toggle, and on bulk select.
+   */
+  _applySelectionState(el, videoPath) {
+    if (!el) return;
+    const selected = this._selectedPaths.has(videoPath);
+    el.classList.toggle('library__card--selected', selected);
+    const cb = el.querySelector('.library__card-checkbox');
+    if (cb) {
+      // Visibility belongs here too: a card rebuilt WHILE in select mode was
+      // getting `hidden` from the creation-time value, which is correct, but
+      // keeping it in one place means bulk paths can't miss it either.
+      cb.hidden = !this._selectMode;
+      cb.classList.toggle('library__card-checkbox--checked', selected);
+    }
+  }
+
   _toggleCardSelection(card, videoPath) {
     if (this._selectedPaths.has(videoPath)) {
       this._selectedPaths.delete(videoPath);
-      card.classList.remove('library__card--selected');
-      const cb = card.querySelector('.library__card-checkbox');
-      if (cb) cb.classList.remove('library__card-checkbox--checked');
     } else {
       this._selectedPaths.add(videoPath);
-      card.classList.add('library__card--selected');
-      const cb = card.querySelector('.library__card-checkbox');
-      if (cb) cb.classList.add('library__card-checkbox--checked');
     }
+    this._applySelectionState(card, videoPath);
     this._updateSelectionCount();
   }
 

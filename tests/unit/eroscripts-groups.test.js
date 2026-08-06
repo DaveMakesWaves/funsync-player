@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Grouping EroScripts attachments into script sets.
 //
 // Fixtures are REAL attachment lists captured from discuss.eroscripts.com

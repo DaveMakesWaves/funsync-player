@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // In-flight thumbnail request dedup (startup perf, 2026-08-03).
 //
 // Grid rebuilds reset cards' loaded state while their first backend

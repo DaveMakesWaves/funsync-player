@@ -1,8 +1,17 @@
-// Global test setup — mocks for Electron IPC, DOM APIs, and browser globals
+// Global test setup — mocks for Electron IPC, DOM APIs, and browser globals.
+//
+// This file runs for EVERY test file, including the ones that opt into the
+// `node` environment (see the `@vitest-environment` docblock convention in
+// notes/CLAUDE.md). So it must not assume a DOM exists at module scope.
+//
+// `globalThis` is used instead of `window` throughout: under jsdom the two are
+// the same object, so jsdom behaviour is byte-identical, while node files get
+// the IPC/browser stubs without a ReferenceError killing the whole file.
+// Genuinely DOM-only patches (HTMLCanvasElement) are explicitly guarded.
 import { vi } from 'vitest';
 
 // --- window.funsync IPC mock (matches electron/preload.js) ---
-window.funsync = {
+globalThis.funsync = {
   openFileDialog: vi.fn().mockResolvedValue([]),
   readFunscript: vi.fn().mockResolvedValue(null),
   writeFunscript: vi.fn().mockResolvedValue(null),
@@ -193,24 +202,27 @@ const mockCtx = {
   canvas: { width: 800, height: 400 },
 };
 
-const _origGetContext = HTMLCanvasElement.prototype.getContext;
-HTMLCanvasElement.prototype.getContext = function (type) {
-  if (type === '2d') return mockCtx;
-  return _origGetContext.call(this, type);
-};
+// DOM-only: absent in the `node` environment, where nothing renders a canvas.
+if (typeof HTMLCanvasElement !== 'undefined') {
+  const _origGetContext = HTMLCanvasElement.prototype.getContext;
+  HTMLCanvasElement.prototype.getContext = function (type) {
+    if (type === '2d') return mockCtx;
+    return _origGetContext.call(this, type);
+  };
+}
 
 // --- requestAnimationFrame / cancelAnimationFrame ---
 let _rafId = 0;
-if (!window.requestAnimationFrame) {
-  window.requestAnimationFrame = (cb) => ++_rafId;
+if (!globalThis.requestAnimationFrame) {
+  globalThis.requestAnimationFrame = (cb) => ++_rafId;
 }
-if (!window.cancelAnimationFrame) {
-  window.cancelAnimationFrame = () => {};
+if (!globalThis.cancelAnimationFrame) {
+  globalThis.cancelAnimationFrame = () => {};
 }
 
 // --- ResizeObserver ---
-if (!window.ResizeObserver) {
-  window.ResizeObserver = class {
+if (!globalThis.ResizeObserver) {
+  globalThis.ResizeObserver = class {
     observe() {}
     unobserve() {}
     disconnect() {}
@@ -226,8 +238,8 @@ if (!URL.revokeObjectURL) {
 }
 
 // --- Path2D ---
-if (!window.Path2D) {
-  window.Path2D = class {
+if (!globalThis.Path2D) {
+  globalThis.Path2D = class {
     constructor() {}
     moveTo() {}
     lineTo() {}
@@ -238,8 +250,8 @@ if (!window.Path2D) {
 }
 
 // --- devicePixelRatio ---
-if (!window.devicePixelRatio) {
-  window.devicePixelRatio = 1;
+if (!globalThis.devicePixelRatio) {
+  globalThis.devicePixelRatio = 1;
 }
 
 // --- crypto.randomUUID ---

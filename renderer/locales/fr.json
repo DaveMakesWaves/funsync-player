@@ -469,7 +469,8 @@
       "variantSearchTitle": "Sélectionner un script pour la variante",
       "searchEroScripts": "Rechercher sur EroScripts..."
     },
-    "heatmapUnavailable": "Carte thermique indisponible"
+    "heatmapUnavailable": "Carte thermique indisponible",
+    "sortSwitchTo": "Passer à {order}"
   },
   "playlists": {
     "title": "Listes de lecture",
@@ -520,7 +521,11 @@
     "watched": "Vu",
     "watchedCount": "{watched} sur {total} vus",
     "timeLeft": "{time} restant",
-    "continueNamed": "Continuer {name}"
+    "continueNamed": "Continuer {name}",
+    "unavailableCount": "{count, plural, one {# vidéo est indisponible} other {# vidéos sont indisponibles}}",
+    "unavailableOnVolume": "{count, plural, one {# vidéo sur {volume} est indisponible} other {# vidéos sur {volume} sont indisponibles}}",
+    "unavailableHint": "Reconnecte le disque pour les lire. Elles restent dans la playlist.",
+    "unavailableTooltip": "Indisponible pour le moment : {path}"
   },
   "categories": {
     "title": "Catégories",
@@ -667,7 +672,11 @@
     "queueReadError": "Élément de file {name} : échec de lecture du script ({error}) — lecture sans synchronisation",
     "handyUploadTimeout": "L'envoi du script Handy a expiré — la vidéo est en cours de lecture mais Handy ne sera pas synchronisé. Vérifie ta connexion et essaie de recharger la vidéo.",
     "orgasmRoutingFallback": "Orgasm Switch : {devices} non connecté(s). Repli sur un seul axe en attendant la reconnexion.",
-    "orgasmScriptRecovered": "{count} script(s) de finisher déplacé(s) retrouvé(s), chemin mis à jour"
+    "orgasmScriptRecovered": "{count} script(s) de finisher déplacé(s) retrouvé(s), chemin mis à jour",
+    "videoUnavailable": "Cette vidéo n'est pas disponible pour le moment. Reconnecte le disque où elle est stockée.",
+    "playlistAllUnavailable": "Aucune de ces vidéos n'est disponible pour le moment. Reconnecte le disque.",
+    "playlistSkippedUnavailable": "{count, plural, one {# vidéo indisponible ignorée} other {# vidéos indisponibles ignorées}}",
+    "nextAllUnavailable": "Plus de vidéos disponibles dans cette direction. Reconnecte le disque pour lire le reste."
   },
   "modal": {
     "closeAria": "Fermer {title}",
@@ -754,7 +763,8 @@
       "avgSpeedAsc": "Vitesse moy. lente-rapide",
       "avgSpeedDesc": "Vitesse moy. rapide-lente",
       "maxSpeedAsc": "Vitesse max. lente-rapide",
-      "maxSpeedDesc": "Vitesse max. rapide-lente"
+      "maxSpeedDesc": "Vitesse max. rapide-lente",
+      "switchTo": "Passer à {order}"
     },
     "badge": {
       "script": "Script",
@@ -1582,7 +1592,9 @@
       "badgeRotate": "Rotation",
       "badgeEstim": "E-Stim",
       "axisCustom": "Suivre le routage personnalisé",
-      "tuning": "Réglage de sortie"
+      "tuning": "Réglage de sortie",
+      "badgeMachine": "Machine",
+      "machineModeTitle": "Mode de vitesse de la machine"
     },
     "tcode": {
       "l0Label": "Mouvement (principal)",

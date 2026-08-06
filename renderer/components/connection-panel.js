@@ -1382,6 +1382,7 @@ export class ConnectionPanel {
       if (dev.canVibrate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeVibrate'), 'vibrate'));
       if (dev.canRotate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeRotate'), 'rotate'));
       if (dev.canScalar) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeEstim'), 'estim'));
+      if (dev.canOscillate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeMachine'), 'machine'));
       header.appendChild(badges);
 
       const testBtn = document.createElement('button');
@@ -1472,6 +1473,12 @@ export class ConnectionPanel {
           (val) => { if (this.buttplugSync) this.buttplugSync.setRotateMode(dev.index, val); }
         ));
       }
+      if (dev.canOscillate) {
+        controlsRow.appendChild(this._makeModeSelect(dev, 'oscillate', t('connection.buttplug.machineModeTitle'), 'speed',
+          () => this.buttplugSync?.getOscillateMode(dev.index) || 'speed',
+          (val) => { if (this.buttplugSync) this.buttplugSync.setOscillateMode(dev.index, val); }
+        ));
+      }
       if (dev.canScalar) {
         controlsRow.appendChild(this._makeModeSelect(dev, 'scalar', t('connection.buttplug.estimModeTitle'), 'position',
           () => this.buttplugSync?.getScalarMode(dev.index) || 'position',
@@ -1496,7 +1503,7 @@ export class ConnectionPanel {
       controlsRow.appendChild(invertLabel);
 
       // Info button
-      if (dev.canVibrate || dev.canScalar || dev.canRotate) {
+      if (dev.canVibrate || dev.canScalar || dev.canRotate || dev.canOscillate) {
         const infoBtn = document.createElement('button');
         infoBtn.className = 'connection-panel__device-info-btn';
         infoBtn.title = t('connection.buttplug.modeHelp');
@@ -1631,8 +1638,11 @@ export class ConnectionPanel {
       cutoffRow.appendChild(cutoffReadout);
       row.appendChild(cutoffRow);
 
-      // E-stim safety section (only for scalar devices)
-      if (dev.canScalar) {
+      // Safety section — max cap + ramp-up. Shared by e-stim and flywheel
+      // MACHINES: both need a hard ceiling and a gentle start, and both read
+      // their values from the same `_applyScalarSafety` path in the sync
+      // engine. For a machine the cap is a safety limit, not a preference.
+      if (dev.canScalar || dev.canOscillate) {
         const safetySection = document.createElement('div');
         safetySection.className = 'connection-panel__device-safety-section';
 
@@ -1738,6 +1748,13 @@ export class ConnectionPanel {
         await this.buttplug.sendRotate(idx, 40, false);
         await new Promise(r => setTimeout(r, 500));
         await this.buttplug.sendRotate(idx, 0);
+      } else if (dev.canOscillate) {
+        // Machine test: a brief, low, capped nudge. Enough to confirm
+        // commands are routed without spinning a flywheel up to speed.
+        const cap = this.buttplugSync?.getMaxIntensity(idx) ?? 70;
+        await this.buttplug.sendOscillate(idx, Math.min(20, cap));
+        await new Promise(r => setTimeout(r, 600));
+        await this.buttplug.sendOscillate(idx, 0);
       } else if (dev.canScalar) {
         // E-stim test: very gentle pulse, respecting safety cap
         const cap = this.buttplugSync?.getMaxIntensity(idx) ?? 70;
@@ -1807,6 +1824,8 @@ export class ConnectionPanel {
       if (scalarMode !== 'position') settings.scalarMode = scalarMode;
       const rotateMode = this.buttplugSync.getRotateMode(dev.index);
       if (rotateMode !== 'speed') settings.rotateMode = rotateMode;
+      const oscillateMode = this.buttplugSync.getOscillateMode(dev.index);
+      if (oscillateMode !== 'speed') settings.oscillateMode = oscillateMode;
       const maxIntensity = this.buttplugSync.getMaxIntensity(dev.index);
       if (maxIntensity !== 70) settings.maxIntensity = maxIntensity;
       const rampUp = this.buttplugSync.getRampUp(dev.index);
@@ -1865,6 +1884,7 @@ export class ConnectionPanel {
         if (saved.vibeMode) this.buttplugSync.setVibeMode(dev.index, saved.vibeMode);
         if (saved.scalarMode) this.buttplugSync.setScalarMode(dev.index, saved.scalarMode);
         if (saved.rotateMode) this.buttplugSync.setRotateMode(dev.index, saved.rotateMode);
+        if (saved.oscillateMode) this.buttplugSync.setOscillateMode(dev.index, saved.oscillateMode);
         if (saved.maxIntensity !== undefined) this.buttplugSync.setMaxIntensity(dev.index, saved.maxIntensity);
         if (saved.rampUp === false) this.buttplugSync.setRampUp(dev.index, false);
         // Per-device range: only apply if both min and max are finite

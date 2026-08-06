@@ -14,6 +14,7 @@ import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
 import { joinPath, dirOfPath } from '../js/path-utils.js';
 import { groupAttachments, axisLabels, buildMultiAssociation } from '../js/eroscripts-groups.js';
+import { createResultThumb } from './result-thumb.js';
 
 /** `D:/v/Some Video.mp4` → `Some Video` */
 function stemOf(p) {
@@ -240,11 +241,23 @@ export function showEroScriptsSearchModal(video) {
           head.type = 'button';
           head.className = 'eroscripts-inline__result-head';
 
+          // Visual reference matters most here: a filename-seeded query can
+          // return 50 similarly-titled posts, and the preview frame is the
+          // fastest way to tell which one is the right video.
+          head.appendChild(createResultThumb({
+            thumbnail: topic.thumbnail,
+            avatar: topic.avatar,
+            className: 'eroscripts-inline__result-thumb',
+          }));
+
+          const info = document.createElement('div');
+          info.className = 'eroscripts-inline__result-info';
+
           const title = document.createElement('div');
           title.className = 'eroscripts-panel__result-title';
           title.textContent = topic.title;
           title.title = topic.title;
-          head.appendChild(title);
+          info.appendChild(title);
 
           const meta = document.createElement('div');
           meta.className = 'eroscripts-panel__result-meta';
@@ -252,7 +265,7 @@ export function showEroScriptsSearchModal(video) {
           if (topic.creator) bits.push(`@${topic.creator}`);
           if (topic.likeCount > 0) bits.push(t('eroscripts.likes', { count: topic.likeCount }));
           meta.textContent = bits.join(' · ');
-          head.appendChild(meta);
+          info.appendChild(meta);
 
           // The multi-axis tag is worth surfacing before the post is opened
           // — it's the single most useful thing about a result here.
@@ -260,8 +273,9 @@ export function showEroScriptsSearchModal(video) {
             const badge = document.createElement('span');
             badge.className = 'eroscripts-inline__badge';
             badge.textContent = t('eroscripts.inline.multiBadge');
-            head.appendChild(badge);
+            info.appendChild(badge);
           }
+          head.appendChild(info);
 
           const host = document.createElement('div');
           host.className = 'eroscripts-inline__groups';

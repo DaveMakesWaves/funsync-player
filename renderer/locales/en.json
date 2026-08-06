@@ -469,7 +469,8 @@
       "variantSearchTitle": "Select Script for Variation",
       "searchEroScripts": "Search EroScripts..."
     },
-    "heatmapUnavailable": "Heatmap unavailable"
+    "heatmapUnavailable": "Heatmap unavailable",
+    "sortSwitchTo": "Switch to {order}"
   },
   "playlists": {
     "title": "Playlists",
@@ -520,7 +521,11 @@
     "watched": "Watched",
     "watchedCount": "{watched} of {total} watched",
     "timeLeft": "{time} left",
-    "continueNamed": "Continue {name}"
+    "continueNamed": "Continue {name}",
+    "unavailableCount": "{count, plural, one {# video is unavailable} other {# videos are unavailable}}",
+    "unavailableOnVolume": "{count, plural, one {# video on {volume} is unavailable} other {# videos on {volume} are unavailable}}",
+    "unavailableHint": "Reconnect the drive to play them. They stay in the playlist.",
+    "unavailableTooltip": "Unavailable right now: {path}"
   },
   "categories": {
     "title": "Categories",
@@ -886,7 +891,11 @@
     "queueReadError": "Queue item {name}: script read failed ({error}) — playing without sync",
     "handyUploadTimeout": "Handy script upload timed out — video is playing but the Handy won't be in sync. Check your connection and try reloading the video.",
     "orgasmRoutingFallback": "Orgasm Switch: {devices} not connected. Using the single-axis fallback until everything is back.",
-    "orgasmScriptRecovered": "Found {count} moved finisher script(s) and updated the path"
+    "orgasmScriptRecovered": "Found {count} moved finisher script(s) and updated the path",
+    "videoUnavailable": "This video is not available right now. Reconnect the drive it is stored on.",
+    "playlistAllUnavailable": "None of these videos are available right now. Reconnect the drive.",
+    "playlistSkippedUnavailable": "{count, plural, one {Skipped # unavailable video} other {Skipped # unavailable videos}}",
+    "nextAllUnavailable": "No more available videos in that direction. Reconnect the drive to play the rest."
   },
   "modal": {
     "closeAria": "Close {title}",
@@ -1232,7 +1241,8 @@
       "avgSpeedAsc": "Avg Speed Slow-Fast",
       "avgSpeedDesc": "Avg Speed Fast-Slow",
       "maxSpeedAsc": "Max Speed Slow-Fast",
-      "maxSpeedDesc": "Max Speed Fast-Slow"
+      "maxSpeedDesc": "Max Speed Fast-Slow",
+      "switchTo": "Switch to {order}"
     },
     "badge": {
       "script": "Script",
@@ -1701,7 +1711,9 @@
       "badgeRotate": "Rotate",
       "badgeEstim": "E-Stim",
       "axisCustom": "Follow Custom Routing",
-      "tuning": "Output tuning"
+      "tuning": "Output tuning",
+      "badgeMachine": "Machine",
+      "machineModeTitle": "Machine speed mode"
     },
     "tcode": {
       "l0Label": "Stroke (main)",

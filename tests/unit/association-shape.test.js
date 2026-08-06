@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the association shape helpers. These guard the parallel-slot
 // data model against regression — the "single/multi/custom in parallel
 // with an active pointer" model is what makes mode switches lossless,

@@ -1,3 +1,8 @@
+/**
+ * @vitest-environment node
+ * No DOM required — skips jsdom construction. See notes/CLAUDE.md
+ * "Test environments" before changing this or adding DOM here.
+ */
 // Tests for the pure buttplug-route matcher used by custom routing.
 // The logic is non-trivial: prefer Intiface's deviceIndex (stable across
 // Intiface restarts), but require the name to confirm — otherwise an
