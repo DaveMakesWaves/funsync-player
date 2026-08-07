@@ -1741,6 +1741,21 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 }
 
 /* === Connection Panel === */
+
+/* Backdrop. Mirrors `.modal-overlay` in modal.css so the device panel dims
+   the page like every other modal does. It sits at z-index 999, one below
+   the panel's 1000, and carries no flex centering: unlike the shared Modal,
+   this panel positions ITSELF with top/left 50% + translate, so centering
+   here would fight it.
+   Dismissal is unaffected: the outside-click handler is bound on document
+   and a backdrop click is still outside `.connection-panel`. */
+.connection-panel__backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  z-index: 999;
+}
+
 .connection-panel {
   position: fixed;
   top: 50%;

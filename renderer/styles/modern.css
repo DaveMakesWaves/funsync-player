@@ -87,8 +87,13 @@
   border-color: var(--border-subtle);
   box-shadow: var(--elev-3), var(--edge-highlight);
 }
-/* Backdrop gets a touch of blur for depth (cheap, one element). */
-:root[data-style="modern"] .modal-overlay {
+/* Backdrop gets a touch of blur for depth (cheap, one element).
+   Both selectors live in ONE rule on purpose. The device panel was missing
+   the blur for months simply because it is not built on the shared Modal
+   component and so has its own backdrop class; keeping them together means
+   the next backdrop tweak cannot apply to one and miss the other. */
+:root[data-style="modern"] .modal-overlay,
+:root[data-style="modern"] .connection-panel__backdrop {
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
 }

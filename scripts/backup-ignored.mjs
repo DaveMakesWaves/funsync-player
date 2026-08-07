@@ -21,6 +21,10 @@
  * from the backup. Pass --prune to mirror deletions. A backup that silently
  * deletes your only remaining copy is worse than one that keeps a stale file.
  *
+ * Also covers the two sibling content-pipeline folders (../FunSync-Discord,
+ * ../FunSync-Patreon). They are not in this repo and are not git repos of
+ * their own, so without this nothing protects them.
+ *
  * Usage:  node scripts/backup-ignored.mjs [--prune] [--dry-run]
  */
 
@@ -45,6 +49,11 @@ const INCLUDE = [
   { p: 'Test.mp4', why: 'test media, deliberately too large for git' },
   { p: 'Test-slow.funscript', why: 'test fixture, deliberately not in git' },
   { p: 'ffmpeg', why: 'pinned 8.1 binaries; re-downloadable but a faff to match' },
+  // SIBLING folders, not in this repo and not git repos of their own — so
+  // nothing else protects them at all. `from` is resolved against the repo's
+  // parent; `p` is the name they take inside the backup.
+  { p: 'FunSync-Discord', from: '../FunSync-Discord', why: 'Discord content pipeline (drafts/outbox/posted) — no git of its own' },
+  { p: 'FunSync-Patreon', from: '../FunSync-Patreon', why: 'Patreon content pipeline (drafts/outbox/posted) — no git of its own' },
 ];
 
 /** Regenerable — listed so the README can explain the omission honestly. */
@@ -109,8 +118,8 @@ function walk(srcDir, dstDir) {
 
 console.log(`Backing up ignored files\n  from ${REPO}\n  to   ${DEST}${DRY ? '  (dry run)' : ''}\n`);
 
-for (const { p } of INCLUDE) {
-  const src = path.join(REPO, p);
+for (const { p, from } of INCLUDE) {
+  const src = from ? path.resolve(REPO, from) : path.join(REPO, p);
   if (!fs.existsSync(src)) { console.log(`  -- ${p} (absent, skipped)`); continue; }
   const dst = path.join(DEST, p);
   if (fs.statSync(src).isDirectory()) walk(src, dst);
@@ -141,7 +150,7 @@ function writeReadme() {
     '',
     '## What is here',
     '',
-    ...INCLUDE.map(({ p, why }) => `- \`${p}\` — ${why}`),
+    ...INCLUDE.map(({ p, from, why }) => `- \`${p}\`${from ? ` (from \`${from}\`)` : ''} — ${why}`),
     '',
     '## Deliberately NOT here',
     '',

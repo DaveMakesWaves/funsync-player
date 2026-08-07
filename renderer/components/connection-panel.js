@@ -473,6 +473,19 @@ export class ConnectionPanel {
 
     `;
 
+    // Backdrop. The panel declares aria-modal="true" but had NO backdrop
+    // element at all (Dave, 2026-08-07: "background blurs on all modals
+    // except device panel"). Every other modal goes through the shared
+    // Modal component, which renders `.modal-overlay` — and modern.css
+    // blurs that. This panel predates it and centres itself directly, so
+    // there was simply nothing behind it to dim or blur, and the page
+    // underneath still looked interactive while the panel claimed to be
+    // modal. Its own `backdrop-filter` would do nothing: the panel is
+    // opaque, so there is no background showing through it to blur.
+    this._backdrop = document.createElement('div');
+    this._backdrop.className = 'connection-panel__backdrop';
+    this._backdrop.hidden = true;
+    document.getElementById('app').appendChild(this._backdrop);
     document.getElementById('app').appendChild(this._panel);
 
     // Replace the <i data-lucide> placeholder with actual SVG
@@ -493,6 +506,10 @@ export class ConnectionPanel {
     document.addEventListener('fullscreenchange', () => {
       const target = document.fullscreenElement || document.getElementById('app');
       if (this._panel.parentElement !== target) {
+        // Backdrop first so it stays UNDER the panel in DOM order, and
+        // moves with it — left behind in #app it would be painted below
+        // the fullscreen top layer and simply vanish.
+        target.appendChild(this._backdrop);
         target.appendChild(this._panel);
       }
     });
@@ -2428,6 +2445,7 @@ export class ConnectionPanel {
   }
 
   show() {
+    if (this._backdrop) this._backdrop.hidden = false;
     this._panel.hidden = false;
     this._visible = true;
 
@@ -2490,6 +2508,7 @@ export class ConnectionPanel {
   }
 
   hide() {
+    if (this._backdrop) this._backdrop.hidden = true;
     this._panel.hidden = true;
     this._visible = false;
     if (this._boundOutsideClick) {
