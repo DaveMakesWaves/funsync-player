@@ -1399,6 +1399,21 @@ class App {
         }
         // Hold mode: restart whichever local engines we stopped — they re-anchor
         // at the current video time automatically on their next tick.
+        //
+        // "On their next tick" is only true where the script HAS content. In
+        // an unscripted zone the tick hits `nextIdx >= actions.length` or
+        // `duration > MAX_GAP_MS` — both bare returns — so nothing is
+        // commanded and the finisher's last value stays on the device. Two
+        // sides each assuming the other would handle it: the finisher never
+        // sends a stop on release, and the engine treats silence as safe.
+        //
+        // So zero the sustained-output actuators here. Linear is left alone
+        // (a parked stroker is inert; a buzzing vibrator is not), and the
+        // engines re-command within a tick wherever there IS script content,
+        // which is imperceptible for vibration. Reported by Dave 2026-08-14:
+        // the device "hangs on to the last value played in the orgasm switch
+        // script" when releasing into an unscripted section.
+        try { this.buttplugManager?.stopSustainedOutputs?.(); } catch { /* best-effort */ }
         if (this._orgasmStoppedEngines?.includes('buttplug')) this.buttplugSync.start();
         if (this._orgasmStoppedEngines?.includes('tcode')) this.tcodeSync.start();
         this._orgasmStoppedEngines = [];
@@ -3104,6 +3119,44 @@ class App {
     // Tick-driven engines cache the action list; make them re-read it.
     this.buttplugSync?.reloadActions?.();
     this.tcodeSync?.reloadActions?.();
+
+    // Redraw the heatmap, because the action list it was drawn from has just
+    // changed underneath it.
+    //
+    // The load sequence renders the heatmap from getActions() BEFORE this
+    // runs (it is called from _startGapSkip, ~50 lines later, because that is
+    // where the video duration is known and deferred if it is not). So on the
+    // first play after changing a filler setting the bar showed the OLD
+    // actions, and only looked right on the second play — by which point the
+    // previous load had already rebuilt the filler. Reported by Dave,
+    // 2026-08-14: "displays the heatmap correctly only after 2 separate
+    // launches of a video, not on the first launch after the change."
+    //
+    // Doing it here rather than reordering the load sequence also fixes
+    // changing the setting while a video is already playing, which never
+    // updated the bar at all.
+    //
+    // Unconditional on purpose. Gating on "does filler exist now vs before"
+    // would miss the commonest case — switching PRESET while filler is
+    // already on, where the shape changes completely and the flag does not.
+    // This runs on load and on settings change, not per tick, so the extra
+    // draw costs nothing worth guarding against.
+    this._refreshHeatmap();
+  }
+
+  /**
+   * Redraw the seek-bar heatmap from the CURRENT action list.
+   *
+   * No-ops until the duration is known — the same guard every other
+   * renderHeatmap call site uses, since the bar is drawn against duration.
+   */
+  _refreshHeatmap() {
+    const duration = this.videoPlayer?.duration;
+    if (!isFinite(duration) || duration <= 0) return;
+    const actions = this.funscriptEngine?.getActions?.();
+    if (!actions) return;
+    this.progressBar?.renderHeatmap(actions, duration);
+    this._feedInlineViz?.();
   }
 
   /**

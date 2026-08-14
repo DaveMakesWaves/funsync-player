@@ -150,11 +150,11 @@ export function createCategoryIconPicker({ initialIcon = null, color = '#e94560'
   empty.textContent = t('categories.iconEmojiNone');
   empty.hidden = true;
 
-  // Filtered ONCE, to what this machine can actually draw. Windows renders
-  // through Segoe UI Emoji and most Linux desktops through Noto Color Emoji,
-  // and the two ship different Unicode versions — offering a glyph that
-  // shows as tofu is worse than not offering it. See emoji-support.js.
-  const supportedGroups = EMOJI_GROUPS
+  // Filtered ONCE, to what we actually bundled artwork for. This used to be a
+  // per-machine font-coverage check; since the emoji render as Twemoji SVGs the
+  // local font no longer decides, so the only way to offer a glyph we can't
+  // draw is to list one whose asset didn't ship. See emoji-asset.js.
+  const bundledGroups = EMOJI_GROUPS
     .map((g) => ({ ...g, emoji: g.emoji.filter((e) => emojiAssetPath(e)) }))
     .filter((g) => g.emoji.length > 0);
 
@@ -163,7 +163,7 @@ export function createCategoryIconPicker({ initialIcon = null, color = '#e94560'
     const q = (query || '').trim().toLowerCase();
     let shown = 0;
 
-    for (const group of supportedGroups) {
+    for (const group of bundledGroups) {
       // Searching filters by the group name, since the catalogue carries no
       // per-emoji keywords — a full keyword table is a lot of data for a
       // category icon, and grouping is what people actually scan by.

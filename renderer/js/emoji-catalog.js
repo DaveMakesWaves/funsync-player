@@ -13,14 +13,16 @@
 // here — melting face, heart hands, the coloured hearts, the newer animals
 // and objects, and so on.
 //
-// Including new emoji is SAFE because availability is never assumed. Windows
-// renders through Segoe UI Emoji and most Linux desktops through Noto Color
-// Emoji, both of which lag the Unicode spec by a variable amount, and both
-// of which differ build to build. Every entry is run through
-// emoji-support.js first, which draws the glyph and checks the result, so a
-// machine with an older font simply sees a shorter list rather than a grid
-// of tofu. That is exactly what makes it reasonable to list Unicode 15 and
-// 16 characters here at all.
+// Including new emoji is SAFE because we ship the artwork rather than trusting
+// the platform font. Windows renders through Segoe UI Emoji and most Linux
+// desktops through Noto Color Emoji, both of which lag the Unicode spec by a
+// variable amount and differ build to build — so this used to be gated by
+// canvas measurement (draw the glyph, compare against tofu). Bundling Twemoji
+// made that unnecessary: every entry below is backed by an SVG, and the picker
+// filters on emojiAssetPath() — "did we bundle this?" — not on what the local
+// font happens to cover. That is what makes listing Unicode 15 and 16
+// characters here reasonable. Font rendering survives only as the <img>
+// onerror fallback in emoji-asset.js.
 //
 // Groups follow the Unicode emoji ordering loosely, so the layout matches
 // what people are used to from OS pickers.

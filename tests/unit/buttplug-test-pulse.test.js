@@ -153,3 +153,73 @@ describe('the flywheel test pulse', () => {
     expect(Math.max(...sent)).toBe(0);
   });
 });
+
+// Dave, 2026-08-14: releasing the Orgasm Switch hotkey in an unscripted zone
+// left the device "hanging on to the last value played in the orgasm switch
+// script".
+//
+// Hold-mode release restarts the main sync engines, whose comment promises
+// they "re-anchor at the current video time automatically on their next
+// tick" — true only where the script HAS content. In a gap the tick hits
+// `nextIdx >= actions.length` or `duration > MAX_GAP_MS`, both bare returns,
+// so nothing is commanded. Meanwhile `deactivate()` never sent a stop either.
+// Two sides each assuming the other would handle it.
+//
+// The distinction that matters: a LINEAR device parked at its last position
+// is inert, but a vibrate/rotate/oscillate/e-stim actuator holding its last
+// value keeps acting on it. `stopAll()` would zero linear too and snap
+// strokers to 0 on every release.
+describe('stopSustainedOutputs', () => {
+  const rig = (devices) => {
+    const mgr = new ButtplugManager();
+    mgr._client = { };            // connected-enough for the guard
+    mgr._connected = true;
+    mgr._devices = new Map(devices.map((d) => [d.index, d]));
+    Object.defineProperty(mgr, 'devices', { get: () => devices });
+    for (const m of ['sendVibrate', 'sendOscillate', 'sendRotate', 'sendScalar', 'sendLinear']) {
+      mgr[m] = vi.fn(async () => ({ ok: true }));
+    }
+    return mgr;
+  };
+
+  it('zeroes every sustained actuator', async () => {
+    const mgr = rig([
+      { index: 0, canVibrate: true },
+      { index: 1, canOscillate: true },
+      { index: 2, canRotate: true },
+      { index: 3, canScalar: true },
+    ]);
+    await mgr.stopSustainedOutputs();
+    expect(mgr.sendVibrate).toHaveBeenCalledWith(0, 0);
+    expect(mgr.sendOscillate).toHaveBeenCalledWith(1, 0);
+    expect(mgr.sendRotate).toHaveBeenCalledWith(2, 0, true);
+    expect(mgr.sendScalar).toHaveBeenCalledWith(3, 0);
+  });
+
+  // THE POINT. Zeroing linear would snap a stroker to 0 on every release,
+  // including mid-scripted-section where nothing was wrong.
+  it('leaves linear position alone', async () => {
+    const mgr = rig([{ index: 0, canLinear: true }]);
+    await mgr.stopSustainedOutputs();
+    expect(mgr.sendLinear).not.toHaveBeenCalled();
+  });
+
+  it('silences the motor of a device that is BOTH, without moving it', async () => {
+    const mgr = rig([{ index: 0, canLinear: true, canVibrate: true }]);
+    await mgr.stopSustainedOutputs();
+    expect(mgr.sendVibrate).toHaveBeenCalledWith(0, 0);
+    expect(mgr.sendLinear).not.toHaveBeenCalled();
+  });
+
+  it('does nothing when disconnected', async () => {
+    const mgr = rig([{ index: 0, canVibrate: true }]);
+    mgr._connected = false;
+    await mgr.stopSustainedOutputs();
+    expect(mgr.sendVibrate).not.toHaveBeenCalled();
+  });
+
+  it('survives an empty device list', async () => {
+    const mgr = rig([]);
+    await expect(mgr.stopSustainedOutputs()).resolves.toBeUndefined();
+  });
+});

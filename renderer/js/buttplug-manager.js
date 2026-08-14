@@ -485,6 +485,40 @@ export class ButtplugManager {
   }
 
   /**
+   * Zero every SUSTAINED-OUTPUT actuator, leaving linear position alone.
+   *
+   * The distinction is the whole point. A linear device parked at its last
+   * position is inert — it simply sits there. A vibrate / rotate / oscillate
+   * / e-stim actuator holding its last value keeps *acting on* it, because
+   * for those "send nothing" means "carry on as you were".
+   *
+   * Needed on Orgasm Switch release (Dave, 2026-08-14): releasing the hotkey
+   * restarts the main sync engines, which re-anchor "on their next tick" —
+   * true only where the script has content. Land in an unscripted zone and
+   * the tick hits `nextIdx >= actions.length` or `duration > MAX_GAP_MS`,
+   * both bare returns, so nothing is commanded and the finisher's last value
+   * stays on the device. The finisher holds HIGH values, so it stays running
+   * hard with nothing on screen to explain it.
+   *
+   * Why not `stopAll()`: that also zeroes linear, which would snap strokers
+   * to 0 on every release even mid-scripted-section.
+   *
+   * @returns {Promise<void>}
+   */
+  async stopSustainedOutputs() {
+    if (!this._client || !this._connected) return;
+    await Promise.all(this.devices.map(async (dev) => {
+      // Deliberately NOT gated on `canLinear` being false — hardware that is
+      // both (some Lovense) still needs its motor silenced while keeping its
+      // position untouched.
+      if (dev.canVibrate) await this.sendVibrate(dev.index, 0);
+      if (dev.canOscillate) await this.sendOscillate(dev.index, 0);
+      if (dev.canRotate) await this.sendRotate(dev.index, 0, true);
+      if (dev.canScalar) await this.sendScalar(dev.index, 0);
+    }));
+  }
+
+  /**
    * Serialize a ButtplugClientDevice for UI display.
    * v4 API: capabilities checked via device.hasOutput(OutputType).
    *
