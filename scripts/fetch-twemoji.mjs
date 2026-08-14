@@ -19,7 +19,7 @@
 
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DIR = path.join(ROOT, 'renderer', 'assets', 'emoji');
@@ -43,13 +43,53 @@ export function twemojiCandidates(emoji) {
   return names;
 }
 
-async function loadCatalogue() {
+/**
+ * Strip import declarations, and any top-level statement that uses what they
+ * bound, from an ES module's source.
+ *
+ * The catalogue is evaluated below as a `data:` URL, which CANNOT resolve
+ * relative specifiers — `./emoji-asset.js` throws ERR_UNSUPPORTED_RESOLVE_REQUEST
+ * because a data: URL has no hierarchical base to resolve against. That is not
+ * an accident to work around by importing the file directly: this script must
+ * run on a FRESH CLONE, where `emoji-assets-manifest.js` does not exist yet
+ * because this script is what generates it. Loading the real module would be a
+ * chicken-and-egg failure, and would drag browser-side code into a build step.
+ *
+ * We only want the plain data (EMOJI_GROUPS / ALL_EMOJI), so dropping the
+ * imports and their call sites is sound. Generic rather than hardcoding the
+ * current two, so adding an import to the catalogue doesn't break the build
+ * again — which is exactly how v0.9.1 failed CI on both platforms.
+ */
+export function stripImports(src) {
+  const bound = new Set();
+  // import ... from '...';  — may span lines, e.g. a multi-name brace list.
+  const withoutImports = src.replace(
+    /^import\s+([\s\S]*?)\s+from\s+['"][^'"]+['"];?[ \t]*$/gm,
+    (_m, clause) => {
+      for (const name of clause.replace(/[{}]/g, ' ').split(',')) {
+        const id = name.trim().split(/\s+as\s+/).pop().trim();
+        if (id) bound.add(id);
+      }
+      return '';
+    },
+  );
+  if (bound.size === 0) return withoutImports;
+  // Drop top-level statements that reference an imported binding, e.g. the
+  // `registerAvailableAssets(BUNDLED_EMOJI_ASSETS);` side-effect call.
+  const uses = new RegExp(`\\b(?:${[...bound].join('|')})\\b`);
+  return withoutImports
+    .split('\n')
+    .filter((line) => !(uses.test(line) && !line.trim().startsWith('//')))
+    .join('\n');
+}
+
+export async function loadCatalogue() {
   const src = await fs.readFile(
     path.join(ROOT, 'renderer', 'js', 'emoji-catalog.js'),
     'utf8',
   );
   const mod = await import(
-    `data:text/javascript;base64,${Buffer.from(src).toString('base64')}`
+    `data:text/javascript;base64,${Buffer.from(stripImports(src)).toString('base64')}`
   );
   return mod.ALL_EMOJI;
 }
@@ -127,7 +167,11 @@ async function main() {
   );
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Only fetch when run as a script. Without this guard, importing the module to
+// test its helpers downloads 737 SVGs as a side effect.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
