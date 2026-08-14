@@ -6,6 +6,21 @@
 
 let ButtplugSDK = null;
 
+// Send-path results.
+//
+// Every send* used to swallow its own error into a warning and return
+// undefined, so a CALLER could not tell "command delivered" from "command
+// threw". That is how a Hismith can sit inert while the device test reports
+// success (adventurous1, thread #274) — the same shape as the e-stim bug: a
+// real failure dressed up as a working device.
+//
+// The sync loop still ignores these. It must never throw mid-tick, and a
+// per-tick failure is already rate-limited by _warnOnce. The device TEST
+// checks them, so "test passed" now means the hardware was really commanded.
+const SENT = { ok: true };
+const NOT_CONNECTED = { ok: false, error: 'device not connected' };
+const failed = (err) => ({ ok: false, error: err?.message || String(err) });
+
 /**
  * Coerce an arbitrary thrown value into a user-readable string.
  *
@@ -104,7 +119,27 @@ export class ButtplugManager {
       // Wire device events
       this._client.addListener('deviceadded', (device) => {
         this._devices.set(device.index, device);
-        if (this.onDeviceAdded) this.onDeviceAdded(this._serializeDevice(device));
+        const info = this._serializeDevice(device);
+        // ALWAYS log what a device advertises, not only when nothing matched.
+        //
+        // Previously the only device log was the "no recognised capabilities"
+        // warning, so a device that WAS recognised but still did not move
+        // left no trace at all — and a user reporting "it sees my machine
+        // but won't control it" could not be diagnosed from their log
+        // (adventurous1, thread #274, took three round trips). One line per
+        // device at connect makes the next report answerable immediately.
+        console.log(
+          `[Buttplug] Device added: "${device.name}" (index ${device.index}) ` +
+          `outputs=[${this._describeOutputs(device).join(', ') || 'none'}] ` +
+          `routed as: ${[
+            info.canLinear && 'linear',
+            info.canOscillate && 'oscillate',
+            info.canVibrate && 'vibrate',
+            info.canRotate && 'rotate',
+            info.canScalar && 'scalar',
+          ].filter(Boolean).join('+') || 'NOTHING'}`
+        );
+        if (this.onDeviceAdded) this.onDeviceAdded(info);
       });
 
       this._client.addListener('deviceremoved', (device) => {
@@ -196,18 +231,20 @@ export class ButtplugManager {
    */
   async sendVibrate(deviceIndex, intensity) {
     const device = this._devices.get(deviceIndex);
-    if (!device || !ButtplugSDK) return;
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
 
     const pct = Math.max(0, Math.min(1, intensity / 100));
 
     try {
       const cmd = ButtplugSDK.DeviceOutput.Vibrate.percent(pct);
       await device.runOutput(cmd);
+      return SENT;
     } catch (err) {
       this._warnOnce(
         `send-vibrate-${deviceIndex}`,
         `[Buttplug] Vibrate command to "${device.name}" failed: ${err?.message || err}`
       );
+      return failed(err);
     }
   }
 
@@ -219,7 +256,7 @@ export class ButtplugManager {
    */
   async sendLinear(deviceIndex, position, durationMs) {
     const device = this._devices.get(deviceIndex);
-    if (!device || !ButtplugSDK) return;
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
 
     const pct = Math.max(0, Math.min(1, position / 100));
     const dur = Math.max(50, Math.round(durationMs));
@@ -227,11 +264,13 @@ export class ButtplugManager {
     try {
       const cmd = ButtplugSDK.DeviceOutput.PositionWithDuration.percent(pct, dur);
       await device.runOutput(cmd);
+      return SENT;
     } catch (err) {
       this._warnOnce(
         `send-linear-${deviceIndex}`,
         `[Buttplug] Linear command to "${device.name}" failed: ${err?.message || err}`
       );
+      return failed(err);
     }
   }
 
@@ -243,18 +282,20 @@ export class ButtplugManager {
    */
   async sendRotate(deviceIndex, speed, clockwise = true) {
     const device = this._devices.get(deviceIndex);
-    if (!device || !ButtplugSDK) return;
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
 
     const pct = Math.max(0, Math.min(1, speed / 100));
 
     try {
       const cmd = ButtplugSDK.DeviceOutput.Rotate.percent(pct, clockwise);
       await device.runOutput(cmd);
+      return SENT;
     } catch (err) {
       this._warnOnce(
         `send-rotate-${deviceIndex}`,
         `[Buttplug] Rotate command to "${device.name}" failed: ${err?.message || err}`
       );
+      return failed(err);
     }
   }
 
@@ -271,18 +312,60 @@ export class ButtplugManager {
    */
   async sendOscillate(deviceIndex, speed) {
     const device = this._devices.get(deviceIndex);
-    if (!device || !ButtplugSDK) return;
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
 
     const pct = Math.max(0, Math.min(1, speed / 100));
 
     try {
       const cmd = ButtplugSDK.DeviceOutput.Oscillate.percent(pct);
       await device.runOutput(cmd);
+      return SENT;
     } catch (err) {
       this._warnOnce(
         `send-oscillate-${deviceIndex}`,
         `[Buttplug] Oscillate command to "${device.name}" failed: ${err?.message || err}`
       );
+      return failed(err);
+    }
+  }
+
+  /**
+   * Spin a flywheel machine briefly, hard enough that it actually turns.
+   *
+   * The old test sent a flat 20% and was documented as "enough to prove
+   * routing without spinning a flywheel up" — which is self-defeating. A
+   * fuck machine has real stiction; below roughly a third power it does not
+   * start at all. So the test proved nothing and looked identical to a
+   * broken device (adventurous1, thread #274: "does not control and test
+   * does not work either"). A vibrator at 20% is a clear buzz; a Hismith at
+   * 20% is silence.
+   *
+   * Ramped rather than slammed: a machine jumping straight to full is
+   * alarming, and a ramp also demonstrates that speed *changes* land, not
+   * just that one command did.
+   *
+   * @param {number} deviceIndex
+   * @param {number} [cap] — user's safety cap 0-100; never exceeded
+   * @returns {Promise<{ok: boolean, error?: string}>}
+   */
+  async testOscillate(deviceIndex, cap = 100) {
+    const ceiling = Math.max(0, Math.min(100, cap));
+    // Below this a flywheel generally will not break stiction, so a "test"
+    // that stays under it cannot answer the question being asked.
+    const peak = Math.min(65, ceiling);
+    const steps = [Math.min(45, ceiling), peak, peak];
+
+    let last = SENT;
+    try {
+      for (const speed of steps) {
+        last = await this.sendOscillate(deviceIndex, speed);
+        if (last && last.ok === false) return last;
+        await new Promise((r) => setTimeout(r, 350));
+      }
+      return await this.sendOscillate(deviceIndex, 0);
+    } finally {
+      // Never leave a machine running because the test threw part-way.
+      this.sendOscillate(deviceIndex, 0);
     }
   }
 
@@ -334,7 +417,7 @@ export class ButtplugManager {
    */
   async sendScalar(deviceIndex, intensity) {
     const device = this._devices.get(deviceIndex);
-    if (!device || !ButtplugSDK) return;
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
 
     const type = this._scalarOutputType(device);
     if (!type) {
@@ -343,7 +426,7 @@ export class ButtplugManager {
         `[Buttplug] Device "${device.name}" is flagged as scalar-capable but ` +
         `exposes neither Constrict nor Inflate. Scalar commands cannot be sent.`
       );
-      return;
+      return { ok: false, error: 'no concrete scalar output type' };
     }
 
     const pct = Math.max(0, Math.min(1, intensity / 100));
@@ -351,6 +434,7 @@ export class ButtplugManager {
     try {
       const cmd = ButtplugSDK.DeviceOutput[type].percent(pct);
       await device.runOutput(cmd);
+      return SENT;
     } catch (err) {
       // Warn (not debug) and once per device: a silent failure here is
       // indistinguishable from a device that simply isn't responding.
@@ -358,6 +442,7 @@ export class ButtplugManager {
         `scalar-send-${deviceIndex}`,
         `[Buttplug] ${type} command to "${device.name}" failed: ${err?.message || err}`
       );
+      return failed(err);
     }
   }
 
@@ -414,6 +499,26 @@ export class ButtplugManager {
    * @param {object} device
    * @returns {object}
    */
+  /**
+   * Every output type a device actually advertises.
+   *
+   * `OutputType` in buttplug-js v4 is a STRING enum and `hasOutput` does
+   * `Output.hasOwnProperty(type)`, so probing by string is correct — worth
+   * stating because "maybe it wants the enum object" is the obvious wrong
+   * theory when a device reports nothing.
+   *
+   * @returns {string[]}
+   */
+  _describeOutputs(device) {
+    const ALL_TYPES = [
+      'Vibrate', 'Rotate', 'Oscillate', 'Constrict', 'Inflate',
+      'Position', 'HwPositionWithDuration', 'Temperature', 'Spray', 'Led',
+    ];
+    return ALL_TYPES.filter((t) => {
+      try { return !!device.hasOutput(t); } catch { return false; }
+    });
+  }
+
   _serializeDevice(device) {
     const probe = (type) => {
       try { return !!device.hasOutput(type); } catch (e) { return false; }
@@ -443,11 +548,7 @@ export class ButtplugManager {
     // dump the set of output types it actually exposes so we can add the
     // mapping without guessing. Catches driver renames + new device types.
     if (!canVibrate && !canLinear && !canRotate && !canScalar && !canOscillate) {
-      const ALL_TYPES = [
-        'Vibrate', 'Rotate', 'Oscillate', 'Constrict', 'Inflate',
-        'Position', 'HwPositionWithDuration', 'Temperature', 'Spray', 'Led',
-      ];
-      const present = ALL_TYPES.filter(probe);
+      const present = this._describeOutputs(device);
       console.warn(
         `[Buttplug] Device "${device.name}" reports no recognised capabilities. ` +
         `Actual outputs: [${present.join(', ') || 'none'}]. ` +

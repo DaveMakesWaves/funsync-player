@@ -12,7 +12,9 @@
     "backend:dev": "cd backend && python3 main.py || python main.py",
     "backend:test": "cd backend && python3 -m pytest -v || python -m pytest -v",
     "build": "node scripts/build.js",
-    "backup": "node scripts/backup-ignored.mjs"
+    "backup": "node scripts/backup-ignored.mjs",
+    "vault:check": "node scripts/vault-freshness.mjs",
+    "vault:stamp": "node scripts/vault-freshness.mjs --stamp"
   },
   "keywords": [
     "video-player",

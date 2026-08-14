@@ -481,3 +481,26 @@
 .categories__list-item:hover .categories__list-actions {
   opacity: 1;
 }
+
+/* Icon marks in the categories list + card name. Same reason as the
+ * library: the plain-dot box would hide the shape/emoji entirely. */
+.categories__list-dot--icon,
+.categories__card-name-mark--icon {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
+}
+
+.categories__card-name-mark {
+  margin-right: 6px;
+  vertical-align: middle;
+  flex-shrink: 0;
+}
+
+.categories__card-name-mark:not(.categories__card-name-mark--icon) {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}

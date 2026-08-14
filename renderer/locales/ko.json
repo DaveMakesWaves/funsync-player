@@ -249,14 +249,16 @@
   },
   "backend": {
     "title": "백엔드가 응답하지 않습니다",
-    "detail": "라이브러리 스캔, 썸네일 및 VR 기능에는 백엔드가 필요합니다. 이미 열려 있는 파일은 계속 재생됩니다.",
-    "detailWithError": "라이브러리 스캔, 썸네일 및 VR 기능에는 백엔드가 필요합니다. 이미 열려 있는 파일은 계속 재생됩니다. ({error})",
+    "detail": "썸네일, VR, 웹 리모컨에는 백엔드가 필요합니다. 재생은 평소대로 계속됩니다. 아래 \"백엔드 재시작\"을 눌러 보세요.",
+    "detailWithError": "썸네일, VR, 웹 리모컨에는 백엔드가 필요합니다. 재생은 평소대로 계속됩니다. 아래 \"백엔드 재시작\"을 눌러 보세요. ({error})",
     "restart": "백엔드 재시작",
     "restarting": "재시작 중…",
     "restartingTitle": "백엔드 재시작 중…",
     "restartingDetail": "보통 몇 초 정도 걸립니다.",
     "viewLogs": "로그 보기",
-    "dismiss": "배너 닫기"
+    "dismiss": "배너 닫기",
+    "missingTitle": "백엔드 프로그램이 없습니다",
+    "missingDetail": "FunSync가 백엔드 프로그램을 찾지 못했습니다. 보통 설치 후 백신이 격리한 경우입니다. FunSync를 백신 예외에 추가하고 다시 설치하세요. 재생은 계속되지만 썸네일, 검색, VR, 웹 리모컨은 사용할 수 없습니다."
   },
   "dropZone": {
     "title": "드롭하여 로드",
@@ -470,7 +472,8 @@
       "searchEroScripts": "EroScripts 검색..."
     },
     "heatmapUnavailable": "히트맵을 사용할 수 없음",
-    "sortSwitchTo": "{order}(으)로 전환"
+    "sortSwitchTo": "{order}(으)로 전환",
+    "selectedAll": "{count, plural, other {동영상 #개를 선택했습니다}}"
   },
   "playlists": {
     "title": "재생 목록",
@@ -545,7 +548,16 @@
     "gridView": "그리드 보기",
     "listView": "목록 보기",
     "detailEmpty": "이 카테고리에 동영상이 없습니다",
-    "detailEmptyHint": "케밥 메뉴를 사용하여 라이브러리에서 동영상을 할당하세요"
+    "detailEmptyHint": "케밥 메뉴를 사용하여 라이브러리에서 동영상을 할당하세요",
+    "iconLabel": "아이콘",
+    "iconModeColor": "색상",
+    "iconModeShape": "모양",
+    "iconModeEmoji": "이모지",
+    "iconEmojiPlaceholder": "이모지를 붙여넣기",
+    "iconPreview": "미리보기",
+    "editCategory": "카테고리 편집",
+    "iconEmojiSearch": "그룹 검색",
+    "iconEmojiNone": "일치하는 항목 없음"
   },
   "stroke": {
     "rangeLabel": "스트로크 범위",
@@ -969,7 +981,16 @@
       "removed": "소스 \"{name}\" 제거됨",
       "toggled": "소스 \"{name}\" {state}됨",
       "stateEnabled": "활성화",
-      "stateDisabled": "비활성화"
+      "stateDisabled": "비활성화",
+      "unreachableHint": "이 소스에 접근할 수 없어 켜질 수 없습니다. 설정은 그대로 유지됩니다.",
+      "unreachableReason": "접근할 수 없음. 드라이브를 연결한 뒤 다시 확인을 누르세요.",
+      "recheck": "다시 확인",
+      "recheckHint": "접근 가능한 소스를 다시 확인합니다",
+      "rechecking": "확인 중...",
+      "recheckedAll": "모든 소스에 접근할 수 있습니다.",
+      "recheckedSome": "{count, plural, other {소스 #개에 여전히 접근할 수 없습니다}}",
+      "working": "처리 중...",
+      "scanning": "라이브러리 스캔 중..."
     },
     "multiAxisConfirm": {
       "title": "기본을 다중 축으로 전환하시겠습니까?",
@@ -1060,7 +1081,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "비디오 및 성능",
       "rememberSpeedLabel": "재생 속도 기억",
-      "rememberSpeedHint": "다른 영상을 불러와도 현재 속도를 유지합니다. 기본값은 꺼짐이며, 각 영상은 1배속으로 시작합니다."
+      "rememberSpeedHint": "다른 영상을 불러와도 현재 속도를 유지합니다. 기본값은 꺼짐이며, 각 영상은 1배속으로 시작합니다.",
+      "fillerHeader": "간격 채우기",
+      "fillerEnable": "간격을 움직임으로 채우기",
+      "fillerResetEnable": "간격 채우기 초기화",
+      "fillerResetEnableAria": "간격 채우기를 기본값으로 되돌리기",
+      "fillerPattern": "패턴",
+      "fillerPreviewAria": "채우기 패턴 미리보기",
+      "fillerHint": "스크립트가 비어 있는 긴 구간에서 기기를 멈춰 두는 대신 부드러운 움직임을 재생합니다. 간격 건너뛰기가 자동이면 무시됩니다.",
+      "fillerStats": "평균 {avg} 단위/초, 최대 {max} 단위/초",
+      "fillerShape": "파형",
+      "fillerBpm": "속도 (BPM)",
+      "fillerDepth": "깊이",
+      "fillerAbsolute": "범위 직접 지정",
+      "fillerAbsMin": "최소",
+      "fillerAbsMax": "최대"
     },
     "appearance": {
       "themeHeader": "테마",
@@ -1528,7 +1563,8 @@
       "apply": "적용",
       "test": "테스트",
       "measure": "측정",
-      "measuring": "측정 중…"
+      "measuring": "측정 중…",
+      "applyLatency": "적용"
     },
     "handy": {
       "connectionKey": "연결 키",
@@ -1656,7 +1692,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "장치 토큰을 입력하세요",
       "latencyToast": "Autoblow 지연: {ms} ms",
-      "latencyFailed": "지연 측정 실패: {error}"
+      "latencyFailed": "지연 측정 실패: {error}",
+      "latencyNoReading": "지연 시간을 측정하지 못했습니다. 기기 연결을 확인하세요.",
+      "latencyApplied": "동기화 오프셋을 {ms}ms로 설정했습니다"
     },
     "sync": {
       "experimental": "실험적",
@@ -1812,5 +1850,36 @@
     "resumeAt": "{time}부터 재생",
     "progressLabel": "{percent}% 시청함",
     "resumedToast": "{time}부터 이어서 재생"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "느린 애무",
+      "gentle": "부드럽게",
+      "steady": "일정하게",
+      "building": "고조",
+      "drift": "드리프트",
+      "pulse": "펄스",
+      "custom": "사용자 지정"
+    },
+    "shape": {
+      "sine": "사인파",
+      "triangle": "삼각파",
+      "sawtooth": "톱니파",
+      "square": "사각파",
+      "escalating": "고조",
+      "random": "랜덤"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "스마일리",
+      "people": "사람",
+      "hearts": "하트와 기호",
+      "nature": "동물과 자연",
+      "food": "음식과 음료",
+      "activity": "활동",
+      "objects": "사물",
+      "travel": "여행과 장소"
+    }
   }
 }

@@ -9,6 +9,10 @@ import {
 } from '../js/auto-offset.js';
 import { eventBus } from '../js/event-bus.js';
 import { showToast } from '../js/toast.js';
+import { medianLatency, isApplicableLatency, clampToOffsetRange } from '../js/latency-sample.js';
+
+/** Probes per "Measure" press. Odd, so the median is a real sample. */
+const LATENCY_SAMPLE_COUNT = 5;
 // TCode v0.3 axes exposed in the Axis Ranges UI. Naming + type match the
 // multi-axis spec module (renderer/js/multi-axis.js) and the official TCode
 // specification. L0 is the main stroke; R0-R2 are rotation, V* are vibration,
@@ -396,6 +400,7 @@ export class ConnectionPanel {
           <span class="connection-panel__setting-label" data-i18n="connection.autoblow.latency">${_esc(t('connection.autoblow.latency'))}</span>
           <span id="ab-latency" class="connection-panel__setting-value">—</span>
           <button id="ab-latency-btn" class="connection-panel__action connection-panel__action--utility" data-i18n="connection.btn.measure">${_esc(t('connection.btn.measure'))}</button>
+          <button id="ab-latency-apply" class="connection-panel__action connection-panel__action--utility" data-i18n="connection.btn.applyLatency" hidden>${_esc(t('connection.btn.applyLatency'))}</button>
         </div>
         <div class="connection-panel__setting-row">
           <span class="connection-panel__setting-label" data-i18n="connection.autoblow.offset">${_esc(t('connection.autoblow.offset'))}</span>
@@ -796,22 +801,56 @@ export class ConnectionPanel {
 
       this._initAutoblowCutoff();
 
+      // Measure, then OFFER to apply. Deliberately not automatic: the offset
+      // may have been tuned by hand and silently overwriting that is worse
+      // than making the user press one more button.
       this._panel.querySelector('#ab-latency-btn')?.addEventListener('click', async () => {
         const btn = this._panel.querySelector('#ab-latency-btn');
         const display = this._panel.querySelector('#ab-latency');
+        const applyBtn = this._panel.querySelector('#ab-latency-apply');
         const originalText = btn.textContent;
         btn.disabled = true;
         btn.textContent = t('connection.btn.measuring');
         try {
-          const latency = await this.autoblowManager.estimateLatency();
-          display.textContent = `${latency}ms`;
-          showToast(t('connection.autoblow.latencyToast', { ms: latency }), 'info', 2500);
+          // Several probes, not one. A single cloud round trip is noisy and
+          // one unlucky sample written into the offset silently breaks sync.
+          const samples = [];
+          for (let i = 0; i < LATENCY_SAMPLE_COUNT; i++) {
+            samples.push(await this.autoblowManager.estimateLatency());
+          }
+          const latency = medianLatency(samples);
+          this._measuredLatencyMs = latency;
+
+          if (isApplicableLatency(latency)) {
+            display.textContent = `${latency}ms`;
+            if (applyBtn) applyBtn.hidden = false;
+            showToast(t('connection.autoblow.latencyToast', { ms: latency }), 'info', 2500);
+          } else {
+            // estimateLatency() returns 0 when disconnected AND on error, so
+            // 0 means "no reading" — never write it over a good offset.
+            display.textContent = '—';
+            if (applyBtn) applyBtn.hidden = true;
+            showToast(t('connection.autoblow.latencyNoReading'), 'warn', 3500);
+          }
         } catch (err) {
           showToast(t('connection.autoblow.latencyFailed', { error: err?.message || 'unknown error' }), 'error', 4000);
         } finally {
           btn.textContent = originalText;
           btn.disabled = false;
         }
+      });
+
+      this._panel.querySelector('#ab-latency-apply')?.addEventListener('click', () => {
+        const measured = this._measuredLatencyMs;
+        if (!isApplicableLatency(measured)) return;
+        const value = clampToOffsetRange(measured);
+        this.settings.set('autoblow.offset', value);
+        const slider = this._panel.querySelector('#ab-offset');
+        const label = this._panel.querySelector('#ab-offset-value');
+        if (slider) slider.value = String(value);
+        if (label) label.textContent = `${value}ms`;
+        if (this.autoblowManager?.connected) this.autoblowManager.syncOffset(value);
+        showToast(t('connection.autoblow.latencyApplied', { ms: value }), 'success', 2500);
       });
 
       this.autoblowManager.onConnect = () => this._updateAutoblowStatus('connected');
@@ -1766,12 +1805,15 @@ export class ConnectionPanel {
         await new Promise(r => setTimeout(r, 500));
         await this.buttplug.sendRotate(idx, 0);
       } else if (dev.canOscillate) {
-        // Machine test: a brief, low, capped nudge. Enough to confirm
-        // commands are routed without spinning a flywheel up to speed.
-        const cap = this.buttplugSync?.getMaxIntensity(idx) ?? 70;
-        await this.buttplug.sendOscillate(idx, Math.min(20, cap));
-        await new Promise(r => setTimeout(r, 600));
-        await this.buttplug.sendOscillate(idx, 0);
+        // Machine test: ramped spin-up, capped by the user's safety limit.
+        // The old version sent a flat 20% "without spinning a flywheel up",
+        // which is precisely why it could not tell a working machine from a
+        // dead one — below roughly a third power these do not turn at all.
+        const cap = this.buttplugSync?.getMaxIntensity(idx) ?? 100;
+        const result = await this.buttplug.testOscillate(idx, cap);
+        if (result && result.ok === false) {
+          console.warn('[Test] Machine test failed:', result.error);
+        }
       } else if (dev.canScalar) {
         // E-stim test: very gentle pulse, respecting safety cap
         const cap = this.buttplugSync?.getMaxIntensity(idx) ?? 70;

@@ -249,14 +249,16 @@
   },
   "backend": {
     "title": "Backend antwortet nicht",
-    "detail": "Bibliotheks-Scans, Vorschaubilder und VR-Funktionen benötigen das Backend. Bereits geöffnete Dateien lassen sich weiter abspielen.",
-    "detailWithError": "Bibliotheks-Scans, Vorschaubilder und VR-Funktionen benötigen das Backend. Bereits geöffnete Dateien lassen sich weiter abspielen. ({error})",
+    "detail": "Vorschaubilder, VR und die Web-Fernbedienung benötigen es. Die Wiedergabe läuft normal weiter. Versuche unten „Backend neu starten“.",
+    "detailWithError": "Vorschaubilder, VR und die Web-Fernbedienung benötigen es. Die Wiedergabe läuft normal weiter. Versuche unten „Backend neu starten“. ({error})",
     "restart": "Backend neu starten",
     "restarting": "Starte neu…",
     "restartingTitle": "Backend wird neu gestartet…",
     "restartingDetail": "Das dauert in der Regel ein paar Sekunden.",
     "viewLogs": "Logs ansehen",
-    "dismiss": "Banner schließen"
+    "dismiss": "Banner schließen",
+    "missingTitle": "Backend-Programm fehlt",
+    "missingDetail": "FunSync konnte sein Backend-Programm nicht finden. Meist wurde es nach der Installation vom Virenscanner in Quarantäne verschoben. Nimm FunSync in die Ausnahmen deines Virenscanners auf und installiere neu. Die Wiedergabe funktioniert weiter; Vorschaubilder, Scannen, VR und die Web-Fernbedienung nicht."
   },
   "dropZone": {
     "title": "Zum Laden ablegen",
@@ -470,7 +472,8 @@
       "searchEroScripts": "EroScripts durchsuchen..."
     },
     "heatmapUnavailable": "Heatmap nicht verfügbar",
-    "sortSwitchTo": "Wechseln zu {order}"
+    "sortSwitchTo": "Wechseln zu {order}",
+    "selectedAll": "{count, plural, one {# Video ausgewählt} other {# Videos ausgewählt}}"
   },
   "playlists": {
     "title": "Playlists",
@@ -545,7 +548,16 @@
     "gridView": "Rasteransicht",
     "listView": "Listenansicht",
     "detailEmpty": "Keine Videos in dieser Kategorie",
-    "detailEmptyHint": "Weise Videos aus der Bibliothek über das Kebab-Menü zu"
+    "detailEmptyHint": "Weise Videos aus der Bibliothek über das Kebab-Menü zu",
+    "iconLabel": "Symbol",
+    "iconModeColor": "Farbe",
+    "iconModeShape": "Form",
+    "iconModeEmoji": "Emoji",
+    "iconEmojiPlaceholder": "Emoji einfügen",
+    "iconPreview": "Vorschau",
+    "editCategory": "Kategorie bearbeiten",
+    "iconEmojiSearch": "Gruppen suchen",
+    "iconEmojiNone": "Keine Treffer"
   },
   "stroke": {
     "rangeLabel": "Stroke-Bereich",
@@ -969,7 +981,16 @@
       "removed": "Quelle „{name}\" entfernt",
       "toggled": "Quelle „{name}\" {state}",
       "stateEnabled": "aktiviert",
-      "stateDisabled": "deaktiviert"
+      "stateDisabled": "deaktiviert",
+      "unreachableHint": "Diese Quelle ist nicht erreichbar und kann daher nicht aktiviert werden. Deine Einstellung bleibt gespeichert.",
+      "unreachableReason": "Nicht erreichbar. Laufwerk verbinden, dann Erneut prüfen.",
+      "recheck": "Erneut prüfen",
+      "recheckHint": "Erneut prüfen, welche Quellen erreichbar sind",
+      "rechecking": "Prüfe ...",
+      "recheckedAll": "Alle Quellen sind erreichbar.",
+      "recheckedSome": "{count, plural, one {# Quelle ist weiterhin nicht erreichbar} other {# Quellen sind weiterhin nicht erreichbar}}",
+      "working": "Arbeite ...",
+      "scanning": "Bibliothek wird durchsucht ..."
     },
     "multiAxisConfirm": {
       "title": "Auf Mehrachsig-Standard umstellen?",
@@ -1060,7 +1081,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "Video & Leistung",
       "rememberSpeedLabel": "Wiedergabegeschwindigkeit merken",
-      "rememberSpeedHint": "Behält die aktuelle Geschwindigkeit beim Laden eines anderen Videos bei. Standardmäßig aus, jedes Video startet mit 1x."
+      "rememberSpeedHint": "Behält die aktuelle Geschwindigkeit beim Laden eines anderen Videos bei. Standardmäßig aus, jedes Video startet mit 1x.",
+      "fillerHeader": "Lückenfüller",
+      "fillerEnable": "Lücken mit Bewegungen füllen",
+      "fillerResetEnable": "Lückenfüller zurücksetzen",
+      "fillerResetEnableAria": "Lückenfüller auf Standard zurücksetzen",
+      "fillerPattern": "Muster",
+      "fillerPreviewAria": "Vorschau des Füllmusters",
+      "fillerHint": "Spielt sanfte Bewegungen in langen leeren Skriptabschnitten, statt das Gerät still zu lassen. Wird ignoriert, wenn Lücken überspringen auf automatisch steht.",
+      "fillerStats": "Durchschnitt {avg} Einheiten/s, Spitze {max} Einheiten/s",
+      "fillerShape": "Form",
+      "fillerBpm": "Tempo (BPM)",
+      "fillerDepth": "Tiefe",
+      "fillerAbsolute": "Genauen Bereich festlegen",
+      "fillerAbsMin": "Minimum",
+      "fillerAbsMax": "Maximum"
     },
     "appearance": {
       "themeHeader": "Design",
@@ -1528,7 +1563,8 @@
       "apply": "Anwenden",
       "test": "Test",
       "measure": "Messen",
-      "measuring": "Messe…"
+      "measuring": "Messe…",
+      "applyLatency": "Übernehmen"
     },
     "handy": {
       "connectionKey": "Verbindungs-Code",
@@ -1656,7 +1692,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "Geräte-Token eingeben",
       "latencyToast": "Autoblow-Latenz: {ms} ms",
-      "latencyFailed": "Latenzmessung fehlgeschlagen: {error}"
+      "latencyFailed": "Latenzmessung fehlgeschlagen: {error}",
+      "latencyNoReading": "Keine Latenzmessung. Prüfe, ob das Gerät verbunden ist.",
+      "latencyApplied": "Sync-Versatz auf {ms} ms gesetzt"
     },
     "sync": {
       "experimental": "EXPERIMENTELL",
@@ -1812,5 +1850,36 @@
     "resumeAt": "Ab {time} fortsetzen",
     "progressLabel": "{percent} % gesehen",
     "resumedToast": "Fortgesetzt ab {time}"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "Langsames Necken",
+      "gentle": "Sanft",
+      "steady": "Gleichmäßig",
+      "building": "Steigernd",
+      "drift": "Treiben",
+      "pulse": "Puls",
+      "custom": "Benutzerdefiniert"
+    },
+    "shape": {
+      "sine": "Sinus",
+      "triangle": "Dreieck",
+      "sawtooth": "Sägezahn",
+      "square": "Rechteck",
+      "escalating": "Steigernd",
+      "random": "Zufällig"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "Smileys",
+      "people": "Menschen",
+      "hearts": "Herzen & Symbole",
+      "nature": "Tiere & Natur",
+      "food": "Essen & Trinken",
+      "activity": "Aktivität",
+      "objects": "Objekte",
+      "travel": "Reisen & Orte"
+    }
   }
 }

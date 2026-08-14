@@ -249,14 +249,16 @@
   },
   "backend": {
     "title": "バックエンドが応答していません",
-    "detail": "ライブラリのスキャン、サムネイル、VR 機能にはバックエンドが必要です。すでに開いているファイルは引き続き再生できます。",
-    "detailWithError": "ライブラリのスキャン、サムネイル、VR 機能にはバックエンドが必要です。すでに開いているファイルは引き続き再生できます。 ({error})",
+    "detail": "サムネイル、VR、ウェブリモコンにはバックエンドが必要です。再生はそのまま続きます。下の「バックエンドを再起動」をお試しください。",
+    "detailWithError": "サムネイル、VR、ウェブリモコンにはバックエンドが必要です。再生はそのまま続きます。下の「バックエンドを再起動」をお試しください。 ({error})",
     "restart": "バックエンドを再起動",
     "restarting": "再起動中…",
     "restartingTitle": "バックエンドを再起動中…",
     "restartingDetail": "通常は数秒で完了します。",
     "viewLogs": "ログを表示",
-    "dismiss": "バナーを閉じる"
+    "dismiss": "バナーを閉じる",
+    "missingTitle": "バックエンドプログラムが見つかりません",
+    "missingDetail": "FunSync がバックエンドプログラムを見つけられませんでした。多くの場合、インストール後にウイルス対策ソフトが隔離しています。FunSync をウイルス対策ソフトの除外に追加して再インストールしてください。再生は引き続き可能ですが、サムネイル、スキャン、VR、ウェブリモコンは利用できません。"
   },
   "dropZone": {
     "title": "ドロップして読み込む",
@@ -470,7 +472,8 @@
       "searchEroScripts": "EroScripts を検索..."
     },
     "heatmapUnavailable": "ヒートマップは利用できません",
-    "sortSwitchTo": "{order} に切り替え"
+    "sortSwitchTo": "{order} に切り替え",
+    "selectedAll": "{count, plural, other {# 本の動画を選択しました}}"
   },
   "playlists": {
     "title": "プレイリスト",
@@ -545,7 +548,16 @@
     "gridView": "グリッド表示",
     "listView": "リスト表示",
     "detailEmpty": "このカテゴリに動画はありません",
-    "detailEmptyHint": "ライブラリのケバブメニューから動画を割り当ててください"
+    "detailEmptyHint": "ライブラリのケバブメニューから動画を割り当ててください",
+    "iconLabel": "アイコン",
+    "iconModeColor": "色",
+    "iconModeShape": "形",
+    "iconModeEmoji": "絵文字",
+    "iconEmojiPlaceholder": "絵文字を貼り付け",
+    "iconPreview": "プレビュー",
+    "editCategory": "カテゴリを編集",
+    "iconEmojiSearch": "グループを検索",
+    "iconEmojiNone": "該当なし"
   },
   "stroke": {
     "rangeLabel": "ストローク範囲",
@@ -969,7 +981,16 @@
       "removed": "ソース「{name}」を削除しました",
       "toggled": "ソース「{name}」を{state}にしました",
       "stateEnabled": "有効",
-      "stateDisabled": "無効"
+      "stateDisabled": "無効",
+      "unreachableHint": "このソースにはアクセスできないため、有効にできません。設定は保持されます。",
+      "unreachableReason": "アクセス不可。ドライブを接続してから再確認してください。",
+      "recheck": "再確認",
+      "recheckHint": "アクセスできるソースを再確認します",
+      "rechecking": "確認中...",
+      "recheckedAll": "すべてのソースにアクセスできます。",
+      "recheckedSome": "{count, plural, other {# 件のソースにはまだアクセスできません}}",
+      "working": "処理中...",
+      "scanning": "ライブラリをスキャン中..."
     },
     "multiAxisConfirm": {
       "title": "マルチ軸をデフォルトに切り替えますか?",
@@ -1060,7 +1081,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "ビデオとパフォーマンス",
       "rememberSpeedLabel": "再生速度を記憶",
-      "rememberSpeedHint": "別の動画を読み込んでも現在の速度を維持します。既定はオフで、各動画は1倍速で始まります。"
+      "rememberSpeedHint": "別の動画を読み込んでも現在の速度を維持します。既定はオフで、各動画は1倍速で始まります。",
+      "fillerHeader": "ギャップフィラー",
+      "fillerEnable": "ギャップを動きで埋める",
+      "fillerResetEnable": "ギャップフィラーをリセット",
+      "fillerResetEnableAria": "ギャップフィラーを既定値に戻す",
+      "fillerPattern": "パターン",
+      "fillerPreviewAria": "フィラーパターンのプレビュー",
+      "fillerHint": "スクリプトが長く空いている区間で、デバイスを止めたままにせず穏やかな動きを再生します。ギャップスキップが自動の場合は無視されます。",
+      "fillerStats": "平均 {avg} ユニット/秒、最大 {max} ユニット/秒",
+      "fillerShape": "波形",
+      "fillerBpm": "速さ (BPM)",
+      "fillerDepth": "深さ",
+      "fillerAbsolute": "範囲を数値で指定",
+      "fillerAbsMin": "最小",
+      "fillerAbsMax": "最大"
     },
     "appearance": {
       "themeHeader": "テーマ",
@@ -1528,7 +1563,8 @@
       "apply": "適用",
       "test": "テスト",
       "measure": "測定",
-      "measuring": "測定中…"
+      "measuring": "測定中…",
+      "applyLatency": "適用"
     },
     "handy": {
       "connectionKey": "接続キー",
@@ -1656,7 +1692,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "デバイストークンを入力してください",
       "latencyToast": "Autoblow 遅延: {ms} ms",
-      "latencyFailed": "遅延測定に失敗しました: {error}"
+      "latencyFailed": "遅延測定に失敗しました: {error}",
+      "latencyNoReading": "レイテンシを測定できません。デバイスの接続を確認してください。",
+      "latencyApplied": "同期オフセットを {ms}ms に設定しました"
     },
     "sync": {
       "experimental": "実験的",
@@ -1812,5 +1850,36 @@
     "resumeAt": "{time} から再生",
     "progressLabel": "{percent}% 視聴済み",
     "resumedToast": "{time} から再開しました"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "スローティーズ",
+      "gentle": "やさしく",
+      "steady": "一定",
+      "building": "盛り上がり",
+      "drift": "ドリフト",
+      "pulse": "パルス",
+      "custom": "カスタム"
+    },
+    "shape": {
+      "sine": "サイン波",
+      "triangle": "三角波",
+      "sawtooth": "ノコギリ波",
+      "square": "矩形波",
+      "escalating": "盛り上がり",
+      "random": "ランダム"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "スマイリー",
+      "people": "人物",
+      "hearts": "ハートと記号",
+      "nature": "動物と自然",
+      "food": "食べ物と飲み物",
+      "activity": "アクティビティ",
+      "objects": "物",
+      "travel": "旅行と場所"
+    }
   }
 }

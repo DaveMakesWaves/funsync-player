@@ -538,3 +538,17 @@
     transform: none;
   }
 }
+
+/* Gap-filler waveform preview in the settings panel. Renders the REAL
+ * generated output including the slew limiter and the join ramps, so what
+ * the user sees is what the device does. See renderer/js/filler-preview.js. */
+.settings-panel__filler-preview {
+  display: block;
+  width: 100%;
+  max-width: 320px;
+  height: 60px;
+  margin: 4px 0 2px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.3));
+  border-radius: 4px;
+  background: var(--surface-2, rgba(127, 127, 127, 0.06));
+}

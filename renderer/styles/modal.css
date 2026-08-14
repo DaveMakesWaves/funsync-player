@@ -473,6 +473,7 @@
 /* Source toggle — Fitts: 36×36 hit area (was 32×18, the thumb itself was
    only ~14×14). The visible track stays the same compact 32×18 pill;
    padding extends the click target to the 36-px floor used elsewhere. */
+.toggle-switch,
 .settings-panel__source-toggle {
   flex-shrink: 0;
   width: 36px;
@@ -486,6 +487,7 @@
 
 /* Visible track — pseudo-element so the hit area can be larger than
    the visual element. */
+.toggle-switch::before,
 .settings-panel__source-toggle::before {
   content: '';
   position: absolute;
@@ -501,6 +503,7 @@
 /* Toggle thumb is intentionally fixed (light grey "off" / white "on")
    on both themes — toggle thumbs aren't theme-dependent visual elements,
    they signify on/off state via position + saturation, not surface tint. */
+.toggle-switch::after,
 .settings-panel__source-toggle::after {
   content: '';
   position: absolute;
@@ -514,18 +517,103 @@
   z-index: 1;
 }
 
+.toggle-switch--on::before,
 .settings-panel__source-toggle--on::before {
   background: var(--accent);
 }
 
+.toggle-switch--on::after,
 .settings-panel__source-toggle--on::after {
   transform: translateX(14px);
   background: #fff;
 }
 
+.toggle-switch:focus-visible,
 .settings-panel__source-toggle:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+
+/* --- Locked switch: off because the path is unreachable, not because the
+   user turned it off. Those must not look the same, or it reads as the app
+   having forgotten the setting. The stored preference is untouched (see
+   source-state.js); this is presentation only.
+
+   Deliberately NOT just `opacity` on the button — that would fade the focus
+   ring too. Track and thumb are dimmed individually, and a dashed track says
+   "inactive by circumstance" rather than "switched off". */
+.toggle-switch--locked,
+.settings-panel__source-toggle--locked {
+  cursor: not-allowed;
+}
+
+.toggle-switch--locked::before,
+.settings-panel__source-toggle--locked::before {
+  background: transparent;
+  border: 1px dashed var(--border-strong);
+  /* Border sits inside the same box, so pull the track in to match height. */
+  box-sizing: border-box;
+}
+
+.toggle-switch--locked::after,
+.settings-panel__source-toggle--locked::after {
+  background: var(--text-secondary);
+  opacity: 0.45;
+  transform: none;
+}
+
+/* Light theme: the fixed grey thumb reads as "on" against a pale track, so the
+   OFF track needs to be darker than the page rather than lighter. The thumb
+   itself stays fixed light-grey/white on both themes by design (see the note
+   on the ::after rule above) — only the track is theme-dependent. */
+:root[data-theme="light"] .toggle-switch::before,
+:root[data-theme="light"] .settings-panel__source-toggle::before {
+  background: rgba(0, 0, 0, 0.22);
+}
+
+:root[data-theme="light"] .toggle-switch::after,
+:root[data-theme="light"] .settings-panel__source-toggle::after {
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+}
+
+:root[data-theme="light"] .toggle-switch--locked::before,
+:root[data-theme="light"] .settings-panel__source-toggle--locked::before {
+  background: transparent;
+}
+
+/* Modern style: rounder track + the shared motion curve, matching the other
+   Modern controls. Classic (no data-style attribute) keeps the plain look. */
+:root[data-style="modern"] .toggle-switch::before,
+:root[data-style="modern"] .settings-panel__source-toggle::before {
+  border-radius: var(--radius-pill, 9px);
+  transition: background var(--dur-1, 150ms) var(--ease-out, ease);
+}
+
+:root[data-style="modern"] .toggle-switch::after,
+:root[data-style="modern"] .settings-panel__source-toggle::after {
+  transition: transform var(--dur-1, 150ms) var(--ease-out, ease),
+              background var(--dur-1, 150ms) var(--ease-out, ease);
+}
+
+/* Reduced motion: state must still be legible, so keep colour and position
+   changes but drop the animation. */
+@media (prefers-reduced-motion: reduce) {
+  .toggle-switch::before,
+  .toggle-switch::after,
+  .settings-panel__source-toggle::before,
+  .settings-panel__source-toggle::after {
+    transition: none;
+  }
+}
+
+/* Row hint explaining WHY a switch is locked. A tooltip alone is invisible on
+   touch and to keyboard users. */
+.settings-panel__source-reason {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-top: 2px;
 }
 
 .settings-panel__source-grip {
@@ -1676,3 +1764,228 @@
 }
 .remote-video-modal__error-head { font-weight: 600; color: var(--text-primary); margin-bottom: 6px; }
 .remote-video-modal__error-detail { font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+
+/* --- Sources busy state -------------------------------------------------
+ *
+ * Reconnecting a source triggers a full library rescan. The main-process
+ * yields keep the app responsive, but the work is still slow, so the panel
+ * has to say it is working rather than looking dead (Dave, 2026-08-11).
+ *
+ * The overlay covers the whole sources area, not just the button: the
+ * toggles and Add Source must not be clickable mid-rescan or a second scan
+ * queues behind the first. */
+.settings-panel__sources--busy {
+  position: relative;
+}
+
+.settings-panel__sources--busy .settings-panel__sources-list,
+.settings-panel__sources--busy .settings-panel__source-buttons {
+  opacity: 0.45;
+  pointer-events: none;
+  /* Not `filter: blur()` — it forces a repaint of the whole list on a machine
+     that is already busy scanning. */
+  transition: opacity 120ms;
+}
+
+.settings-panel__busy {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  z-index: 2;
+  /* No backdrop fill: the list underneath is already dimmed, and a second
+     scrim over a translucent modal muddies the whole surface. */
+  pointer-events: none;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.settings-panel__busy-spinner {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  animation: settings-panel-spin 700ms linear infinite;
+}
+
+@keyframes settings-panel-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Reduced motion: a spinning ring is the worst case for motion sensitivity.
+   Swap to a pulse so the "working" signal survives without rotation. */
+@media (prefers-reduced-motion: reduce) {
+  .settings-panel__busy-spinner {
+    animation: settings-panel-pulse 1.2s ease-in-out infinite;
+    border-top-color: var(--accent);
+  }
+  @keyframes settings-panel-pulse {
+    0%, 100% { opacity: 0.35; }
+    50%      { opacity: 1; }
+  }
+}
+
+.settings-panel__source-buttons {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+/* --- Category icon picker (create + edit category modals) ---
+ * myopiic #270: shapes and emoji alongside the colour. Three mutually
+ * exclusive modes; Colour is the default so existing behaviour is what you
+ * get unless you ask for something else. */
+.categories__icon-picker {
+  margin-top: 12px;
+}
+
+.categories__icon-modes {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.categories__icon-mode {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.35));
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.categories__icon-mode--active {
+  border-color: var(--accent, #e94560);
+  background: var(--accent-soft, rgba(233, 69, 96, 0.15));
+}
+
+.categories__icon-shapes,
+.categories__icon-emoji-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.categories__icon-shape,
+.categories__icon-emoji-suggestion {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.35));
+  border-radius: 5px;
+  background: transparent;
+  cursor: pointer;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.categories__icon-shape--selected {
+  border-color: var(--accent, #e94560);
+  background: var(--accent-soft, rgba(233, 69, 96, 0.15));
+}
+
+.categories__icon-emoji-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.categories__icon-emoji-input {
+  max-width: 120px;
+  text-align: center;
+  font-size: 18px;
+}
+
+.categories__icon-preview-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.categories__icon-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  min-height: 20px;
+}
+
+/* The default colour-dot branch returns a bare span with a background, so
+ * it needs explicit dimensions here the way the card dots get from their
+ * own class. */
+.categories__icon-preview > span:not([style*="font-size"]) {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+}
+
+.categories__card-name-mark {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+.categories__card-name-mark:not([style*="font-size"]):is(span) {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+
+/* Scrollable emoji browser. The font stack MUST match the one
+ * emoji-support.js measures with, or availability testing describes a
+ * different font than the one on screen. */
+.categories__icon-emoji-search {
+  width: 100%;
+  margin-top: 8px;
+}
+
+.categories__icon-emoji-browser {
+  max-height: 190px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  margin-top: 8px;
+  padding-right: 4px;
+  border: 1px solid var(--border, rgba(127, 127, 127, 0.25));
+  border-radius: 5px;
+}
+
+.categories__icon-emoji-group {
+  position: sticky;
+  top: 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  opacity: 0.7;
+  background: var(--surface-1, #1b1b1f);
+  z-index: 1;
+}
+
+.categories__icon-emoji-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 6px 8px;
+}
+
+.categories__icon-emoji-empty {
+  padding: 10px 6px;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.categories__icon-emoji-suggestion,
+.categories__icon-emoji-input {
+  font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
+               "Twemoji Mozilla", "Segoe UI Symbol", sans-serif;
+}

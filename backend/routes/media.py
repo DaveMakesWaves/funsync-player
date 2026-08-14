@@ -14,6 +14,7 @@ from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 router = APIRouter()
 
@@ -78,11 +79,25 @@ def register_videos(videos: list[dict]):
     duration=0. The web remote (and VR content server) would otherwise
     show "0" runtime on grouping rows and no duration badge on cards.
     """
-    _video_registry.clear()
-    _speed_probed.clear()  # new library scan → re-compute speed stats
+    # Build off to the side and swap in one rebind.
+    #
+    # This used to clear the live dict and refill it in place. That was
+    # safe only because the whole call ran on the event loop, so nothing
+    # else could be served while the registry was half empty. Now that
+    # registration runs in a threadpool (so `/health` keeps answering
+    # during a scan) other requests genuinely do overlap it, and an
+    # in-place rebuild would let `/stream`, `/thumbnail` and the VR
+    # endpoints see a partially filled registry and 404 a video that is
+    # perfectly fine. Rebinding the name is atomic, and every reader goes
+    # through `get_video_registry()`, so a request either sees the entire
+    # old registry or the entire new one.
+    global _video_registry
+    new_registry: dict[str, dict] = {}
     for v in videos:
         vid_id = _path_to_id(v.get("path", ""))
-        _video_registry[vid_id] = v
+        new_registry[vid_id] = v
+    _video_registry = new_registry
+    _speed_probed.clear()  # new library scan → re-compute speed stats
 
     _queue_duration_probes()
     _queue_speed_probes()
@@ -96,11 +111,24 @@ def register_videos(videos: list[dict]):
 
 _duration_probing: set = set()   # video IDs currently being probed
 _duration_semaphore = None
+DURATION_PROBE_WORKERS = 2       # must match the Semaphore below
 
 
 def _queue_duration_probes():
-    """Spawn background ffprobe jobs for every registered video missing a
-    duration. Idempotent — a video already being probed is skipped."""
+    """Queue background ffprobe jobs for every registered video missing a
+    duration. Idempotent — a video already being probed is skipped.
+
+    FIXED WORKER POOL, not thread-per-video. This used to spawn one OS
+    thread for each pending video — 1466 threads on a full library scan,
+    every one of them immediately parking on a Semaphore(2). They cost
+    little to create but they all contend for the GIL for the entire
+    length of the probe pass, which starves the asyncio event loop and
+    stops `/health` answering. That is what made the "Backend is not
+    responding" banner fire right after a scan on a healthy backend
+    (2026-08-09 14:25, 25.8 s blackout). Two workers do the identical
+    work at the identical rate — the Semaphore(2) already capped real
+    concurrency at two, so the other 1464 threads were pure overhead.
+    """
     import threading
     global _duration_semaphore
     if _duration_semaphore is None:
@@ -114,13 +142,26 @@ def _queue_duration_probes():
         if (v.get("duration") or 0) == 0 and v.get("path")
         and vid_id not in _duration_probing
     ]
+    if not pending:
+        return
     for vid_id, _path in pending:
         _duration_probing.add(vid_id)
 
-    for vid_id, filepath in pending:
+    for _ in range(min(DURATION_PROBE_WORKERS, len(pending))):
         threading.Thread(
-            target=_probe_duration, args=(vid_id, filepath), daemon=True
+            target=_duration_probe_worker, args=(pending,), daemon=True
         ).start()
+
+
+def _duration_probe_worker(pending: list):
+    """Drain the shared pending list. `list.pop()` is atomic under the GIL,
+    so no extra lock is needed to hand work out between the workers."""
+    while True:
+        try:
+            vid_id, filepath = pending.pop()
+        except IndexError:
+            return
+        _probe_duration(vid_id, filepath)
 
 
 def _probe_duration(vid_id: str, filepath: str):
@@ -211,8 +252,22 @@ def _queue_speed_probes():
 
 def _speed_probe_worker(pending: list):
     """Sequential loop — reads each funscript, computes speed stats, stores
-    back on the registry entry."""
-    for vid_id, fs_path in pending:
+    back on the registry entry.
+
+    Yields the GIL between files. `json.load` does not release the GIL
+    while it parses, and a big funscript (16 930 actions is normal) is
+    tens of milliseconds of solid C loop. Back to back across 2318
+    scripts that starves the asyncio event loop badly enough that
+    `/health` misses its 3 s deadline and the app declares the backend
+    dead. A 1 ms sleep every 25 files actually hands the GIL over
+    (sleep(0) re-acquires too fast to help); across 2318 scripts that is
+    ~0.09 s of added wall-clock on a pass that already takes tens of
+    seconds.
+    """
+    import time as _time
+    for i, (vid_id, fs_path) in enumerate(pending):
+        if i % 25 == 24:
+            _time.sleep(0.001)
         try:
             if not fs_path or not os.path.isfile(fs_path):
                 continue
@@ -560,6 +615,24 @@ async def register_library(request: Request):
     for the scan to finish.
     """
     data = await request.json()
+    await run_in_threadpool(_apply_registration, data)
+    return {
+        "registered": len(_video_registry),
+        "collections": len(_collections),
+        "playlists": len(_playlists),
+        "categories": len(_categories),
+    }
+
+
+def _apply_registration(data: dict):
+    """The body of `register_library`, off the event loop.
+
+    Every one of these calls is synchronous filesystem/CPU work, and on a
+    full library it is seconds of it. Run inline on an `async def` handler
+    it blocks the loop, `/health` stops answering, and the desktop puts up
+    "Backend is not responding" for a backend that is merely busy — which
+    is precisely what a user sees after pressing Scan.
+    """
     if "videos" in data:
         register_videos(data.get("videos") or [])
 
@@ -592,13 +665,6 @@ async def register_library(request: Request):
         _custom_thumbs = ct if isinstance(ct, dict) else {}
     if data.get("customThumbsDir"):
         _custom_thumbs_dir = str(data["customThumbsDir"])
-
-    return {
-        "registered": len(_video_registry),
-        "collections": len(_collections),
-        "playlists": len(_playlists),
-        "categories": len(_categories),
-    }
 
 
 # --- Video Streaming ---

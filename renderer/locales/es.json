@@ -249,14 +249,16 @@
   },
   "backend": {
     "title": "El backend no responde",
-    "detail": "Los escaneos de biblioteca, miniaturas y funciones de VR lo necesitan. La reproducción sigue funcionando para los archivos ya abiertos.",
-    "detailWithError": "Los escaneos de biblioteca, miniaturas y funciones de VR lo necesitan. La reproducción sigue funcionando para los archivos ya abiertos. ({error})",
+    "detail": "Las miniaturas, la VR y el mando web lo necesitan. La reproducción continúa con normalidad. Prueba «Reiniciar backend» abajo.",
+    "detailWithError": "Las miniaturas, la VR y el mando web lo necesitan. La reproducción continúa con normalidad. Prueba «Reiniciar backend» abajo. ({error})",
     "restart": "Reiniciar backend",
     "restarting": "Reiniciando…",
     "restartingTitle": "Reiniciando backend…",
     "restartingDetail": "Esto suele tardar un par de segundos.",
     "viewLogs": "Ver registros",
-    "dismiss": "Cerrar banner"
+    "dismiss": "Cerrar banner",
+    "missingTitle": "Falta el programa backend",
+    "missingDetail": "FunSync no encontró su programa backend. Normalmente el antivirus lo puso en cuarentena tras la instalación. Añade FunSync a las exclusiones de tu antivirus y reinstala. La reproducción sigue funcionando; las miniaturas, el escaneo, la VR y el mando web no."
   },
   "dropZone": {
     "title": "Suelta para cargar",
@@ -470,7 +472,8 @@
       "searchEroScripts": "Buscar en EroScripts..."
     },
     "heatmapUnavailable": "Mapa de calor no disponible",
-    "sortSwitchTo": "Cambiar a {order}"
+    "sortSwitchTo": "Cambiar a {order}",
+    "selectedAll": "{count, plural, one {# vídeo seleccionado} other {# vídeos seleccionados}}"
   },
   "playlists": {
     "title": "Listas de reproducción",
@@ -545,7 +548,16 @@
     "gridView": "Vista de cuadrícula",
     "listView": "Vista de lista",
     "detailEmpty": "No hay vídeos en esta categoría",
-    "detailEmptyHint": "Asigna vídeos desde la Biblioteca usando el menú de tres puntos"
+    "detailEmptyHint": "Asigna vídeos desde la Biblioteca usando el menú de tres puntos",
+    "iconLabel": "Icono",
+    "iconModeColor": "Color",
+    "iconModeShape": "Forma",
+    "iconModeEmoji": "Emoji",
+    "iconEmojiPlaceholder": "Pega un emoji",
+    "iconPreview": "Vista previa",
+    "editCategory": "Editar categoría",
+    "iconEmojiSearch": "Buscar grupos",
+    "iconEmojiNone": "Sin coincidencias"
   },
   "stroke": {
     "rangeLabel": "Rango de stroke",
@@ -969,7 +981,16 @@
       "removed": "Fuente \"{name}\" eliminada",
       "toggled": "Fuente \"{name}\" {state}",
       "stateEnabled": "habilitada",
-      "stateDisabled": "deshabilitada"
+      "stateDisabled": "deshabilitada",
+      "unreachableHint": "No se puede acceder a esta fuente, por lo que no se puede activar. Tu ajuste se conserva.",
+      "unreachableReason": "No accesible. Vuelve a conectar la unidad y pulsa Volver a comprobar.",
+      "recheck": "Volver a comprobar",
+      "recheckHint": "Comprobar de nuevo qué fuentes son accesibles",
+      "rechecking": "Comprobando...",
+      "recheckedAll": "Todas las fuentes son accesibles.",
+      "recheckedSome": "{count, plural, one {# fuente sigue sin ser accesible} other {# fuentes siguen sin ser accesibles}}",
+      "working": "Trabajando...",
+      "scanning": "Escaneando biblioteca..."
     },
     "multiAxisConfirm": {
       "title": "¿Cambiar a multi-eje predeterminado?",
@@ -1060,7 +1081,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "Vídeo y rendimiento",
       "rememberSpeedLabel": "Recordar la velocidad",
-      "rememberSpeedHint": "Mantiene la velocidad actual al cargar otro vídeo. Desactivado por defecto: cada vídeo empieza a 1x."
+      "rememberSpeedHint": "Mantiene la velocidad actual al cargar otro vídeo. Desactivado por defecto: cada vídeo empieza a 1x.",
+      "fillerHeader": "Relleno de huecos",
+      "fillerEnable": "Rellenar huecos con movimiento",
+      "fillerResetEnable": "Restablecer relleno de huecos",
+      "fillerResetEnableAria": "Restablecer el relleno de huecos al valor predeterminado",
+      "fillerPattern": "Patrón",
+      "fillerPreviewAria": "Vista previa del patrón de relleno",
+      "fillerHint": "Reproduce movimientos suaves durante tramos largos sin script en lugar de dejar el dispositivo parado. Se ignora si Saltar huecos está en automático.",
+      "fillerStats": "Media {avg} unidades/s, pico {max} unidades/s",
+      "fillerShape": "Forma",
+      "fillerBpm": "Velocidad (BPM)",
+      "fillerDepth": "Profundidad",
+      "fillerAbsolute": "Definir rango exacto",
+      "fillerAbsMin": "Mínimo",
+      "fillerAbsMax": "Máximo"
     },
     "appearance": {
       "themeHeader": "Tema",
@@ -1528,7 +1563,8 @@
       "apply": "Aplicar",
       "test": "Probar",
       "measure": "Medir",
-      "measuring": "Midiendo…"
+      "measuring": "Midiendo…",
+      "applyLatency": "Aplicar"
     },
     "handy": {
       "connectionKey": "Código de conexión",
@@ -1656,7 +1692,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "Introduce el token del dispositivo",
       "latencyToast": "Latencia Autoblow: {ms} ms",
-      "latencyFailed": "Medición de latencia fallida: {error}"
+      "latencyFailed": "Medición de latencia fallida: {error}",
+      "latencyNoReading": "Sin lectura de latencia. Comprueba que el dispositivo esté conectado.",
+      "latencyApplied": "Desfase de sincronización ajustado a {ms} ms"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",
@@ -1812,5 +1850,36 @@
     "resumeAt": "Reanudar desde {time}",
     "progressLabel": "{percent} % visto",
     "resumedToast": "Reanudado desde {time}"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "Provocación lenta",
+      "gentle": "Suave",
+      "steady": "Constante",
+      "building": "Ascendente",
+      "drift": "Deriva",
+      "pulse": "Pulso",
+      "custom": "Personalizado"
+    },
+    "shape": {
+      "sine": "Seno",
+      "triangle": "Triángulo",
+      "sawtooth": "Diente de sierra",
+      "square": "Cuadrada",
+      "escalating": "Ascendente",
+      "random": "Aleatorio"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "Caritas",
+      "people": "Personas",
+      "hearts": "Corazones y símbolos",
+      "nature": "Animales y naturaleza",
+      "food": "Comida y bebida",
+      "activity": "Actividad",
+      "objects": "Objetos",
+      "travel": "Viajes y lugares"
+    }
   }
 }

@@ -161,7 +161,9 @@ describe('promptCreateCategory — shared helper', () => {
     const id = await promise;
     expect(id).toBe('cat-new');
     expect(settings.addCategory).toHaveBeenCalledTimes(1);
-    expect(settings.addCategory).toHaveBeenCalledWith('Hardcore', module.PRESET_COLORS[0]);
+    // Third arg is the icon: null means 'plain colour dot', i.e. the
+    // default the picker starts on.
+    expect(settings.addCategory).toHaveBeenCalledWith('Hardcore', module.PRESET_COLORS[0], null);
   });
 
   it('returns null when the user cancels', async () => {
@@ -193,7 +195,7 @@ describe('promptCreateCategory — shared helper', () => {
     input.value = 'POV';
     document.querySelector('.modal-btn--primary').click();
     await promise;
-    expect(settings.addCategory).toHaveBeenCalledWith('POV', module.PRESET_COLORS[3]);
+    expect(settings.addCategory).toHaveBeenCalledWith('POV', module.PRESET_COLORS[3], null);
   });
 
   it('returns null if settings.addCategory resolves without an object', async () => {
@@ -215,7 +217,7 @@ describe('promptCreateCategory — shared helper', () => {
     input.dispatchEvent(evt);
     const id = await promise;
     expect(id).toBe('cat');
-    expect(settings.addCategory).toHaveBeenCalledWith('Foot', module.PRESET_COLORS[0]);
+    expect(settings.addCategory).toHaveBeenCalledWith('Foot', module.PRESET_COLORS[0], null);
   });
 
   it('exports the PRESET_COLORS palette for Categories component reuse', () => {
@@ -251,7 +253,7 @@ describe('Integration: end-to-end inline category creation flow', () => {
     document.querySelector('.modal-btn--primary').click();
     const selectedId = await promise;
     expect(selectedId).toBe('cat-inline');
-    expect(settings.addCategory).toHaveBeenCalledWith('Inline-created', expect.stringMatching(/^#/));
+    expect(settings.addCategory).toHaveBeenCalledWith('Inline-created', expect.stringMatching(/^#/), null);
   });
 
   it('cancelling the inner create modal leaves the outer selectFromList open', async () => {

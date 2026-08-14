@@ -1,12 +1,13 @@
 // Categories — Grid view of categories with detail view showing videos
 
 import { Modal } from './modal.js';
+import { createCategoryMark } from '../js/category-icon.js';
 import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, FileX, FileCheck, Gauge, LayoutGrid, LayoutList } from '../js/icons.js';
 import { computeSpeedStats } from '../js/library-search.js';
 import { computeBins, renderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
 import { pathToFileURL } from '../js/path-utils.js';
-import { promptCreateCategory, PRESET_COLORS } from '../js/category-create-modal.js';
+import { promptCreateCategory, promptCategoryDetails, PRESET_COLORS } from '../js/category-create-modal.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { thumbRequestOpts, customThumbImagePath } from './library.js';
@@ -157,7 +158,13 @@ export class Categories {
 
     const name = document.createElement('div');
     name.className = 'categories__card-name';
-    name.textContent = cat.name;
+    // Icon in front of the name, so a chosen shape/emoji is visible on the
+    // card and not only on video thumbnails.
+    name.appendChild(createCategoryMark(cat, {
+      className: 'categories__card-name-mark',
+      size: 12,
+    }));
+    name.appendChild(document.createTextNode(cat.name));
 
     const count = document.createElement('div');
     count.className = 'categories__card-count';
@@ -224,9 +231,7 @@ export class Categories {
     backBtn.title = t('categories.backToCategories');
     backBtn.addEventListener('click', () => this.navigateBack());
 
-    const colorDot = document.createElement('span');
-    colorDot.className = 'categories__header-dot';
-    colorDot.style.background = cat.color;
+    const colorDot = createCategoryMark(cat, { className: 'categories__header-dot' });
 
     const title = document.createElement('span');
     title.className = 'categories__title';
@@ -590,10 +595,27 @@ export class Categories {
     this._renderGrid();
   }
 
+  /**
+   * Edit an existing category: name, colour AND icon.
+   *
+   * Was rename-only. An icon picker that only appears when CREATING a
+   * category is useless to anyone who already has some, which is everyone
+   * who would want this — so the pencil now opens the full form.
+   */
   async _renameCategory(cat) {
-    const name = await Modal.prompt(t('categories.renameCategory'), t('categories.categoryNamePlaceholder'), cat.name);
-    if (!name) return;
-    this._settings.renameCategory(cat.id, name);
+    const result = await promptCategoryDetails({
+      title: t('categories.editCategory'),
+      confirmLabel: t('common.save'),
+      initial: { name: cat.name, color: cat.color, icon: cat.icon || null },
+    });
+    if (!result) return;
+    if (result.name !== cat.name) this._settings.renameCategory(cat.id, result.name);
+    if (result.color !== cat.color) this._settings.setCategoryColor(cat.id, result.color);
+    // Compared by value: the picker rebuilds the object each time, so an
+    // identity check would write on every save even when nothing changed.
+    const before = JSON.stringify(cat.icon || null);
+    const after = JSON.stringify(result.icon || null);
+    if (before !== after) this._settings.setCategoryIcon(cat.id, result.icon);
     this._renderGrid();
   }
 
@@ -642,9 +664,7 @@ export class Categories {
     const row = document.createElement('div');
     row.className = 'categories__list-item';
 
-    const dot = document.createElement('span');
-    dot.className = 'categories__list-dot';
-    dot.style.background = cat.color;
+    const dot = createCategoryMark(cat, { className: 'categories__list-dot', size: 10 });
 
     const name = document.createElement('span');
     name.className = 'categories__list-name';

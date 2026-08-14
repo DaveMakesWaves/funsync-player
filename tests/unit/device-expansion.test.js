@@ -234,7 +234,9 @@ describe('ButtplugSync — E-Stim Intensity Modes', () => {
 
   it('speed mode: slow movement = low intensity', () => {
     sync.setScalarMode(0, 'speed');
-    sync._sendToDevices(10, 1000, 0); // 10 units in 1000ms = very slow
+    // 10 units in 1000ms = very slow. sinceLastMs is the interval the
+    // movement spans; the positional arg is LinearCmd's duration.
+    sync._sendToDevices(10, 1000, 0, { sinceLastMs: 1000 });
     const sent = buttplug.sendScalar.mock.calls[0][1];
     expect(sent).toBeLessThan(20);
   });

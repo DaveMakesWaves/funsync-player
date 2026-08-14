@@ -51,7 +51,9 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // Categories
   getCategories: () => ipcRenderer.invoke('get-categories'),
-  addCategory: (name, color) => ipcRenderer.invoke('add-category', name, color),
+  addCategory: (name, color, icon) => ipcRenderer.invoke('add-category', name, color, icon),
+  setCategoryIcon: (id, icon) => ipcRenderer.invoke('set-category-icon', id, icon),
+  setCategoryColor: (id, color) => ipcRenderer.invoke('set-category-color', id, color),
   renameCategory: (id, name) => ipcRenderer.invoke('rename-category', id, name),
   deleteCategory: (id) => ipcRenderer.invoke('delete-category', id),
 
@@ -82,8 +84,8 @@ contextBridge.exposeInMainWorld('funsync', {
   writeFunscript: (content, filePath) => ipcRenderer.invoke('write-funscript', content, filePath),
 
   // File utilities
-  fileExists: (filePath) => ipcRenderer.invoke('file-exists', filePath),
-  filesExist: (filePaths) => ipcRenderer.invoke('files-exist', filePaths),
+  fileExists: (filePath, timeoutMs) => ipcRenderer.invoke('file-exists', filePath, timeoutMs),
+  filesExist: (filePaths, timeoutMs) => ipcRenderer.invoke('files-exist', filePaths, timeoutMs),
 
   // Data export/import
   exportData: () => ipcRenderer.invoke('export-data'),

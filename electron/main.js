@@ -49,7 +49,7 @@ if (PORTABLE_DIR) {
 }
 
 const log = require('./logger');
-const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState } = require('./python-bridge');
+const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState, getHealthDetail } = require('./python-bridge');
 const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
 const dataBackup = require('./data-backup');
@@ -467,7 +467,10 @@ ipcMain.handle('get-backend-port', () => {
 // renderer needs to ask for the current state to know if it should
 // already be showing the banner).
 ipcMain.handle('get-backend-health', () => {
-  return getHealthState();
+  // Detail as well as state: the renderer subscribes AFTER startBackend has
+  // already run, so a 'backend executable missing' emitted during startup
+  // would otherwise be lost and the user would get the generic message.
+  return { state: getHealthState(), detail: getHealthDetail() };
 });
 
 // User-initiated restart from the disconnected banner.
@@ -818,8 +821,16 @@ ipcMain.handle('get-categories', () => {
   return store.getCategories();
 });
 
-ipcMain.handle('add-category', (_event, name, color) => {
-  return store.addCategory(name, color);
+ipcMain.handle('add-category', (_event, name, color, icon) => {
+  return store.addCategory(name, color, icon);
+});
+
+ipcMain.handle('set-category-icon', (_event, id, icon) => {
+  store.setCategoryIcon(id, icon);
+});
+
+ipcMain.handle('set-category-color', (_event, id, color) => {
+  store.setCategoryColor(id, color);
 });
 
 ipcMain.handle('rename-category', (_event, id, name) => {
@@ -1061,6 +1072,22 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
+/**
+ * Hand the main process's event loop back for one turn.
+ *
+ * The library scan does the directory walk asynchronously, but then runs a
+ * dozen SYNCHRONOUS passes over the full entry list. On a large or networked
+ * library that is one long block on the main thread, which freezes everything
+ * the main process owns — including modal dialogs, which is how Dave hit it
+ * (2026-08-11: "everything just freezes, on the modal as well").
+ *
+ * `setImmediate` yields after I/O callbacks, so pending IPC and window paints
+ * get serviced between passes. It converts one long freeze into several short
+ * ones; it does not make the scan faster, and it cannot help WITHIN a single
+ * pass over a huge list — see the chunked loop below for that.
+ */
+const yieldTick = () => new Promise((resolve) => setImmediate(resolve));
+
 ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // Accept a single path or array of paths (multi-source)
   // sourceMap: optional { path: sourceName } mapping for VR content server grouping
@@ -1139,6 +1166,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // "Title (Nude).mp4" script-less and hidden under the Matched tab.
   const videoBaseLocal = new Set();  // dir + '\0' + normalizedBase
   const videoBaseGlobal = new Set(); // normalizedBase
+  await yieldTick();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const vext = path.extname(entry.name).toLowerCase();
@@ -1150,6 +1178,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 
   // Collect all funscripts with variant/axis classification
   const funscriptList = [];
+  await yieldTick();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
@@ -1230,11 +1259,13 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // ambiguous variant's `videoBase`.
   const siblingBasesLocal = new Set();
   const siblingBasesGlobal = new Set();
+  await yieldTick();
   for (const fs of funscriptList) {
     if (fs.isAxis || fs.isAmbiguousDotVariant) continue;
     siblingBasesLocal.add(fs.dir + '\0' + fs.videoBase);
     siblingBasesGlobal.add(fs.videoBase);
   }
+  await yieldTick();
   for (const fs of funscriptList) {
     if (!fs.isAmbiguousDotVariant) continue;
     const localKey = fs.dir + '\0' + fs.videoBase;
@@ -1254,6 +1285,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // Build two maps: same-directory (preferred) and global (fallback)
   const funscriptMapLocal = new Map(); // dir+base → fs
   const funscriptMapGlobal = new Map(); // base → fs
+  await yieldTick();
   for (const fs of funscriptList) {
     const localKey = fs.dir + '\0' + fs.videoBase;
     const globalKey = fs.videoBase;
@@ -1263,6 +1295,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
     }
   }
   // Fallback: if no default variant, use first matching
+  await yieldTick();
   for (const fs of funscriptList) {
     const localKey = fs.dir + '\0' + fs.videoBase;
     const globalKey = fs.videoBase;
@@ -1275,6 +1308,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
   // Collect subtitle basenames — local (same-dir) and global maps
   const subtitleMapLocal = new Map();
   const subtitleMapGlobal = new Map();
+  await yieldTick();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
@@ -1290,6 +1324,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 
   // Build video list with funscript + subtitle + variant pairing
   const videos = [];
+  await yieldTick();
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const ext = path.extname(entry.name).toLowerCase();
@@ -1432,6 +1467,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 
   // Collect unmatched funscripts (not paired to any video)
   const unmatchedFunscripts = [];
+  await yieldTick();
   for (const fs of funscriptList) {
     if (!fs._used) {
       unmatchedFunscripts.push({ name: fs.name, path: fs.path });
@@ -1450,6 +1486,7 @@ ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
 
   // Collect all funscripts for multi-axis dropdowns
   const allFunscripts = [];
+  await yieldTick();
   for (const fs of funscriptList) {
     allFunscripts.push({ name: fs.name, path: fs.path });
   }
@@ -1983,12 +2020,54 @@ ipcMain.handle('backup:open-folder', async () => {
 
 // --- File existence check ---
 
-ipcMain.handle('file-exists', (_event, filePath) => {
+/**
+ * Default budget for an existence check, in ms.
+ *
+ * A DEAD MAPPED NETWORK DRIVE is the case this exists for. Windows keeps the
+ * drive letter after a NAS goes offline, so the path looks real and the OS
+ * blocks on an SMB round trip that can take seconds. lnlytrckr (EroScripts
+ * #251/#255) saw the whole app freeze for ~5s every 20-30s because of it.
+ *
+ * External drives do NOT hit this: Windows removes the letter entirely, so the
+ * check fails immediately.
+ */
+const EXISTS_TIMEOUT_MS = 800;
+
+/**
+ * Async, time-boxed existence check.
+ *
+ * Two deliberate changes from the old `fs.existsSync`:
+ *
+ *  1. ASYNC. `existsSync` runs on the main process's JS thread, so a blocking
+ *     network stat froze the entire UI, not just the library. `fs.promises`
+ *     work happens on libuv's threadpool and leaves the app responsive.
+ *
+ *  2. TIME-BOXED. We stop WAITING after the budget and report "not reachable".
+ *     Note this does not cancel the underlying syscall — it cannot be
+ *     cancelled — so the threadpool slot stays occupied until the OS gives up.
+ *     That is acceptable because callers now skip disabled sources and cache
+ *     results, so we issue few of these. If that ever changes, watch the
+ *     4-slot default threadpool.
+ */
+async function pathReachable(filePath, timeoutMs = EXISTS_TIMEOUT_MS) {
+  if (typeof filePath !== 'string' || filePath.length === 0) return false;
+  let timer;
   try {
-    return fs.existsSync(filePath);
+    return await Promise.race([
+      fs.promises.access(filePath).then(() => true, () => false),
+      new Promise((resolve) => {
+        timer = setTimeout(() => resolve(false), timeoutMs);
+      }),
+    ]);
   } catch {
     return false;
+  } finally {
+    clearTimeout(timer);
   }
+}
+
+ipcMain.handle('file-exists', async (_event, filePath, timeoutMs) => {
+  return pathReachable(filePath, Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined);
 });
 
 /**
@@ -1999,15 +2078,12 @@ ipcMain.handle('file-exists', (_event, filePath) => {
  * Returns an array of booleans positionally matching the input. Never throws:
  * an unreadable path is `false`, which is exactly how callers treat it.
  */
-ipcMain.handle('files-exist', (_event, filePaths) => {
+ipcMain.handle('files-exist', async (_event, filePaths, timeoutMs) => {
   if (!Array.isArray(filePaths)) return [];
-  return filePaths.map((p) => {
-    try {
-      return typeof p === 'string' && p.length > 0 && fs.existsSync(p);
-    } catch {
-      return false;
-    }
-  });
+  const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined;
+  // Concurrent, not sequential: one slow path must not delay the rest, and the
+  // whole batch shares roughly one timeout rather than N of them in series.
+  return Promise.all(filePaths.map((p) => pathReachable(p, budget)));
 });
 
 // --- IPC Handlers: Shell ---

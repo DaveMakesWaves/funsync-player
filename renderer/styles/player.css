@@ -3536,3 +3536,13 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+/* An icon mark (shape or emoji) is not a dot — the fixed box and radius
+ * above would squash it into a plain circle. See library.css for the
+ * original report. */
+.player__category-dot--icon {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+  background: none;
+}

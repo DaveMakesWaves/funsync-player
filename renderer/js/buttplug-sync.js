@@ -256,7 +256,20 @@ export class ButtplugSync {
     }
     // Cache the main script's natural range whenever actions change.
     // Recomputed on variant switch via reloadActions → _cacheActions.
-    this._naturalRange = computeNaturalRange(this._actions);
+    //
+    // Deliberately the AUTHORED actions, not the played ones. `getActions()`
+    // includes gap filler, and the range extender uses this to decide how
+    // far to stretch the script — measuring filler would stretch the
+    // author's content by a factor derived from content they did not write.
+    // The `?? this._actions` fallback is for older injected fakes that
+    // predate `getAuthoredActions`. In production `funscript` is always a
+    // FunscriptEngine, which has it, so the fallback never fires — and when
+    // it does, it reproduces the pre-filler behaviour rather than throwing.
+    this._naturalRange = computeNaturalRange(
+      this.funscript.isLoaded
+        ? (this.funscript.getAuthoredActions?.() ?? this._actions)
+        : null,
+    );
   }
 
   // --- Video event wiring ---
@@ -555,7 +568,15 @@ export class ButtplugSync {
     const prevPos = this._lastSentPos >= 0 ? this._lastSentPos : targetPos;
     // In action-boundary mode, skip linear emission here — it was handled above.
     const emitLinear = this._linearStrategy !== 'action-boundary';
-    this._sendToDevices(targetPos, duration, prevPos, { emitLinear });
+    // Elapsed time since the LAST SEND, which is the only correct denominator
+    // for a velocity derived from (targetPos - lastSentPos). `duration` above
+    // is the time to the NEXT ACTION — right for LinearCmd's "reach this
+    // position in N ms", wrong for speed, and mixing them is what made
+    // derived intensity ramp within every stroke. See _computeVibeIntensity.
+    const sinceLastMs = this._lastSendTime > 0
+      ? Math.max(1, now - this._lastSendTime)
+      : MIN_SEND_INTERVAL_MS;
+    this._sendToDevices(targetPos, duration, prevPos, { emitLinear, sinceLastMs });
     this._lastSendTime = now;
     this._lastSentPos = targetPos;
     if (this.onCommandSent) this.onCommandSent();
@@ -652,6 +673,12 @@ export class ButtplugSync {
    */
   _sendToDevices(position, durationMs, prevPosition, opts = {}) {
     const emitLinear = opts.emitLinear !== false;
+    // Time actually elapsed since the previous send. Derived-intensity modes
+    // MUST divide by this, not by `durationMs` — see _computeVibeIntensity.
+    // Falls back to the tick interval so older call sites keep working.
+    const sinceLastMs = Number.isFinite(opts.sinceLastMs) && opts.sinceLastMs > 0
+      ? opts.sinceLastMs
+      : MIN_SEND_INTERVAL_MS;
     const devices = this.buttplug.devices;
     // Range Extender applied once before per-device transforms — same
     // stretched input shared across all devices in this send-call.
@@ -692,13 +719,13 @@ export class ButtplugSync {
       // both would fight over one motor.
       if (dev.canVibrate && !dev.canOscillate && !this._vibActions) {
         const mode = this._vibeModeMap.get(dev.index) || 'speed';
-        const intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+        const intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
         this.buttplug.sendVibrate(dev.index, intensity);
       }
       // E-stim / scalar devices (skip if dedicated vib script is loaded — vib path drives them)
       if (dev.canScalar && !this._vibActions) {
         const mode = this._scalarModeMap.get(dev.index) || 'position';
-        let intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+        let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
         intensity = this._applyScalarSafety(dev.index, intensity);
         this.buttplug.sendScalar(dev.index, intensity);
       }
@@ -708,7 +735,7 @@ export class ButtplugSync {
       // Same treatment e-stim gets, for the same reason.
       if (dev.canOscillate && !this._vibActions) {
         const mode = this._oscillateModeMap.get(dev.index) || 'speed';
-        let speed = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+        let speed = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
         speed = this._applyScalarSafety(dev.index, speed);
         this.buttplug.sendOscillate(dev.index, speed);
       }
@@ -720,7 +747,7 @@ export class ButtplugSync {
           const speed = pos < 50 ? ((50 - pos) / 50) * 100 : ((pos - 50) / 50) * 100;
           this.buttplug.sendRotate(dev.index, speed, clockwise);
         } else {
-          const intensity = this._computeVibeIntensity(mode, pos, prevPos, durationMs);
+          const intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
           const clockwise = pos >= prevPos;
           this.buttplug.sendRotate(dev.index, intensity, clockwise);
         }
@@ -1236,7 +1263,31 @@ export class ButtplugSync {
    * @param {number} durationMs — time between actions
    * @returns {number} intensity 0–100
    */
-  _computeVibeIntensity(mode, pos, prevPos, durationMs) {
+  /**
+   * Derive an intensity 0-100 from position and motion.
+   *
+   * `elapsedMs` MUST be the time since the previous send — the same interval
+   * `pos - prevPos` was measured over. It used to be passed the time to the
+   * NEXT ACTION instead, which is a different quantity entirely, and the
+   * mismatch made every speed-derived device wrong:
+   *
+   *   one 0→100 stroke over 1000ms is a constant 100 units/s, but the old
+   *   maths reported 1.4% at the start of the stroke rising to 26.7% at the
+   *   end — a sawtooth ramp repeating every stroke, instead of a flat 33%.
+   *
+   * Because the denominator was the gap to the next keyframe, intensity
+   * tracked how tightly a script was authored rather than how fast it moved.
+   * Widely spaced actions produced near-zero output, so a machine would stop
+   * while the editor still showed the script running, and a "25%" section
+   * could easily drive harder than a "40%" one (adventurous1, thread #274).
+   *
+   * @param {'speed'|'position'|'intensity'} mode
+   * @param {number} pos
+   * @param {number} prevPos
+   * @param {number} elapsedMs — time since the previous send
+   */
+  _computeVibeIntensity(mode, pos, prevPos, elapsedMs) {
+    const durationMs = elapsedMs;
     switch (mode) {
       case 'position':
         return Math.max(0, Math.min(100, pos));

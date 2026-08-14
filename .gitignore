@@ -59,3 +59,12 @@ Desktop.ini
 *.swp
 *.swo
 *~
+
+# Bundled Twemoji artwork for category icons (~2.7 MB, 737 SVGs).
+# Fetched at BUILD time by scripts/fetch-twemoji.mjs, not committed — same
+# treatment as ffmpeg/ and backend-dist/. Keeping generated third-party art
+# out of history matters more than the 2.7 MB: every regeneration of the
+# catalogue would otherwise add another copy, permanently.
+# The manifest IS committed (it is small, and it keeps imports resolving in a
+# fresh clone); a missing SVG degrades to font rendering, it does not break.
+renderer/assets/emoji/

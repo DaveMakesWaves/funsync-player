@@ -1,6 +1,7 @@
 // FunscriptEngine — Client-side funscript parsing, heatmap data, and backend conversion
 
 import { parseFunscriptTime } from './funscript-time.js';
+import { applyFiller } from './filler-engine.js';
 
 /**
  * Strip a leading UTF-8 BOM (U+FEFF) from a JSON string. Some scripting
@@ -88,6 +89,8 @@ export class FunscriptEngine {
     this._parsed = null;
     this._csvInfo = null;
     this._rawContent = null; // raw funscript JSON string for SDK upload
+    this._fillerOptions = null;
+    this._filledActions = null; // authored + gap filler, or null when off
   }
 
   /**
@@ -157,6 +160,9 @@ export class FunscriptEngine {
       this._csvInfo = null;
     }
 
+    // A new script invalidates any filler built for the previous one.
+    this._rebuildFiller();
+
     return this.getInfo();
   }
 
@@ -181,11 +187,61 @@ export class FunscriptEngine {
   }
 
   /**
-   * Get the actions array for heatmap rendering.
+   * The actions to PLAY: authored content plus any gap filler.
+   *
+   * Filler points carry `_filler: true`. Callers that need the author's
+   * content on its own — anything measuring what the script IS, rather than
+   * what to send — must use `getAuthoredActions()` instead. Getting that
+   * wrong makes the range extender stretch a script using a factor derived
+   * from filler it is not part of.
+   *
    * @returns {Array|null}
    */
   getActions() {
+    return this._filledActions || this._parsed?.actions || null;
+  }
+
+  /**
+   * The author's actions, with no filler. Use this for natural-range and
+   * anything else that characterises the script itself.
+   * @returns {Array|null}
+   */
+  getAuthoredActions() {
     return this._parsed?.actions || null;
+  }
+
+  /**
+   * Set (or clear) gap-filler options and rebuild the played action list.
+   *
+   * Filler is a playback-time transform over a COPY. The authored actions
+   * and the file on disk are never modified.
+   *
+   * @param {object|null} options — see filler-engine.js; `enabled: false`
+   *   or null clears any filler.
+   */
+  setFillerOptions(options) {
+    this._fillerOptions = options || null;
+    this._rebuildFiller();
+  }
+
+  /** @returns {boolean} whether the played list currently contains filler. */
+  get hasFiller() {
+    return !!this._filledActions;
+  }
+
+  _rebuildFiller() {
+    const opts = this._fillerOptions;
+    if (!this._parsed || !opts || !opts.enabled) {
+      this._filledActions = null;
+      return;
+    }
+    const merged = applyFiller(this._parsed.actions, {
+      ...opts,
+      totalDurationMs: opts.totalDurationMs || 0,
+    });
+    // Only take the merged list if filler was actually produced, so the
+    // common case keeps returning the original array by reference.
+    this._filledActions = merged.some((a) => a._filler) ? merged : null;
   }
 
   /**
@@ -314,6 +370,7 @@ export class FunscriptEngine {
     this._parsed = null;
     this._csvInfo = null;
     this._rawContent = null;
+    this._filledActions = null;
   }
 
   _formatDuration(ms) {

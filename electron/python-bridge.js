@@ -27,6 +27,17 @@ const HEALTH_INTERVAL_MS = 5000;
 const HEALTH_TIMEOUT_MS = 3000;
 const HEALTH_FAIL_THRESHOLD = 2;
 
+/**
+ * Sentinel carried in the health 'detail' when the bundled backend
+ * executable is missing from a packaged install. The renderer shows a
+ * specific, actionable message for this instead of a generic timeout —
+ * 'reinstall / check antivirus' is something a non-technical user can act
+ * on, 'backend is not responding' is not.
+ */
+const BACKEND_MISSING = 'backend-executable-missing';
+
+let backendMissing = false;
+let healthDetail = null;
 let healthState = 'unknown';   // 'unknown' | 'running' | 'down' | 'restarting'
 let healthConsecutiveFailures = 0;
 let healthIntervalHandle = null;
@@ -118,6 +129,36 @@ async function startBackend() {
     const userDataDir = electronApp.getPath('userData');
 
     let cmd, args, cwd;
+
+    // A PACKAGED build must never fall through to the developer path.
+    //
+    // 4wen's log, 2026-08-13: `Failed to start Python backend: spawn python
+    // ENOENT`. The installed app could not find its bundled backend, quietly
+    // dropped into the ELSE branch below — which is meant for running from a
+    // source checkout — and tried to spawn `python` off the PATH. He has no
+    // Python installed, because he should not need any, so it failed with an
+    // error that means nothing to him and the app simply said "backend is
+    // not responding" forever. Restart could never work either: it took the
+    // same path every time.
+    //
+    // The executable going missing after a successful install is almost
+    // always ANTIVIRUS QUARANTINE — PyInstaller one-file executables are a
+    // long-standing false positive, which is why this project already builds
+    // with `upx=False`. It can also be a partial or corrupted install.
+    //
+    // Either way it is an installation fault, not a runtime one, and the
+    // user needs telling that rather than being shown a generic timeout.
+    if (isPackaged && (!bundledBackend || !fs.existsSync(bundledBackend))) {
+      log.error(`[Backend] Bundled executable NOT FOUND at: ${bundledBackend}`);
+      log.error('[Backend] The app is packaged, so this file should exist. Most likely it was '
+        + 'quarantined by antivirus after install, or the install is incomplete.');
+      log.error('[Backend] NOT falling back to a system Python — that is a development-only path '
+        + 'and would fail with a misleading "spawn python ENOENT".');
+      backendMissing = true;
+      _emitHealthState('down', BACKEND_MISSING);
+      resolve();   // the app still runs; playback does not need the backend
+      return;
+    }
 
     if (bundledBackend && fs.existsSync(bundledBackend)) {
       // Production: use PyInstaller-bundled executable
@@ -237,6 +278,24 @@ function getHealthState() {
 }
 
 /**
+ * Why the backend is down, when we know something more specific than
+ * "it stopped answering" — currently the BACKEND_MISSING sentinel.
+ *
+ * Read at first paint as well as pushed on transitions: the renderer
+ * subscribes AFTER startBackend() has already run, so a reason emitted
+ * during startup would otherwise be lost and the user would get the
+ * generic timeout message instead of "reinstall / check antivirus".
+ */
+function getHealthDetail() {
+  return healthDetail;
+}
+
+/** True when a packaged install is missing its backend executable. */
+function isBackendMissing() {
+  return backendMissing;
+}
+
+/**
  * Single non-blocking GET to /health. Resolves with `true` on 200,
  * `false` on any other outcome (network error, timeout, non-2xx).
  */
@@ -262,6 +321,7 @@ function probeHealth() {
 function _emitHealthState(newState, detail) {
   if (newState === healthState) return; // no-op when state didn't change
   healthState = newState;
+  healthDetail = detail || null;
   log.info(`[Backend] health state → ${newState}${detail ? ` (${detail})` : ''}`);
   if (healthListener) {
     try { healthListener(newState, detail); }
@@ -322,6 +382,9 @@ module.exports = {
   getBackendPort,
   setHealthListener,
   getHealthState,
+  getHealthDetail,
+  isBackendMissing,
+  BACKEND_MISSING,
   startHealthMonitor,
   stopHealthMonitor,
   restartBackend,

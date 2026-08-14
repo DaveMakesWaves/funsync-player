@@ -52,11 +52,15 @@ function makeSync(devices) {
 
 /**
  * Drive one dispatch tick directly, bypassing the scheduler.
- * Signature is `(position, durationMs, prevPosition)` — devices come from
- * the manager the sync was constructed with.
+ *
+ * `durationMs` here means "the interval this movement happened over", which
+ * is `sinceLastMs` — NOT the third positional arg (`durationMs` = time to the
+ * next action, used only by LinearCmd). Passing it positionally is what these
+ * tests used to do, and it is precisely the confusion that hid the bug: the
+ * two coincide in a hand-built call and diverge completely in production.
  */
 function tick(sync, devices, { pos, prevPos, durationMs = 100 }) {
-  sync._sendToDevices(pos, durationMs, prevPos);
+  sync._sendToDevices(pos, durationMs, prevPos, { sinceLastMs: durationMs });
 }
 
 describe('oscillate dispatch', () => {

@@ -5,6 +5,11 @@ import { icon, Trash2, Pencil, GripVertical } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { classifyOverlap } from '../js/path-utils.js';
 import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale, translatePage } from '../js/i18n.js';
+import { createToggleSwitch } from './toggle-switch.js';
+import { FILLER_PRESETS, DEFAULT_PRESET_ID, resolveFillerOptions } from '../js/filler-presets.js';
+import { resolveDepth } from '../js/filler-engine.js';
+import { buildPreviewSample, drawFillerWaveform } from '../js/filler-preview.js';
+import { isUserEnabled, isToggleLocked, setUserEnabled } from '../js/source-state.js';
 import { eventBus } from '../js/event-bus.js';
 import { openFeedbackModal } from './feedback-modal.js';
 
@@ -15,6 +20,8 @@ import { openFeedbackModal } from './feedback-modal.js';
 // reset and see the default state.
 const SETTINGS_DEFAULTS = {
   'player.gapSkip.mode': 'off',
+  'player.gapFiller.enabled': false,
+  'player.gapFiller.presetId': 'slowTease',
   'player.gapSkip.thresholdSec': 10,
   'player.upNext.mode': 'auto',
   'player.upNext.countdownSec': 10,
@@ -51,9 +58,16 @@ export class SettingsPanel {
     onClearOrgasmScript,
     getOrgasmScriptName,
     getConnectionState,
+    getUnreachableSources,
+    onRecheckSources,
   }) {
     this._settings = settings;
     this._onSourcesChanged = onSourcesChanged;
+    // Reachability lives on the library/app side; the panel only reads it.
+    // Supplied as a GETTER, not a value, so a re-probe is reflected without
+    // re-constructing the panel.
+    this.getUnreachableSources = getUnreachableSources || (() => new Set());
+    this.onRecheckSources = onRecheckSources || null;
     this.onGapSkipChanged = onGapSkipChanged || null;
     this.onUpNextChanged = onUpNextChanged || null;
     this.onPreferMultiAxisChanged = onPreferMultiAxisChanged || null;
@@ -416,6 +430,56 @@ export class SettingsPanel {
     body.appendChild(doneBtn);
   }
 
+  /**
+   * Busy overlay for the sources tab.
+   *
+   * Reconnecting a source triggers a full library rescan, and on a large or
+   * networked library that takes real time (Dave, 2026-08-11: "everything just
+   * freezes, on the modal as well"). The main-process yields stop it being a
+   * hard freeze, but the work is still slow, so the UI has to SAY it is
+   * working rather than looking dead.
+   *
+   * Covers the whole tab, not just the button: the toggles and Add Source must
+   * not be clickable mid-rescan or we queue a second scan behind the first.
+   *
+   * @param {boolean} on
+   * @param {string} [message]
+   */
+  setSourcesBusy(on, message = '') {
+    const panel = this._panel || this._container;
+    const list = panel?.querySelector?.('.settings-panel__sources-list');
+    if (!list) return;
+    const host = list.parentElement || list;
+    host.classList.toggle('settings-panel__sources--busy', !!on);
+
+    let overlay = host.querySelector(':scope > .settings-panel__busy');
+    if (on) {
+      if (!overlay) {
+        overlay = document.createElement('div');
+        overlay.className = 'settings-panel__busy';
+        overlay.setAttribute('role', 'status');
+        overlay.setAttribute('aria-live', 'polite');
+        const spinner = document.createElement('span');
+        spinner.className = 'settings-panel__busy-spinner';
+        spinner.setAttribute('aria-hidden', 'true');
+        const text = document.createElement('span');
+        text.className = 'settings-panel__busy-text';
+        overlay.appendChild(spinner);
+        overlay.appendChild(text);
+        host.appendChild(overlay);
+      }
+      overlay.querySelector('.settings-panel__busy-text').textContent =
+        message || t('settingsPanel.sources.working');
+    } else if (overlay) {
+      overlay.remove();
+    }
+  }
+
+  /** Repaint the sources list in place (after a re-probe). */
+  refreshSources() {
+    if (this._renderSources) this._renderSources();
+  }
+
   _buildSourcesTab() {
     const panel = document.createElement('div');
     panel.className = 'settings-panel__tab-content';
@@ -423,9 +487,10 @@ export class SettingsPanel {
     const sourcesList = document.createElement('div');
     sourcesList.className = 'settings-panel__sources-list';
 
-    const renderSources = () => {
+    const renderSources = this._renderSources = () => {
       sourcesList.innerHTML = '';
       const sources = this._settings.get('library.sources') || [];
+      const unreachable = this.getUnreachableSources() || new Set();
 
       if (sources.length === 0) {
         const empty = document.createElement('div');
@@ -483,29 +548,47 @@ export class SettingsPanel {
             if (this._onSourcesChanged) this._onSourcesChanged();
           });
 
-          // Enable/disable toggle — click to include or exclude this source from scans
-          // without deleting it (useful for temporarily-offline drives or archive folders).
-          const toggle = document.createElement('button');
-          toggle.className = 'settings-panel__source-toggle';
-          toggle.setAttribute('role', 'switch');
-          const isEnabled = src.enabled !== false;
-          toggle.setAttribute('aria-checked', String(isEnabled));
-          toggle.classList.toggle('settings-panel__source-toggle--on', isEnabled);
-          toggle.title = isEnabled ? t('settingsPanel.sources.enabledHint') : t('settingsPanel.sources.disabledHint');
-          toggle.addEventListener('click', () => {
-            const srcs = this._settings.get('library.sources') || [];
-            const target = srcs.find(s => s.id === src.id);
-            if (!target) return;
-            target.enabled = target.enabled === false ? true : false;
-            this._settings.set('library.sources', srcs);
-            renderSources();
-            if (this._onSourcesChanged) this._onSourcesChanged();
-            showToast(t('settingsPanel.sources.toggled', {
-              name: src.name,
-              state: target.enabled ? t('settingsPanel.sources.stateEnabled') : t('settingsPanel.sources.stateDisabled'),
-            }), 'info');
+          // Enable/disable toggle. Three states, not two: active, off (user
+          // chose), and LOCKED (path unreachable). Off and locked must look
+          // different or it reads as the app forgetting the setting.
+          const locked = isToggleLocked(src, unreachable);
+          const toggle = createToggleSwitch({
+            checked: isUserEnabled(src),
+            locked,
+            className: 'settings-panel__source-toggle',
+            label: src.name,
+            title: locked
+              ? t('settingsPanel.sources.unreachableHint')
+              : (isUserEnabled(src)
+                ? t('settingsPanel.sources.enabledHint')
+                : t('settingsPanel.sources.disabledHint')),
+            onChange: (next) => {
+              const srcs = this._settings.get('library.sources') || [];
+              // setUserEnabled is the ONLY writer of `enabled`, and it refuses
+              // while unreachable — that refusal is what preserves the user's
+              // last choice across a session where the drive was missing.
+              const res = setUserEnabled(srcs, src.id, next, unreachable);
+              if (!res.changed) return;
+              this._settings.set('library.sources', res.sources);
+              renderSources();
+              // Switching a source ON rescans it. Show the same busy state as
+              // Recheck, or the modal just sits there.
+              if (this._onSourcesChanged) {
+                this.setSourcesBusy(true, t('settingsPanel.sources.scanning'));
+                Promise.resolve(this._onSourcesChanged())
+                  .catch(() => { /* surfaced by the caller */ })
+                  .finally(() => this.setSourcesBusy(false));
+              }
+              showToast(t('settingsPanel.sources.toggled', {
+                name: src.name,
+                state: res.enabled
+                  ? t('settingsPanel.sources.stateEnabled')
+                  : t('settingsPanel.sources.stateDisabled'),
+              }), 'info');
+            },
           });
           row.appendChild(toggle);
+          if (locked) row.classList.add('settings-panel__source-row--unreachable');
 
           const info = document.createElement('div');
           info.className = 'settings-panel__source-info';
@@ -518,6 +601,12 @@ export class SettingsPanel {
           path.title = src.path;
           info.appendChild(name);
           info.appendChild(path);
+          if (locked) {
+            const reason = document.createElement('span');
+            reason.className = 'settings-panel__source-reason';
+            reason.textContent = t('settingsPanel.sources.unreachableReason');
+            info.appendChild(reason);
+          }
 
           const actions = document.createElement('div');
           actions.className = 'settings-panel__source-actions';
@@ -649,7 +738,44 @@ export class SettingsPanel {
       if (this._onSourcesChanged) this._onSourcesChanged();
       showToast(t('settingsPanel.sources.added', { name }), 'info');
     });
-    panel.appendChild(addBtn);
+
+    // Recheck: a source that was offline at launch is locked until something
+    // re-probes it. Without this the only way back is restarting the app,
+    // which is a poor answer to "I just turned the NAS on".
+    const recheckBtn = document.createElement('button');
+    recheckBtn.className = 'settings-panel__add-btn settings-panel__recheck-btn';
+    recheckBtn.textContent = t('settingsPanel.sources.recheck');
+    recheckBtn.title = t('settingsPanel.sources.recheckHint');
+    recheckBtn.addEventListener('click', async () => {
+      if (recheckBtn.disabled) return;
+      recheckBtn.disabled = true;
+      const original = recheckBtn.textContent;
+      recheckBtn.textContent = t('settingsPanel.sources.rechecking');
+      // The rescan behind a recheck is the slow part, not the probe, so the
+      // busy state has to wrap the WHOLE callback.
+      this.setSourcesBusy(true, t('settingsPanel.sources.rechecking'));
+      try {
+        if (this.onRecheckSources) await this.onRecheckSources();
+        renderSources();
+        const stillOut = (this.getUnreachableSources() || new Set()).size;
+        showToast(
+          stillOut > 0
+            ? t('settingsPanel.sources.recheckedSome', { count: stillOut })
+            : t('settingsPanel.sources.recheckedAll'),
+          stillOut > 0 ? 'warn' : 'info',
+        );
+      } finally {
+        this.setSourcesBusy(false);
+        recheckBtn.disabled = false;
+        recheckBtn.textContent = original;
+      }
+    });
+
+    const sourceActions = document.createElement('div');
+    sourceActions.className = 'settings-panel__source-buttons';
+    sourceActions.appendChild(addBtn);
+    sourceActions.appendChild(recheckBtn);
+    panel.appendChild(sourceActions);
 
     return panel;
   }
@@ -680,6 +806,57 @@ export class SettingsPanel {
         <button type="button" id="sp-gap-threshold-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.gapResetThreshold')}" aria-label="${t('settingsPanel.playback.gapResetThresholdAria')}">↻</button>
       </div>
       <div class="settings-panel__hint" id="sp-gap-hint">${t('settingsPanel.playback.gapHint')}</div>
+
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.fillerHeader')}</h2>
+      <div class="settings-panel__field">
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerEnable')}</span>
+        <input type="checkbox" id="sp-filler-enabled" class="settings-panel__input settings-panel__input--checkbox">
+        <button type="button" id="sp-filler-enabled-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.fillerResetEnable')}" aria-label="${t('settingsPanel.playback.fillerResetEnableAria')}">↻</button>
+      </div>
+      <div class="settings-panel__field" id="sp-filler-preset-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerPattern')}</span>
+        <select id="sp-filler-preset" class="settings-panel__input settings-panel__input--select"></select>
+      </div>
+      <div class="settings-panel__field" id="sp-filler-custom-pattern-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerShape')}</span>
+        <select id="sp-filler-custom-pattern" class="settings-panel__input settings-panel__input--select">
+          <option value="sine">${t('filler.shape.sine')}</option>
+          <option value="triangle">${t('filler.shape.triangle')}</option>
+          <option value="sawtooth">${t('filler.shape.sawtooth')}</option>
+          <option value="square">${t('filler.shape.square')}</option>
+          <option value="escalating">${t('filler.shape.escalating')}</option>
+          <option value="random">${t('filler.shape.random')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__field" id="sp-filler-custom-bpm-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerBpm')}</span>
+        <input type="range" id="sp-filler-custom-bpm" class="settings-panel__input settings-panel__input--range" min="10" max="120" step="1" value="20">
+        <span id="sp-filler-custom-bpm-val" class="settings-panel__field-value">20</span>
+      </div>
+      <div class="settings-panel__field" id="sp-filler-custom-depth-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerDepth')}</span>
+        <input type="range" id="sp-filler-custom-depth" class="settings-panel__input settings-panel__input--range" min="10" max="100" step="5" value="100">
+        <span id="sp-filler-custom-depth-val" class="settings-panel__field-value">100%</span>
+      </div>
+      <div class="settings-panel__field" id="sp-filler-custom-abs-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerAbsolute')}</span>
+        <input type="checkbox" id="sp-filler-custom-abs" class="settings-panel__input settings-panel__input--checkbox">
+      </div>
+      <div class="settings-panel__field" id="sp-filler-custom-absmin-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerAbsMin')}</span>
+        <input type="range" id="sp-filler-custom-absmin" class="settings-panel__input settings-panel__input--range" min="0" max="100" step="5" value="0">
+        <span id="sp-filler-custom-absmin-val" class="settings-panel__field-value">0</span>
+      </div>
+      <div class="settings-panel__field" id="sp-filler-custom-absmax-row" hidden>
+        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerAbsMax')}</span>
+        <input type="range" id="sp-filler-custom-absmax" class="settings-panel__input settings-panel__input--range" min="0" max="100" step="5" value="100">
+        <span id="sp-filler-custom-absmax-val" class="settings-panel__field-value">100</span>
+      </div>
+      <div id="sp-filler-preview-row" hidden>
+        <canvas id="sp-filler-preview" class="settings-panel__filler-preview" width="260" height="60" role="img" aria-label="${t('settingsPanel.playback.fillerPreviewAria')}"></canvas>
+        <div class="settings-panel__hint" id="sp-filler-stats"></div>
+      </div>
+      <div class="settings-panel__hint" id="sp-filler-hint">${t('settingsPanel.playback.fillerHint')}</div>
     `;
     panel.appendChild(gapSection);
 
@@ -915,6 +1092,164 @@ export class SettingsPanel {
         this._settings.set('player.gapSkip', { mode, threshold: seconds * 1000 });
         if (this.onGapSkipChanged) this.onGapSkipChanged(mode, seconds * 1000);
       });
+
+      // Gap filler — strokes during blank stretches of script.
+      const fillerEnabled = panel.querySelector('#sp-filler-enabled');
+      const fillerPreset = panel.querySelector('#sp-filler-preset');
+      const fillerPresetRow = panel.querySelector('#sp-filler-preset-row');
+      const fillerPreviewRow = panel.querySelector('#sp-filler-preview-row');
+      const fillerCanvas = panel.querySelector('#sp-filler-preview');
+      const fillerStats = panel.querySelector('#sp-filler-stats');
+
+      const fillerCustom = {
+        patternRow: panel.querySelector('#sp-filler-custom-pattern-row'),
+        pattern: panel.querySelector('#sp-filler-custom-pattern'),
+        bpmRow: panel.querySelector('#sp-filler-custom-bpm-row'),
+        bpm: panel.querySelector('#sp-filler-custom-bpm'),
+        bpmVal: panel.querySelector('#sp-filler-custom-bpm-val'),
+        depthRow: panel.querySelector('#sp-filler-custom-depth-row'),
+        depth: panel.querySelector('#sp-filler-custom-depth'),
+        depthVal: panel.querySelector('#sp-filler-custom-depth-val'),
+        absRow: panel.querySelector('#sp-filler-custom-abs-row'),
+        abs: panel.querySelector('#sp-filler-custom-abs'),
+        absMinRow: panel.querySelector('#sp-filler-custom-absmin-row'),
+        absMin: panel.querySelector('#sp-filler-custom-absmin'),
+        absMinVal: panel.querySelector('#sp-filler-custom-absmin-val'),
+        absMaxRow: panel.querySelector('#sp-filler-custom-absmax-row'),
+        absMax: panel.querySelector('#sp-filler-custom-absmax'),
+        absMaxVal: panel.querySelector('#sp-filler-custom-absmax-val'),
+      };
+
+      if (fillerPreset && !fillerPreset.options.length) {
+        for (const p of FILLER_PRESETS) {
+          const opt = document.createElement('option');
+          opt.value = p.id;
+          opt.textContent = t(p.labelKey);
+          fillerPreset.appendChild(opt);
+        }
+        // Custom is not in FILLER_PRESETS — it has no fixed pattern/bpm/depth
+        // by definition, so it is appended rather than living in the table.
+        const customOpt = document.createElement('option');
+        customOpt.value = 'custom';
+        customOpt.textContent = t('filler.preset.custom');
+        fillerPreset.appendChild(customOpt);
+      }
+
+      const savedFiller = this._settings.get('player.gapFiller') || {};
+      const savedCustom = savedFiller.custom || {};
+      if (fillerEnabled) fillerEnabled.checked = !!savedFiller.enabled;
+      if (fillerPreset) fillerPreset.value = savedFiller.presetId || DEFAULT_PRESET_ID;
+      if (fillerCustom.pattern) fillerCustom.pattern.value = savedCustom.pattern || 'sine';
+      if (fillerCustom.bpm) fillerCustom.bpm.value = String(savedCustom.bpm ?? 20);
+      if (fillerCustom.depth) fillerCustom.depth.value = String(savedCustom.depthPct ?? 100);
+      if (fillerCustom.abs) fillerCustom.abs.checked = !!savedCustom.absolute;
+      if (fillerCustom.absMin) fillerCustom.absMin.value = String(savedCustom.absolute?.min ?? 0);
+      if (fillerCustom.absMax) fillerCustom.absMax.value = String(savedCustom.absolute?.max ?? 100);
+
+      /** The custom block as stored, read straight off the controls. */
+      const readCustom = () => {
+        const useAbs = !!fillerCustom.abs?.checked;
+        let absolute = null;
+        if (useAbs) {
+          const lo = parseInt(fillerCustom.absMin?.value, 10) || 0;
+          const hi = parseInt(fillerCustom.absMax?.value, 10) || 100;
+          // Degenerate or inverted bands are refused rather than silently
+          // swapped — a swap is a hidden behaviour change the user did not
+          // ask for, and resolveDepth would fall back to full throw anyway.
+          absolute = hi > lo ? { min: lo, max: hi } : null;
+        }
+        return {
+          pattern: fillerCustom.pattern?.value || 'sine',
+          bpm: parseInt(fillerCustom.bpm?.value, 10) || 20,
+          depthPct: parseInt(fillerCustom.depth?.value, 10) || 100,
+          absolute,
+        };
+      };
+
+      const syncCustomLabels = () => {
+        const c = readCustom();
+        if (fillerCustom.bpmVal) fillerCustom.bpmVal.textContent = String(c.bpm);
+        if (fillerCustom.depthVal) fillerCustom.depthVal.textContent = `${c.depthPct}%`;
+        if (fillerCustom.absMinVal) fillerCustom.absMinVal.textContent = fillerCustom.absMin?.value ?? '0';
+        if (fillerCustom.absMaxVal) fillerCustom.absMaxVal.textContent = fillerCustom.absMax?.value ?? '100';
+      };
+
+      const redrawFillerPreview = () => {
+        const on = !!fillerEnabled?.checked;
+        const isCustom = fillerPreset?.value === 'custom';
+        const useAbs = isCustom && !!fillerCustom.abs?.checked;
+
+        if (fillerPresetRow) fillerPresetRow.hidden = !on;
+        if (fillerPreviewRow) fillerPreviewRow.hidden = !on;
+        // Custom controls only exist when Custom is selected. Absolute
+        // min/max only when the absolute override is on — depth % and an
+        // absolute band are two ways of saying the same thing, so showing
+        // both at once invites the user to set contradictory values.
+        for (const row of [fillerCustom.patternRow, fillerCustom.bpmRow, fillerCustom.absRow]) {
+          if (row) row.hidden = !on || !isCustom;
+        }
+        if (fillerCustom.depthRow) fillerCustom.depthRow.hidden = !on || !isCustom || useAbs;
+        if (fillerCustom.absMinRow) fillerCustom.absMinRow.hidden = !on || !isCustom || !useAbs;
+        if (fillerCustom.absMaxRow) fillerCustom.absMaxRow.hidden = !on || !isCustom || !useAbs;
+
+        syncCustomLabels();
+        if (!on || !fillerCanvas) return;
+
+        // Resolve through the SAME path playback uses, so the preview cannot
+        // drift from what the device will actually do.
+        const opts = resolveFillerOptions({
+          enabled: true,
+          presetId: fillerPreset?.value || DEFAULT_PRESET_ID,
+          custom: readCustom(),
+        });
+        // The panel has no script loaded, so preview against a notional
+        // full-range one. depthPct is a percentage of the AUTHORED range,
+        // and 0-100 is the honest stand-in for "whatever you play it over".
+        const depth = resolveDepth(
+          [{ at: 0, pos: 0 }, { at: 1, pos: 100 }],
+          { depthPct: opts.depthPct, centrePct: opts.centrePct, absolute: opts.absoluteDepth },
+        );
+        const { actions, stats } = buildPreviewSample({
+          pattern: opts.pattern,
+          bpm: opts.bpm,
+          min: depth.min,
+          max: depth.max,
+        });
+        const css = getComputedStyle(document.documentElement);
+        drawFillerWaveform(fillerCanvas, actions, {
+          stroke: css.getPropertyValue('--accent')?.trim() || '#4aa3ff',
+          grid: 'rgba(127,127,127,0.25)',
+        });
+        if (fillerStats) {
+          fillerStats.textContent = t('settingsPanel.playback.fillerStats', {
+            avg: stats.avgSpeed,
+            max: stats.maxSpeed,
+          });
+        }
+      };
+
+      const persistFiller = () => {
+        this._settings.set('player.gapFiller', {
+          ...(this._settings.get('player.gapFiller') || {}),
+          enabled: !!fillerEnabled?.checked,
+          presetId: fillerPreset?.value || DEFAULT_PRESET_ID,
+          custom: readCustom(),
+        });
+        redrawFillerPreview();
+        if (this.onGapFillerChanged) this.onGapFillerChanged();
+      };
+
+      fillerEnabled?.addEventListener('change', persistFiller);
+      fillerPreset?.addEventListener('change', persistFiller);
+      fillerCustom.pattern?.addEventListener('change', persistFiller);
+      fillerCustom.abs?.addEventListener('change', persistFiller);
+      // Sliders redraw live while dragging but only persist on release, so
+      // a drag across the range doesn't write settings on every frame.
+      for (const el of [fillerCustom.bpm, fillerCustom.depth, fillerCustom.absMin, fillerCustom.absMax]) {
+        el?.addEventListener('input', redrawFillerPreview);
+        el?.addEventListener('change', persistFiller);
+      }
+      redrawFillerPreview();
 
       // Up Next
       const upNextMode = panel.querySelector('#sp-upnext-mode');

@@ -352,16 +352,68 @@ function getCategories() {
   return conf.get('categories') || [];
 }
 
-function addCategory(name, color) {
+function addCategory(name, color, icon) {
   const categories = getCategories();
   const category = {
     id: randomUUID(),
     name,
     color,
   };
+  // Only written when actually chosen. Absent means "plain colour dot",
+  // which is what every pre-existing category has, so the stored shape
+  // stays identical for anyone who never picks an icon.
+  const clean = _cleanIcon(icon);
+  if (clean) category.icon = clean;
   categories.push(category);
   conf.set('categories', categories);
   return category;
+}
+
+/**
+ * Validate an icon before it reaches config.json.
+ *
+ * The renderer already normalises, but this is the last gate before user
+ * config is written and a malformed value here would render as a blank
+ * category on every surface until hand-edited out.
+ */
+function _cleanIcon(icon) {
+  if (!icon || typeof icon !== 'object') return null;
+  if (icon.type === 'shape') {
+    return typeof icon.value === 'string' && icon.value ? { type: 'shape', value: icon.value } : null;
+  }
+  if (icon.type === 'emoji') {
+    const v = String(icon.value || '').trim();
+    // Cap the stored length. Graphemes are multi-code-unit so this is a
+    // sanity bound, not a character count — the renderer does the precise
+    // single-grapheme truncation.
+    return v && v.length <= 16 ? { type: 'emoji', value: v } : null;
+  }
+  return null;
+}
+
+/**
+ * Set or clear a category's icon. `null` clears it back to a colour dot.
+ * Editing existing categories is the case that actually matters — an icon
+ * you can only set at creation time is useless to anyone who already has
+ * categories.
+ */
+function setCategoryIcon(id, icon) {
+  const categories = getCategories();
+  const category = categories.find((c) => c.id === id);
+  if (!category) return;
+  const clean = _cleanIcon(icon);
+  if (clean) category.icon = clean;
+  else delete category.icon;
+  conf.set('categories', categories);
+}
+
+/** Set a category's colour. */
+function setCategoryColor(id, color) {
+  const categories = getCategories();
+  const category = categories.find((c) => c.id === id);
+  if (!category || typeof color !== 'string' || !color) return;
+  category.color = color;
+  conf.set('categories', categories);
 }
 
 function deleteCategory(id) {
@@ -502,6 +554,8 @@ module.exports = {
   addCategory,
   deleteCategory,
   renameCategory,
+  setCategoryIcon,
+  setCategoryColor,
   assignCategory,
   unassignCategory,
   getVideoCategories,

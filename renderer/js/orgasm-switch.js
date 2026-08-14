@@ -37,6 +37,21 @@ const MIN_POS_DELTA = 1;      // skip sends that wouldn't move the device
 // engine (100ms). At the tick length (40ms) with stopOnTarget the device
 // start-stops and just bumps instead of stroking. See handy-hdsp-sync.js.
 const HANDY_MOVE_MS = 100;
+// Buttplug LinearCmd move window. Same reasoning as HANDY_MOVE_MS above, and
+// for a long time the same bug: this loop passed the TICK LENGTH (40ms) as
+// the move duration, so a device was told "reach X in 40ms" every 40ms and
+// was retargeted before it could complete anything. On BLE, where a round
+// trip is often longer than the tick itself, that is a stutter.
+//
+// Reported by acuity7 (thread #275) with an unusually precise diagnosis: the
+// Handy is smooth over WiFi and jerky over Bluetooth-via-Intiface, and they
+// reproduced the same split in MultiFunPlayer — "FixedUpdate" jerky,
+// "PolledUpdate" smooth. WiFi takes the HDSP path above and already got the
+// longer window; Bluetooth takes the Buttplug path and did not.
+//
+// NOT the same value as the speed denominator. `dur` stays the tick because
+// `p - pPrev` is one tick of movement; conflating the two is its own bug.
+const BP_LINEAR_MOVE_MS = 100;
 
 export class OrgasmSwitch {
   /**
@@ -314,7 +329,8 @@ export class OrgasmSwitch {
       if (dev?.canOscillate) continue;
       if (dev?.canLinear) {
         if (p !== null && mainMoved) {
-          try { bp.sendLinear(dev.index, p, dur); } catch { /* per-device best-effort */ }
+          // Move window, NOT the tick — see BP_LINEAR_MOVE_MS.
+          try { bp.sendLinear(dev.index, p, BP_LINEAR_MOVE_MS); } catch { /* per-device best-effort */ }
         }
       } else if (dev?.canVibrate) {
         if (vibCh) {
@@ -353,7 +369,7 @@ export class OrgasmSwitch {
       const speed = dur > 0 ? (Math.abs(p - pPrev) / dur) * 1000 : 0;
       const intensity = Math.min(100, (speed / 300) * 100);
       if (dev.canLinear) {
-        try { bp.sendLinear(dev.index, p, dur); } catch { /* */ }
+        try { bp.sendLinear(dev.index, p, BP_LINEAR_MOVE_MS); } catch { /* */ }
       } else if (dev.canVibrate) {
         try { bp.sendVibrate(dev.index, intensity); } catch { /* */ }
       }

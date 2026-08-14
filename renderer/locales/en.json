@@ -248,15 +248,17 @@
     "popOutOpening": "Opening player window…"
   },
   "backend": {
-    "title": "Backend is not responding",
-    "detail": "Library scans, thumbnails, and VR features need it. Playback still works for already-open files.",
-    "detailWithError": "Library scans, thumbnails, and VR features need it. Playback still works for files already open. ({error})",
+    "title": "Backend not responding",
+    "detail": "Thumbnails, VR and the web remote need it. Playback carries on as normal. Try Restart Backend below.",
+    "detailWithError": "Thumbnails, VR and the web remote need it. Playback carries on as normal. Try Restart Backend below. ({error})",
     "restart": "Restart Backend",
     "restarting": "Restarting…",
     "restartingTitle": "Restarting backend…",
     "restartingDetail": "This usually takes a couple of seconds.",
     "viewLogs": "View Logs",
-    "dismiss": "Dismiss banner"
+    "dismiss": "Dismiss banner",
+    "missingTitle": "Backend program is missing",
+    "missingDetail": "FunSync could not find its backend program. This is usually antivirus quarantining it after install. Add FunSync to your antivirus exclusions and reinstall. Playback still works; thumbnails, scanning, VR and the web remote do not."
   },
   "dropZone": {
     "title": "Drop to load",
@@ -470,7 +472,8 @@
       "searchEroScripts": "Search EroScripts..."
     },
     "heatmapUnavailable": "Heatmap unavailable",
-    "sortSwitchTo": "Switch to {order}"
+    "sortSwitchTo": "Switch to {order}",
+    "selectedAll": "{count, plural, one {Selected # video} other {Selected # videos}}"
   },
   "playlists": {
     "title": "Playlists",
@@ -545,7 +548,16 @@
     "gridView": "Grid view",
     "listView": "List view",
     "detailEmpty": "No videos in this category",
-    "detailEmptyHint": "Assign videos from the Library using the kebab menu"
+    "detailEmptyHint": "Assign videos from the Library using the kebab menu",
+    "iconLabel": "Icon",
+    "iconModeColor": "Colour",
+    "iconModeShape": "Shape",
+    "iconModeEmoji": "Emoji",
+    "iconEmojiPlaceholder": "Paste an emoji",
+    "iconPreview": "Preview",
+    "editCategory": "Edit category",
+    "iconEmojiSearch": "Search groups",
+    "iconEmojiNone": "Nothing matches"
   },
   "stroke": {
     "rangeLabel": "Stroke Range",
@@ -939,7 +951,16 @@
       "removed": "Source \"{name}\" removed",
       "toggled": "Source \"{name}\" {state}",
       "stateEnabled": "enabled",
-      "stateDisabled": "disabled"
+      "stateDisabled": "disabled",
+      "unreachableHint": "This source cannot be reached, so it cannot be switched on. Your setting is remembered.",
+      "unreachableReason": "Not reachable. Reconnect the drive, then use Recheck.",
+      "recheck": "Recheck",
+      "recheckHint": "Check again which sources are reachable",
+      "rechecking": "Checking...",
+      "recheckedAll": "All sources are reachable.",
+      "recheckedSome": "{count, plural, one {# source is still not reachable} other {# sources are still not reachable}}",
+      "working": "Working...",
+      "scanning": "Scanning library..."
     },
     "multiAxisConfirm": {
       "title": "Switch to multi-axis default?",
@@ -1030,7 +1051,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "Video & performance",
       "rememberSpeedLabel": "Remember playback speed",
-      "rememberSpeedHint": "Keep the current speed when you load another video. Off by default, so each video starts at 1x."
+      "rememberSpeedHint": "Keep the current speed when you load another video. Off by default, so each video starts at 1x.",
+      "fillerHeader": "Gap Filler",
+      "fillerEnable": "Fill gaps with strokes",
+      "fillerResetEnable": "Reset gap filler",
+      "fillerResetEnableAria": "Reset gap filler to default",
+      "fillerPattern": "Pattern",
+      "fillerPreviewAria": "Preview of the filler stroke pattern",
+      "fillerHint": "Plays gentle strokes during long blank stretches of script instead of leaving the device still. Ignored when Gap Skip is set to automatic.",
+      "fillerStats": "Average {avg} units/s, peak {max} units/s",
+      "fillerShape": "Shape",
+      "fillerBpm": "Speed (BPM)",
+      "fillerDepth": "Depth",
+      "fillerAbsolute": "Set exact range",
+      "fillerAbsMin": "Lowest",
+      "fillerAbsMax": "Highest"
     },
     "appearance": {
       "themeHeader": "Theme",
@@ -1647,7 +1682,8 @@
       "apply": "Apply",
       "test": "Test",
       "measure": "Measure",
-      "measuring": "Measuring…"
+      "measuring": "Measuring…",
+      "applyLatency": "Apply"
     },
     "handy": {
       "connectionKey": "Connection Key",
@@ -1775,7 +1811,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "Enter device token",
       "latencyToast": "Autoblow latency: {ms} ms",
-      "latencyFailed": "Latency measurement failed: {error}"
+      "latencyFailed": "Latency measurement failed: {error}",
+      "latencyNoReading": "No latency reading. Check the device is connected.",
+      "latencyApplied": "Sync offset set to {ms}ms"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",
@@ -1812,5 +1850,36 @@
     "resumeAt": "Resume from {time}",
     "progressLabel": "{percent}% watched",
     "resumedToast": "Resumed from {time}"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "Slow tease",
+      "gentle": "Gentle",
+      "steady": "Steady",
+      "building": "Building",
+      "drift": "Drift",
+      "pulse": "Pulse",
+      "custom": "Custom"
+    },
+    "shape": {
+      "sine": "Sine",
+      "triangle": "Triangle",
+      "sawtooth": "Sawtooth",
+      "square": "Square",
+      "escalating": "Building",
+      "random": "Random"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "Smileys",
+      "people": "People",
+      "hearts": "Hearts & Symbols",
+      "nature": "Animals & Nature",
+      "food": "Food & Drink",
+      "activity": "Activity",
+      "objects": "Objects",
+      "travel": "Travel & Places"
+    }
   }
 }

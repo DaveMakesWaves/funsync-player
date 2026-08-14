@@ -23,27 +23,106 @@ describe('script-modifiers', () => {
     { at: 4000, pos: 0 },
   ];
 
+  // --- Half / double speed -------------------------------------------
+  //
+  // Reported by belgriffinite (thread #261): double speed "just adds
+  // midpoints but doesn't change the actual speed or number of movements".
+  // He was right, and the tests that used to live here are the reason it
+  // survived: they asserted POINT COUNTS and which indices were kept,
+  // which is precisely the broken behaviour, pinned as correct.
+  //
+  // What matters to a user is the MOVEMENT the device performs. These
+  // tests measure that instead, by counting position changes and by
+  // interpolating the output the way a device does.
+
+  /** Movements = position changes. This is what "number of strokes" means. */
+  const movements = (acts) => {
+    let n = 0;
+    for (let i = 1; i < acts.length; i++) if (acts[i].pos !== acts[i - 1].pos) n++;
+    return n;
+  };
+
+  /** Linear interpolation, i.e. what the hardware actually does between keyframes. */
+  const posAt = (acts, t) => {
+    if (t <= acts[0].at) return acts[0].pos;
+    const last = acts[acts.length - 1];
+    if (t >= last.at) return last.pos;
+    for (let i = 0; i < acts.length - 1; i++) {
+      const a = acts[i], b = acts[i + 1];
+      if (t >= a.at && t <= b.at) {
+        const dt = b.at - a.at;
+        return dt === 0 ? a.pos : a.pos + ((t - a.at) / dt) * (b.pos - a.pos);
+      }
+    }
+    return last.pos;
+  };
+
+  /** Largest difference in commanded position across the whole span. */
+  const motionDelta = (x, y) => {
+    const end = Math.max(x[x.length - 1].at, y[y.length - 1].at);
+    let worst = 0;
+    for (let t = 0; t <= end; t += 5) worst = Math.max(worst, Math.abs(posAt(x, t) - posAt(y, t)));
+    return worst;
+  };
+
+  const span = (acts) => acts[acts.length - 1].at - acts[0].at;
+
+  // 0, 100, 0, 100, 0 — the ordinary shape of a stroking script, and the
+  // shape both functions handled worst.
+  const alternating = (n, step = 500) =>
+    Array.from({ length: n }, (_, i) => ({ at: i * step, pos: i % 2 ? 100 : 0 }));
+
   describe('halfSpeed', () => {
-    it('returns copy for 0-2 actions', () => {
+    it('actually halves the number of movements', () => {
+      const input = alternating(9);           // 8 movements
+      const result = halfSpeed(input);
+      expect(movements(input)).toBe(8);
+      expect(movements(result)).toBeLessThanOrEqual(4);
+      expect(movements(result)).toBeGreaterThan(0);
+    });
+
+    // THE REGRESSION. Keeping every even-indexed point looks reasonable
+    // until you notice that on alternating content every even-indexed
+    // point is the SAME end of the stroke. 0,100,0,100,0 became 0,0,0.
+    it('never flattens an alternating script to a dead line', () => {
+      for (const n of [4, 5, 6, 7, 8, 9, 12, 21]) {
+        const result = halfSpeed(alternating(n));
+        const positions = new Set(result.map(a => a.pos));
+        expect(positions.size, `${n} points collapsed to one position`).toBeGreaterThan(1);
+        expect(movements(result), `${n} points lost all movement`).toBeGreaterThan(0);
+      }
+    });
+
+    it('keeps the script aligned to the video: same span, same endpoints', () => {
+      const input = alternating(9);
+      const result = halfSpeed(input);
+      expect(result[0].at).toBe(input[0].at);
+      expect(result[0].pos).toBe(input[0].pos);
+      expect(span(result)).toBe(span(input));
+      expect(result[result.length - 1].at).toBe(input[input.length - 1].at);
+    });
+
+    it('leaves scripts too short to thin out alone', () => {
       expect(halfSpeed([])).toEqual([]);
       expect(halfSpeed([{ at: 0, pos: 50 }])).toEqual([{ at: 0, pos: 50 }]);
-      expect(halfSpeed([{ at: 0, pos: 0 }, { at: 1000, pos: 100 }])).toEqual([
-        { at: 0, pos: 0 },
-        { at: 1000, pos: 100 },
-      ]);
+      // A single one-way move cannot lose a movement and still be motion.
+      const two = [{ at: 0, pos: 0 }, { at: 1000, pos: 100 }];
+      expect(halfSpeed(two)).toEqual(two);
+      const three = [{ at: 0, pos: 0 }, { at: 500, pos: 100 }, { at: 1000, pos: 0 }];
+      expect(halfSpeed(three)).toEqual(three);
     });
 
-    it('keeps every other action plus first and last', () => {
-      const result = halfSpeed(sampleActions);
-      expect(result.length).toBeLessThan(sampleActions.length);
-      expect(result[0]).toEqual(sampleActions[0]);
-      expect(result[result.length - 1]).toEqual(sampleActions[sampleActions.length - 1]);
-    });
-
-    it('preserves first and last', () => {
-      const result = halfSpeed(sampleActions);
-      expect(result[0].at).toBe(0);
-      expect(result[result.length - 1].at).toBe(4000);
+    it('handles uneven timing without inventing points', () => {
+      const input = [
+        { at: 0, pos: 10 }, { at: 300, pos: 90 }, { at: 1100, pos: 20 },
+        { at: 1400, pos: 80 }, { at: 2600, pos: 5 },
+      ];
+      const result = halfSpeed(input);
+      expect(result.length).toBeLessThan(input.length);
+      expect(movements(result)).toBeGreaterThan(0);
+      // Every position it emits came from the original, nothing synthesised.
+      const originals = new Set(input.map(a => a.pos));
+      for (const a of result) expect(originals.has(a.pos)).toBe(true);
     });
 
     it('does not mutate input', () => {
@@ -51,50 +130,105 @@ describe('script-modifiers', () => {
       halfSpeed(copy);
       expect(copy).toEqual(sampleActions);
     });
-
-    it('keeps even-indexed actions plus first and last', () => {
-      const actions = [
-        { at: 0, pos: 0 },
-        { at: 1000, pos: 10 },
-        { at: 2000, pos: 20 },
-        { at: 3000, pos: 30 },
-        { at: 4000, pos: 40 },
-        { at: 5000, pos: 50 },
-        { at: 6000, pos: 60 },
-      ];
-      const result = halfSpeed(actions);
-      // Indices 0, 2, 4, 6 kept (even), plus last (6 is already even)
-      expect(result.map(a => a.at)).toEqual([0, 2000, 4000, 6000]);
-    });
   });
 
   describe('doubleSpeed', () => {
-    it('returns copy for 0-1 actions', () => {
+    // THE REGRESSION bel reported. The old version put each inserted point
+    // at the average of its neighbours, which sits exactly on the line
+    // between them, so the device performed an identical stroke. This
+    // asserts on the interpolated output, which is the only thing that
+    // could have caught it.
+    it('changes the motion, not just the point count', () => {
+      const input = alternating(5);
+      const result = doubleSpeed(input);
+      expect(result.length).toBeGreaterThan(input.length);
+      expect(motionDelta(input, result)).toBeGreaterThan(20);
+    });
+
+    it('actually doubles the number of movements', () => {
+      for (const n of [3, 5, 7, 9]) {
+        const input = alternating(n);
+        const result = doubleSpeed(input);
+        expect(movements(result), `${n} points`).toBe(movements(input) * 2);
+      }
+    });
+
+    it('keeps the script aligned to the video: same span, same endpoints', () => {
+      for (const n of [3, 4, 5, 6, 9]) {
+        const input = alternating(n);
+        const result = doubleSpeed(input);
+        expect(result[0]).toEqual(input[0]);
+        expect(result[result.length - 1].at).toBe(input[input.length - 1].at);
+        expect(result[result.length - 1].pos).toBe(input[input.length - 1].pos);
+        expect(span(result)).toBe(span(input));
+      }
+    });
+
+    it('emits strictly increasing, in-range points', () => {
+      const input = [
+        { at: 0, pos: 10 }, { at: 300, pos: 90 }, { at: 1100, pos: 20 },
+        { at: 1400, pos: 80 }, { at: 2600, pos: 5 },
+      ];
+      const result = doubleSpeed(input);
+      for (let i = 1; i < result.length; i++) {
+        expect(result[i].at).toBeGreaterThan(result[i - 1].at);
+      }
+      for (const a of result) {
+        expect(a.pos).toBeGreaterThanOrEqual(0);
+        expect(a.pos).toBeLessThanOrEqual(100);
+      }
+    });
+
+    it('leaves scripts with no full cycle alone', () => {
       expect(doubleSpeed([])).toEqual([]);
       expect(doubleSpeed([{ at: 0, pos: 50 }])).toEqual([{ at: 0, pos: 50 }]);
+      // One-way move: repeating it would change where the stroke ends.
+      const two = [{ at: 0, pos: 0 }, { at: 1000, pos: 100 }];
+      expect(doubleSpeed(two)).toEqual(two);
     });
 
-    it('inserts midpoints between each pair', () => {
-      const actions = [
-        { at: 0, pos: 0 },
-        { at: 1000, pos: 100 },
+    it('survives zero-length and duplicated timestamps', () => {
+      const degenerate = [
+        { at: 0, pos: 0 }, { at: 0, pos: 100 }, { at: 0, pos: 0 }, { at: 500, pos: 100 },
       ];
-      const result = doubleSpeed(actions);
-      expect(result.length).toBe(3);
-      expect(result[0]).toEqual({ at: 0, pos: 0 });
-      expect(result[1]).toEqual({ at: 500, pos: 50 });
-      expect(result[2]).toEqual({ at: 1000, pos: 100 });
-    });
-
-    it('roughly doubles the action count', () => {
-      const result = doubleSpeed(sampleActions);
-      expect(result.length).toBe(sampleActions.length * 2 - 1);
+      expect(() => doubleSpeed(degenerate)).not.toThrow();
+      const result = doubleSpeed(degenerate);
+      expect(result.length).toBeGreaterThanOrEqual(degenerate.length);
+      for (const a of result) expect(Number.isFinite(a.at)).toBe(true);
     });
 
     it('does not mutate input', () => {
       const copy = sampleActions.map(a => ({ ...a }));
       doubleSpeed(copy);
       expect(copy).toEqual(sampleActions);
+    });
+  });
+
+  describe('half and double are opposites', () => {
+    it('double then half lands back near the original movement count', () => {
+      const input = alternating(9);
+      const round = halfSpeed(doubleSpeed(input));
+      expect(movements(round)).toBeGreaterThanOrEqual(movements(input) - 2);
+      expect(movements(round)).toBeLessThanOrEqual(movements(input) + 2);
+      expect(span(round)).toBe(span(input));
+    });
+
+    it('neither ever produces a script the device cannot play', () => {
+      const shapes = [alternating(4), alternating(5), alternating(12),
+        [{ at: 0, pos: 50 }, { at: 100, pos: 50 }, { at: 200, pos: 50 }, { at: 300, pos: 50 }]];
+      for (const input of shapes) {
+        for (const fn of [halfSpeed, doubleSpeed]) {
+          const out = fn(input);
+          expect(out.length).toBeGreaterThan(0);
+          for (const a of out) {
+            expect(Number.isFinite(a.at)).toBe(true);
+            expect(Number.isFinite(a.pos)).toBe(true);
+          }
+          for (let i = 1; i < out.length; i++) {
+            expect(out[i].at).toBeGreaterThanOrEqual(out[i - 1].at);
+          }
+        }
+      }
     });
   });
 

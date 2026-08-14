@@ -276,10 +276,13 @@ describe('popout EDIT_OP routing', () => {
     applyPopoutEdit(es, { op: OP_APPLY_MODIFIER, name: 'halfSpeed' });
     expect(es.actions.length).toBeLessThan(5);
 
-    // doubleSpeed (up-sample) — at least one new midpoint per gap
+    // doubleSpeed — needs a full cycle (out and back) to have something to
+    // repeat; two points is a single one-way move and is left alone by
+    // design, so route-testing with two would prove nothing.
     es = new EditableScript();
     es.insertAction(0, 0);
-    es.insertAction(1000, 100);
+    es.insertAction(500, 100);
+    es.insertAction(1000, 0);
     es.selectAll();
     const before = es.actions.length;
     applyPopoutEdit(es, { op: OP_APPLY_MODIFIER, name: 'doubleSpeed' });

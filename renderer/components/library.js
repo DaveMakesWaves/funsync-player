@@ -1,8 +1,10 @@
 // Library — Browse a directory of videos with thumbnail grid
 
+import { createCategoryMark } from '../js/category-icon.js';
 import { Modal } from './modal.js';
 import { rankFunscriptMatches, fuzzyMatchScore } from '../js/fuzzy-match.js';
 import { computeGridRange, hasRangeChanged } from '../js/virtual-scroll.js';
+import { rangeBetween, allSelectablePaths, nextAnchor } from '../js/selection-range.js';
 import {
   shouldDeferLoads,
   smoothVelocity,
@@ -154,6 +156,9 @@ export class Library {
     this._boundCloseMenu = (e) => this._handleOutsideClick(e);
     this._selectMode = false;
     this._selectedPaths = new Set();
+    // Where a shift-click range starts. Set by a plain click, deliberately
+    // NOT moved by a shift-click so a range can be extended repeatedly.
+    this._selectionAnchor = null;
     this._unmatchedFunscripts = [];
     this._unmatchedSubtitles = [];
     this._activeTab = 'matched';
@@ -216,12 +221,55 @@ export class Library {
       this._resizeListenerAttached = true;
     }
 
+    // Ctrl/Cmd+A — select everything in the current filter.
+    //
+    // Bound once, on document, and gated three ways: the library must be the
+    // visible view, the event must not come from a text field (or we hijack
+    // "select all" while someone is editing the search box), and the script
+    // editor must not be open (it has its own Ctrl+A for actions).
+    if (!this._selectAllListenerAttached) {
+      this._onSelectAllKey = (e) => {
+        if (e.key !== 'a' && e.key !== 'A') return;
+        if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+        if (!this._container || this._container.offsetParent === null) return;
+        const el = document.activeElement;
+        const tag = el?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+        if (document.querySelector('.script-editor:not([hidden])')) return;
+        e.preventDefault();
+        const n = this.selectAllVisible();
+        import('../js/toast.js').then(({ showToast }) => {
+          showToast(t('library.selectedAll', { count: n }), 'info');
+        });
+      };
+      document.addEventListener('keydown', this._onSelectAllKey);
+      this._selectAllListenerAttached = true;
+    }
+
     // Re-translate dynamic strings on locale change. Most library text is
     // baked into innerHTML via `t()` at render time (kebab menu items,
     // empty states, sort/filter pickers, badges, etc.) — `translatePage()`
     // only catches `data-i18n` attributes, so without this, switching
     // language leaves the library partially in the old locale until the
     // user navigates away and back. Subscribed once per Library instance.
+    // Repaint category marks when a category is edited.
+    //
+    // `category:changed` was emitted by dataService and NOBODY LISTENED, so
+    // renaming a category or giving it an icon left every already-rendered
+    // card showing the old mark until the view was rebuilt for some other
+    // reason. Reported as "they don't change when edited".
+    //
+    // Only the colour/icon/rename actions need this; assign/unassign already
+    // repaint their own card at the call site.
+    if (!this._categoryListenerAttached) {
+      eventBus.on('category:changed', ({ action } = {}) => {
+        if (!this._container) return;
+        if (!['icon', 'color', 'rename', 'add', 'delete'].includes(action)) return;
+        this._repaintAllCategoryDots();
+      });
+      this._categoryListenerAttached = true;
+    }
+
     if (!this._languageListenerAttached) {
       eventBus.on('language:changed', () => {
         if (!this._container) return;
@@ -731,8 +779,19 @@ export class Library {
     this._videos = videos;
     this._videosByPath = new Map(videos.map(v => [v.path, v]));
 
-    // Warn about failed source paths (disconnected drives)
+    // Sources that FAILED TO SCAN this pass (ENOENT on a disconnected drive).
+    //
+    // This used to be shown as a toast and then thrown away, which is how
+    // 325 association script pointers were nulled on 2026-08-11: the scan
+    // knew `D:unsc` had failed, said so in the log, and the association
+    // validator was never told — so every script on that drive looked
+    // "missing" and got pruned 375ms later.
+    //
+    // A failed scan is the STRONGEST evidence a location is unreachable,
+    // stronger than the periodic probe, because it just tried and failed.
+    // It must feed the same guard.
     const failedPaths = Array.isArray(result) ? [] : (result?.failedPaths || []);
+    this._failedScanPaths = new Set(failedPaths);
     if (failedPaths.length > 0) {
       const { showToast } = await import('../js/toast.js');
       const names = failedPaths.map(p => p.split(/[\\/]/).pop());
@@ -2254,9 +2313,7 @@ export class Library {
       for (const catId of catIds) {
         const cat = allCats.find((c) => c.id === catId);
         if (cat) {
-          const dot = document.createElement('span');
-          dot.className = 'library__card-category-dot';
-          dot.style.background = cat.color;
+          const dot = createCategoryMark(cat, { className: 'library__card-category-dot', size: 12 });
           dot.title = cat.name;
           badges.appendChild(dot);
         }
@@ -2290,10 +2347,11 @@ export class Library {
     checkbox.hidden = !this._selectMode;
     row.appendChild(checkbox);
 
-    // Click to play (or toggle select)
-    row.addEventListener('click', () => {
-      if (this._selectMode) {
-        this._toggleCardSelection(row, video.path);
+    // Click to play, or select. Shift enters select mode on its own so the
+    // range gesture works without hunting for the Select button first.
+    row.addEventListener('click', (e) => {
+      if (this._selectMode || e.shiftKey) {
+        this._handleSelectionClick(row, video.path, e);
       } else {
         this._playVideo(video);
       }
@@ -2609,9 +2667,7 @@ export class Library {
       for (const catId of catIds) {
         const cat = allCats.find((c) => c.id === catId);
         if (cat) {
-          const dot = document.createElement('span');
-          dot.className = 'library__card-category-dot';
-          dot.style.background = cat.color;
+          const dot = createCategoryMark(cat, { className: 'library__card-category-dot', size: 12 });
           dot.title = cat.name;
           dotsContainer.appendChild(dot);
         }
@@ -2659,10 +2715,11 @@ export class Library {
 
     card.appendChild(info);
 
-    // Click to play (or toggle select)
-    card.addEventListener('click', () => {
-      if (this._selectMode) {
-        this._toggleCardSelection(card, video.path);
+    // Click to play, or select. Shift enters select mode on its own so the
+    // range gesture works without hunting for the Select button first.
+    card.addEventListener('click', (e) => {
+      if (this._selectMode || e.shiftKey) {
+        this._handleSelectionClick(card, video.path, e);
       } else {
         this._playVideo(video);
       }
@@ -3411,13 +3468,53 @@ export class Library {
    * On reconnect the files come back, so the associations should too.
    */
   _isUnderUnavailableSource(absPath) {
-    if (!absPath || !this._unavailablePaths || this._unavailablePaths.size === 0) return false;
+    if (!absPath) return false;
+    // Union of two signals: the periodic reachability probe, and sources that
+    // actually failed to scan this pass. The second is the stronger evidence
+    // and was previously ignored entirely.
+    const roots = [];
+    if (this._unavailablePaths?.size) roots.push(...this._unavailablePaths);
+    if (this._failedScanPaths?.size) roots.push(...this._failedScanPaths);
+    if (roots.length === 0) return false;
     const normalized = canonicalPath(absPath);
-    for (const srcPath of this._unavailablePaths) {
+    for (const srcPath of roots) {
       const srcNorm = canonicalPath(srcPath);
       if (srcNorm && (normalized === srcNorm || normalized.startsWith(srcNorm + '/'))) return true;
     }
     return false;
+  }
+
+  /**
+   * Last line of defence before destroying a stored association.
+   *
+   * A single `fileExists` miss is NOT sufficient evidence that a user's
+   * association is stale. The file can be missing because it was deleted, or
+   * because its whole location is unreachable — and only the first justifies
+   * touching the user's data.
+   *
+   * So before pruning we ask whether the script's PARENT DIRECTORY answers.
+   * A missing file inside a directory that exists is a genuinely dead path.
+   * A missing file inside a directory that itself cannot be read is a
+   * disconnected drive, and we keep the association untouched.
+   *
+   * Deliberately fails CLOSED: any error, and we refuse to prune. The cost of
+   * keeping a stale pointer is a single unmatched video. The cost of a wrong
+   * prune is hours of manual work, as 2026-08-11 demonstrated.
+   *
+   * @param {string} scriptPath
+   * @returns {Promise<boolean>} true only when it is safe to prune
+   */
+  async _safeToPrune(scriptPath) {
+    if (!scriptPath) return false;
+    if (this._isUnderUnavailableSource(scriptPath)) return false;
+    const dirEnd = Math.max(scriptPath.lastIndexOf('\\'), scriptPath.lastIndexOf('/'));
+    if (dirEnd <= 0) return false;
+    const dir = scriptPath.slice(0, dirEnd);
+    try {
+      return !!(await window.funsync.fileExists(dir));
+    } catch {
+      return false;
+    }
   }
 
   async _validateAssociationsInBackground() {
@@ -3426,6 +3523,8 @@ export class Library {
     if (entries.length === 0) return;
 
     let healed = 0;
+    // Counted and logged so a near-miss is visible rather than silent.
+    let skippedUnreachable = 0;
     let pruned = 0;
     const prunedPaths = [];
     const CONCURRENCY = 8;
@@ -3473,6 +3572,13 @@ export class Library {
             entry.single = recovered;
             entryChanged = true;
             healed++;
+          } else if (!(await this._safeToPrune(entry.single))) {
+            // The SCRIPT's own location is unreachable, even though the video
+            // is fine — a video on C: can hold a script on D:. Guarding only
+            // on the video path (which is all this did before) left exactly
+            // that case exposed, and it is how the 2026-08-11 loss happened.
+            // Leave the association completely alone.
+            skippedUnreachable++;
           } else {
             // Drop the broken single slot. If it was the active one, fall
             // back to the next usable mode so something still plays.
@@ -3536,6 +3642,12 @@ export class Library {
       await Promise.all(entries.slice(i, i + CONCURRENCY).map(validate));
     }
 
+    if (skippedUnreachable > 0) {
+      console.warn(
+        `[Library] Association validation: LEFT ${skippedUnreachable} association(s) untouched ` +
+        'because their script location was unreachable. Nothing was pruned for those.'
+      );
+    }
     if (healed > 0 || pruned > 0) {
       this._settings.set('library.associations', all);
       console.log(
@@ -3589,6 +3701,11 @@ export class Library {
           }
         }
       }
+      // Same rule as associations (see `_safeToPrune`): a missing file is not
+      // proof the user's variant is stale. If the variant's own location is
+      // unreachable, KEEP it — this path had no guard at all, which is the
+      // 2026-08-11 association bug waiting to happen to variants.
+      if (!(await this._safeToPrune(variant.path))) return { keep: true, changed: false };
       return { keep: false, changed: true };
     };
 
@@ -6290,6 +6407,22 @@ export class Library {
     }
   }
 
+  /**
+   * Rebuild the category marks on every card currently in the DOM.
+   *
+   * Cheap: only rendered cards are touched, and virtual scrolling means that
+   * is a screenful, not the whole library. Anything scrolled out gets the
+   * new mark when it is next built.
+   */
+  _repaintAllCategoryDots() {
+    if (!this._container) return;
+    const cards = this._container.querySelectorAll('[data-video-path]');
+    for (const card of cards) {
+      const path = card.dataset.videoPath;
+      if (path) this._updateCardCategoryDots(card, path);
+    }
+  }
+
   _updateCardCategoryDots(cardEl, videoPath) {
     // Fallback for list view so dots appear immediately after assign,
     // not only after the next re-render.
@@ -6310,9 +6443,7 @@ export class Library {
     for (const catId of catIds) {
       const cat = allCats.find((c) => c.id === catId);
       if (cat) {
-        const dot = document.createElement('span');
-        dot.className = 'library__card-category-dot';
-        dot.style.background = cat.color;
+        const dot = createCategoryMark(cat, { className: 'library__card-category-dot', size: 12 });
         dot.title = cat.name;
         dotsContainer.appendChild(dot);
       }
@@ -6350,6 +6481,7 @@ export class Library {
   _exitSelectMode() {
     this._selectMode = false;
     this._selectedPaths = new Set();
+    this._selectionAnchor = null;
 
     if (!this._container) return;
 
@@ -6394,6 +6526,64 @@ export class Library {
       cb.hidden = !this._selectMode;
       cb.classList.toggle('library__card-checkbox--checked', selected);
     }
+  }
+
+  /**
+   * Single entry point for a click while selecting.
+   *
+   * Shift extends from the anchor; a plain click toggles and sets a new
+   * anchor. Shift ENTERS select mode if it is not already on, so the gesture
+   * works straight from browsing.
+   */
+  _handleSelectionClick(cardEl, videoPath, e) {
+    const shift = !!(e && e.shiftKey);
+    if (!this._selectMode) {
+      // Preserve any anchor across the mode switch — _enterSelectMode clears
+      // the selection, and we want the range that follows to still work.
+      const keep = this._selectionAnchor;
+      this._enterSelectMode();
+      this._selectionAnchor = keep;
+    }
+
+    if (shift) {
+      const paths = rangeBetween(this._filteredItems, this._selectionAnchor, videoPath);
+      // ADDITIVE, not replace. Someone bulk-tagging across several ranges
+      // should not lose the earlier ones to a mis-click; Cancel Select is the
+      // escape hatch. Explorer replaces here, but this mode is explicit.
+      for (const p of paths) this._selectedPaths.add(p);
+      this._selectionAnchor = nextAnchor(this._selectionAnchor, videoPath, true);
+      this._repaintSelection();
+      this._updateSelectionCount();
+      return;
+    }
+
+    this._toggleCardSelection(cardEl, videoPath);
+    this._selectionAnchor = nextAnchor(this._selectionAnchor, videoPath, false);
+  }
+
+  /**
+   * Push `_selectedPaths` onto every card currently in the DOM.
+   *
+   * Only the rendered window needs touching: selection lives in the Set, and
+   * `_applySelectionState` restores it on card creation, so items further down
+   * a range render correctly when the user scrolls to them. Virtual scrolling
+   * would otherwise make an off-screen range invisible.
+   */
+  _repaintSelection() {
+    this._container?.querySelectorAll('[data-video-path]').forEach((el) => {
+      const p = el.dataset.videoPath;
+      if (p) this._applySelectionState(el, p);
+    });
+  }
+
+  /** Ctrl+A — select everything in the current filter, entering select mode. */
+  selectAllVisible() {
+    if (!this._selectMode) this._enterSelectMode();
+    const paths = allSelectablePaths(this._filteredItems);
+    for (const p of paths) this._selectedPaths.add(p);
+    this._repaintSelection();
+    this._updateSelectionCount();
+    return paths.length;
   }
 
   _toggleCardSelection(card, videoPath) {

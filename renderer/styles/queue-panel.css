@@ -506,23 +506,38 @@ html.has-wco #app[data-view="player"] > .queue-panel {
 .queue-panel__vr-pill--vr   { background: var(--badge-purple, #8b5cf6); }
 .queue-panel__vr-pill--flat { background: var(--badge-info, #3b82f6); }
 
-/* Category dots — bottom-right of the thumbnail, mirrors the library
- * card placement so the visual language is consistent. */
+/* Category dots — bottom-LEFT of the thumbnail, mirroring the library card
+ * placement so the visual language stays consistent. Moved from bottom-right
+ * along with the library card, where the duration badge shares that corner
+ * (myopiic, thread #270). */
 .queue-panel__category-dots {
   position: absolute;
-  bottom: 4px;
-  right: 4px;
+  top: 4px;
+  left: 4px;
   display: flex;
   gap: 3px;
   z-index: 1;
+  max-width: calc(100% - 24px);
+  flex-wrap: wrap;
+  filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.6));
 }
 
 .queue-panel__category-dot {
-  width: 8px;
-  height: 8px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   border: 1px solid rgba(0, 0, 0, 0.3);
   flex-shrink: 0;
+}
+
+/* See the library note: an icon is not a dot, so the fixed box and the
+ * border have to come off or it renders as a plain circle. */
+.queue-panel__category-dot--icon {
+  width: auto;
+  height: auto;
+  border: none;
+  border-radius: 0;
+  background: none;
 }
 
 /* Remove button — appears on row hover. Hit area is 32×32 so it

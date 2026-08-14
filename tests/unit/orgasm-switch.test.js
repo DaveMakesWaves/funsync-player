@@ -497,4 +497,73 @@ describe('OrgasmSwitch — loadPlan (custom routing)', () => {
     const last = deps.buttplugManager.sendLinear.mock.calls.at(-1);
     expect(last[1]).toBeCloseTo(20, 0); // 1800 → 100 - (800/1000)*100 = 20
   });
+
+  // acuity7, thread #275: the Handy is smooth over WiFi and jerky over
+  // Bluetooth-via-Intiface. They pinned it further by reproducing the same
+  // split in MultiFunPlayer — "FixedUpdate" jerky, "PolledUpdate" smooth.
+  //
+  // WiFi takes the Handy HDSP path, which already used a move window LONGER
+  // than the tick (HANDY_MOVE_MS) precisely so moves overlap into continuous
+  // motion. Bluetooth takes the Buttplug path, which passed the TICK LENGTH
+  // as the move duration — "reach X in 40ms", re-sent every 40ms. On BLE a
+  // round trip is often longer than the tick itself, so the device is
+  // retargeted before it completes anything and bumps in place.
+  //
+  // The same mistake was already found and fixed for the Handy in this very
+  // file; it was simply never applied to Buttplug.
+  describe('Buttplug linear move window (thread #275)', () => {
+    it('sends a move duration LONGER than the tick, not equal to it', () => {
+      const deps = makeDeps();
+      const os = new OrgasmSwitch(deps, { tickIntervalMs: 40 });
+      os.setTimerImpl(() => 1, () => {});
+      os.loadScript(SCRIPT);
+      os.activate();
+
+      const calls = deps.buttplugManager.sendLinear.mock.calls;
+      expect(calls.length, 'no linear command was sent').toBeGreaterThan(0);
+      for (const [, , durationMs] of calls) {
+        expect(
+          durationMs,
+          `move duration ${durationMs}ms is not longer than the 40ms tick — `
+          + 'the device gets retargeted before it can finish and stutters on BLE',
+        ).toBeGreaterThan(40);
+      }
+    });
+
+    it('matches the Handy move window, which is the proven-smooth value', () => {
+      const deps = makeDeps();
+      const os = new OrgasmSwitch(deps, { tickIntervalMs: 40 });
+      os.setTimerImpl(() => 1, () => {});
+      os.loadScript(SCRIPT);
+      os.activate();
+
+      const bpDur = deps.buttplugManager.sendLinear.mock.calls.at(-1)[2];
+      const handyDur = deps.handyManager.hdspMove.mock.calls.length
+        ? deps.handyManager.hdspMove.mock.calls.at(-1)[1]
+        : bpDur;
+      expect(bpDur).toBe(handyDur);
+    });
+
+    // The move window and the velocity denominator are DIFFERENT quantities.
+    // Widening `dur` wholesale would fix the stutter and silently corrupt
+    // derived vibrate/rotate intensity — the exact unit mismatch that broke
+    // speed mode elsewhere in the codebase.
+    it('does not distort derived intensity for vibe-only devices', () => {
+      const deps = makeDeps();
+      deps.buttplugManager.devices = [
+        { index: 0, canLinear: false, canVibrate: true, canRotate: false },
+      ];
+      const os = new OrgasmSwitch(deps, { tickIntervalMs: 40 });
+      os.setTimerImpl(() => 1, () => {});
+      os.loadScript(SCRIPT);
+      os.activate();
+      os._tick();
+
+      for (const [, intensity] of deps.buttplugManager.sendVibrate.mock.calls) {
+        expect(intensity).toBeGreaterThanOrEqual(0);
+        expect(intensity).toBeLessThanOrEqual(100);
+      }
+    });
+  });
+
 });

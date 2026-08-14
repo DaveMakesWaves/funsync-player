@@ -299,8 +299,11 @@ describe('ButtplugSync', () => {
       mockButtplug.devices = [
         { index: 1, name: 'Vibe', canLinear: false, canVibrate: true, canRotate: false },
       ];
-      // Position change of 100 over 500ms = 200 pos/sec → 200/300*100 ≈ 66.7 intensity
-      sync._sendToDevices(100, 500, 0);
+      // Position change of 100 over 500ms = 200 pos/sec → 200/300*100 ≈ 66.7.
+      // The 500ms must be passed as sinceLastMs — the interval the movement
+      // was measured over. The positional `durationMs` is LinearCmd's
+      // time-to-next-action and means something different.
+      sync._sendToDevices(100, 500, 0, { sinceLastMs: 500 });
       expect(mockButtplug.sendVibrate).toHaveBeenCalledWith(1, expect.closeTo(66.7, 0));
     });
 

@@ -9,6 +9,7 @@
 // lives on dataService. This component is purely a view + interaction
 // surface.
 
+import { createCategoryMark } from '../js/category-icon.js';
 import { icon, X, Trash2, GripVertical, FileCheck, Captions, Gauge, Layers2, Cable, Shuffle } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
@@ -391,9 +392,18 @@ export class QueuePanel {
       badgeBits.push(`<span class="queue-panel__badge queue-panel__badge--speed queue-panel__badge--speed-${meta.speedTier}" data-queue-badge="speed" title="${_esc(title)}"></span>`);
     }
 
+    // Built as real elements and then serialised, rather than hand-writing
+    // the markup. Shapes are SVG, and hand-authored SVG strings are exactly
+    // how you end up with elements in the wrong namespace — invisible but
+    // still clickable. createCategoryMark uses createElementNS, and
+    // outerHTML round-trips that correctly through the HTML parser.
     const categoryDots = meta.categories.length > 0
       ? `<div class="queue-panel__category-dots">${meta.categories
-          .map((c) => `<span class="queue-panel__category-dot" style="background:${_esc(c.color)}" title="${_esc(c.name)}"></span>`)
+          .map((c) => {
+            const mark = createCategoryMark(c, { className: 'queue-panel__category-dot', size: 10 });
+            mark.setAttribute('title', c.name);
+            return mark.outerHTML;
+          })
           .join('')}</div>`
       : '';
 

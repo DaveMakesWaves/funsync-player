@@ -232,7 +232,20 @@ export class TCodeSync {
     this._actions = this.funscript.isLoaded ? this.funscript.getActions() : null;
     // Cache the main axis's natural range whenever actions reload —
     // variant switch, script clear, etc. all funnel through here.
-    this._naturalRange = computeNaturalRange(this._actions);
+    //
+    // Deliberately the AUTHORED actions, not the played ones. `getActions()`
+    // includes gap filler, and the range extender uses this to decide how
+    // far to stretch the script — measuring filler would stretch the
+    // author's content by a factor derived from content they did not write.
+    // The `?? this._actions` fallback is for older injected fakes that
+    // predate `getAuthoredActions`. In production `funscript` is always a
+    // FunscriptEngine, which has it, so the fallback never fires — and when
+    // it does, it reproduces the pre-filler behaviour rather than throwing.
+    this._naturalRange = computeNaturalRange(
+      this.funscript.isLoaded
+        ? (this.funscript.getAuthoredActions?.() ?? this._actions)
+        : null,
+    );
   }
 
   _resetState() {

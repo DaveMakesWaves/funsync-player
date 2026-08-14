@@ -249,14 +249,16 @@
   },
   "backend": {
     "title": "后端无响应",
-    "detail": "媒体库扫描、缩略图和 VR 功能需要后端。已打开的文件仍可正常播放。",
-    "detailWithError": "媒体库扫描、缩略图和 VR 功能需要后端。已打开的文件仍可正常播放。({error})",
+    "detail": "缩略图、VR 和网页遥控需要后端。播放仍可正常继续。请尝试下方的“重启后端”。",
+    "detailWithError": "缩略图、VR 和网页遥控需要后端。播放仍可正常继续。请尝试下方的“重启后端”。({error})",
     "restart": "重启后端",
     "restarting": "重启中…",
     "restartingTitle": "正在重启后端…",
     "restartingDetail": "通常只需几秒钟。",
     "viewLogs": "查看日志",
-    "dismiss": "关闭横幅"
+    "dismiss": "关闭横幅",
+    "missingTitle": "缺少后端程序",
+    "missingDetail": "FunSync 找不到它的后端程序。通常是安装后被杀毒软件隔离了。请将 FunSync 添加到杀毒软件的排除列表并重新安装。播放仍可使用；缩略图、扫描、VR 和网页遥控则不可用。"
   },
   "dropZone": {
     "title": "拖放以加载",
@@ -470,7 +472,8 @@
       "searchEroScripts": "搜索 EroScripts..."
     },
     "heatmapUnavailable": "热力图不可用",
-    "sortSwitchTo": "切换为 {order}"
+    "sortSwitchTo": "切换为 {order}",
+    "selectedAll": "{count, plural, other {已选择 # 个视频}}"
   },
   "playlists": {
     "title": "播放列表",
@@ -545,7 +548,16 @@
     "gridView": "网格视图",
     "listView": "列表视图",
     "detailEmpty": "此分类中无视频",
-    "detailEmptyHint": "通过媒体库中的更多菜单分配视频"
+    "detailEmptyHint": "通过媒体库中的更多菜单分配视频",
+    "iconLabel": "图标",
+    "iconModeColor": "颜色",
+    "iconModeShape": "形状",
+    "iconModeEmoji": "表情",
+    "iconEmojiPlaceholder": "粘贴一个表情",
+    "iconPreview": "预览",
+    "editCategory": "编辑分类",
+    "iconEmojiSearch": "搜索分组",
+    "iconEmojiNone": "没有匹配项"
   },
   "stroke": {
     "rangeLabel": "行程范围",
@@ -969,7 +981,16 @@
       "removed": "来源 \"{name}\" 已移除",
       "toggled": "来源 \"{name}\" 已{state}",
       "stateEnabled": "启用",
-      "stateDisabled": "禁用"
+      "stateDisabled": "禁用",
+      "unreachableHint": "无法访问此来源，因此无法开启。你的设置已保留。",
+      "unreachableReason": "无法访问。请重新连接驱动器，然后点击重新检查。",
+      "recheck": "重新检查",
+      "recheckHint": "重新检查哪些来源可访问",
+      "rechecking": "检查中...",
+      "recheckedAll": "所有来源均可访问。",
+      "recheckedSome": "{count, plural, other {仍有 # 个来源无法访问}}",
+      "working": "处理中...",
+      "scanning": "正在扫描媒体库..."
     },
     "multiAxisConfirm": {
       "title": "切换为多轴默认?",
@@ -1060,7 +1081,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "视频与性能",
       "rememberSpeedLabel": "记住播放速度",
-      "rememberSpeedHint": "加载其他视频时保持当前速度。默认关闭，每个视频都以 1 倍速开始。"
+      "rememberSpeedHint": "加载其他视频时保持当前速度。默认关闭，每个视频都以 1 倍速开始。",
+      "fillerHeader": "空隙填充",
+      "fillerEnable": "用动作填充空隙",
+      "fillerResetEnable": "重置空隙填充",
+      "fillerResetEnableAria": "将空隙填充恢复为默认值",
+      "fillerPattern": "模式",
+      "fillerPreviewAria": "填充模式预览",
+      "fillerHint": "在脚本长时间空白的段落播放轻柔动作，而不是让设备静止。当跳过空隙设为自动时将被忽略。",
+      "fillerStats": "平均 {avg} 单位/秒，峰值 {max} 单位/秒",
+      "fillerShape": "波形",
+      "fillerBpm": "速度 (BPM)",
+      "fillerDepth": "深度",
+      "fillerAbsolute": "设定精确范围",
+      "fillerAbsMin": "最小值",
+      "fillerAbsMax": "最大值"
     },
     "appearance": {
       "themeHeader": "主题",
@@ -1528,7 +1563,8 @@
       "apply": "应用",
       "test": "测试",
       "measure": "测量",
-      "measuring": "测量中…"
+      "measuring": "测量中…",
+      "applyLatency": "应用"
     },
     "handy": {
       "connectionKey": "连接密钥",
@@ -1656,7 +1692,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "请输入设备令牌",
       "latencyToast": "Autoblow 延迟: {ms} ms",
-      "latencyFailed": "延迟测量失败: {error}"
+      "latencyFailed": "延迟测量失败: {error}",
+      "latencyNoReading": "未能测得延迟。请检查设备是否已连接。",
+      "latencyApplied": "同步偏移已设为 {ms} 毫秒"
     },
     "sync": {
       "experimental": "实验性",
@@ -1812,5 +1850,36 @@
     "resumeAt": "从 {time} 继续",
     "progressLabel": "已观看 {percent}%",
     "resumedToast": "已从 {time} 继续播放"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "缓慢挑逗",
+      "gentle": "轻柔",
+      "steady": "平稳",
+      "building": "渐强",
+      "drift": "漂移",
+      "pulse": "脉冲",
+      "custom": "自定义"
+    },
+    "shape": {
+      "sine": "正弦",
+      "triangle": "三角",
+      "sawtooth": "锯齿",
+      "square": "方波",
+      "escalating": "渐强",
+      "random": "随机"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "表情",
+      "people": "人物",
+      "hearts": "爱心与符号",
+      "nature": "动物与自然",
+      "food": "食物与饮品",
+      "activity": "活动",
+      "objects": "物品",
+      "travel": "旅行与地点"
+    }
   }
 }

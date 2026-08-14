@@ -29,11 +29,19 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DEST = path.resolve(REPO, '..', 'funsync-backup');
+
+/**
+ * The app's own data directory. Derived, not hardcoded, so this still works
+ * on another machine or a different user account.
+ */
+const APPDATA = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+const USERDATA = path.join(APPDATA, 'funsync-player');
 
 /**
  * Ignored paths worth keeping. Each carries WHY, because the next person to
@@ -54,6 +62,20 @@ const INCLUDE = [
   // parent; `p` is the name they take inside the backup.
   { p: 'FunSync-Discord', from: '../FunSync-Discord', why: 'Discord content pipeline (drafts/outbox/posted) — no git of its own' },
   { p: 'FunSync-Patreon', from: '../FunSync-Patreon', why: 'Patreon content pipeline (drafts/outbox/posted) — no git of its own' },
+  // THE APP'S OWN DATA. Nothing else protects it, and it is the only
+  // irreplaceable thing here: associations, playlists, collections, device
+  // settings and custom thumbnails are all user work that cannot be
+  // regenerated from anything else.
+  {
+    p: 'appdata/config.json',
+    from: path.join(USERDATA, 'config.json'),
+    why: 'LIVE app data: associations, playlists, collections, settings',
+  },
+  {
+    p: 'appdata/backups',
+    from: path.join(USERDATA, 'backups'),
+    why: 'dated config snapshots — what recovered 429 associations on 2026-08-11',
+  },
 ];
 
 /** Regenerable — listed so the README can explain the omission honestly. */
@@ -160,6 +182,14 @@ function writeReadme() {
     '| Path | Size | Restore with |',
     '|---|---|---|',
     ...SKIPPED.map(([p, s, how]) => `| \`${p}\` | ${s} | \`${how}\` |`),
+    '',
+    "## A caveat on `appdata/config.json`",
+    '',
+    'The app rewrites that file whole. If FunSync is RUNNING when this script',
+    'copies it, you can catch a partially-written file. `appdata/backups/` is',
+    'the real safety net: those snapshots are written once and never touched',
+    'again, so they are always intact. For a clean copy of the live file,',
+    'close FunSync first.',
     '',
     '## Keeping it current',
     '',

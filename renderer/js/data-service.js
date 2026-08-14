@@ -220,12 +220,34 @@ class DataService {
     return this._cache.categories || [];
   }
 
-  async addCategory(name, color) {
+  async addCategory(name, color, icon) {
     // Async — returns authoritative object from main process
-    const category = await window.funsync.addCategory(name, color);
+    const category = await window.funsync.addCategory(name, color, icon || null);
     this._cache.categories.push(category);
     eventBus.emit('category:changed', { action: 'add', category });
     return category;
+  }
+
+  /**
+   * Set or clear a category's icon. `null` clears back to a colour dot.
+   * Cache-first so every rendered dot updates on the next repaint without
+   * waiting on the IPC round trip.
+   */
+  setCategoryIcon(id, icon) {
+    const category = this._cache.categories.find((c) => c.id === id);
+    if (category) {
+      if (icon) category.icon = icon;
+      else delete category.icon;
+    }
+    window.funsync.setCategoryIcon(id, icon || null);
+    eventBus.emit('category:changed', { action: 'icon', id, icon: icon || null });
+  }
+
+  setCategoryColor(id, color) {
+    const category = this._cache.categories.find((c) => c.id === id);
+    if (category) category.color = color;
+    window.funsync.setCategoryColor(id, color);
+    eventBus.emit('category:changed', { action: 'color', id, color });
   }
 
   deleteCategory(id) {

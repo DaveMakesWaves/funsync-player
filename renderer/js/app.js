@@ -6,6 +6,20 @@ import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
 import { AXIS_DEFINITIONS } from './multi-axis.js';
+import { sourcesToProbe } from './source-state.js';
+import { BackendBannerState } from './backend-banner-state.js';
+
+/** Mirrors BACKEND_MISSING in electron/python-bridge.js. */
+const BACKEND_MISSING = 'backend-executable-missing';
+
+/**
+ * Budget for a single source reachability probe, in ms. Matches the main
+ * process default. A dead mapped network drive is the case this exists for:
+ * Windows keeps the drive letter after a NAS goes offline so the path looks
+ * real and the OS blocks on SMB. Too short and a slow-but-alive NAS gets
+ * wrongly marked unreachable.
+ */
+const SOURCE_PROBE_TIMEOUT_MS = 800;
 import { HandyManager } from './handy-manager.js';
 import { AudienceBridge } from './audience-bridge.js';
 import * as AUDIENCE from './audience-popout-protocol.js';
@@ -33,6 +47,9 @@ import { maybeShowHevcGuidance } from './hevc-detect.js';
 import { initTheme } from './theme-manager.js';
 import { matchButtplugRoute } from './custom-routing-match.js';
 import { extendRawScriptContent, clampRawScriptContent } from './device-transform-stack.js';
+import { fillRawScriptContent } from './filler-engine.js';
+import { createCategoryMark } from './category-icon.js';
+import { resolveFillerOptions } from './filler-presets.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library, thumbRequestOpts, customThumbImagePath } from '../components/library.js';
@@ -50,7 +67,7 @@ import { UpNextCard } from '../components/up-next-card.js';
 import { EroScriptsPanel } from '../components/eroscripts-panel.js';
 import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
-  EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles,
+  EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles, Repeat1,
   Maximize, Maximize2, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
   Pencil, FileCheck, Captions, RotateCcw, Columns2, X, Activity, Thermometer,
 } from './icons.js';
@@ -200,9 +217,18 @@ class App {
         // 'gauge' for the overflow menu's playback-speed item. 'chevron-down'
         // replaces the raw `▾` glyph on the variant-selector button so the
         // toolbar reads consistently as proper SVG iconography.
-        // 'rectangle-goggles' (exported as `Goggles`) for the overflow
         // menu's VR Format item — only shown for VR-detected videos.
-        Gauge, ChevronDown, Goggles,
+        //
+        // NOTE THE KEY. createIcons looks up icons[toPascalCase(attr)], so
+        // `data-lucide="rectangle-goggles"` resolves to `RectangleGoggles`.
+        // It was registered as `Goggles` (our import alias, used by
+        // nav-bar.js) and therefore never matched — the icon rendered as
+        // nothing and logged "icon name was not found" on every boot.
+        Gauge, ChevronDown, RectangleGoggles: Goggles,
+        // Loop-one icon: the loop-mode button and its overflow-menu twin in
+        // index.html. The player pop-out registered this; the main window
+        // did not, so it was blank in the main window only.
+        Repeat1,
         // Queue panel toggle icon (Android Auto split-screen look).
         Columns2,
         // 'maximize-2' for the "Pop out player" overflow item (detached
@@ -301,6 +327,10 @@ class App {
     // Nav Bar
     this.settingsPanel = new SettingsPanel({
       settings: this.settings,
+      // Getter, not a value: a re-probe must be visible without rebuilding
+      // the panel. Empty set = everything reachable (fail open).
+      getUnreachableSources: () => this._sourceProbeCache || new Set(),
+      onRecheckSources: () => this._recheckSources(),
       onSourcesChanged: () => {
         this._refreshCollectionsUI();
         if (this.library) this.library._lastScanKey = null;
@@ -311,7 +341,10 @@ class App {
           this.gapSkipEngine.setSettings(mode, threshold);
           if (this.funscriptEngine.isLoaded) this._startGapSkip();
         }
+        // Auto-skip suppresses filler, so the two settings are coupled.
+        this._applyFillerSettings();
       },
+      onGapFillerChanged: () => this._applyFillerSettings(),
       onUpNextChanged: (mode, countdownSec) => {
         if (this.upNextEngine) {
           this.upNextEngine.setSettings(mode, countdownSec);
@@ -1599,7 +1632,7 @@ class App {
     // Both reads failed. Drop any manualVariants entry pointing at the
     // dead path so the backend log stops spamming on the next render
     // pass that touches this video.
-    this._pruneStaleManualVariant(scriptPath);
+    await this._pruneStaleManualVariant(scriptPath);
     return null;
   }
 
@@ -1614,8 +1647,16 @@ class App {
    * Called when both the stored path and the basename fallback miss —
    * the file is genuinely gone and nothing should keep referring to it.
    */
-  _pruneStaleManualVariant(scriptPath) {
+  async _pruneStaleManualVariant(scriptPath) {
     if (!scriptPath) return;
+    // Guard before deleting a user's variant. A read failure can mean the file
+    // is gone OR that its whole location is unreachable, and only the first
+    // justifies touching stored data. This path had NO guard, which is the
+    // 2026-08-11 association loss waiting to happen to variants instead.
+    // Fails closed: if the library is not available to ask, keep the variant.
+    try {
+      if (!(await this.library?._safeToPrune?.(scriptPath))) return;
+    } catch { return; }
     const all = this.settings.get('library.manualVariants') || {};
     let dirty = false;
     for (const videoPath of Object.keys(all)) {
@@ -3024,6 +3065,48 @@ class App {
   }
 
   /**
+   * Current gap-filler options, resolved from settings.
+   *
+   * Auto-skip and filler act on the same gaps, so precedence has to be
+   * stated somewhere: if a gap is being SKIPPED there is nothing to fill, so
+   * skip wins and filler is suppressed entirely. Button-skip leaves the gap
+   * playing until the user presses the button, so filler still applies.
+   *
+   * @returns {object|null} null when filler should not run
+   */
+  _fillerOptionsForUpload() {
+    const filler = this.settings?.get?.('player.gapFiller') || {};
+    if (!filler.enabled) return null;
+
+    const gapSettings = this.settings?.get?.('player.gapSkip') || {};
+    if ((gapSettings.mode || 'off') === 'auto') return null;   // skip wins
+
+    return resolveFillerOptions({
+      enabled: true,
+      presetId: filler.presetId,
+      custom: filler.custom || null,
+      // Default the filler threshold to the gap-skip threshold so the two
+      // features agree on what counts as a gap unless told otherwise.
+      thresholdMs: filler.thresholdMs || gapSettings.threshold || 10000,
+      totalDurationMs: Math.round((this.videoPlayer?.video?.duration || 0) * 1000),
+      maxJoinSpeed: filler.maxJoinSpeed,
+    });
+  }
+
+  /**
+   * Push the current filler settings into the funscript engine so the
+   * tick-driven devices (T-Code, Buttplug, Handy HDSP) pick filler up via
+   * their existing `reloadActions()` path.
+   */
+  _applyFillerSettings() {
+    if (!this.funscriptEngine?.setFillerOptions) return;
+    this.funscriptEngine.setFillerOptions(this._fillerOptionsForUpload());
+    // Tick-driven engines cache the action list; make them re-read it.
+    this.buttplugSync?.reloadActions?.();
+    this.tcodeSync?.reloadActions?.();
+  }
+
+  /**
    * Wire the backend-disconnected banner. Subscribes to `backend-status`
    * IPC events and renders / hides the banner based on the current
    * state. Three states from the main-process health monitor:
@@ -3041,35 +3124,63 @@ class App {
     const restartBtn = banner.querySelector('#backend-banner-restart');
     const logsBtn = banner.querySelector('#backend-banner-logs');
     const dismissBtn = banner.querySelector('#backend-banner-dismiss');
-    let userDismissed = false;
+
+    // Every decision about visibility and dismissal lives in this object so
+    // it can be tested without a DOM. See backend-banner-state.js for why
+    // the dismissal must outlive a flap.
+    const bannerState = new BackendBannerState();
+    let rearmTimer = null;
+
+    const applyDecision = (decision) => {
+      if (decision.cancelRearmTimer && rearmTimer) {
+        clearTimeout(rearmTimer);
+        rearmTimer = null;
+      }
+      if (decision.startRearmTimer && !rearmTimer) {
+        rearmTimer = setTimeout(() => {
+          rearmTimer = null;
+          applyDecision(bannerState.onRearmTimerFired());
+        }, bannerState.rearmAfterMs);
+      }
+      banner.hidden = !decision.visible;
+    };
 
     const render = (state, detail) => {
-      if (state === 'running') {
-        banner.hidden = true;
-        banner.classList.remove('backend-banner--restarting');
-        userDismissed = false; // reset for next failure
-        return;
-      }
+      const decision = bannerState.onStatus(state);
+
       if (state === 'restarting') {
-        banner.hidden = false;
         banner.classList.add('backend-banner--restarting');
         titleEl.textContent = t('backend.restartingTitle');
         detailEl.textContent = t('backend.restartingDetail');
         restartBtn.disabled = true;
-        return;
+      } else if (state === 'down') {
+        banner.classList.remove('backend-banner--restarting');
+        if (detail === BACKEND_MISSING) {
+          // A packaged install whose backend executable has gone. Almost
+          // always antivirus quarantine. Restarting cannot help — it would
+          // look for the same missing file — so the button is hidden rather
+          // than left there to be pressed forever, which is exactly what
+          // 4wen did (thread #262).
+          titleEl.textContent = t('backend.missingTitle');
+          detailEl.textContent = t('backend.missingDetail');
+          restartBtn.hidden = true;
+        } else {
+          titleEl.textContent = t('backend.title');
+          detailEl.textContent = detail
+            ? t('backend.detailWithError', { error: detail })
+            : t('backend.detail');
+          restartBtn.hidden = false;
+          restartBtn.disabled = false;
+        }
+      } else {
+        banner.classList.remove('backend-banner--restarting');
       }
-      // 'down' (default)
-      if (userDismissed) return;
-      banner.hidden = false;
-      banner.classList.remove('backend-banner--restarting');
-      titleEl.textContent = t('backend.title');
-      detailEl.textContent = detail
-        ? t('backend.detailWithError', { error: detail })
-        : t('backend.detail');
-      restartBtn.disabled = false;
+
+      applyDecision(decision);
     };
 
     restartBtn.addEventListener('click', async () => {
+      applyDecision(bannerState.onRestartRequested());
       restartBtn.disabled = true;
       restartBtn.textContent = t('backend.restarting');
       try {
@@ -3092,8 +3203,7 @@ class App {
     });
 
     dismissBtn.addEventListener('click', () => {
-      banner.hidden = true;
-      userDismissed = true;
+      applyDecision(bannerState.onDismiss());
     });
 
     // Subscribe to live state transitions.
@@ -3102,8 +3212,11 @@ class App {
     // First paint — query current state in case the backend died before
     // the renderer had subscribed (subscription is event-only; misses
     // any transition that already happened).
-    window.funsync.getBackendHealth?.().then((state) => {
-      if (state && state !== 'unknown') render(state);
+    window.funsync.getBackendHealth?.().then((health) => {
+      // Older shape was a bare string; current shape is { state, detail }.
+      const state = typeof health === 'string' ? health : health?.state;
+      const detail = typeof health === 'string' ? null : health?.detail;
+      if (state && state !== 'unknown') render(state, detail);
     }).catch(() => { /* ignore — IPC may not be ready yet */ });
   }
 
@@ -3169,33 +3282,47 @@ class App {
       if (!dev) dev = bpDevices.find(d => `buttplug:${d.name}` === deviceId);
       if (!dev) return { ok: false, reason: t('deviceTest.deviceNotConnected', { name: deviceId.replace(/^buttplug:/, '') }) };
 
+      // Every send* now REPORTS its outcome rather than only logging it, so
+      // a failed command can no longer be reported to the user as a passing
+      // test. Previously they swallowed into _warnOnce and returned
+      // undefined, which is how a device could sit inert while the button
+      // said it worked (adventurous1, thread #274).
+      const check = (result) => (!result || result.ok !== false)
+        ? null
+        : { ok: false, reason: result.error || t('deviceTest.buttplugFailed') };
+
       try {
+        let r;
         if (dev.canLinear) {
-          await this.buttplugManager.sendLinear(dev.index, 70, 500);
-          await new Promise(r => setTimeout(r, 550));
-          await this.buttplugManager.sendLinear(dev.index, 20, 500);
+          r = await this.buttplugManager.sendLinear(dev.index, 70, 500);
+          if (check(r)) return check(r);
+          await new Promise(res => setTimeout(res, 550));
+          r = await this.buttplugManager.sendLinear(dev.index, 20, 500);
         } else if (dev.canOscillate) {
-          // Brief, low nudge — enough to prove routing without spinning a
-          // flywheel up. Mirrors the connection panel's machine test.
-          await this.buttplugManager.sendOscillate(dev.index, 20);
-          await new Promise(r => setTimeout(r, 600));
-          await this.buttplugManager.sendOscillate(dev.index, 0);
+          // Flywheel machines need enough power to break stiction or the
+          // test proves nothing — see testOscillate(). Respects the user's
+          // safety cap.
+          const cap = this.buttplugSync?.getMaxIntensity?.(dev.index) ?? 100;
+          r = await this.buttplugManager.testOscillate(dev.index, cap);
         } else if (dev.canScalar) {
-          await this.buttplugManager.sendScalar(dev.index, 0.3);
-          await new Promise(r => setTimeout(r, 500));
-          await this.buttplugManager.sendScalar(dev.index, 0);
+          r = await this.buttplugManager.sendScalar(dev.index, 30);
+          if (check(r)) return check(r);
+          await new Promise(res => setTimeout(res, 500));
+          r = await this.buttplugManager.sendScalar(dev.index, 0);
         } else if (dev.canVibrate) {
-          await this.buttplugManager.sendVibrate(dev.index, 0.5);
-          await new Promise(r => setTimeout(r, 500));
-          await this.buttplugManager.sendVibrate(dev.index, 0);
+          r = await this.buttplugManager.sendVibrate(dev.index, 50);
+          if (check(r)) return check(r);
+          await new Promise(res => setTimeout(res, 500));
+          r = await this.buttplugManager.sendVibrate(dev.index, 0);
         } else if (dev.canRotate) {
-          await this.buttplugManager.sendRotate(dev.index, 0.5, true);
-          await new Promise(r => setTimeout(r, 500));
-          await this.buttplugManager.sendRotate(dev.index, 0, true);
+          r = await this.buttplugManager.sendRotate(dev.index, 50, true);
+          if (check(r)) return check(r);
+          await new Promise(res => setTimeout(res, 500));
+          r = await this.buttplugManager.sendRotate(dev.index, 0, true);
         } else {
           return { ok: false, reason: t('deviceTest.noTestableOutput') };
         }
-        return { ok: true };
+        return check(r) || { ok: true };
       } catch (err) {
         return { ok: false, reason: err.message || t('deviceTest.buttplugFailed') };
       }
@@ -3615,8 +3742,12 @@ class App {
       // Same reason as Handy HSSP: cloud-script-upload model, no per-tick
       // hook. Extender stretches first, then the cutoff clamps.
       const extenderEnabled = !!this.settings?.get?.('player.rangeExtender.enabled');
+      // extend → fill → clamp, same as the Handy HSSP path above.
       const uploadContent = clampRawScriptContent(
-        extendRawScriptContent(rawContent, extenderEnabled),
+        fillRawScriptContent(
+          extendRawScriptContent(rawContent, extenderEnabled),
+          this._fillerOptionsForUpload(),
+        ),
         this._cutoffFromSettings('autoblow'),
       );
       const ok = await this.autoblowSync.uploadScript(uploadContent);
@@ -4156,8 +4287,15 @@ class App {
     // same order as the per-tick stack (extender → … → cutoff). HSSP plays
     // server-side, so both must be baked into the uploaded content.
     const cutoff = this._cutoffFromSettings('handy');
+    // extend → fill → clamp. Gap filler is baked in here because HSSP plays
+    // the uploaded script from the device's own clock — there is no per-tick
+    // hook, so without this the Handy at 1x would be the one device that
+    // silently got no filler.
     const uploadContent = clampRawScriptContent(
-      extendRawScriptContent(rawContent, extenderEnabled),
+      fillRawScriptContent(
+        extendRawScriptContent(rawContent, extenderEnabled),
+        this._fillerOptionsForUpload(),
+      ),
       cutoff,
     );
 
@@ -6748,6 +6886,7 @@ class App {
     // Load settings
     const gapSettings = this.settings.get('player.gapSkip') || {};
     this.gapSkipEngine.setSettings(gapSettings.mode || 'off', gapSettings.threshold || 10000);
+    this._applyFillerSettings();
 
     // Wire overlay callbacks
     const gapSkipLabel = (gapType) => gapType === 'leading' ? t('gapSkip.skipToAction')
@@ -6828,6 +6967,12 @@ class App {
     this.gapSkipEngine.loadGaps();
     this.progressBar.setGaps(this.gapSkipEngine.gaps);
     this.gapSkipEngine.start();
+
+    // Filler needs the same two preconditions this method already waits for:
+    // a loaded script and a known duration (leading and trailing gaps are
+    // undefined without it). Rebuilding here rather than at load time means
+    // it inherits the loadedmetadata deferral above for free.
+    this._applyFillerSettings();
   }
 
   _stopGapSkip() {
@@ -7432,6 +7577,65 @@ class App {
 
   // --- Library Collections ---
 
+  /**
+   * Probe which source paths answer, cached for the session.
+   *
+   *   1. DISABLED SOURCES ARE NEVER TOUCHED. The scan already honoured the
+   *      toggle; the probe did not, so switching a dead NAS off did nothing
+   *      and deleting the source was the only escape.
+   *   2. TIME-BOXED in the main process, so a dead mapped drive costs ~800ms
+   *      once rather than blocking the UI.
+   *   3. CACHED. `_refreshCollectionsUI` runs from nine call sites; without a
+   *      cache that is nine probes per user action.
+   *
+   * A disabled source is reported REACHABLE, not unreachable — "unreachable"
+   * drives the LOCKED presentation, and a source the user switched off
+   * themselves must read as plainly off, not locked.
+   *
+   * @param {object[]} sources
+   * @param {boolean} [force] bypass the cache (Recheck button)
+   * @returns {Promise<Set<string>>} paths that did not answer
+   */
+  async _probeSourceReachability(sources, force = false) {
+    const list = Array.isArray(sources) ? sources : [];
+    const paths = sourcesToProbe(list).map((s) => s.path);
+    const key = paths.join('|');
+
+    if (!force && this._sourceProbeCache && this._sourceProbeKey === key) {
+      return this._sourceProbeCache;
+    }
+
+    const unreachable = new Set();
+    if (paths.length > 0) {
+      try {
+        const results = await window.funsync.filesExist(paths, SOURCE_PROBE_TIMEOUT_MS);
+        if (Array.isArray(results) && results.length === paths.length) {
+          paths.forEach((p, i) => { if (!results[i]) unreachable.add(p); });
+        }
+        // Length mismatch is a contract break, not evidence of dead paths.
+      } catch {
+        // Fail OPEN. Marking a working library unreachable because an IPC
+        // hiccuped is far worse than missing a lock state.
+      }
+    }
+
+    this._sourceProbeKey = key;
+    this._sourceProbeCache = unreachable;
+    return unreachable;
+  }
+
+  /** Recheck button: drop the cache, re-probe, repaint. */
+  async _recheckSources() {
+    const sources = this.settings.get('library.sources') || [];
+    await this._probeSourceReachability(sources, true);
+    if (this.library) this.library._lastScanKey = null;
+    await this._refreshCollectionsUI();
+    this.settingsPanel?.refreshSources?.();
+    if (this._currentView() === 'library') {
+      this.library?.show?.(this._getViewEl('library'));
+    }
+  }
+
   async _refreshCollectionsUI() {
     const collections = this.settings.get('library.collections') || [];
     let activeCollectionId = this.settings.get('library.activeCollectionId') || null;
@@ -7445,16 +7649,13 @@ class App {
       this.settings.set('library.sources', sources);
     }
 
-    // Check which source paths are available (external drives may be disconnected)
-    const unavailablePaths = new Set();
-    await Promise.all(sources.map(async (s) => {
-      try {
-        const exists = await window.funsync.fileExists(s.path);
-        if (!exists) unavailablePaths.add(s.path);
-      } catch {
-        unavailablePaths.add(s.path);
-      }
-    }));
+    // Which source paths are reachable right now.
+    //
+    // This used to probe EVERY source with a synchronous `existsSync`, which
+    // froze the app for ~5s every 20-30s on an offline NAS even after the user
+    // switched that source off (lnlytrckr, EroScripts #251/#255). Two things
+    // fix it: skip what the user disabled, and never block.
+    const unavailablePaths = await this._probeSourceReachability(sources);
 
     // Determine which collections are unavailable (any video from an unavailable source)
     // Use separator-aware prefix check to avoid false matches (e.g. D:/Videos vs D:/Videos2)
@@ -9675,9 +9876,7 @@ class App {
     for (const catId of catIds) {
       const cat = allCats.find((c) => c.id === catId);
       if (cat) {
-        const dot = document.createElement('span');
-        dot.className = 'player__category-dot';
-        dot.style.background = cat.color;
+        const dot = createCategoryMark(cat, { className: 'player__category-dot' });
         dot.title = cat.name;
         container.appendChild(dot);
       }

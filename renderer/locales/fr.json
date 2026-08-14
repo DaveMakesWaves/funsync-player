@@ -249,14 +249,16 @@
   },
   "backend": {
     "title": "Le backend ne répond pas",
-    "detail": "Les scans de bibliothèque, miniatures et fonctions VR en ont besoin. La lecture fonctionne toujours pour les fichiers déjà ouverts.",
-    "detailWithError": "Les scans de bibliothèque, miniatures et fonctions VR en ont besoin. La lecture fonctionne toujours pour les fichiers déjà ouverts. ({error})",
+    "detail": "Les miniatures, la VR et la télécommande web en ont besoin. La lecture continue normalement. Essayez « Redémarrer le backend » ci-dessous.",
+    "detailWithError": "Les miniatures, la VR et la télécommande web en ont besoin. La lecture continue normalement. Essayez « Redémarrer le backend » ci-dessous. ({error})",
     "restart": "Redémarrer le backend",
     "restarting": "Redémarrage…",
     "restartingTitle": "Redémarrage du backend…",
     "restartingDetail": "Cela prend généralement quelques secondes.",
     "viewLogs": "Voir les journaux",
-    "dismiss": "Fermer la bannière"
+    "dismiss": "Fermer la bannière",
+    "missingTitle": "Programme backend introuvable",
+    "missingDetail": "FunSync n'a pas trouvé son programme backend. Le plus souvent, l'antivirus l'a mis en quarantaine après l'installation. Ajoutez FunSync aux exclusions de votre antivirus et réinstallez. La lecture fonctionne toujours ; les miniatures, l'analyse, la VR et la télécommande web non."
   },
   "dropZone": {
     "title": "Déposer pour charger",
@@ -470,7 +472,8 @@
       "searchEroScripts": "Rechercher sur EroScripts..."
     },
     "heatmapUnavailable": "Carte thermique indisponible",
-    "sortSwitchTo": "Passer à {order}"
+    "sortSwitchTo": "Passer à {order}",
+    "selectedAll": "{count, plural, one {# vidéo sélectionnée} other {# vidéos sélectionnées}}"
   },
   "playlists": {
     "title": "Listes de lecture",
@@ -545,7 +548,16 @@
     "gridView": "Vue en grille",
     "listView": "Vue en liste",
     "detailEmpty": "Aucune vidéo dans cette catégorie",
-    "detailEmptyHint": "Assigne des vidéos depuis la Bibliothèque via le menu kebab"
+    "detailEmptyHint": "Assigne des vidéos depuis la Bibliothèque via le menu kebab",
+    "iconLabel": "Icône",
+    "iconModeColor": "Couleur",
+    "iconModeShape": "Forme",
+    "iconModeEmoji": "Émoji",
+    "iconEmojiPlaceholder": "Collez un émoji",
+    "iconPreview": "Aperçu",
+    "editCategory": "Modifier la catégorie",
+    "iconEmojiSearch": "Rechercher des groupes",
+    "iconEmojiNone": "Aucun résultat"
   },
   "stroke": {
     "rangeLabel": "Plage de stroke",
@@ -969,7 +981,16 @@
       "removed": "Source \"{name}\" supprimée",
       "toggled": "Source \"{name}\" {state}",
       "stateEnabled": "activée",
-      "stateDisabled": "désactivée"
+      "stateDisabled": "désactivée",
+      "unreachableHint": "Cette source est inaccessible, elle ne peut donc pas être activée. Ton réglage est conservé.",
+      "unreachableReason": "Inaccessible. Reconnecte le disque, puis utilise Vérifier à nouveau.",
+      "recheck": "Vérifier à nouveau",
+      "recheckHint": "Vérifier à nouveau quelles sources sont accessibles",
+      "rechecking": "Vérification...",
+      "recheckedAll": "Toutes les sources sont accessibles.",
+      "recheckedSome": "{count, plural, one {# source est toujours inaccessible} other {# sources sont toujours inaccessibles}}",
+      "working": "Traitement...",
+      "scanning": "Analyse de la bibliothèque..."
     },
     "multiAxisConfirm": {
       "title": "Passer par défaut en multi-axe ?",
@@ -1060,7 +1081,21 @@
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "Vidéo et performances",
       "rememberSpeedLabel": "Mémoriser la vitesse de lecture",
-      "rememberSpeedHint": "Conserve la vitesse actuelle au chargement d'une autre vidéo. Désactivé par défaut : chaque vidéo démarre à 1x."
+      "rememberSpeedHint": "Conserve la vitesse actuelle au chargement d'une autre vidéo. Désactivé par défaut : chaque vidéo démarre à 1x.",
+      "fillerHeader": "Remplissage des blancs",
+      "fillerEnable": "Remplir les blancs par des mouvements",
+      "fillerResetEnable": "Réinitialiser le remplissage",
+      "fillerResetEnableAria": "Réinitialiser le remplissage des blancs",
+      "fillerPattern": "Motif",
+      "fillerPreviewAria": "Aperçu du motif de remplissage",
+      "fillerHint": "Joue des mouvements doux pendant les longues plages sans script au lieu de laisser l'appareil immobile. Ignoré si Saut de blanc est en automatique.",
+      "fillerStats": "Moyenne {avg} unités/s, pic {max} unités/s",
+      "fillerShape": "Forme",
+      "fillerBpm": "Vitesse (BPM)",
+      "fillerDepth": "Profondeur",
+      "fillerAbsolute": "Définir une plage exacte",
+      "fillerAbsMin": "Minimum",
+      "fillerAbsMax": "Maximum"
     },
     "appearance": {
       "themeHeader": "Thème",
@@ -1528,7 +1563,8 @@
       "apply": "Appliquer",
       "test": "Tester",
       "measure": "Mesurer",
-      "measuring": "Mesure…"
+      "measuring": "Mesure…",
+      "applyLatency": "Appliquer"
     },
     "handy": {
       "connectionKey": "Code de connexion",
@@ -1656,7 +1692,9 @@
       "deviceVacu2": "VacuGlide 2",
       "errEnterToken": "Saisis le token de l'appareil",
       "latencyToast": "Latence Autoblow : {ms} ms",
-      "latencyFailed": "Échec de mesure de la latence : {error}"
+      "latencyFailed": "Échec de mesure de la latence : {error}",
+      "latencyNoReading": "Aucune mesure de latence. Vérifiez que l'appareil est connecté.",
+      "latencyApplied": "Décalage de synchronisation réglé sur {ms} ms"
     },
     "sync": {
       "experimental": "EXPÉRIMENTAL",
@@ -1812,5 +1850,36 @@
     "resumeAt": "Reprendre à {time}",
     "progressLabel": "{percent} % vu",
     "resumedToast": "Repris à {time}"
+  },
+  "filler": {
+    "preset": {
+      "slowTease": "Taquinerie lente",
+      "gentle": "Doux",
+      "steady": "Régulier",
+      "building": "Crescendo",
+      "drift": "Dérive",
+      "pulse": "Pulsation",
+      "custom": "Personnalisé"
+    },
+    "shape": {
+      "sine": "Sinus",
+      "triangle": "Triangle",
+      "sawtooth": "Dent de scie",
+      "square": "Carrée",
+      "escalating": "Crescendo",
+      "random": "Aléatoire"
+    }
+  },
+  "emoji": {
+    "group": {
+      "smileys": "Émoticônes",
+      "people": "Personnes",
+      "hearts": "Cœurs et symboles",
+      "nature": "Animaux et nature",
+      "food": "Nourriture et boissons",
+      "activity": "Activité",
+      "objects": "Objets",
+      "travel": "Voyages et lieux"
+    }
   }
 }

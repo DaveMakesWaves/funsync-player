@@ -9,6 +9,7 @@
 
 import { Modal } from '../components/modal.js';
 import { t } from './i18n.js';
+import { createCategoryIconPicker } from './category-icon-picker.js';
 
 export const PRESET_COLORS = [
   '#e94560', '#ff6b81', '#f39c12', '#2ecc71',
@@ -24,14 +25,28 @@ export const PRESET_COLORS = [
  * @param {{ addCategory: (name: string, color: string) => Promise<{id: string}> }} args.settings
  * @returns {Promise<string|null>} new category id, or null if user cancelled / left the field blank.
  */
-export async function promptCreateCategory({ settings }) {
-  const result = await Modal.open({
-    title: t('categories.newCategory'),
+/**
+ * The shared name + colour + icon form, used for BOTH creating and editing.
+ *
+ * Editing matters more than creating here: an icon picker that only appears
+ * on new categories is useless to anyone who already has some, which is
+ * everybody.
+ *
+ * @param {object} args
+ * @param {string} args.title
+ * @param {string} args.confirmLabel
+ * @param {{name?:string, color?:string, icon?:object|null}} [args.initial]
+ * @returns {Promise<{name:string, color:string, icon:object|null}|null>}
+ */
+export async function promptCategoryDetails({ title, confirmLabel, initial = {} }) {
+  return Modal.open({
+    title,
     onRender(body, close) {
       const input = document.createElement('input');
       input.type = 'text';
       input.className = 'modal-input';
       input.placeholder = t('categories.categoryNamePlaceholder');
+      input.value = initial.name || '';
       body.appendChild(input);
 
       const colorLabel = document.createElement('div');
@@ -39,7 +54,7 @@ export async function promptCreateCategory({ settings }) {
       colorLabel.textContent = t('categories.color');
       body.appendChild(colorLabel);
 
-      let selectedColor = PRESET_COLORS[0];
+      let selectedColor = initial.color || PRESET_COLORS[0];
 
       const swatches = document.createElement('div');
       swatches.className = 'categories__color-swatches';
@@ -54,10 +69,19 @@ export async function promptCreateCategory({ settings }) {
           selectedColor = color;
           swatches.querySelectorAll('.categories__color-swatch').forEach((s) =>
             s.classList.toggle('categories__color-swatch--selected', s === swatch));
+          // Shapes are tinted with the category colour, so the picker has to
+          // follow the colour choice or its previews lie.
+          picker.setColor(selectedColor);
         });
         swatches.appendChild(swatch);
       }
       body.appendChild(swatches);
+
+      const picker = createCategoryIconPicker({
+        initialIcon: initial.icon || null,
+        color: selectedColor,
+      });
+      body.appendChild(picker.element);
 
       const actions = document.createElement('div');
       actions.className = 'modal-actions';
@@ -71,10 +95,10 @@ export async function promptCreateCategory({ settings }) {
       const createBtn = document.createElement('button');
       createBtn.className = 'modal-btn modal-btn--primary';
       createBtn.type = 'button';
-      createBtn.textContent = t('common.create');
+      createBtn.textContent = confirmLabel;
       createBtn.addEventListener('click', () => {
         const val = input.value.trim();
-        if (val) close({ name: val, color: selectedColor });
+        if (val) close({ name: val, color: selectedColor, icon: picker.getIcon() });
         else close(null);
       });
 
@@ -93,8 +117,22 @@ export async function promptCreateCategory({ settings }) {
       setTimeout(() => input.focus(), 0);
     },
   });
+}
 
+/**
+ * Open the create-category modal, persist the new category via
+ * `settings.addCategory(name, color, icon)`, and return the new id.
+ *
+ * @param {Object} args
+ * @param {{ addCategory: (name: string, color: string, icon?: object|null) => Promise<{id: string}> }} args.settings
+ * @returns {Promise<string|null>} new category id, or null if cancelled / blank.
+ */
+export async function promptCreateCategory({ settings }) {
+  const result = await promptCategoryDetails({
+    title: t('categories.newCategory'),
+    confirmLabel: t('common.create'),
+  });
   if (!result) return null;
-  const cat = await settings.addCategory(result.name, result.color);
+  const cat = await settings.addCategory(result.name, result.color, result.icon);
   return cat?.id ?? null;
 }

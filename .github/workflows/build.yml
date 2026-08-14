@@ -60,6 +60,50 @@ jobs:
           ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install pyinstaller
           ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m PyInstaller --distpath ../backend-dist --workpath ../build/pyinstaller --clean funsync-backend.spec
 
+      # Prove the executable exists before packaging. PyInstaller can exit 0
+      # without leaving anything at the expected path, and electron-builder
+      # copies an empty extraResources folder without complaint — so the
+      # failure mode is a green build that ships an installer with no backend
+      # and every user seeing "Backend program is missing". It would never be
+      # caught locally either, because in development app.isPackaged is false
+      # and the app runs the backend from the venv instead.
+      - name: Verify backend executable was produced
+        shell: bash
+        run: |
+          EXE="backend-dist/funsync-backend"
+          [ "${{ matrix.os }}" = "windows-latest" ] && EXE="backend-dist/funsync-backend.exe"
+          if [ ! -f "$EXE" ]; then
+            echo "FATAL: $EXE missing after a successful PyInstaller run."
+            echo "Contents of backend-dist/:"
+            ls -la backend-dist/ || echo "  (directory does not exist)"
+            exit 1
+          fi
+          SIZE=$(wc -c < "$EXE")
+          if [ "$SIZE" -lt 1000000 ]; then
+            echo "FATAL: $EXE is only $SIZE bytes — not a real build."
+            exit 1
+          fi
+          echo "OK: $EXE ($SIZE bytes)"
+
+      # Category-icon artwork (Twemoji, ~737 SVGs / 2.7 MB). Gitignored and
+      # fetched here, same treatment as ffmpeg below — it is generated
+      # third-party art, and committing it would add another copy to history
+      # every time the catalogue is regenerated. A missing SVG degrades to
+      # font rendering rather than breaking, so this failing is cosmetic, but
+      # cosmetic-and-silent is exactly what bundling them was meant to fix.
+      - name: Fetch Twemoji artwork
+        run: node scripts/fetch-twemoji.mjs
+
+      - name: Verify emoji artwork was fetched
+        shell: bash
+        run: |
+          COUNT=$(ls -1 renderer/assets/emoji/*.svg 2>/dev/null | wc -l)
+          if [ "$COUNT" -lt 100 ]; then
+            echo "FATAL: only $COUNT emoji SVGs fetched."
+            exit 1
+          fi
+          echo "OK: $COUNT emoji SVGs"
+
       - name: Download ffmpeg (Linux)
         if: matrix.os == 'ubuntu-latest'
         # Source: BtbN/FFmpeg-Builds. Hosted on GitHub's own CDN so
@@ -99,6 +143,30 @@ jobs:
         # Two publishers, one tag = the bug that broke every 0.8.0-experimental
         # release. Publishing is centralized in the `release` job below.
         run: npx electron-builder --config electron-builder.yml --${{ matrix.target }} --publish never
+
+      # And prove it survived INTO the package. The step above can succeed
+      # with an empty extraResources copy, so verifying the source file
+      # existed is not the same as verifying it shipped.
+      - name: Verify backend shipped inside the package
+        shell: bash
+        run: |
+          FOUND=0
+          for DIR in dist/win-unpacked/resources/backend dist/linux-unpacked/resources/backend; do
+            [ -d "$DIR" ] || continue
+            COUNT=$(ls -1 "$DIR" | wc -l)
+            if [ "$COUNT" -eq 0 ]; then
+              echo "FATAL: $DIR is EMPTY — this installer has no backend."
+              exit 1
+            fi
+            echo "OK: $DIR contains $COUNT file(s)"
+            FOUND=1
+          done
+          if [ "$FOUND" -eq 0 ]; then
+            echo "FATAL: no unpacked output contained resources/backend/."
+            echo "extraResources did not copy. Do NOT publish this build."
+            find dist -maxdepth 3 -type d | head -30
+            exit 1
+          fi
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
