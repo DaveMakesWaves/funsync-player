@@ -40,9 +40,16 @@ export class SyncEngine {
     this._active = true;
     this._bindVideoEvents();
 
-    // If video is already playing, sync immediately
+    // If video is already playing, sync immediately.
+    //
+    // Not awaited (start() is sync), so it MUST carry its own catch: this one
+    // is not reached through the guarded event listeners, and a rejection
+    // inside it has no owner. It broke CI rather than the app — vitest fails
+    // the run on an unhandled rejection while Node only warns (2026-08-21).
     if (!this.player.paused) {
-      this._handlePlaying();
+      this._handlePlaying().catch((err) => {
+        console.warn('[Sync] initial anchor failed:', err?.message || err);
+      });
     }
 
     console.log('Sync engine started');
@@ -156,7 +163,13 @@ export class SyncEngine {
     // play send a stop and never reach 'synced'. The suite caught that one.
     if (pauseGen !== this._pauseGen) {
       console.log('[Sync] play superseded by a pause while in flight — re-sending stop');
-      await this.handy.hsspStop();
+      // Best-effort: a device that cannot be stopped is already the worse
+      // problem, and throwing here would take the handler down with it.
+      try {
+        await this.handy.hsspStop();
+      } catch (err) {
+        console.warn('[Sync] supersede stop failed:', err?.message || err);
+      }
       return;
     }
 
