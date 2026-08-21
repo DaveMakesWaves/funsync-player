@@ -269,7 +269,11 @@ export class FunscriptEngine {
    * @returns {number} Position 0-100
    */
   getPositionAt(timeMs) {
-    const actions = this._parsed?.actions;
+    // MUST be the played list, not the authored one. This is what the device
+    // simulator draws, and reading `_parsed.actions` meant it interpolated
+    // flatly across a gap while the devices were actually running filler
+    // strokes through it (reported on Discord, 2026-08-17).
+    const actions = this.getActions();
     if (!actions || actions.length === 0) return 50;
 
     // Before first action

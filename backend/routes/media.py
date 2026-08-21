@@ -716,6 +716,19 @@ async def stream_video(video_id: str, request: Request):
             start = 0
             end = file_size - 1
 
+        # An open-ended "bytes=X-" is answered to EOF, as nginx and every
+        # other conventional file server does.
+        #
+        # TRIED AND REVERTED, 2026-08-21: capping the open form to a 16MB
+        # window, to stop one seek pushing hundreds of MB at a phone over
+        # Wi-Fi. It desynced audio from video on a real device — twice, once
+        # with a mid-body disconnect check (which truncated a response that
+        # had promised a Content-Length, and was a genuine bug) and again
+        # with the window alone, on a file that had played correctly before.
+        # The mechanism for the second one was never established; windowed
+        # 206s are ordinary HTTP and the bytes were proven byte-identical to
+        # the file on disk. Do not re-add it without a device to test on and
+        # an explanation for that.
         end = min(end, file_size - 1)
         content_length = end - start + 1
 
@@ -729,6 +742,19 @@ async def stream_video(video_id: str, request: Request):
                 await loop.run_in_executor(None, f.seek, start)
                 remaining = content_length
                 while remaining > 0:
+                    # NO is_disconnected() check here, deliberately.
+                    #
+                    # It was added on 2026-08-21 to stop an abandoned response
+                    # pushing into a dead socket, and it broke audio/video sync
+                    # within minutes: breaking out of the loop early ends the
+                    # body BEFORE the Content-Length we already promised, so
+                    # the client is left with a short read for a range it
+                    # believes it has in full. A demuxer handed a truncated
+                    # segment does not error — it drifts.
+                    #
+                    # Starlette already cancels this generator when the client
+                    # goes away, which is the correct mechanism: it tears the
+                    # response down rather than completing it with a lie.
                     read_size = min(chunk_size, remaining)
                     data = await loop.run_in_executor(None, f.read, read_size)
                     if not data:
@@ -747,7 +773,20 @@ async def stream_video(video_id: str, request: Request):
                 "Content-Length": str(content_length),
                 "Accept-Ranges": "bytes",
                 "Access-Control-Allow-Origin": "*",
-                "Cache-Control": "public, max-age=3600",
+                # no-store, NOT "public, max-age=3600".
+                #
+                # A cached 206 is a cached SLICE, keyed by URL, and the slice
+                # boundaries depend on what the server chose to send. When the
+                # 16MB window experiment above was reverted, phones were left
+                # holding an hour of cached 16MB slices for a URL that now
+                # answers with the whole remainder — seeks landed on stale,
+                # differently-shaped entries and the player simply snapped
+                # back to where it started (Dave, 2026-08-21).
+                #
+                # There is nothing to gain here either: the file is on a LAN
+                # the client is already talking to, and a browser media cache
+                # is the wrong place to put gigabytes of video.
+                "Cache-Control": "no-store",
             },
         )
     else:
@@ -759,6 +798,7 @@ async def stream_video(video_id: str, request: Request):
                 "Accept-Ranges": "bytes",
                 "Content-Length": str(file_size),
                 "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-store",
             },
         )
 

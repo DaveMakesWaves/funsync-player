@@ -27,16 +27,20 @@ export class KeyboardHandler {
   }
 
   /**
-   * Key-up handler — currently only the Orgasm Switch hold key. Deliberately
-   * does NOT gate on focus/editor: if a hold was started we must always
-   * release it, even if focus moved to an input mid-hold (otherwise the
-   * device would be stuck driving the orgasm loop). The hold itself is gated
-   * in _onKeyDown.
+   * Key-up handler — the two hold keys (Orgasm Switch X, Edge Hold Z).
+   * Deliberately does NOT gate on focus/editor: if a hold was started we
+   * must always release it, even if focus moved to an input mid-hold
+   * (otherwise the device would be stuck driving the orgasm loop, or — for
+   * Edge — stuck silent). The holds themselves are gated in _onKeyDown.
    */
   _onKeyUp(e) {
     if ((e.key === 'x' || e.key === 'X') && this._orgasmHoldActive) {
       this._orgasmHoldActive = false;
       if (this.onOrgasmHold) this.onOrgasmHold(false);
+    }
+    if ((e.key === 'z' || e.key === 'Z') && this._edgeHoldActive) {
+      this._edgeHoldActive = false;
+      if (this.onEdgeHold) this.onEdgeHold(false);
     }
   }
 
@@ -56,6 +60,34 @@ export class KeyboardHandler {
       if (target) {
         e.preventDefault();
         this.onNavigate(target);
+        return;
+      }
+    }
+
+    // Ctrl+= / Ctrl+- / Ctrl+0 zoom the VR video, mirroring Ctrl+scroll and
+    // trackpad pinch for anyone without a wheel. Handled ahead of the main
+    // switch because these keys otherwise mean nothing here, and because
+    // preventDefault MUST run or Chromium's page zoom rescales the whole UI.
+    // '+' is included since Shift+= is how many layouts produce it.
+    // Gated on the editor being closed, matching every other player-only
+    // key here. The editor binds BARE +/=/- to its own timeline zoom and
+    // calls stopPropagation, so a focused canvas already wins — but with
+    // the editor open and focus elsewhere this would otherwise zoom the
+    // video behind the editor, which is not what the user is looking at.
+    if (e.ctrlKey && !e.altKey && !this.scriptEditor?.isOpen) {
+      if (e.key === '=' || e.key === '+') {
+        e.preventDefault();
+        if (this.onVRZoom) this.onVRZoom(1);
+        return;
+      }
+      if (e.key === '-' || e.key === '_') {
+        e.preventDefault();
+        if (this.onVRZoom) this.onVRZoom(-1);
+        return;
+      }
+      if (e.key === '0') {
+        e.preventDefault();
+        if (this.onVRZoomReset) this.onVRZoomReset();
         return;
       }
     }
@@ -137,6 +169,30 @@ export class KeyboardHandler {
         }
         break;
 
+      // Home / End — jump to the start or end of the video.
+      //
+      // These were listed in the `?` help from the beginning but never
+      // actually implemented in the player: pressing them did nothing.
+      // Found by the shortcut audit on 2026-08-15. The editor binds both
+      // to its own actions (repeat-last-stroke / move-to-playhead), so
+      // they are gated like every other player-only key.
+      case 'Home':
+        if (this.scriptEditor?.isOpen) break;
+        e.preventDefault();
+        this.player.seek(0);
+        break;
+
+      case 'End':
+        if (this.scriptEditor?.isOpen) break;
+        e.preventDefault();
+        // Land a hair before the end: seeking exactly to `duration` fires
+        // `ended` on some builds, which would advance the playlist instead
+        // of showing the last frame.
+        if (Number.isFinite(this.player.duration) && this.player.duration > 0) {
+          this.player.seek(Math.max(0, this.player.duration - 0.05));
+        }
+        break;
+
       case 'm':
       case 'M':
         e.preventDefault();
@@ -209,14 +265,16 @@ export class KeyboardHandler {
 
       case 'R':
         // Shift+R cycles the VR-as-flat playback mode (Off → Left → Right → Off).
-        // Ctrl+Shift+R opens the VR Format panel for the current video
-        // — manual projection / eye / zoom / apply-to-folder overrides.
         // Format is taken from the current video's stereo classification
         // — fed in by app.js after loadVideo runs. No-op if no format set.
+        //
+        // Ctrl+Shift+R used to open the VR Format panel here. Removed
+        // 2026-08-14: zoom is now direct manipulation (Ctrl+scroll, trackpad
+        // pinch, Ctrl+= / Ctrl+-), so the panel no longer needs a hotkey of
+        // its own. It is still reachable from the player overflow menu and
+        // the library kebab, both of which stay in sync with the gesture.
         e.preventDefault();
-        if (e.ctrlKey) {
-          if (this.onOpenVRFormat) this.onOpenVRFormat();
-        } else if (this.onCycleVRFlatten) {
+        if (this.onCycleVRFlatten) {
           this.onCycleVRFlatten();
         } else {
           this.player.cycleAspectRatio();
@@ -323,6 +381,21 @@ export class KeyboardHandler {
         if (!this._orgasmHoldActive) {
           this._orgasmHoldActive = true;
           if (this.onOrgasmHold) this.onOrgasmHold(true);
+        }
+        break;
+
+      case 'z':
+      case 'Z':
+        // Edge Hold — the Orgasm Switch's inverse, on the neighboring key:
+        // HOLD to stop all device output while the video keeps playing;
+        // release resumes the main script in sync at the current position
+        // (handled in _onKeyUp). Same auto-repeat guard and editor gate as X.
+        // (MattWritesNSFW, EroScripts #301.)
+        if (this.scriptEditor?.isOpen) break;
+        e.preventDefault();
+        if (!this._edgeHoldActive) {
+          this._edgeHoldActive = true;
+          if (this.onEdgeHold) this.onEdgeHold(true);
         }
         break;
 

@@ -8,12 +8,20 @@
 // Handles:
 //  - Visibility change: pauses devices when the phone is backgrounded (iOS
 //    / Android throttle WebSocket activity aggressively — don't leave toys
-//    running while the screen is off).
-//  - Reconnect on transient network drops (3s grace period before the
-//    desktop stops devices, matches scope-doc spec).
+//    running while the screen is off). Also checked on `play` itself: a
+//    page that is ALREADY hidden when playback starts never gets a
+//    visibilitychange transition, so the event alone is not enough.
+//  - Buffering stalls: `state.paused` reports EFFECTIVE playback (paused
+//    OR seeking OR starved buffer), not just `video.paused`. During a
+//    network seek the element stops firing timeupdate while `paused`
+//    stays false — without this the desktop proxy extrapolates through
+//    the stall and devices play a timeline the video has already left.
+//  - Reconnect on transient network drops with capped backoff (the
+//    desktop side has its own 3s grace before stopping devices).
 //  - Server kick (`kicked` payload): closes cleanly and surfaces a UI hook.
 
 const STATE_THROTTLE_MS = 250;
+const RECONNECT_MAX_MS = 10000;
 
 export class RemoteSyncClient {
   /**
@@ -31,19 +39,40 @@ export class RemoteSyncClient {
 
     this._ws = null;
     this._kicked = false;
+    this._stopped = false;
+    this._retries = 0;
+    this._retryTimer = null;
     this._lastStateSent = 0;
     this._boundHandlers = null;
 
-    this._onPlay = () => this._send({ type: 'play' });
+    this._onPlay = () => {
+      // The visibilitychange guard below only fires on a TRANSITION; a page
+      // that is already hidden when play() lands never sees one, and Chrome
+      // starves timeupdate in hidden pages — the desktop would extrapolate
+      // stale state with nothing correcting it. Refuse to start hidden.
+      if (typeof document !== 'undefined' && document.hidden) {
+        try { this._video.pause(); } catch { /* ignore */ }
+        return;
+      }
+      this._send({ type: 'play' });
+    };
     this._onPause = () => this._send({ type: 'pause' });
     this._onSeeked = () => this._send({ type: 'seek', at: Math.round(this._video.currentTime * 1000) });
     this._onEnded = () => this._send({ type: 'ended' });
     this._onTimeUpdate = () => this._sendStateThrottled();
+    // Stall transitions bypass the throttle: they are rare, and each one
+    // flips the effective-paused bit the desktop uses to stop/start devices.
+    this._onStallChange = () => this._sendState();
     this._onVisibility = () => {
       if (document.hidden && !this._video.paused) {
         // Phone backgrounded — pause playback so devices don't keep running
         // while the WebSocket silently throttles.
         try { this._video.pause(); } catch { /* ignore */ }
+      } else if (!document.hidden && !this._ws && !this._stopped && !this._kicked) {
+        // Back on screen with a dead socket — reconnect immediately rather
+        // than waiting out the backoff timer.
+        if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+        this.start();
       }
     };
   }
@@ -51,6 +80,12 @@ export class RemoteSyncClient {
   /** Open the socket. Resolves once it's open or fails to open (best-effort). */
   start() {
     if (this._ws) return;
+    // The visibility guard outlives any one socket: it pauses on hide and
+    // drives reconnect on unhide, so it must NOT die with the connection.
+    if (!this._visibilityBound && typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this._onVisibility);
+      this._visibilityBound = true;
+    }
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const url = `${proto}//${location.host}/api/remote/sync?videoId=${encodeURIComponent(this._videoId)}`;
     let ws;
@@ -58,6 +93,7 @@ export class RemoteSyncClient {
     this._ws = ws;
 
     ws.addEventListener('open', () => {
+      this._retries = 0;
       ws.send(JSON.stringify({
         type: 'hello',
         videoId: this._videoId,
@@ -83,9 +119,29 @@ export class RemoteSyncClient {
     ws.addEventListener('close', () => {
       this._detachVideoHandlers();
       this._ws = null;
+      this._scheduleReconnect();
     });
 
     ws.addEventListener('error', () => { /* 'close' will follow */ });
+  }
+
+  /**
+   * Capped-backoff reconnect after an unexpected close. A Wi-Fi blip or an
+   * OS-killed socket used to end device sync silently for the rest of the
+   * video — playback carried on, devices sat dead, and only exiting and
+   * reopening the video restored sync. Kicks and deliberate stop() never
+   * reconnect; hidden pages wait for the visibility handler instead (the
+   * socket would just be throttled into uselessness anyway).
+   */
+  _scheduleReconnect() {
+    if (this._stopped || this._kicked || this._retryTimer) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    const delay = Math.min(1000 * 2 ** this._retries, RECONNECT_MAX_MS);
+    this._retries++;
+    this._retryTimer = setTimeout(() => {
+      this._retryTimer = null;
+      if (!this._stopped && !this._kicked && !this._ws) this.start();
+    }, delay);
   }
 
   /**
@@ -123,6 +179,12 @@ export class RemoteSyncClient {
 
   /** Cleanly signal disconnect and tear down. */
   stop() {
+    this._stopped = true;
+    if (this._retryTimer) { clearTimeout(this._retryTimer); this._retryTimer = null; }
+    if (this._visibilityBound) {
+      document.removeEventListener('visibilitychange', this._onVisibility);
+      this._visibilityBound = false;
+    }
     this._detachVideoHandlers();
     if (this._ws) {
       try {
@@ -150,7 +212,12 @@ export class RemoteSyncClient {
     this._send({
       type: 'state',
       at: Math.round(this._video.currentTime * 1000),
-      paused: this._video.paused,
+      // Effective playback, not the element's `paused` bit: during a seek
+      // or buffer starvation `paused` stays false while no frames advance.
+      // Reporting that honestly is what lets the desktop stop devices
+      // instead of extrapolating through the stall. readyState < 3 is
+      // HAVE_CURRENT_DATA or worse — nothing to advance into.
+      paused: this._video.paused || this._video.seeking || this._video.readyState < 3,
       rate: this._video.playbackRate || 1,
       duration: isFinite(this._video.duration) ? this._video.duration : 0,
     });
@@ -169,7 +236,13 @@ export class RemoteSyncClient {
     this._video.addEventListener('seeked', this._onSeeked);
     this._video.addEventListener('ended', this._onEnded);
     this._video.addEventListener('timeupdate', this._onTimeUpdate);
-    document.addEventListener('visibilitychange', this._onVisibility);
+    // Stall boundaries: timeupdate stops during these, so each must push a
+    // state itself or the desktop never learns playback isn't advancing.
+    this._video.addEventListener('seeking', this._onStallChange);
+    this._video.addEventListener('waiting', this._onStallChange);
+    this._video.addEventListener('stalled', this._onStallChange);
+    this._video.addEventListener('playing', this._onStallChange);
+    this._video.addEventListener('canplay', this._onStallChange);
     this._boundHandlers = true;
   }
 
@@ -180,7 +253,11 @@ export class RemoteSyncClient {
     this._video.removeEventListener('seeked', this._onSeeked);
     this._video.removeEventListener('ended', this._onEnded);
     this._video.removeEventListener('timeupdate', this._onTimeUpdate);
-    document.removeEventListener('visibilitychange', this._onVisibility);
+    this._video.removeEventListener('seeking', this._onStallChange);
+    this._video.removeEventListener('waiting', this._onStallChange);
+    this._video.removeEventListener('stalled', this._onStallChange);
+    this._video.removeEventListener('playing', this._onStallChange);
+    this._video.removeEventListener('canplay', this._onStallChange);
     this._boundHandlers = false;
   }
 }

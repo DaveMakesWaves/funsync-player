@@ -49,6 +49,7 @@ if (PORTABLE_DIR) {
 }
 
 const log = require('./logger');
+const { setRedactionEnabled } = require('./log-redact');
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState, getHealthDetail } = require('./python-bridge');
 const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
@@ -335,6 +336,11 @@ app.whenReady().then(async () => {
   const _tStore = Date.now();
   await store.initStore();
   log.info(`[Timing main] store.initStore: ${Date.now() - _tStore}ms`);
+
+  // Apply the saved log-redaction preference now the store is readable.
+  // logger.js is required long before this point, so it starts with
+  // redaction off and picks up the user's choice here.
+  setRedactionEnabled(store.getSetting('security.hideLogFileNames'));
 
   // Wire snapshot scheduling: every settings write debounces a 60 s
   // snapshot. The blacklist filter inside data-backup keeps high-churn
@@ -655,6 +661,14 @@ ipcMain.handle('get-setting', (_event, path) => {
 
 ipcMain.handle('set-setting', (_event, path, value) => {
   store.setSetting(path, value);
+  // Keep the log redactor in step the moment the toggle moves, so a user who
+  // enables it before grabbing a log does not have to restart first.
+  // NB: store.setSetting prefixes 'settings.' itself, so the path that
+  // arrives here is unprefixed. Getting this wrong makes the toggle a no-op
+  // that still looks saved in the UI.
+  if (path === 'security.hideLogFileNames') {
+    setRedactionEnabled(value);
+  }
 });
 
 ipcMain.handle('add-recent-file', (_event, filePath) => {

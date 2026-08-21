@@ -27,6 +27,7 @@
 // hardware, not just flywheels.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { ButtplugManager } from '../../renderer/js/buttplug-manager.js';
+import { ButtplugSync } from '../../renderer/js/buttplug-sync.js';
 
 /** A manager with one fake device wired straight into the private map. */
 function managerWith({ throws = false } = {}) {
@@ -221,5 +222,145 @@ describe('stopSustainedOutputs', () => {
   it('survives an empty device list', async () => {
     const mgr = rig([]);
     await expect(mgr.stopSustainedOutputs()).resolves.toBeUndefined();
+  });
+});
+
+// tintinfernando13, thread #285 and a follow-up PM: "the vacuum it creates
+// using the scripts seems way too strong... I've tried changing the
+// percentages, but it's still the same."
+//
+// He was right, and it was not user error. His JoyHub Mirage 3 reports
+// Vibrate + Rotate + E-Stim, and his screenshot showed Max set to 65% with
+// the 2s ramp on. But the cap only ever reached the SCALAR and OSCILLATE
+// paths — sendVibrate and sendRotate were uncapped and unramped. The
+// suction he was feeling came out of the vibrate path at full script value.
+//
+// The slider is presented once per DEVICE, so it has to govern the whole
+// device. Gated on the device actually showing the control, or every plain
+// vibrator (which has no slider at all) would be silently pinned at the 70%
+// default with no way to raise it.
+describe('the Max cap governs the whole device, not just e-stim', () => {
+  function syncWith(caps) {
+    const sent = { vibrate: [], rotate: [], scalar: [] };
+    const sync = new ButtplugSync({
+      buttplugManager: {
+        sendVibrate: (_i, v) => sent.vibrate.push(v),
+        sendRotate: (_i, v) => sent.rotate.push(v),
+        sendScalar: (_i, v) => sent.scalar.push(v),
+        sendLinear: () => {},
+        sendOscillate: () => {},
+        get devices() { return [{ index: 0, ...caps }]; },
+      },
+      funscriptEngine: { isLoaded: true, getActions: () => [{ at: 0, pos: 0 }, { at: 1000, pos: 100 }] },
+      videoPlayer: { get currentTime() { return 0.5; }, get paused() { return false; } },
+    });
+    sync._rampUpMap.set(0, false);   // isolate the CAP from the ramp
+    return { sync, sent };
+  }
+
+  it('caps vibrate on a device that also has e-stim', () => {
+    const { sync, sent } = syncWith({ canVibrate: true, canScalar: true });
+    sync.setMaxIntensity(0, 65);
+    expect(sync._safe({ index: 0, canVibrate: true, canScalar: true }, 100)).toBeLessThanOrEqual(65);
+  });
+
+  it('caps rotate on the same device', () => {
+    const { sync } = syncWith({ canRotate: true, canScalar: true });
+    sync.setMaxIntensity(0, 40);
+    expect(sync._safe({ index: 0, canRotate: true, canScalar: true }, 100)).toBeLessThanOrEqual(40);
+  });
+
+  // THE GUARD. A plain vibrator shows no Max slider, so capping it would
+  // hold it at the 70% default forever with no control to change it.
+  it('leaves a vibrate-only device completely alone', () => {
+    const { sync } = syncWith({ canVibrate: true });
+    expect(sync._safe({ index: 0, canVibrate: true }, 100)).toBe(100);
+  });
+
+  it('treats a flywheel machine as having controls, as it always did', () => {
+    const { sync } = syncWith({ canOscillate: true });
+    sync.setMaxIntensity(0, 30);
+    expect(sync._safe({ index: 0, canOscillate: true }, 100)).toBeLessThanOrEqual(30);
+  });
+
+  it('_hasSafetyControls matches what the UI actually renders', () => {
+    const { sync } = syncWith({ canVibrate: true });
+    expect(sync._hasSafetyControls({ canScalar: true })).toBe(true);
+    expect(sync._hasSafetyControls({ canOscillate: true })).toBe(true);
+    expect(sync._hasSafetyControls({ canVibrate: true })).toBe(false);
+    expect(sync._hasSafetyControls({ canRotate: true })).toBe(false);
+    expect(sync._hasSafetyControls(null)).toBe(false);
+  });
+});
+
+// Heater and spray, added 2026-08-16 after auditing the Buttplug device
+// config. 19 devices expose Temperature (18 binary heaters plus the Umove at
+// a real 37-42 C) and 2 expose Spray (JoyHub Dodge, Sinloli Piupiu).
+//
+// They are MANUAL controls, never routed from the funscript: a heater is a
+// comfort setting you pick once, and a binary dispenser fired on every action
+// would empty itself in a minute. An earlier note in this project called them
+// a "deliberate no" and stopped there, which conflated "should not be a script
+// output" with "should not be supported at all".
+describe('heater and spray', () => {
+  // init() loads the real SDK from node_modules, which is what populates the
+  // module-private ButtplugSDK. Without it every send short-circuits to
+  // not-connected and a test asserting real behaviour silently passes on a
+  // no-op — the failure mode this whole file exists to catch.
+  async function mgrWith({ throws = false } = {}) {
+    const mgr = new ButtplugManager();
+    await mgr.init();
+    const sent = [];
+    const runOutput = vi.fn(async (cmd) => {
+      sent.push(cmd);
+      if (throws) throw new Error('device went away');
+    });
+    mgr._devices = new Map([[1, { index: 1, name: 'JoyHub Dodge', runOutput, hasOutput: () => true }]]);
+    return { mgr, sent, runOutput };
+  }
+
+  it('heat returns a result rather than undefined', async () => {
+    const { mgr } = await mgrWith();
+    const r = await mgr.sendHeat(1, true);
+    expect(r).toBeTruthy();
+    expect(typeof r.ok).toBe('boolean');
+  });
+
+  it('reports not-connected for an unknown device', async () => {
+    const { mgr } = await mgrWith();
+    expect((await mgr.sendHeat(99, true)).ok).toBe(false);
+    expect((await mgr.sendSpray(99)).ok).toBe(false);
+  });
+
+  it('surfaces a failure instead of claiming success', async () => {
+    const { mgr } = await mgrWith({ throws: true });
+    expect((await mgr.sendHeat(1, true)).ok).toBe(false);
+  });
+
+  // THE ONE THAT MATTERS. A dispenser left on empties itself, and nothing
+  // else in the app would ever switch it off.
+  it('spray always switches itself back off', async () => {
+    const { mgr, sent } = await mgrWith();
+    await mgr.sendSpray(1, 50);
+    expect(sent.length).toBeGreaterThanOrEqual(2);
+    expect(sent.at(-1)).toBeTruthy();
+  });
+
+  it('spray still switches off when the first command throws', async () => {
+    const mgr = new ButtplugManager();
+    // Explicit init, not relying on a previous test having set the
+    // module-private SDK. Without this the test passes only because of leaked
+    // module state and would fail when run alone or reordered.
+    await mgr.init();
+    let calls = 0;
+    const sent = [];
+    const runOutput = vi.fn(async (cmd) => {
+      calls++; sent.push(cmd);
+      if (calls === 1) throw new Error('boom');
+    });
+    mgr._devices = new Map([[1, { index: 1, name: 'x', runOutput, hasOutput: () => true }]]);
+    const r = await mgr.sendSpray(1, 20);
+    expect(r.ok).toBe(false);
+    expect(calls).toBeGreaterThanOrEqual(2);   // the off attempt still happened
   });
 });

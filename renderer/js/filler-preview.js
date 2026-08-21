@@ -52,8 +52,9 @@ export function buildPreviewSample(opts = {}) {
  * @param {HTMLCanvasElement} canvas
  * @param {Array<{at:number,pos:number}>} actions
  * @param {{stroke?:string, fill?:string, grid?:string}} [colors]
+ * @param {{playhead?: number|null}} [opts] — 0-1 position of the test playhead
  */
-export function drawFillerWaveform(canvas, actions, colors = {}) {
+export function drawFillerWaveform(canvas, actions, colors = {}, opts = {}) {
   if (!canvas || typeof canvas.getContext !== 'function') return;
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
@@ -112,4 +113,18 @@ export function drawFillerWaveform(canvas, actions, colors = {}) {
   ctx.lineWidth = 2;
   ctx.lineJoin = 'round';
   ctx.stroke();
+
+  // Test playhead. Drawn last so it sits over the curve, and only while a
+  // test is actually running — a parked playhead on an idle preview would
+  // read as a position the device is holding.
+  const head = opts.playhead;
+  if (Number.isFinite(head) && head >= 0 && head <= 1) {
+    const px = head * cssW;
+    ctx.strokeStyle = colors.playhead || '#ff5c5c';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, cssH);
+    ctx.stroke();
+  }
 }

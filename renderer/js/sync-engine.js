@@ -13,6 +13,17 @@ export class SyncEngine {
     this._playingTimer = null; // for double-play correction
     this._secondPlayDelay = 2500; // ms — matches SDK's videoPlayerDelayForSecondPlay
     this._seekGen = 0;  // monotonic counter so rapid seeks supersede in-flight handlers
+    // Same idea for play/pause. hsspPlay is a CLOUD call: x0193143's log
+    // (thread #288) shows it taking 8.7s and 17.3s to return. Pause during
+    // that window sent hsspStop, the pending play then landed AFTER it, and
+    // the device carried on stroking — "Handy would keep working about 15
+    // seconds". Bumping this on pause lets a superseded play undo itself.
+    this._playGen = 0;
+    // Bumped ONLY by things that mean "the device should be stopped" (pause,
+    // ended). `_playGen` alone cannot answer "was I superseded by a pause or
+    // by another play?", and the answer decides whether an in-flight play
+    // must undo itself — see _handlePlaying.
+    this._pauseGen = 0;
 
     // Callbacks
     this.onDriftDetected = null;  // (driftMs) => {}
@@ -122,9 +133,39 @@ export class SyncEngine {
     // Clear any pending second-play timer
     clearTimeout(this._playingTimer);
 
+    const gen = ++this._playGen;
+    const pauseGen = this._pauseGen;
     const timeMs = Math.round(this.player.currentTime * 1000);
     console.log(`[Sync] hsspPlay at ${timeMs}ms`);
     await this.handy.hsspPlay(timeMs);
+
+    // A PAUSE landed while that cloud call was in flight. The device has now
+    // been told to play AFTER we told it to stop, so the stop is lost and it
+    // keeps going. Undo it rather than assume ordering.
+    //
+    // Checked against `_pauseGen`, not `_playGen`. Both are bumped here and
+    // `_playGen` is also bumped by _handlePause, so a second PLAY arriving
+    // close behind the first (the orgasm-switch restore does exactly this —
+    // an explicit start() plus the element's own `playing` event, 1ms apart)
+    // made the first call believe a pause had superseded it and send a stop
+    // — silencing the device immediately after the newer play started it.
+    // Seen on Dave's Handy, 2026-08-21.
+    //
+    // Not `this.player.paused` either: the element can still read paused at
+    // the moment the `playing` handler runs, so checking it made every normal
+    // play send a stop and never reach 'synced'. The suite caught that one.
+    if (pauseGen !== this._pauseGen) {
+      console.log('[Sync] play superseded by a pause while in flight — re-sending stop');
+      await this.handy.hsspStop();
+      return;
+    }
+
+    // Superseded by a NEWER PLAY: that call owns the device now and has
+    // already anchored it. Stand down without touching the device.
+    if (gen !== this._playGen) {
+      console.log('[Sync] play superseded by a newer play — standing down');
+      return;
+    }
 
     // Double-play pattern (matches SDK's setVideoPlayer behavior):
     // Send a second hsspPlay after a delay to correct for video startup
@@ -134,6 +175,7 @@ export class SyncEngine {
     // surface as an unhandled promise rejection.
     this._playingTimer = setTimeout(async () => {
       if (!this._active || this.player.paused || !this.handy.connected) return;
+      if (gen !== this._playGen) return;   // paused/replayed since we scheduled
       const correctedTimeMs = Math.round(this.player.currentTime * 1000);
       console.log(`[Sync] correction hsspPlay at ${correctedTimeMs}ms`);
       try {
@@ -150,6 +192,10 @@ export class SyncEngine {
   async _handlePause() {
     if (!this._active || !this.handy.connected) return;
 
+    // Supersede any in-flight hsspPlay BEFORE stopping, so if one is still
+    // travelling it re-sends the stop when it lands (see _handlePlaying).
+    this._playGen++;
+    this._pauseGen++;
     clearTimeout(this._playingTimer);
     this._stopDriftMonitor();
     await this.handy.hsspStop();
@@ -203,6 +249,9 @@ export class SyncEngine {
   async _handleEnded() {
     if (!this._active || !this.handy.connected) return;
 
+    // Also a "should be stopped" intent, so an in-flight play undoes itself.
+    this._playGen++;
+    this._pauseGen++;
     clearTimeout(this._playingTimer);
     this._stopDriftMonitor();
     await this.handy.hsspStop();

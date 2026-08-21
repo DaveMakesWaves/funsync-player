@@ -819,10 +819,16 @@ export class VideoPlayer {
     this.video.classList.remove('player__video--flat-eye-2');
     if (this.video.style?.removeProperty) {
       this.video.style.removeProperty('--vr-flatten-zoom');
+      this.video.style.removeProperty('--vr-view-zoom');
+      this.video.style.removeProperty('--vr-pan-x');
+      this.video.style.removeProperty('--vr-pan-y');
     }
     this._vrFlattenFormat = null;
     this._vrFlattenEye = 1;
     this._vrFlattenZoom = 1;
+    this._vrViewZoom = 1;
+    this._vrPanX = 0;
+    this._vrPanY = 0;
 
     // Non-planar — mount renderer, configure, show the canvas.
     if (format && NONPLANAR_FORMATS.has(format)) {
@@ -862,7 +868,38 @@ export class VideoPlayer {
     this._vrFlattenFormat = format;
     this._vrFlattenEye = eye;
     this._vrFlattenZoom = zoom;
+    // Restore any saved viewer zoom/pan for this video. Separate call so
+    // the gesture path can update it later without re-running the whole
+    // class-swapping dance above.
+    this.setVRViewZoom(opts.viewZoom, opts.panX, opts.panY);
   }
+
+  /**
+   * Uniform viewer zoom + pan for a PLANAR flattened video.
+   *
+   * Distinct from `opts.zoom` above, which is the one-axis packing-ratio
+   * correction (`--vr-flatten-zoom`). That one stretches; this one
+   * magnifies. Conflating them is what made the VR Format panel's "Zoom"
+   * slider misleading — see vr-zoom.js.
+   *
+   * Values are written as CSS custom properties and composed by the
+   * transform in player.css, so there is no per-frame JS.
+   */
+  setVRViewZoom(viewZoom, panX = 0, panY = 0) {
+    const z = Number.isFinite(viewZoom) ? Math.max(1, viewZoom) : 1;
+    const x = Number.isFinite(panX) ? panX : 0;
+    const y = Number.isFinite(panY) ? panY : 0;
+    this._vrViewZoom = z;
+    this._vrPanX = x;
+    this._vrPanY = y;
+    if (!this.video?.style?.setProperty) return;
+    this.video.style.setProperty('--vr-view-zoom', String(z));
+    this.video.style.setProperty('--vr-pan-x', String(x));
+    this.video.style.setProperty('--vr-pan-y', String(y));
+  }
+
+  /** Current viewer zoom, for callers deciding whether a drag should pan. */
+  get vrViewZoom() { return this._vrViewZoom || 1; }
 
   /** Update the pan/zoom/roll of an already-active spherical projection
    *  without remounting. Caller (drag-to-pan, FOV slider, "Rotate 180°"

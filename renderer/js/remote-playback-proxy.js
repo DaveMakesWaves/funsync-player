@@ -15,6 +15,10 @@
 //   - Rate (playbackSpeed) is optional; defaults to 1.
 
 export class RemotePlaybackProxy extends EventTarget {
+  // No state for this long while "playing" → synthesize pause (see
+  // _armStaleWatchdog). 8× the phone's 250ms state cadence.
+  static STALE_LIMIT_MS = 2000;
+
   constructor() {
     super();
     this._currentTimeSec = 0;       // last authoritative time in seconds
@@ -23,6 +27,7 @@ export class RemotePlaybackProxy extends EventTarget {
     this._playbackRate = 1;
     this._ended = false;
     this._lastUpdateWallMs = 0;     // performance.now() when last state arrived
+    this._staleTimer = null;
   }
 
   // --- HTMLVideoElement-shaped interface --------------------------------
@@ -47,6 +52,7 @@ export class RemotePlaybackProxy extends EventTarget {
     if (this._paused) {
       this._paused = false;
       this._lastUpdateWallMs = performance.now();
+      this._armStaleWatchdog();
       this.dispatchEvent(new Event('playing'));
     }
     return Promise.resolve();
@@ -88,6 +94,7 @@ export class RemotePlaybackProxy extends EventTarget {
       const nowPaused = state.paused;
       if (wasPaused && !nowPaused) {
         this._paused = false;
+        this._armStaleWatchdog();
         this.dispatchEvent(new Event('playing'));
       } else if (!wasPaused && nowPaused) {
         this._paused = true;
@@ -116,6 +123,7 @@ export class RemotePlaybackProxy extends EventTarget {
     if (this._paused) {
       this._paused = false;
       this._lastUpdateWallMs = performance.now();
+      this._armStaleWatchdog();
       this.dispatchEvent(new Event('playing'));
     }
   }
@@ -147,6 +155,36 @@ export class RemotePlaybackProxy extends EventTarget {
     this._playbackRate = 1;
     this._ended = false;
     this._lastUpdateWallMs = 0;
+    this._disarmStaleWatchdog();
+  }
+
+  /**
+   * Liveness watchdog (same idea as the VR bridge's 8s one, tighter because
+   * the phone's state cadence is ~250ms): while "playing", the currentTime
+   * getter extrapolates from the last state — with NO cap. If the phone goes
+   * silent without a pause (dead socket before the backend's grace fires,
+   * hidden page with timeupdate starved), the sync engines would drive
+   * devices along a timeline the video has left, indefinitely. No state for
+   * STALE_LIMIT_MS while unpaused → synthesize a pause, which the engines
+   * already handle by stopping devices. A later state with paused:false
+   * resumes through the normal updateState transition.
+   */
+  _armStaleWatchdog() {
+    if (this._staleTimer) return;
+    this._staleTimer = setInterval(() => {
+      if (this._paused) { this._disarmStaleWatchdog(); return; }
+      if (performance.now() - this._lastUpdateWallMs > RemotePlaybackProxy.STALE_LIMIT_MS) {
+        this.pause();
+        this._disarmStaleWatchdog();
+      }
+    }, 500);
+  }
+
+  _disarmStaleWatchdog() {
+    if (this._staleTimer) {
+      clearInterval(this._staleTimer);
+      this._staleTimer = null;
+    }
   }
 
   /**

@@ -13,6 +13,11 @@
     "backend:test": "cd backend && python3 -m pytest -v || python -m pytest -v",
     "build": "node scripts/build.js",
     "backup": "node scripts/backup-ignored.mjs",
+    "updates:archive": "node scripts/archive-updates.mjs",
+    "updates:archive:write": "node scripts/archive-updates.mjs --write",
+    "specs:check": "node scripts/device-spec-check.mjs",
+    "specs:update": "node scripts/device-spec-check.mjs --update",
+    "specs:coverage": "node scripts/buttplug-coverage.mjs",
     "vault:check": "node scripts/vault-freshness.mjs",
     "vault:stamp": "node scripts/vault-freshness.mjs --stamp"
   },

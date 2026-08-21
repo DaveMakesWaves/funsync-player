@@ -391,6 +391,62 @@ export class ButtplugManager {
   }
 
   /**
+   * Turn a device heater on or off.
+   *
+   * Manual only — never driven from a script. Most heaters are binary, so
+   * this sends full or nothing. The one device with a real range (Umove,
+   * 37-42 C) treats percent(0) as its floor of 37 C rather than truly off,
+   * which is body temperature and the closest thing it has to off.
+   *
+   * @param {number} deviceIndex
+   * @param {boolean} on
+   */
+  async sendHeat(deviceIndex, on) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
+    try {
+      await device.runOutput(ButtplugSDK.DeviceOutput.Temperature.percent(on ? 1 : 0));
+      return SENT;
+    } catch (err) {
+      this._warnOnce(
+        `send-heat-${deviceIndex}`,
+        `[Buttplug] Heat command to "${device.name}" failed: ${err?.message || err}`
+      );
+      return failed(err);
+    }
+  }
+
+  /**
+   * Fire a device's spray / dispenser once.
+   *
+   * A pulse, not a level: these are binary and only two devices have one
+   * (JoyHub Dodge, Sinloli Piupiu). Auto-off after a short burst, because a
+   * dispenser left on empties itself and nothing else would turn it off.
+   *
+   * @param {number} deviceIndex
+   * @param {number} [ms=600] how long to run before switching off
+   */
+  async sendSpray(deviceIndex, ms = 600) {
+    const device = this._devices.get(deviceIndex);
+    if (!device || !ButtplugSDK) return NOT_CONNECTED;
+    try {
+      await device.runOutput(ButtplugSDK.DeviceOutput.Spray.percent(1));
+      await new Promise((r) => setTimeout(r, Math.max(50, ms)));
+      // The off MUST happen even if the caller stops awaiting; a dispenser
+      // stuck on is the worst failure mode this feature has.
+      await device.runOutput(ButtplugSDK.DeviceOutput.Spray.percent(0));
+      return SENT;
+    } catch (err) {
+      try { await device.runOutput(ButtplugSDK.DeviceOutput.Spray.percent(0)); } catch { /* best effort */ }
+      this._warnOnce(
+        `send-spray-${deviceIndex}`,
+        `[Buttplug] Spray command to "${device.name}" failed: ${err?.message || err}`
+      );
+      return failed(err);
+    }
+  }
+
+  /**
    * Log a message once per key, so an error inside a 20Hz send loop surfaces
    * without flooding the log.
    * @param {string} key
@@ -577,11 +633,24 @@ export class ButtplugManager {
     // driver ever advertises it. The real detection is Constrict / Inflate.
     // sendScalar() resolves the concrete type — it must never send `Scalar`.
     const canScalar = probe('Scalar') || probe('Constrict') || probe('Inflate');
+    // Comfort / utility outputs. Deliberately NOT routed from the funscript:
+    // a heater is a comfort setting you set once, and a binary lube pump
+    // fired on every action would empty itself in a minute. They are manual
+    // controls on the device card instead.
+    //
+    // Found by auditing the Buttplug device config (see the Device Specs note
+    // in the knowledge base): 19 devices expose Temperature, almost all JoyHub
+    // plus the Svakom Fatima Pro, and 2 expose Spray (JoyHub Dodge, Sinloli
+    // Piupiu). 18 of the 19 heaters are binary; the Umove reports a real
+    // range of 37-42 degrees C.
+    const canHeat = probe('Temperature');
+    const canSpray = probe('Spray');
 
     // Diagnostic — when a device connects but no known capability matches,
     // dump the set of output types it actually exposes so we can add the
     // mapping without guessing. Catches driver renames + new device types.
-    if (!canVibrate && !canLinear && !canRotate && !canScalar && !canOscillate) {
+    if (!canVibrate && !canLinear && !canRotate && !canScalar && !canOscillate
+        && !canHeat && !canSpray) {
       const present = this._describeOutputs(device);
       console.warn(
         `[Buttplug] Device "${device.name}" reports no recognised capabilities. ` +
@@ -598,6 +667,8 @@ export class ButtplugManager {
       canRotate,
       canScalar,
       canOscillate,
+      canHeat,
+      canSpray,
     };
   }
 

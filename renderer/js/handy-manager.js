@@ -28,6 +28,23 @@ export class HandyManager {
     this._mode = null;
     this._hdspErrorLogged = false;
 
+    // --- HSSP call serialisation ---------------------------------------
+    //
+    // Every HSSP call is a cloud round trip taking 200-750ms. Mashing X and Z
+    // fires an engage/release pair per press, so a few quick presses put
+    // several of them in flight at once — and under that pile-up the cloud
+    // started returning "Device timeout", after which the device had lost its
+    // mode setup and stopped following the video (Dave, 2026-08-21).
+    //
+    // One at a time, in order. The device has a single state machine and there
+    // is no version of "two overlapping mode-setup calls" that is coherent.
+    this._hsspChain = Promise.resolve();
+    // Bumped by every enqueue. A queued PLAY whose generation is stale by the
+    // time it reaches the front is pointless — a newer play or a stop has
+    // already superseded it — so it is dropped rather than sent. Stops are
+    // never dropped: skipping one leaves the device running.
+    this._hsspGen = 0;
+
     // Cloud-reachability health check. The SDK's 'disconnect' event only
     // fires for client-side socket drops — it does NOT fire when the
     // physical Handy switches to BT mode (the SDK's HTTP session stays
@@ -187,7 +204,35 @@ export class HandyManager {
    * @param {string} scriptUrl - URL to the CSV script (must be publicly accessible)
    * @returns {boolean} True if setup succeeded
    */
+  /**
+   * Run an HSSP operation with no other HSSP operation in flight.
+   *
+   * @param {'play'|'stop'|'setup'} kind — 'play' may be dropped when stale
+   * @param {() => Promise<any>} fn
+   * @param {any} skipValue — returned if the call is dropped as superseded
+   */
+  _hsspExclusive(kind, fn, skipValue) {
+    const gen = ++this._hsspGen;
+    const run = this._hsspChain.then(async () => {
+      // Only a play is safe to drop: a stop that never runs leaves hardware
+      // moving, and a setup that never runs leaves the device unusable.
+      if (kind === 'play' && gen !== this._hsspGen) {
+        console.log(`[Handy] hsspPlay dropped — superseded while queued`);
+        return skipValue;
+      }
+      return fn();
+    });
+    // Keep the chain alive even when a link rejects, or one failure would
+    // wedge every later HSSP call in this session.
+    this._hsspChain = run.then(() => {}, () => {});
+    return run;
+  }
+
   async setupScript(scriptUrl) {
+    return this._hsspExclusive('setup', () => this._setupScriptImpl(scriptUrl), false);
+  }
+
+  async _setupScriptImpl(scriptUrl) {
     if (!this._handy || !this._connected) return false;
 
     try {
@@ -265,6 +310,10 @@ export class HandyManager {
    * @returns {boolean} True if play started
    */
   async hsspPlay(startTimeMs = 0) {
+    return this._hsspExclusive('play', () => this._hsspPlayImpl(startTimeMs), false);
+  }
+
+  async _hsspPlayImpl(startTimeMs = 0) {
     if (!this._handy || !this._connected) return false;
 
     const est = HandySDK?.getEstimatedServerTime
@@ -284,8 +333,18 @@ export class HandyManager {
       // so resuming can fail with "Script set is required". Re-set the cached
       // cloud script and retry once — this is the reliable fix for the device
       // going silent after the Orgasm Switch releases.
-      if (/script\s*set\s*is\s*required/i.test(err?.message || '') && this._lastCloudUrl) {
-        console.warn('[Handy] hsspPlay: scriptSet lost — re-setting cached script and retrying');
+      // Two different messages mean the same thing — the device no longer has
+      // HSSP set up and needs setScript again:
+      //   "Script set is required"                        (HDSP cleared it)
+      //   "Illegal state. Mode specific setup required first."
+      // The second showed up when Dave mashed X and Z: the stacked engage /
+      // release cycles timed out against the cloud and left the device
+      // without its mode setup, and because only the first message was
+      // matched, nothing re-established it — the Handy stopped following the
+      // video until the video was reloaded (2026-08-21).
+      if (/script\s*set\s*is\s*required|mode\s*specific\s*setup\s*required/i.test(err?.message || '')
+          && this._lastCloudUrl) {
+        console.warn('[Handy] hsspPlay: HSSP setup lost — re-setting cached script and retrying');
         try {
           const r = await this._handy.setScript(this._lastCloudUrl);
           if (r?.result === 0 || r?.result === 1) {
@@ -295,10 +354,15 @@ export class HandyManager {
             return result?.result === 0;
           }
         } catch (err2) {
+          this._mode = null;   // stop claiming a mode the device does not have
           this._emitError(`HSSP re-setScript+play failed: ${err2.message}`);
           return false;
         }
       }
+      // Drop the mode cache on ANY failure. It exists to keep steady-state
+      // ticks cheap, and holding a stale `_mode = 1` after an error is how the
+      // device stays dead: every later call skips the re-setup it needs.
+      this._mode = null;
       this._emitError(`HSSP play failed: ${err.message}`);
       return false;
     }
@@ -308,11 +372,26 @@ export class HandyManager {
    * Stop HSSP playback.
    */
   async hsspStop() {
+    return this._hsspExclusive('stop', () => this._hsspStopImpl(), undefined);
+  }
+
+  async _hsspStopImpl() {
     if (!this._handy || !this._connected) return;
 
+    // Logged both sides, like hsspPlay. Until 2026-08-16 a successful stop
+    // logged NOTHING, so x0193143's report (#288, "Handy keeps working ~15s
+    // after pause") could not be diagnosed from his log: the plays were
+    // visible with call and result timestamps, the stops were invisible, and
+    // the whole bug was about the ORDER the two arrived in.
+    console.log('[Handy] hsspStop — requesting…');
     try {
-      await this._handy.hsspStop();
+      const res = await this._handy.hsspStop();
+      console.log(`[Handy] hsspStop result: ${JSON.stringify(res ?? null)}`);
     } catch (err) {
+      // Same reasoning as hsspPlay: a failed stop means the device is not in
+      // the state we think it is, so the cache has to go or the next play
+      // will skip its setup.
+      this._mode = null;
       console.warn('HSSP stop error:', err.message);
     }
   }

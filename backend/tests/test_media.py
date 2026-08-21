@@ -1,6 +1,7 @@
 """Tests for media streaming routes — video serving, funscripts, thumbnails."""
 
 import os
+import hashlib
 import sys
 import json
 import pytest
@@ -204,6 +205,93 @@ async def test_serve_funscript_unknown_variant_404(client, tmp_path):
     response = await client.get(f"/api/media/script/{vid_id}?variant=Ghost")
     assert response.status_code == 404
     assert "Ghost" in response.json()["detail"]
+
+
+@pytest.mark.anyio
+async def test_open_ended_range_reaches_the_end_of_the_file(client):
+    """An open-ended range must deliver the whole remainder.
+
+    Kept after the 16MB window was reverted (it desynced A/V on a real
+    device): this now guards the un-capped path, and would fail again for
+    anything that quietly shortens a response.
+    """
+    if not os.path.exists(TEST_VIDEO):
+        pytest.skip("Test.mp4 not found")
+
+    vid_id = _path_to_id(TEST_VIDEO)
+    register_videos([{"path": TEST_VIDEO, "name": "Test.mp4"}])
+    file_size = os.path.getsize(TEST_VIDEO)
+
+    got = 0
+    for _ in range(50):
+        response = await client.get(
+            f"/api/media/stream/{vid_id}",
+            headers={"Range": f"bytes={got}-"},
+        )
+        assert response.status_code == 206
+        got += len(response.content)
+        if got >= file_size:
+            break
+    assert got == file_size
+
+
+@pytest.mark.anyio
+async def test_windowed_range_returns_byte_identical_data(client):
+    """Windowed serving must be lossless, not merely well-shaped.
+
+    A short read that still claims a full Content-Length does not make a
+    player error — it makes it DRIFT, which is how the first version of this
+    (an is_disconnected() check that broke the loop mid-body) desynced audio
+    from video within minutes of shipping (Dave, 2026-08-21).
+    """
+    if not os.path.exists(TEST_VIDEO):
+        pytest.skip("Test.mp4 not found")
+
+    vid_id = _path_to_id(TEST_VIDEO)
+    register_videos([{"path": TEST_VIDEO, "name": "Test.mp4"}])
+
+    with open(TEST_VIDEO, "rb") as f:
+        on_disk = f.read()
+
+    # Pull it the way a browser does: open-ended range, window after window.
+    over_http = b""
+    for _ in range(200):
+        response = await client.get(
+            f"/api/media/stream/{vid_id}",
+            headers={"Range": f"bytes={len(over_http)}-"},
+        )
+        assert response.status_code == 206
+        body = response.content
+        # Every window must deliver exactly what its headers promised.
+        assert len(body) == int(response.headers["content-length"])
+        over_http += body
+        if len(over_http) >= len(on_disk):
+            break
+
+    assert len(over_http) == len(on_disk)
+    assert hashlib.sha256(over_http).hexdigest() == hashlib.sha256(on_disk).hexdigest()
+
+
+@pytest.mark.anyio
+async def test_explicit_range_is_honoured_exactly(client):
+    """A client that names its end gets exactly that, cap or no cap.
+
+    Only the open-ended form is windowed — narrowing an explicit range would
+    break byte-exact consumers.
+    """
+    if not os.path.exists(TEST_VIDEO):
+        pytest.skip("Test.mp4 not found")
+
+    vid_id = _path_to_id(TEST_VIDEO)
+    register_videos([{"path": TEST_VIDEO, "name": "Test.mp4"}])
+
+    response = await client.get(
+        f"/api/media/stream/{vid_id}",
+        headers={"Range": "bytes=10-4009"},
+    )
+    assert response.status_code == 206
+    assert len(response.content) == 4000
+    assert response.headers["content-range"].startswith("bytes 10-4009/")
 
 
 @pytest.mark.anyio

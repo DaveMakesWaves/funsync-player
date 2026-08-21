@@ -60,8 +60,14 @@ export class SettingsPanel {
     getConnectionState,
     getUnreachableSources,
     onRecheckSources,
+    onTestFillerPattern,
+    onStopFillerTest,
   }) {
     this._settings = settings;
+    // Filler test button. The panel owns no devices — app.js holds the sync
+    // engines, so it hands back a start/stop pair and reports progress.
+    this.onTestFillerPattern = onTestFillerPattern || null;
+    this.onStopFillerTest = onStopFillerTest || null;
     this._onSourcesChanged = onSourcesChanged;
     // Reachability lives on the library/app side; the panel only reads it.
     // Supplied as a GETTER, not a value, so a re-probe is reflected without
@@ -217,6 +223,7 @@ export class SettingsPanel {
         ],
       },
       { id: 'data', label: t('settingsPanel.tabData'), groups: [] },
+      { id: 'security', label: t('settingsPanel.tabSecurity'), groups: [] },
       { id: 'help', label: t('settingsPanel.tabHelp'), groups: [] },
     ];
   }
@@ -408,6 +415,10 @@ export class SettingsPanel {
     // --- Data Tab ---
     panels.data = this._buildDataTab();
     wirePanel('data');
+
+    // --- Security Tab ---
+    panels.security = this._buildSecurityTab();
+    wirePanel('security');
 
     // --- Help Tab ---
     panels.help = this._buildHelpTab();
@@ -854,7 +865,10 @@ export class SettingsPanel {
       </div>
       <div id="sp-filler-preview-row" hidden>
         <canvas id="sp-filler-preview" class="settings-panel__filler-preview" width="260" height="60" role="img" aria-label="${t('settingsPanel.playback.fillerPreviewAria')}"></canvas>
-        <div class="settings-panel__hint" id="sp-filler-stats"></div>
+        <div class="settings-panel__filler-test-row">
+          <button type="button" id="sp-filler-test" class="settings-panel__add-btn">${t('settingsPanel.playback.fillerTest')}</button>
+          <span class="settings-panel__hint" id="sp-filler-stats"></span>
+        </div>
       </div>
       <div class="settings-panel__hint" id="sp-filler-hint">${t('settingsPanel.playback.fillerHint')}</div>
     `;
@@ -996,6 +1010,13 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-inline-viz-opacity-hint">${t('settingsPanel.playback.inlineVizOpacityHint')}</div>
       <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-device-sim-opacity">${t('settingsPanel.playback.deviceSimOpacityLabel')}</label>
+        <input type="range" id="sp-device-sim-opacity" class="settings-panel__input settings-panel__input--range" min="20" max="100" step="5" value="80" aria-describedby="sp-device-sim-opacity-hint">
+        <span id="sp-device-sim-opacity-val" class="settings-panel__field-value">80%</span>
+        <button type="button" id="sp-device-sim-opacity-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.deviceSimOpacityResetTitle')}" aria-label="${t('settingsPanel.playback.deviceSimOpacityResetTitle')}">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-device-sim-opacity-hint">${t('settingsPanel.playback.deviceSimOpacityHint')}</div>
+      <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
         <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.miniPlayer') !== false ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
       </div>
@@ -1049,6 +1070,27 @@ export class SettingsPanel {
     `;
     panel.appendChild(orgasmSection);
 
+    // --- Edge Hold ---
+    // Z is the Orgasm Switch's inverse and sits next to X on the keyboard on
+    // purpose, so it gets the same shape of control: hold vs toggle. Its own
+    // section rather than a field under "Orgasm Switch" — nobody looking for
+    // edging settings would think to open the orgasm heading.
+    const edgeSection = document.createElement('div');
+    edgeSection.className = 'settings-panel__section';
+    edgeSection.id = 'sp-sec-edge';
+    edgeSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.edgeHeader')}</h2>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-edge-mode">${t('settingsPanel.playback.edgeModeLabel')}</label>
+        <select id="sp-edge-mode" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-edge-mode-hint">
+          <option value="hold">${t('settingsPanel.playback.edgeModeHold')}</option>
+          <option value="toggle">${t('settingsPanel.playback.edgeModeToggle')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__hint" id="sp-edge-mode-hint">${t('settingsPanel.playback.edgeModeHint')}</div>
+    `;
+    panel.appendChild(edgeSection);
+
 
     // Final order for the rail. Re-appending an existing child MOVES it, so
     // this reorders without disturbing the creation/wiring above. Reads
@@ -1058,6 +1100,7 @@ export class SettingsPanel {
       panel.querySelector('#sp-sec-upnext'),
       panel.querySelector('#sp-sec-gapskip'),
       panel.querySelector('#sp-sec-orgasm'),
+      panel.querySelector('#sp-sec-edge'),
       panel.querySelector('#sp-sec-multiaxis'),
       panel.querySelector('#sp-sec-video'),
     ]) {
@@ -1216,10 +1259,11 @@ export class SettingsPanel {
           max: depth.max,
         });
         const css = getComputedStyle(document.documentElement);
+        this._fillerPreviewActions = actions;
         drawFillerWaveform(fillerCanvas, actions, {
           stroke: css.getPropertyValue('--accent')?.trim() || '#4aa3ff',
           grid: 'rgba(127,127,127,0.25)',
-        });
+        }, { playhead: this._fillerTestHead });
         if (fillerStats) {
           fillerStats.textContent = t('settingsPanel.playback.fillerStats', {
             avg: stats.avgSpeed,
@@ -1227,6 +1271,45 @@ export class SettingsPanel {
           });
         }
       };
+
+      // Test button — play the previewed pattern through the connected
+      // devices. The preview is drawn in SCRIPT space, so a per-device
+      // invert/range/cutoff can make the hardware do something quite
+      // different from the picture; this is the only way to find that out
+      // without playing a video with a gap in it (Dave, 2026-08-21).
+      const fillerTestBtn = panel.querySelector('#sp-filler-test');
+      if (fillerTestBtn) {
+        const endTest = () => {
+          this._fillerTestHead = null;
+          fillerTestBtn.textContent = t('settingsPanel.playback.fillerTest');
+          redrawFillerPreview();
+        };
+        fillerTestBtn.addEventListener('click', () => {
+          if (this._fillerTestHead !== null && this._fillerTestHead !== undefined) {
+            this.onStopFillerTest?.();
+            endTest();
+            return;
+          }
+          const actions = this._fillerPreviewActions;
+          if (!actions || actions.length < 2) return;
+          const result = this.onTestFillerPattern?.(actions, {
+            onProgress: (progress) => {
+              this._fillerTestHead = progress;
+              redrawFillerPreview();
+            },
+            onEnd: endTest,
+          });
+          if (result === 'started') {
+            this._fillerTestHead = 0;
+            fillerTestBtn.textContent = t('settingsPanel.playback.fillerTestStop');
+            redrawFillerPreview();
+          } else if (result === 'busy') {
+            showToast(t('toast.fillerTestBusy'), 'info', 3000);
+          } else {
+            showToast(t('toast.fillerTestNoDevices'), 'info', 3000);
+          }
+        });
+      }
 
       const persistFiller = () => {
         this._settings.set('player.gapFiller', {
@@ -1464,12 +1547,53 @@ export class SettingsPanel {
         });
       }
 
+      // Device simulator (D) opacity. Same 20-100 range and live-apply as the
+      // inline viz above — both are video overlays and are judged against the
+      // footage, not in the abstract.
+      const simOpacity = panel.querySelector('#sp-device-sim-opacity');
+      const simOpacityVal = panel.querySelector('#sp-device-sim-opacity-val');
+      const simOpacityReset = panel.querySelector('#sp-device-sim-opacity-reset');
+      if (simOpacity) {
+        const DEFAULT_SIM_OPACITY = 80;
+        const readSimOpacity = () => {
+          const v = Number(this._settings.get('player.deviceSimOpacity'));
+          return Number.isFinite(v) ? Math.min(100, Math.max(20, v)) : DEFAULT_SIM_OPACITY;
+        };
+        const paintSimOpacity = (v) => {
+          simOpacity.value = String(v);
+          if (simOpacityVal) simOpacityVal.textContent = `${v}%`;
+          if (simOpacityReset) simOpacityReset.hidden = v === DEFAULT_SIM_OPACITY;
+        };
+        paintSimOpacity(readSimOpacity());
+        simOpacity.addEventListener('input', () => {
+          const v = Number(simOpacity.value);
+          this._settings.set('player.deviceSimOpacity', v);
+          paintSimOpacity(v);
+          if (this.onDeviceSimOpacityChanged) this.onDeviceSimOpacityChanged(v);
+        });
+        simOpacityReset?.addEventListener('click', () => {
+          this._settings.set('player.deviceSimOpacity', DEFAULT_SIM_OPACITY);
+          paintSimOpacity(DEFAULT_SIM_OPACITY);
+          if (this.onDeviceSimOpacityChanged) this.onDeviceSimOpacityChanged(DEFAULT_SIM_OPACITY);
+        });
+      }
+
       // Orgasm Switch behaviour: hold-to-ride vs press-to-finish.
       const orgasmMode = panel.querySelector('#sp-orgasm-mode');
       if (orgasmMode) {
         orgasmMode.value = this._settings.get('player.orgasmSwitchMode') || 'hold';
         orgasmMode.addEventListener('change', () => {
           this._settings.set('player.orgasmSwitchMode', orgasmMode.value);
+        });
+      }
+
+      // Edge Hold behaviour: hold-to-edge vs press-to-toggle (lr_x3 #307).
+      const edgeMode = panel.querySelector('#sp-edge-mode');
+      if (edgeMode) {
+        edgeMode.value = this._settings.get('player.edgeHoldMode') || 'hold';
+        edgeMode.addEventListener('change', () => {
+          this._settings.set('player.edgeHoldMode', edgeMode.value);
+          if (this.onEdgeHoldModeChanged) this.onEdgeHoldModeChanged(edgeMode.value);
         });
       }
 
@@ -1849,6 +1973,61 @@ export class SettingsPanel {
   // surface category to user's mental model). Mirrors Discord and
   // VS Code's Help-section pattern; peer-app survey in
   // notes/features/SCOPE-feedback-reporting.md.
+  /**
+   * Security tab — currently one control: hide media file names in the log.
+   *
+   * Exists because #bug-reports on Discord asks users to paste main.log, and
+   * that log records the full path of every video opened. For this app the
+   * FILENAME is the most revealing line in the file, so pasting one publicly
+   * should be a deliberate choice rather than an accident.
+   *
+   * Off by default: most users are diagnosing their own machine, where a
+   * redacted log is simply a worse log.
+   */
+  _buildSecurityTab() {
+    const panel = document.createElement('div');
+    panel.className = 'settings-panel__tab-content';
+
+    const section = document.createElement('div');
+    section.className = 'settings-panel__section';
+    section.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.security.logsHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:12px">
+        ${t('settingsPanel.security.logsBlurb')}
+      </div>
+    `;
+
+    const row = document.createElement('div');
+    row.className = 'settings-panel__row';
+
+    const label = document.createElement('label');
+    label.className = 'settings-panel__label';
+    label.textContent = t('settingsPanel.security.hideFileNames');
+
+    const toggle = createToggleSwitch({
+      checked: !!this._settings.get('security.hideLogFileNames'),
+      label: t('settingsPanel.security.hideFileNames'),
+      onChange: (next) => {
+        // The main process hooks this same key and updates the log redactor
+        // immediately, so it takes effect without a restart.
+        this._settings.set('security.hideLogFileNames', next);
+      },
+    });
+
+    row.appendChild(label);
+    row.appendChild(toggle);
+    section.appendChild(row);
+
+    const detail = document.createElement('div');
+    detail.className = 'settings-panel__hint';
+    detail.style.marginTop = '8px';
+    detail.textContent = t('settingsPanel.security.hideFileNamesHint');
+    section.appendChild(detail);
+
+    panel.appendChild(section);
+    return panel;
+  }
+
   _buildHelpTab() {
     const panel = document.createElement('div');
     panel.className = 'settings-panel__tab-content';

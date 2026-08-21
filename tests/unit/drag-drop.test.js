@@ -1,5 +1,5 @@
 // Unit tests for DragDrop — imports from real source
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { DragDrop } from '../../renderer/js/drag-drop.js';
 
 describe('DragDrop', () => {
@@ -132,6 +132,109 @@ describe('DragDrop', () => {
       btn.click();
       await new Promise((r) => setTimeout(r, 10));
       expect(window.funsync.openFileDialog).toHaveBeenCalled();
+    });
+  });
+
+  // terijapl, thread #284: "when drag-and-dropping a video onto the program
+  // window, the ctrl+shift+R shortcut does not work and displays the 'no
+  // video loaded' message".
+  //
+  // Electron REMOVED the non-standard `File.path` in v32 and this project is
+  // on 41, so a dropped File arrived with `path === undefined`. app.js does
+  //     this._currentVideoPath = file._remote ? null : (file.path || null)
+  // which left it NULL, switching off every path-keyed feature: the VR format
+  // panel he hit, plus funscript auto-pairing, resume, script variations,
+  // queue context, screenshots, remux-on-decode-error and the editor's
+  // autosave target. Playback still worked, because it falls back to a blob
+  // URL — which is precisely why this survived. The drop looked successful.
+  //
+  // The native-dialog path never had the bug: it gets a real path over IPC
+  // and tags the object `_isPathBased`. So the fix is to make a drop produce
+  // the SAME shape, via webUtils.getPathForFile exposed through the preload.
+  describe('resolving the real path of a dropped file', () => {
+    function dropFiles(files) {
+      const event = new Event('drop', { bubbles: true });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { files, types: ['Files'] },
+      });
+      document.dispatchEvent(event);
+    }
+
+    afterEach(() => { delete window.funsync; });
+
+    it('hands a video to loadVideo in the path-based shape the dialog uses', () => {
+      window.funsync = { getPathForFile: vi.fn(() => 'D:\VR\clip.mp4') };
+      dropFiles([new File([''], 'clip.mp4')]);
+
+      const arg = onVideo.mock.calls[0][0];
+      expect(arg.path).toBe('D:\VR\clip.mp4');
+      // Without this flag app.js takes the blob branch and never builds a
+      // file:// URL, so the path would be carried but unused.
+      expect(arg._isPathBased).toBe(true);
+      expect(arg.name).toBe('clip.mp4');
+    });
+
+    // The actual regression, stated as app.js states it.
+    it('yields a non-null _currentVideoPath, which is what Ctrl+Shift+R needs', () => {
+      window.funsync = { getPathForFile: () => '/home/teri/vr/clip.mp4' };
+      dropFiles([new File([''], 'clip.mp4')]);
+
+      const file = onVideo.mock.calls[0][0];
+      const currentVideoPath = file._remote ? null : (file.path || null);
+      expect(currentVideoPath, 'null here is the "no video loaded" toast').not.toBeNull();
+    });
+
+    it('gives a dropped funscript a path for the editor autosave target', () => {
+      window.funsync = { getPathForFile: () => '/home/teri/vr/clip.funscript' };
+      dropFiles([new File(['{}'], 'clip.funscript')]);
+      expect(onFunscript.mock.calls[0][0].path).toBe('/home/teri/vr/clip.funscript');
+    });
+
+    it('keeps a dropped funscript readable as a File', async () => {
+      window.funsync = { getPathForFile: () => '/x/clip.funscript' };
+      dropFiles([new File(['{"actions":[]}'], 'clip.funscript')]);
+      // Assigning .path must not replace the File — app.js still calls
+      // file.text() on the drop path.
+      const f = onFunscript.mock.calls[0][0];
+      expect(typeof f.text).toBe('function');
+      expect(await f.text()).toContain('actions');
+    });
+
+    it('resolves a path for subtitles too', () => {
+      window.funsync = { getPathForFile: () => '/x/subs.srt' };
+      dropFiles([new File([''], 'subs.srt')]);
+      expect(onSubtitle.mock.calls[0][0].path).toBe('/x/subs.srt');
+    });
+
+    // Everything below is the fallback: playback must never regress just
+    // because a path could not be resolved.
+    it('falls back to the raw File when there is no real path', () => {
+      window.funsync = { getPathForFile: () => '' };
+      const f = new File([''], 'clip.mp4');
+      dropFiles([f]);
+      expect(onVideo).toHaveBeenCalledWith(f);
+    });
+
+    it('falls back when the bridge is missing entirely', () => {
+      const f = new File([''], 'clip.mp4');
+      dropFiles([f]);
+      expect(onVideo).toHaveBeenCalledWith(f);
+    });
+
+    it('falls back when the resolver throws', () => {
+      window.funsync = { getPathForFile: () => { throw new Error('no path'); } };
+      const f = new File([''], 'clip.mp4');
+      dropFiles([f]);
+      expect(onVideo).toHaveBeenCalledWith(f);
+    });
+
+    it('resolves each file in a multi-file drop independently', () => {
+      window.funsync = {
+        getPathForFile: (f) => (f.name.endsWith('.mp4') ? '/x/clip.mp4' : '/x/clip.funscript'),
+      };
+      dropFiles([new File([''], 'clip.mp4'), new File(['{}'], 'clip.funscript')]);
+      expect(onVideo.mock.calls[0][0].path).toBe('/x/clip.mp4');
+      expect(onFunscript.mock.calls[0][0].path).toBe('/x/clip.funscript');
     });
   });
 });

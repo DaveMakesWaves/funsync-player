@@ -10,24 +10,75 @@
  */
 
 /**
- * Standard axis definitions from the TCode specification.
+ * Standard axis definitions, matching **MultiFunPlayer's TCode v0.3 profile**.
+ *
+ * MFP is the de-facto reference because it is what scripters name their files
+ * against, so its mapping is the one that makes third-party scripts land on the
+ * right channel. Verified 2026-08-16 against three sources vendored in the
+ * knowledge base (`Device Reference/specs/`): Tempest's official OSR2 firmware,
+ * the TCodeESP32 community fork, and MFP's own `DeviceSettings.cs`.
+ *
+ * Two things this table deliberately does NOT do:
+ * - `suction` is not on `V2`. It was, and it drove nothing: a stock OSR2
+ *   registers no V2 axis at all. v0.3 puts suction on `A1`.
+ * - `lube` and `pump` no longer share `V1`. They collided, last write winning.
+ *   v0.3 puts lube on `A2`.
+ *
+ * `aliases` carries every other spelling seen in the wild — MFP's alternates,
+ * the raw channel name (`video.R0.funscript`), and FunSync's own legacy
+ * suffixes so existing saved associations keep resolving.
+ *
+ * **`A0`/`A1` are genuinely contested** between firmwares: Valve/Suck on
+ * Tempest builds, Suck/Suck-level on TCodeESP32. We follow Tempest and MFP.
+ *
  * @type {AxisInfo[]}
  */
 export const AXIS_DEFINITIONS = [
-  { suffix: 'surge',   tcode: 'L1', label: 'Surge',   type: 'linear'  },
-  { suffix: 'sway',    tcode: 'L2', label: 'Sway',    type: 'linear'  },
-  { suffix: 'twist',   tcode: 'R0', label: 'Twist',   type: 'rotate'  },
-  { suffix: 'roll',    tcode: 'R1', label: 'Roll',    type: 'rotate'  },
-  { suffix: 'pitch',   tcode: 'R2', label: 'Pitch',   type: 'rotate'  },
-  { suffix: 'vib',     tcode: 'V0', label: 'Vibe',    type: 'vibrate' },
-  { suffix: 'lube',    tcode: 'V1', label: 'Lube',    type: 'vibrate' },
-  { suffix: 'pump',    tcode: 'V1', label: 'Pump',    type: 'vibrate' },
-  { suffix: 'suction', tcode: 'V2', label: 'Suction', type: 'vibrate' },
-  { suffix: 'valve',   tcode: 'A0', label: 'Valve',   type: 'linear'  },
+  { suffix: 'surge', tcode: 'L1', label: 'Surge / Forward', aliases: ['forward', 'l1'],   type: 'linear'  },
+  { suffix: 'sway',  tcode: 'L2', label: 'Sway / Left',     aliases: ['left', 'l2'],      type: 'linear'  },
+  { suffix: 'twist', tcode: 'R0', label: 'Twist / Yaw',     aliases: ['yaw', 'r0'],       type: 'rotate'  },
+  { suffix: 'roll',  tcode: 'R1', label: 'Roll',            aliases: ['r1'],              type: 'rotate'  },
+  { suffix: 'pitch', tcode: 'R2', label: 'Pitch',           aliases: ['r2'],              type: 'rotate'  },
+  { suffix: 'vib',   tcode: 'V0', label: 'Vibe',            aliases: ['vibrate', 'v0'],   type: 'vibrate' },
+  { suffix: 'pump',  tcode: 'V1', label: 'Pump',            aliases: ['v1'],              type: 'vibrate' },
+  { suffix: 'valve', tcode: 'A0', label: 'Valve',           aliases: ['a0'],              type: 'linear'  },
+  { suffix: 'suck',  tcode: 'A1', label: 'Suck / Suction',  aliases: ['suction', 'a1'],   type: 'vibrate' },
+  { suffix: 'lube',  tcode: 'A2', label: 'Lube',            aliases: ['a2'],              type: 'vibrate' },
 ];
 
-/** Map of lowercase suffix → AxisInfo for fast lookup. */
-const _suffixMap = new Map(AXIS_DEFINITIONS.map(a => [a.suffix, a]));
+/**
+ * Every accepted spelling for an axis, canonical first.
+ * Used for auto-assign probing, which has to look for `.suck.funscript` AND
+ * `.suction.funscript` — a scripter's choice of word must not decide whether
+ * their file is found.
+ *
+ * @param {AxisInfo} axis
+ * @returns {string[]}
+ */
+export function axisSuffixVariants(axis) {
+  if (!axis) return [];
+  return [axis.suffix, ...(axis.aliases || [])];
+}
+
+/** Map of lowercase suffix (canonical AND alias) → AxisInfo for fast lookup. */
+const _suffixMap = new Map();
+for (const axis of AXIS_DEFINITIONS) {
+  for (const name of axisSuffixVariants(axis)) _suffixMap.set(name, axis);
+}
+
+/**
+ * Resolve any accepted spelling to its axis definition.
+ *
+ * Saved associations are keyed by whatever suffix was canonical when they were
+ * written, so this must stay alias-aware or old configs silently lose axes.
+ *
+ * @param {string} suffix — canonical name, alias, or raw channel
+ * @returns {AxisInfo|null}
+ */
+export function getAxisBySuffix(suffix) {
+  if (!suffix) return null;
+  return _suffixMap.get(String(suffix).toLowerCase()) || null;
+}
 
 /**
  * Parse an axis suffix from a funscript filename.

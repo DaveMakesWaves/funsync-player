@@ -170,4 +170,127 @@ describe('Modal', () => {
       await promise;
     });
   });
+
+  // Fullscreen mounting (lr_x3, EroScripts #307). The Fullscreen API paints
+  // only the fullscreen element's subtree on the top layer, so a
+  // body-mounted overlay opens BEHIND the video and can't be clicked.
+  describe('fullscreen mounting', () => {
+    let app, player, fsEl;
+
+    const setFullscreen = (el) => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: el, configurable: true, writable: true,
+      });
+      document.dispatchEvent(new Event('fullscreenchange'));
+    };
+
+    beforeEach(() => {
+      // Mirror the real tree: body > #app > .player-container > video.
+      // Fullscreen is requested on the player container, not on #app.
+      document.body.innerHTML = '';
+      app = document.createElement('div');
+      app.id = 'app';
+      player = document.createElement('div');
+      player.className = 'player-container';
+      const video = document.createElement('video');
+      player.appendChild(video);
+      app.appendChild(player);
+      document.body.appendChild(app);
+      const toasts = document.createElement('div');
+      toasts.id = 'toasts';
+      document.body.appendChild(toasts);
+      fsEl = player;
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: null, configurable: true, writable: true,
+      });
+    });
+
+    afterEach(() => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: null, configurable: true, writable: true,
+      });
+    });
+
+    it('mounts into the fullscreen element while fullscreen', async () => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: fsEl, configurable: true, writable: true,
+      });
+      const promise = Modal.open({ title: 'Add Variation' });
+      const overlay = document.querySelector('.modal-overlay');
+      expect(overlay.parentElement).toBe(fsEl);
+      document.querySelector('.modal-close-btn').click();
+      await promise;
+    });
+
+    it('mounts into body when not fullscreen', async () => {
+      const promise = Modal.open({ title: 'Add Variation' });
+      expect(document.querySelector('.modal-overlay').parentElement).toBe(document.body);
+      document.querySelector('.modal-close-btn').click();
+      await promise;
+    });
+
+    // The trap: inert propagates to descendants and a descendant can't opt
+    // back out, so blanket-inerting body's children would inert the overlay
+    // itself once it lives inside the fullscreen element.
+    it('leaves no ancestor of the overlay inert', async () => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: fsEl, configurable: true, writable: true,
+      });
+      const promise = Modal.open({ title: 'Add Variation' });
+      const overlay = document.querySelector('.modal-overlay');
+      for (let node = overlay; node && node !== document.body; node = node.parentElement) {
+        expect(node.hasAttribute('inert')).toBe(false);
+      }
+      document.querySelector('.modal-close-btn').click();
+      await promise;
+    });
+
+    it('inerts siblings at every level of the ancestor chain', async () => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: fsEl, configurable: true, writable: true,
+      });
+      const promise = Modal.open({ title: 'Add Variation' });
+      // sibling inside the fullscreen element
+      expect(fsEl.querySelector('video').hasAttribute('inert')).toBe(true);
+      // sibling of #app at body level
+      expect(document.getElementById('toasts').hasAttribute('inert')).toBe(true);
+      document.querySelector('.modal-close-btn').click();
+      await promise;
+      expect(fsEl.querySelector('video').hasAttribute('inert')).toBe(false);
+      expect(document.getElementById('toasts').hasAttribute('inert')).toBe(false);
+    });
+
+    it('re-homes the overlay when fullscreen is exited while open', async () => {
+      Object.defineProperty(document, 'fullscreenElement', {
+        value: fsEl, configurable: true, writable: true,
+      });
+      const promise = Modal.open({ title: 'Add Variation' });
+      const overlay = document.querySelector('.modal-overlay');
+      expect(overlay.parentElement).toBe(fsEl);
+
+      setFullscreen(null);
+      expect(overlay.parentElement).toBe(document.body);
+      // ...and the inert walk was redone against the new chain: the video
+      // is now covered by #app being inert, not by its own attribute.
+      expect(document.getElementById('app').hasAttribute('inert')).toBe(true);
+
+      setFullscreen(fsEl);
+      expect(overlay.parentElement).toBe(fsEl);
+      expect(document.getElementById('app').hasAttribute('inert')).toBe(false);
+
+      document.querySelector('.modal-close-btn').click();
+      await promise;
+      expect(document.getElementById('app').hasAttribute('inert')).toBe(false);
+    });
+
+    it('stops re-homing after close', async () => {
+      const promise = Modal.open({ title: 'Add Variation' });
+      const overlay = document.querySelector('.modal-overlay');
+      document.querySelector('.modal-close-btn').click();
+      await promise;
+      setFullscreen(fsEl);
+      expect(overlay.parentElement).toBeNull();
+      expect(fsEl.querySelector('video').hasAttribute('inert')).toBe(false);
+    });
+  });
 });

@@ -1,8 +1,12 @@
 // VRFormatPanel — per-video override for the VR-flatten projection.
 //
 // Phase 1 of SCOPE-vr-flatten-full.md. Opens from:
-//   - Ctrl+Shift+R (keyboard.js → onOpenVRFormat callback)
+//   - Player overflow menu → "VR Format…"
 //   - Library kebab → "VR Format…"
+//
+// (Ctrl+Shift+R opened this until 2026-08-14. Zoom became a direct
+//  gesture — Ctrl+scroll / trackpad pinch / Ctrl+= — so the panel lost
+//  its hotkey. The panel and the gesture share one value; see onZoomLive.)
 //
 // What it does:
 //   - Lets the user override the auto-detected stereo packing for the
@@ -26,6 +30,7 @@ import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 import { classifyStereoFormat } from '../js/vr-detect.js';
+import { clampViewZoom, clampPan, VIEW_ZOOM_MIN, VIEW_ZOOM_MAX } from '../js/vr-zoom.js';
 
 const PLANAR_PROJECTIONS = ['sbs-half', 'sbs-full', 'tb-half', 'tb-full'];
 // Phase 2a — WebGL renderer ships these. Surfaced as enabled options.
@@ -55,14 +60,31 @@ function projectionLabel(key) {
  * Compute the dataService entry shape from the panel's current
  * controls. Pure — exported for tests.
  */
-export function buildEntry({ projection, eye, zoom, fov, yaw, pitch, roll, source = 'manual' }) {
+export function buildEntry({
+  projection, eye, zoom, fov, yaw, pitch, roll, source = 'manual',
+  viewZoom, panX, panY,
+}) {
   if (!projection || projection === 'flat') {
-    return { projection: 'flat', eye: null, zoom: 1, fov: 90, yaw: 0, pitch: 0, roll: 0, source };
+    return {
+      projection: 'flat', eye: null, zoom: 1, fov: 90, yaw: 0, pitch: 0, roll: 0,
+      viewZoom: 1, panX: 0, panY: 0, source,
+    };
   }
   return {
     projection,
     eye: eye === 'right' ? 'right' : 'left',
+    // `zoom` is the ONE-AXIS packing-ratio correction for non-standard
+    // sources. It has no control any more (the slider below drives the
+    // uniform viewer zoom, which is what "Zoom" means to a user) but the
+    // value is preserved and still applied, so anyone who set it keeps it.
     zoom: Number.isFinite(zoom) ? Math.max(1, Math.min(2, zoom)) : 1,
+    // Uniform viewer zoom + pan, shared with the Ctrl+scroll / pinch
+    // gesture. These MUST be listed here: buildEntry rebuilds the entry
+    // from scratch, so a field it does not know is silently dropped, and
+    // any panel change would wipe whatever the gesture had set.
+    viewZoom: clampViewZoom(viewZoom),
+    panX: clampPan(panX, viewZoom),
+    panY: clampPan(panY, viewZoom),
     fov: Number.isFinite(fov) ? Math.max(30, Math.min(160, fov)) : 90,
     yaw: Number.isFinite(yaw) ? yaw : 0,
     pitch: Number.isFinite(pitch) ? Math.max(-85, Math.min(85, pitch)) : 0,
@@ -108,12 +130,21 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
     projection: initial?.projection ?? (PLANAR_PROJECTIONS.includes(detected) ? detected : null),
     eye: initial?.eye === 'right' ? 'right' : 'left',
     zoom: Number.isFinite(initial?.zoom) ? initial.zoom : 1,
+    viewZoom: clampViewZoom(initial?.viewZoom),
+    panX: Number.isFinite(initial?.panX) ? initial.panX : 0,
+    panY: Number.isFinite(initial?.panY) ? initial.panY : 0,
     fov: Number.isFinite(initial?.fov) ? initial.fov : 90,
     yaw: Number.isFinite(initial?.yaw) ? initial.yaw : 0,
     pitch: Number.isFinite(initial?.pitch) ? initial.pitch : 0,
     roll: Number.isFinite(initial?.roll) ? initial.roll : 0,
     source: initial?.source || (initial ? 'manual' : 'auto'),
   };
+
+  // Guards the gesture<->panel sync loop: commit() writes and emits, and we
+  // must not treat our own emission as an external change and refresh
+  // mid-edit (which would fight a slider drag).
+  let _selfWrite = false;
+  const _unsubscribers = [];
 
   return Modal.open({
     title: t('vrFormat.title'),
@@ -221,13 +252,20 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
 
       const zoomSlider = document.createElement('input');
       zoomSlider.type = 'range';
-      zoomSlider.min = '1';
-      zoomSlider.max = '2';
-      zoomSlider.step = '0.05';
-      zoomSlider.value = String(state.zoom);
+      // Drives the UNIFORM viewer zoom, the same value Ctrl+scroll and
+      // trackpad pinch write. It used to drive the one-axis packing
+      // correction, which stretched the picture instead of magnifying it
+      // — a control called "Zoom" that did not zoom.
+      zoomSlider.min = String(VIEW_ZOOM_MIN);
+      zoomSlider.max = String(VIEW_ZOOM_MAX);
+      zoomSlider.step = '0.1';
+      zoomSlider.value = String(state.viewZoom);
       zoomSlider.className = 'vr-format-panel__slider';
       zoomSlider.addEventListener('input', () => {
-        state.zoom = parseFloat(zoomSlider.value) || 1;
+        state.viewZoom = clampViewZoom(parseFloat(zoomSlider.value));
+        // Zooming out must pull an off-centre pan back inside the limit.
+        state.panX = clampPan(state.panX, state.viewZoom);
+        state.panY = clampPan(state.panY, state.viewZoom);
         state.source = 'manual';
         refresh();
         commit();
@@ -357,6 +395,9 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
           projection: state.projection,
           eye: state.eye,
           zoom: state.zoom,
+          viewZoom: state.viewZoom,
+          panX: state.panX,
+          panY: state.panY,
           fov: state.fov,
           yaw: state.yaw,
           pitch: state.pitch,
@@ -366,8 +407,25 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
       }
 
       function commit() {
-        writeEntry(currentEntry());
+        _selfWrite = true;
+        try { writeEntry(currentEntry()); } finally { _selfWrite = false; }
       }
+
+      // Ctrl+scroll / trackpad pinch / Ctrl+= write the same entry from
+      // app.js and emit `vrFormat:changed`. Pull those values back in so an
+      // open panel tracks the gesture instead of showing a stale slider —
+      // and so the next commit does not overwrite the gesture with what the
+      // panel happened to be holding.
+      const onExternalChange = ({ path: changed, entry }) => {
+        if (_selfWrite || changed !== path || !entry) return;
+        state.viewZoom = clampViewZoom(entry.viewZoom);
+        state.panX = clampPan(entry.panX, entry.viewZoom);
+        state.panY = clampPan(entry.panY, entry.viewZoom);
+        if (Number.isFinite(entry.fov)) state.fov = entry.fov;
+        refresh();
+      };
+      eventBus.on('vrFormat:changed', onExternalChange);
+      _unsubscribers.push(() => eventBus.off('vrFormat:changed', onExternalChange));
 
       function refresh() {
         const proj = projSelect.value;
@@ -388,8 +446,8 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
 
         // Zoom section: planar only (CSS scale path).
         zoomSection.style.display = isPlanar ? '' : 'none';
-        zoomLabel.textContent = t('vrFormat.zoomLabel', { value: state.zoom.toFixed(2) });
-        zoomSlider.value = String(state.zoom);
+        zoomLabel.textContent = t('vrFormat.zoomLabel', { value: state.viewZoom.toFixed(2) });
+        zoomSlider.value = String(state.viewZoom);
 
         // FOV + recenter + rotate-180: spherical only (WebGL viewport).
         fovSection.style.display = isSpherical ? '' : 'none';
@@ -419,6 +477,13 @@ export function openVRFormatPanel({ path, dataService, onApply, enumerateFolderV
       refresh();
       projSelect.focus();
     },
+  }).finally(() => {
+    // Modal has no close hook, so unhook the bus subscription off the
+    // returned promise. Without this every open leaks a listener that
+    // refreshes a detached panel on the next gesture.
+    for (const off of _unsubscribers.splice(0)) {
+      try { off(); } catch { /* already gone */ }
+    }
   });
 }
 

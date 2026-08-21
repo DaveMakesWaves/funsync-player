@@ -136,6 +136,11 @@ const DEFAULTS = {
       collections: [],
       activeCollectionId: null,
     },
+    security: {
+      // Hide media file NAMES in main.log; directory and extension stay.
+      // Off by default. See electron/log-redact.js for the reasoning.
+      hideLogFileNames: false,
+    },
     editor: {
       defaultCreator: '',
       patternPresets: [],

@@ -1930,6 +1930,62 @@ function loadFilterState() {
   }
 }
 
+// --- Native player fallback -------------------------------------------
+//
+// The V4 overlay replaced `<video controls>` on 2026-08-04. Dave's report,
+// 2026-08-21: "when it was a basic web player this worked fine, ever since
+// we did the UI update it's been hot garbage" — seeks landing badly and
+// audio drifting out of step on files that play correctly elsewhere.
+//
+// Removing fastSeek addressed one mechanism, and it was not enough. Rather
+// than have him wait on a player he cannot use, this hands the video back
+// to the browser: stock chrome, the browser's own seek implementation,
+// nothing of ours between the finger and the element.
+//
+// Per DEVICE, not per user — it is a property of the phone's browser, and
+// the one phone that needs it should not change anything for anyone else.
+// Device sync is unaffected either way: the engines follow `timeupdate`,
+// `seeked` and `play`/`pause` from the element itself, which the native
+// controls fire exactly as ours do.
+//
+// What it costs: chapter markers, the A-B loop, the gap-skip chip and the
+// double-tap skip gestures all live in the overlay. The escape hatch is
+// worth more than the extras when the extras are what is broken.
+// Which gesture started the current seek, for the telemetry line.
+//
+// MODULE scope on purpose: it is WRITTEN by seekTo() inside
+// buildPlayerControls and READ by the 'seeking' listener inside
+// renderPlayer — two sibling functions, no shared closure. Declared inside
+// renderPlayer it was simply undeclared where seekTo assigns it, and this
+// file is an ES module, so that assignment threw a ReferenceError instead of
+// creating a global. seekTo() died before setting currentTime, which broke
+// EVERY seek in the player: the scrub thumb followed your finger and then
+// snapped back on the next timeupdate, and the ±10s taps did nothing
+// (Dave: "cant seek at all now it just jumps back to its original position",
+// 2026-08-21). Found by driving the real player in Chrome.
+let seekKind = null;
+
+const NATIVE_CONTROLS_KEY = 'funsync.remote.nativeControls';
+
+function useNativeControls() {
+  try {
+    return localStorage.getItem(NATIVE_CONTROLS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function setNativeControls(on) {
+  try {
+    if (on) localStorage.setItem(NATIVE_CONTROLS_KEY, '1');
+    else localStorage.removeItem(NATIVE_CONTROLS_KEY);
+  } catch { /* private browsing — the toggle just will not persist */ }
+}
+
+// Position to restore after the player is rebuilt by the toggle, so
+// switching modes does not throw the user back to the start.
+let pendingResumeSec = null;
+
 async function renderPlayer(id) {
   // Player view is full-bleed media — hide the entire toolbar AND the
   // breadcrumb so the video gets the full screen. Bottom nav stays
@@ -1961,8 +2017,10 @@ async function renderPlayer(id) {
   videoEl.className = 'player__video';
   videoEl.src = video.streamUrl;
   // Custom controls (V4) — stock browser chrome replaced by our overlay,
-  // built after the wrapper is assembled below.
-  videoEl.controls = false;
+  // built after the wrapper is assembled below. Unless the user has asked
+  // for the browser's own player back (see useNativeControls).
+  const nativeControls = useNativeControls();
+  videoEl.controls = nativeControls;
   videoEl.playsInline = true;
   videoEl.preload = 'metadata';
   if (video.subtitleUrl) {
@@ -1989,11 +2047,152 @@ async function renderPlayer(id) {
   loadingOverlay.appendChild(spinner);
   loadingOverlay.appendChild(loadingText);
   videoWrap.appendChild(loadingOverlay);
+
+  // Buffering spinner: a network seek on phone Wi-Fi with a big file takes
+  // real seconds, and the player showed NOTHING for them — the stall read
+  // as the app being broken rather than the network working. Spinner only
+  // (no text, no dim): universal signal, zero locale strings, and the
+  // controls stay usable so a mid-stall retarget on the seek bar works.
+  // The 150ms arm delay keeps local/buffered seeks from flashing it.
+  const bufferSpinner = document.createElement('div');
+  bufferSpinner.className = 'player__buffer-spinner';
+  bufferSpinner.setAttribute('aria-hidden', 'true');
+  const bufferSpinnerInner = document.createElement('div');
+  bufferSpinnerInner.className = 'player__loading-spinner';
+  bufferSpinner.appendChild(bufferSpinnerInner);
+  bufferSpinner.hidden = true;
+  videoWrap.appendChild(bufferSpinner);
+  let bufferSpinTimer = null;
+  const armBufferSpinner = () => {
+    if (bufferSpinTimer || !bufferSpinner.hidden) return;
+    bufferSpinTimer = setTimeout(() => {
+      bufferSpinTimer = null;
+      bufferSpinner.hidden = false;
+    }, 150);
+  };
+  const clearBufferSpinner = () => {
+    if (bufferSpinTimer) { clearTimeout(bufferSpinTimer); bufferSpinTimer = null; }
+    bufferSpinner.hidden = true;
+  };
+  videoEl.addEventListener('seeking', armBufferSpinner);
+  videoEl.addEventListener('waiting', armBufferSpinner);
+  videoEl.addEventListener('stalled', armBufferSpinner);
+  videoEl.addEventListener('playing', clearBufferSpinner);
+  videoEl.addEventListener('canplay', clearBufferSpinner);
+  videoEl.addEventListener('pause', clearBufferSpinner);
+  videoEl.addEventListener('error', clearBufferSpinner);
+
+  // --- Seek telemetry ---------------------------------------------------
+  // "The web remote still takes a while to seek" is unanswerable from the
+  // desktop: the desktop cannot see the phone's video element, and the
+  // backend log only shows that a range request happened, not what the
+  // player was waiting for. The 2026-08-18 stall fix needed wire captures
+  // for the same reason (Dave, 2026-08-21).
+  //
+  // So each seek reports three numbers: how long until `seeked`, how long
+  // until it was actually playing again, and — the one that splits the
+  // diagnosis in half — whether the target was already BUFFERED. A buffered
+  // seek that is slow is a player or decode problem; an unbuffered one is
+  // bytes, which means the network or the range serving.
+  let lastKnownTime = 0;
+  let seekMark = null;
+  const isBuffered = (t) => {
+    try {
+      const b = videoEl.buffered;
+      for (let i = 0; i < b.length; i++) {
+        if (t >= b.start(i) && t <= b.end(i)) return true;
+      }
+    } catch { /* buffered can throw before metadata */ }
+    return false;
+  };
+  const reportSeek = (mark) => {
+    try {
+      const body = JSON.stringify({
+        kind: mark.kind,
+        from: mark.from,
+        to: mark.to,
+        buffered: mark.buffered,
+        seekedMs: Math.round(mark.seekedMs ?? -1),
+        playingMs: Math.round(performance.now() - mark.at),
+      });
+      // Fire-and-forget: a diagnostic must never add latency to the thing
+      // it is measuring.
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/remote/seek-timing', new Blob([body], { type: 'application/json' }));
+      } else {
+        fetch('/api/remote/seek-timing', {
+          method: 'POST', body, keepalive: true,
+          headers: { 'Content-Type': 'application/json' },
+        }).catch(() => {});
+      }
+    } catch { /* never let telemetry break playback */ }
+  };
+  videoEl.addEventListener('timeupdate', () => {
+    if (!seekMark) lastKnownTime = videoEl.currentTime;
+  });
+  videoEl.addEventListener('seeking', () => {
+    const to = videoEl.currentTime;
+    seekMark = {
+      at: performance.now(),
+      from: lastKnownTime,
+      to,
+      buffered: isBuffered(to),
+      kind: seekKind || 'unknown',
+      seekedMs: null,
+    };
+    seekKind = null;
+  });
+  videoEl.addEventListener('seeked', () => {
+    if (!seekMark) return;
+    seekMark.seekedMs = performance.now() - seekMark.at;
+    lastKnownTime = videoEl.currentTime;
+    // If it is already playable there is nothing more to wait for; otherwise
+    // `playing`/`canplay` below closes the record.
+    if (videoEl.readyState >= 3) {
+      reportSeek(seekMark);
+      seekMark = null;
+    }
+  });
+  const closeSeekRecord = () => {
+    if (!seekMark || seekMark.seekedMs === null) return;
+    reportSeek(seekMark);
+    seekMark = null;
+  };
+  videoEl.addEventListener('playing', closeSeekRecord);
+  videoEl.addEventListener('canplay', closeSeekRecord);
+
+  // Switching control modes rebuilds the player; put the user back where
+  // they were rather than at 0:00.
+  if (pendingResumeSec != null) {
+    const resumeAt = pendingResumeSec;
+    pendingResumeSec = null;
+    videoEl.addEventListener('loadedmetadata', () => {
+      try { videoEl.currentTime = resumeAt; } catch { /* ignore */ }
+    }, { once: true });
+  }
+
   wrap.appendChild(videoWrap);
 
   // Custom control overlay (V4) — center play, seek bar with chapter
-  // markers, A-B loop, gap skip, mute, fullscreen.
-  buildPlayerControls(videoWrap, videoEl, video);
+  // markers, A-B loop, gap skip, mute, fullscreen. Skipped entirely in
+  // native mode: the point of the fallback is that nothing of ours sits
+  // between the finger and the video element.
+  if (!nativeControls) buildPlayerControls(videoWrap, videoEl, video);
+
+  // Mode toggle. Lives in the player view because that is where someone is
+  // standing when they decide the player is not working for them.
+  const controlsToggle = document.createElement('button');
+  controlsToggle.type = 'button';
+  controlsToggle.className = 'player__controls-toggle';
+  controlsToggle.textContent = nativeControls
+    ? t('webRemote.player.useCustomControls')
+    : t('webRemote.player.useNativeControls');
+  controlsToggle.addEventListener('click', () => {
+    pendingResumeSec = videoEl.currentTime || 0;
+    setNativeControls(!nativeControls);
+    renderPlayer(video.id);
+  });
+  wrap.appendChild(controlsToggle);
 
   // Device-sync status pill above the video. Populated by server messages.
   const pill = document.createElement('div');
@@ -2605,24 +2804,33 @@ function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
   let skipChainSide = null;
   let skipChainUntil = 0;
 
-  // Gesture skips use fastSeek where the browser has it (Safari/Firefox):
-  // it lands on the NEAREST KEYFRAME instead of decoding forward to the
-  // exact frame — skipping the biggest chunk of network-seek latency
-  // (long-GOP encodes put keyframes seconds apart; an accurate seek
-  // silently decodes all of it). Precision is irrelevant for ±10s taps,
-  // and device sync follows the ACTUAL landed time via `seeked`, so
-  // scripts stay correct. Android Chrome lacks fastSeek → falls back to
-  // the accurate currentTime set.
-  const seekTo = (t) => {
-    if (typeof videoEl.fastSeek === 'function') videoEl.fastSeek(t);
-    else videoEl.currentTime = t;
+  // Accurate seeks, the same as `<video controls>` does natively.
+  //
+  // This used fastSeek() where available (2026-08-04, V4): it lands on the
+  // nearest KEYFRAME rather than decoding forward to the exact frame, which
+  // on paper skips the biggest part of network-seek latency. In practice, on
+  // Dave's phone, seeking left audio and video out of step — and the stock
+  // web player, which never had this, was fine on the same files. fastSeek
+  // is explicitly approximate; the spec lets a browser trade precision for
+  // speed, and there is no requirement that the audio and video tracks land
+  // on the same approximation.
+  //
+  // Correctness over latency: an accurate seek that takes longer is a wait,
+  // an approximate one that desyncs is a broken player. If seek latency
+  // needs work, fix it where the time actually goes — the telemetry above
+  // reports that now (Dave, 2026-08-21).
+  const seekTo = (t, kind) => {
+    // Labels the telemetry record, so "the scrub bar is slow" and "the ±10s
+    // taps are slow" are separable in the log.
+    seekKind = kind || 'seekTo';
+    videoEl.currentTime = t;
   };
   const doSkip = (side) => {
     if (side === 'left') {
-      seekTo(Math.max(0, videoEl.currentTime - 10));
+      seekTo(Math.max(0, videoEl.currentTime - 10), 'skip-back');
     } else {
       const d = dur();
-      seekTo(d > 0 ? Math.min(d, videoEl.currentTime + 10) : videoEl.currentTime + 10);
+      seekTo(d > 0 ? Math.min(d, videoEl.currentTime + 10) : videoEl.currentTime + 10, 'skip-fwd');
     }
     skipFlash(side);
     renderProgress(); // optimistic — don't wait for post-buffer timeupdate
@@ -2655,15 +2863,21 @@ function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
       else doSkip(side);
       return;
     }
-    tapTimer = setTimeout(() => {
-      tapTimer = null;
-      if (overlay.classList.contains('pcx--visible')) {
-        overlay.classList.remove('pcx--visible');
-        clearTimeout(hideTimer);
-      } else {
-        show();
-      }
-    }, 260);
+    // Visibility toggles on the FIRST tap, immediately. It used to wait out
+    // the 260ms discrimination timer, which made every interaction start
+    // with a dead quarter-second — and an impatient second tap toward the
+    // (not-yet-visible) play button landed in the left third and read as
+    // double-tap = -10s skip instead of a pause. YouTube's split: controls
+    // respond instantly, only the double-tap ACTION waits for the window.
+    // Once controls are visible their buttons swallow taps (the guard at
+    // the top of this handler), so the accidental-skip path is gone.
+    if (overlay.classList.contains('pcx--visible')) {
+      overlay.classList.remove('pcx--visible');
+      clearTimeout(hideTimer);
+    } else {
+      show();
+    }
+    tapTimer = setTimeout(() => { tapTimer = null; }, 260);
   });
   centerBtn.addEventListener('click', togglePlay);
   playBtn.addEventListener('click', togglePlay);
@@ -2699,27 +2913,52 @@ function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
     if (rect.width <= 0) return 0;
     return Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
   };
+  // Scrub = UI-only until release. The old handlers assigned currentTime on
+  // pointerdown AND every pointermove — an ACCURATE seek per move (36 in one
+  // measured 600ms drag), each aborting the previous one's range requests.
+  // On phone Wi-Fi with long-GOP VR files that read as multi-second freezes.
+  // Now the thumb/readout track the finger optimistically and ONE seek
+  // commits on release, through seekTo() — which is an accurate seek since
+  // fastSeek was removed on 2026-08-21 (device sync follows the ACTUAL
+  // landed time via `seeked`, so it stays correct either way).
   let scrubbing = false;
+  let scrubTargetSec = null;
   seek.addEventListener('pointerdown', (e) => {
     scrubbing = true;
-    seek.setPointerCapture?.(e.pointerId);
-    videoEl.currentTime = pctFromEvent(e) * dur();
+    // try/catch, not just `?.`: the optional call guards a MISSING method,
+    // not a throwing one, and this throws NotFoundError if the pointer is
+    // already gone by the time the handler runs. An exception here would
+    // skip the two lines below, so the drag would track nothing and commit
+    // nothing — the same silent-dead-seek shape as the seekKind bug.
+    try { seek.setPointerCapture?.(e.pointerId); } catch { /* capture is a nicety */ }
+    scrubTargetSec = pctFromEvent(e) * dur();
+    renderProgress();
     show();
   });
   seek.addEventListener('pointermove', (e) => {
-    if (scrubbing) videoEl.currentTime = pctFromEvent(e) * dur();
+    if (!scrubbing) return;
+    scrubTargetSec = pctFromEvent(e) * dur();
+    renderProgress();
   });
-  const endScrub = () => { scrubbing = false; };
+  const endScrub = () => {
+    if (!scrubbing) return;
+    scrubbing = false;
+    if (scrubTargetSec != null) seekTo(scrubTargetSec, 'scrub');
+    scrubTargetSec = null;
+  };
   seek.addEventListener('pointerup', endScrub);
   seek.addEventListener('pointercancel', endScrub);
 
   const renderProgress = () => {
     const d = dur();
     if (d <= 0) return;
-    const pct = (videoEl.currentTime / d) * 100;
+    // Mid-scrub the finger is the truth, not the (still-playing) video —
+    // otherwise every timeupdate yanks the thumb back to playback position.
+    const shown = (scrubbing && scrubTargetSec != null) ? scrubTargetSec : videoEl.currentTime;
+    const pct = (shown / d) * 100;
     seekPlayed.style.width = `${pct}%`;
     seekThumb.style.left = `${pct}%`;
-    timeNow.textContent = formatDuration(videoEl.currentTime);
+    timeNow.textContent = formatDuration(shown);
     if (isFinite(videoEl.duration)) timeTotal.textContent = formatDuration(videoEl.duration);
     try {
       const b = videoEl.buffered;
@@ -2983,7 +3222,21 @@ function formatDuration(seconds) {
  */
 function wireThumb(img, url, onGiveUp) {
   let attempts = 0;
-  const MAX_ATTEMPTS = 8;
+  // Generation is semaphore-capped at 2 concurrent ffmpeg jobs backend-side,
+  // so on a cold cache the queue TAIL of a full library takes minutes. The
+  // old ladder (8 tries, 4s cap ≈ 26s budget) expired for the back half of
+  // the grid and those cards stayed black until a full page reload — even
+  // though the server was happily serving the JPEGs by then. ~3.5 minutes
+  // covers a cold 40-video library with margin.
+  const MAX_ATTEMPTS = 15;
+  const retry = () => {
+    if (attempts >= MAX_ATTEMPTS) { if (onGiveUp) onGiveUp(); return; }
+    attempts++;
+    const delay = attempts <= 10 ? Math.min(1000 * attempts, 8000) : 30000;
+    setTimeout(() => {
+      img.src = url + (url.includes('?') ? '&' : '?') + '_r=' + attempts;
+    }, delay);
+  };
   img.onload = () => {
     if (img.naturalWidth > 1) {
       // Real thumbnail arrived over the network → settle-in reveal (V3).
@@ -2994,14 +3247,12 @@ function wireThumb(img, url, onGiveUp) {
       if (!img.dataset.instant) img.classList.add('thumb-reveal');
       return;
     }
-    if (attempts >= MAX_ATTEMPTS) { if (onGiveUp) onGiveUp(); return; }
-    attempts++;
-    const delay = Math.min(1000 * attempts, 4000); // back off: 1s → 4s cap
-    setTimeout(() => {
-      img.src = url + (url.includes('?') ? '&' : '?') + '_r=' + attempts;
-    }, delay);
+    retry();
   };
-  img.onerror = () => { if (onGiveUp) onGiveUp(); };
+  // A transient error (backend mid-generation, one dropped request on a
+  // flaky LAN) used to give up instantly and permanently — errors ride the
+  // same ladder as placeholders now.
+  img.onerror = retry;
   img.src = url;
   if (img.complete && img.naturalWidth > 1) img.dataset.instant = '1';
 }

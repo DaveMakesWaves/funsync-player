@@ -12,8 +12,9 @@ duplication.
 """
 
 import os
+import uuid
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Body
 
 from routes.media import (
     get_video_registry,
@@ -27,6 +28,50 @@ from routes.media import (
 )
 
 router = APIRouter()
+
+# Changes on every app start, appended to the stream URLs the remote uses.
+#
+# A phone that cached partial responses from a previous run cannot be reached
+# by a server-side header change — the entries are already on the device. A
+# fresh URL per boot sidesteps them without asking the user to find a "clear
+# website data" button on a phone (Dave, 2026-08-21).
+_BOOT_TOKEN = uuid.uuid4().hex[:8]
+
+
+@router.post("/seek-timing")
+async def seek_timing(payload: dict = Body(default={})):
+    """Record one seek from the web remote, for diagnosis.
+
+    The desktop cannot see the phone's side of a seek, and that is where the
+    answer lives: whether the wait was for BYTES (a buffer miss, so network or
+    range serving) or for the round trip. The 2026-08-18 stall fix needed wire
+    captures for exactly this reason. One small POST per seek puts the numbers
+    in main.log instead, where Dave already looks.
+
+    Deliberately print(), not a logger: backend stdout is forwarded into
+    main.log with a [Backend] prefix, which is the same path uvicorn's own
+    access lines take.
+    """
+    def _num(key, default=-1.0):
+        try:
+            return float(payload.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    to_s = _num("to")
+    from_s = _num("from")
+    seeked_ms = _num("seekedMs")
+    playing_ms = _num("playingMs")
+    buffered = "hit" if payload.get("buffered") else "miss"
+    delta = to_s - from_s if to_s >= 0 and from_s >= 0 else 0.0
+    kind = str(payload.get("kind", "?"))[:16]
+
+    print(
+        f"[remote-seek] {kind} to={to_s:.1f}s d={delta:+.1f}s buffered={buffered} "
+        f"seeked={seeked_ms:.0f}ms playing={playing_ms:.0f}ms",
+        flush=True,
+    )
+    return {"ok": True}
 
 
 @router.post("/request-rescan")
@@ -93,7 +138,7 @@ async def list_videos():
             # access. Missing → 0, sorts to the "oldest" end.
             "dateAdded": v.get("dateAdded") or 0,
             "sourceName": v.get("sourceName") or "Library",
-            "streamUrl": f"/api/media/stream/{vid_id}",
+            "streamUrl": f"/api/media/stream/{vid_id}?v={_BOOT_TOKEN}",
             "scriptUrl": f"/api/media/script/{vid_id}" if v.get("funscriptPath") else None,
             "subtitleUrl": f"/api/media/subtitle/{vid_id}" if v.get("subtitlePath") else None,
             "thumbUrl": f"/api/media/thumb/{vid_id}",

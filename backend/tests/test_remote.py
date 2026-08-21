@@ -404,3 +404,21 @@ async def test_register_endpoint_backward_compatible(client):
     # Collections still present — not clobbered by the minimal register
     cols_resp = await client.get("/api/remote/collections")
     assert len(cols_resp.json()["collections"]) == 1
+
+@pytest.mark.anyio
+async def test_seek_timing_accepts_a_record(client):
+    """The diagnostic endpoint must never be the thing that breaks playback."""
+    response = await client.post("/api/remote/seek-timing", json={
+        "kind": "scrub", "from": 10.0, "to": 320.5,
+        "buffered": False, "seekedMs": 2140, "playingMs": 2380,
+    })
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+@pytest.mark.anyio
+async def test_seek_timing_survives_junk(client):
+    """A phone on a flaky link can send anything, including nothing."""
+    for payload in ({}, {"to": "banana", "from": None}, {"buffered": "yes"}):
+        response = await client.post("/api/remote/seek-timing", json=payload)
+        assert response.status_code == 200

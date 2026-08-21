@@ -6,10 +6,13 @@ export class DeviceSimulator {
    * @param {object} opts
    * @param {import('../js/video-player.js').VideoPlayer} opts.videoPlayer
    * @param {import('../js/funscript-engine.js').FunscriptEngine} opts.funscriptEngine
+   * @param {object} [opts.orgasmSwitch] — needs `livePosition`. Assigned after
+   *   construction in app.js, since the switch is built later.
    */
-  constructor({ videoPlayer, funscriptEngine }) {
+  constructor({ videoPlayer, funscriptEngine, orgasmSwitch = null }) {
     this.player = videoPlayer;
     this.funscript = funscriptEngine;
+    this.orgasmSwitch = orgasmSwitch;
 
     this._visible = false;
     this._panel = null;
@@ -28,9 +31,13 @@ export class DeviceSimulator {
     this._panel.className = 'device-sim';
     this._panel.hidden = true;
 
+    // Layer order mirrors OpenFunscripter's simulator draw order:
+    // background plate, front bar, height lines OVER the bar, then the
+    // indicator on top. See OFS_ScriptSimulator.cpp.
     this._panel.innerHTML = `
       <div class="device-sim__track">
         <div class="device-sim__fill"></div>
+        <div class="device-sim__lines"></div>
         <div class="device-sim__marker"></div>
       </div>
       <div class="device-sim__info">
@@ -52,6 +59,12 @@ export class DeviceSimulator {
    * @returns {number}
    */
   getPosition() {
+    // The Orgasm Switch runs on its OWN clock and drives the managers directly
+    // with the sync engines stopped, so video.currentTime says nothing about
+    // what the hardware is doing. While it is active it is the authority.
+    const live = this.orgasmSwitch?.livePosition;
+    if (live !== null && live !== undefined) return live;
+
     if (!this.funscript.isLoaded) return 50;
     const timeMs = this.player.currentTime * 1000;
     return this.funscript.getPositionAt(timeMs);

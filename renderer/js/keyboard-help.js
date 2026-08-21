@@ -124,8 +124,9 @@ export function getPlayerShortcutGroups() {
         ['F / F11',       t('kbd.fullscreen')],
         ['R',             t('kbd.cycleAspect')],
         ['Shift+R',       t('kbd.vrFlatten')],
-        ['Ctrl+Shift+R',  t('kbd.vrFormat')],
         ['Shift+Arrows',  t('kbd.vrPan')],
+        ['Ctrl+Scroll',   t('kbd.vrZoom')],
+        ['Ctrl+0',        t('kbd.vrZoomReset')],
         ['<',             t('kbd.speedDown')],
         ['>',             t('kbd.speedUp')],
         ['I',             t('kbd.toggleInfo')],
@@ -147,6 +148,15 @@ export function getPlayerShortcutGroups() {
       rows: [
         ['H',             t('kbd.devicesPanel')],
         ['D',             t('kbd.deviceSimulator')],
+        // X was never listed here — a user with a configured finisher had no
+        // way to discover the hotkey (lettuce, EroScripts #302).
+        // Both keys can run as hold or press-to-toggle, so the row has to
+        // say which one is armed — "(hold)" next to a key that toggles is
+        // worse than no label at all.
+        ['X',             dataService?.get?.('player.orgasmSwitchMode') === 'toggle'
+                            ? t('kbd.orgasmSwitchToggle') : t('kbd.orgasmSwitch')],
+        ['Z',             dataService?.get?.('player.edgeHoldMode') === 'toggle'
+                            ? t('kbd.edgeHoldToggle') : t('kbd.edgeHold')],
       ],
     },
     {

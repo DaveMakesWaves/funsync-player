@@ -48,7 +48,7 @@ describe('targetFileName', () => {
   });
 
   it('round-trips every axis in the definition list', () => {
-    for (const suffix of ['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve']) {
+    for (const suffix of ['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suck', 'valve']) {
       const name = targetFileName(VIDEO, suffix);
       expect(parseAxisSuffix(name)?.suffix).toBe(suffix);
       expect(getBaseName(name)).toBe('Izzy Green POV Onlyfans');

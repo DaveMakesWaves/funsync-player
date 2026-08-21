@@ -193,7 +193,8 @@ export class TCodeManager {
    * still emit `DSTOP\n` because OSR2/SR6 builds recognise it as a
    * shorthand. For MFP-protocol consumers (WebSocket → restim, Howl,
    * etc.) DSTOP is non-standard — they expect axis values — so we ALSO
-   * send a neutral-position frame on every axis. Sending both is
+   * send a rest frame: position axes centred, intensity axes zeroed.
+   * Sending both is
    * harmless on the firmware side (the second frame wins; DSTOP just
    * acts as a hint).
    */
@@ -207,10 +208,19 @@ export class TCodeManager {
     // (interval-less) 50% frame makes the device slam to center at full speed —
     // the "violent jump on pause" OSR2+ users reported. So skip it on serial.
     if (this._transportKind === 'serial') return;
-    const half = Math.round(this._valueMax / 2);
-    const valStr = String(half).padStart(this._precision, '0');
-    const axes = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'V0', 'A0', 'A1', 'A2'];
-    this.send(axes.map((a) => `${a}${valStr}`).join(' ') + '\n');
+    const mid = String(Math.round(this._valueMax / 2)).padStart(this._precision, '0');
+    const off = '0'.padStart(this._precision, '0');
+    // Position axes centre; intensity axes go to ZERO. A "neutral" frame that
+    // parks V0 at 50% is a stop that leaves the device running at half power.
+    // The lists must cover every channel we actually drive (AXIS_DEFINITIONS):
+    // this used to zero A1/A2, which nothing drove, while skipping V1 and V2,
+    // which were driven — so those axes held their last value through a stop.
+    const positionAxes = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2'];
+    const intensityAxes = ['V0', 'V1', 'A0', 'A1', 'A2'];
+    this.send([
+      ...positionAxes.map((a) => `${a}${mid}`),
+      ...intensityAxes.map((a) => `${a}${off}`),
+    ].join(' ') + '\n');
   }
 
   get connected() { return this._connected; }

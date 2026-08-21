@@ -16,7 +16,7 @@
 import { Modal } from './modal.js';
 import { t } from '../js/i18n.js';
 import { buildAssociationEntry, normalizeAssociation } from '../js/association-shape.js';
-import { AXIS_DEFINITIONS, buildCompanionPath } from '../js/multi-axis.js';
+import { AXIS_DEFINITIONS, buildCompanionPath, axisSuffixVariants } from '../js/multi-axis.js';
 
 const baseName = (p) => (p ? String(p).split(/[\\/]/).pop() : '');
 
@@ -133,18 +133,39 @@ export async function openOrgasmConfigModal({ entry, knownDevices = [] } = {}) {
       };
       const axisRefreshers = [];
 
+      // A saved config keys each axis by whatever spelling was canonical when
+      // it was written — `suction` before 2026-08-16, `suck` after. Read and
+      // clear across every accepted spelling so an older association doesn't
+      // silently lose its axis; always WRITE the canonical one.
+      const readAxis = (axis) => {
+        for (const v of axisSuffixVariants(axis)) if (multi.axes[v]) return multi.axes[v];
+        return '';
+      };
+      const clearAxis = (axis) => {
+        for (const v of axisSuffixVariants(axis)) delete multi.axes[v];
+      };
+
       // Auto-probe companion files next to a freshly-picked main script —
       // `<main>.twist.funscript` etc. — via fileExists (no library scan
       // needed, and Linux-safe: buildCompanionPath keeps the main file's
       // own directory + base casing, only the suffix is fixed lowercase,
       // which is the TCode naming convention).
       const probeCompanions = async (mainPath) => {
-        await Promise.all(AXIS_DEFINITIONS.map(async ({ suffix }) => {
-          if (multi.axes[suffix]) return; // never clobber a manual pick
-          const candidate = buildCompanionPath(mainPath, suffix);
-          try {
-            if (await window.funsync.fileExists(candidate)) multi.axes[suffix] = candidate;
-          } catch { /* probe is best-effort */ }
+        await Promise.all(AXIS_DEFINITIONS.map(async (axis) => {
+          if (readAxis(axis)) return; // never clobber a manual pick
+          // Scripters spell the same axis differently: `.suck.` vs `.suction.`,
+          // `.surge.` vs `.forward.`, or the raw channel `.A1.`. Probe every
+          // accepted spelling, canonical first, and take the first that exists —
+          // a scripter's choice of word must not decide whether we find the file.
+          for (const variant of axisSuffixVariants(axis)) {
+            const candidate = buildCompanionPath(mainPath, variant);
+            try {
+              if (await window.funsync.fileExists(candidate)) {
+                multi.axes[axis.suffix] = candidate;
+                return;
+              }
+            } catch { /* probe is best-effort */ }
+          }
         }));
         axisRefreshers.forEach((fn) => fn());
       };
@@ -159,12 +180,12 @@ export async function openOrgasmConfigModal({ entry, knownDevices = [] } = {}) {
       );
       multiPanel.appendChild(mainRow.row);
 
-      for (const { suffix, label } of AXIS_DEFINITIONS) {
+      for (const axis of AXIS_DEFINITIONS) {
         const { row, refresh } = makeScriptRow(
-          label,
-          () => baseName(multi.axes[suffix]),
-          async () => { const p = await pickScript(); if (p) multi.axes[suffix] = p; },
-          () => { delete multi.axes[suffix]; },
+          axis.label,
+          () => baseName(readAxis(axis)),
+          async () => { const p = await pickScript(); if (p) { clearAxis(axis); multi.axes[axis.suffix] = p; } },
+          () => { clearAxis(axis); },
         );
         axisRefreshers.push(refresh);
         multiPanel.appendChild(row);

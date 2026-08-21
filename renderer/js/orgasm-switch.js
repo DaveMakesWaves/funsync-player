@@ -90,6 +90,12 @@ export class OrgasmSwitch {
     this._active = false;
     this._startMs = 0;
     this._lastSentPos = -1;     // main-channel last-sent (single-mode contract)
+    this._livePos = null;       // last position COMPUTED this tick, whether or
+                                // not it cleared MIN_POS_DELTA. Display only —
+                                // the simulator reads it so the indicator
+                                // follows the orgasm loop's own clock instead
+                                // of the video's. Must not use _lastSentPos:
+                                // that is deliberately sparse.
     this._chanLast = new Map(); // per-channel last-sent — aux channels must
                                 // not be starved by a static main (and vice
                                 // versa), so the MIN_POS_DELTA skip is
@@ -174,6 +180,16 @@ export class OrgasmSwitch {
   get active() { return this._active; }
 
   /**
+   * The position the loop is currently driving, or `null` when it is not
+   * driving anything. Display only — the device simulator reads this so the
+   * indicator follows the orgasm loop rather than the video clock, which the
+   * loop deliberately ignores. Returns null while inactive so callers can fall
+   * back to the script position without special-casing.
+   * @returns {number|null}
+   */
+  get livePosition() { return this._active ? this._livePos : null; }
+
+  /**
    * Begin the orgasm-script loop. Returns a short status string:
    *   'activated' | 'already-active' | 'not-configured' | 'no-timer'
    * On success calls onActivate() (app stops the normal sync engines) and
@@ -186,6 +202,7 @@ export class OrgasmSwitch {
     this._active = true;
     this._startMs = this._now();
     this._lastSentPos = -1;
+    this._livePos = null;
     this._chanLast = new Map();
     try { this.onActivate?.(); } catch { /* swallow — best-effort */ }
     this._timer = this._setIntervalImpl(() => this._tick(), this._tickMs);
@@ -220,6 +237,7 @@ export class OrgasmSwitch {
     if (this._actions) {
       pos = interpolatePosition(this._actions, loopMs);
       if (pos !== null) {
+        this._livePos = pos;
         mainMoved = !(this._lastSentPos >= 0 && Math.abs(pos - this._lastSentPos) < MIN_POS_DELTA);
         prev = this._lastSentPos >= 0 ? this._lastSentPos : pos;
         if (mainMoved) this._lastSentPos = pos;

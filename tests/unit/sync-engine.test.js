@@ -281,3 +281,160 @@ describe('SyncEngine', () => {
     });
   });
 });
+
+// x0193143, thread #288: "if I manually connect Handy via connection key
+// after program started, when I paused the video Handy would keep working
+// about 15 seconds".
+//
+// His log is the proof. hsspPlay is a CLOUD round trip and it is SLOW:
+//   16:50:47.448  hsspPlay(7508) issued
+//   16:50:56.103  ...result            (8.7s)
+//   16:51:27.097  correction hsspPlay(4865) issued
+//   16:51:44.435  ...result            (17.3s)
+//
+// Pause inside that window and the ordering inverts: hsspStop goes out and
+// reaches the device, the pending hsspPlay lands AFTER it, and the device
+// happily resumes with nothing left to stop it.
+//
+// _handleSeeked already guarded exactly this with a generation token, and
+// its comment names the hazard — "a slow Stop from an earlier handler can
+// resolve AFTER a newer handler's Play". The pause path never got the same
+// protection.
+describe('pause during an in-flight hsspPlay (thread #288)', () => {
+  let player, handy, funscript, engine;
+
+  beforeEach(() => {
+    player = createMockVideoPlayer();
+    handy = createMockHandyManager();
+    funscript = createMockFunscriptEngine();
+    engine = new SyncEngine({
+      videoPlayer: player,
+      handyManager: handy,
+      funscriptEngine: funscript,
+    });
+    engine._active = true;
+    engine._scriptReady = true;
+  });
+
+  afterEach(() => { engine.stop?.(); });
+
+  /** hsspPlay that does not resolve until we say so. */
+  function deferPlay() {
+    let release;
+    handy.hsspPlay = vi.fn(() => new Promise((res) => { release = () => res(true); }));
+    return () => release();
+  }
+
+  it('re-sends the stop when a play resolves after a pause', async () => {
+    const releasePlay = deferPlay();
+
+    const playing = engine._handlePlaying();          // hangs on the cloud call
+    await Promise.resolve();
+
+    // User pauses while the play is still travelling.
+    Object.defineProperty(player.video, 'paused', { value: true, configurable: true });
+    await engine._handlePause();
+    expect(handy.hsspStop).toHaveBeenCalledTimes(1);
+
+    releasePlay();                                     // the slow play finally lands
+    await playing;
+
+    // THE FIX: without this the device is left playing after a pause.
+    expect(
+      handy.hsspStop.mock.calls.length,
+      'a play that resolved after a pause left the device running',
+    ).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not schedule the correction play after a pause', async () => {
+    vi.useFakeTimers();
+    try {
+      const releasePlay = deferPlay();
+      const playing = engine._handlePlaying();
+      await Promise.resolve();
+
+      Object.defineProperty(player.video, 'paused', { value: true, configurable: true });
+      await engine._handlePause();
+
+      releasePlay();
+      await playing;
+
+      handy.hsspPlay.mockClear();
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(handy.hsspPlay, 'correction play fired after a pause').not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The ordinary path must not regress: a play that is NOT superseded should
+  // leave the device playing and send no stop of its own.
+  it('leaves a normal play alone', async () => {
+    await engine._handlePlaying();
+    expect(handy.hsspPlay).toHaveBeenCalledTimes(1);
+    expect(handy.hsspStop).not.toHaveBeenCalled();
+  });
+});
+
+// Two plays close together must NOT stop the device (Dave's Handy, 2026-08-21).
+//
+// `_playGen` is bumped by BOTH _handlePlaying and _handlePause, so the first
+// of two rapid plays saw the generation move and concluded a PAUSE had
+// superseded it — then sent hsspStop, silencing the device immediately after
+// the newer play had started it. The orgasm-switch restore produces exactly
+// this shape: an explicit start() plus the element's own `playing` event, and
+// the log showed the two hsspPlay calls 1ms apart followed by a stop.
+describe('SyncEngine — supersede: pause vs another play', () => {
+  let player, handy, funscript, engine;
+
+  beforeEach(() => {
+    player = createMockVideoPlayer();
+    handy = createMockHandyManager();
+    funscript = createMockFunscriptEngine();
+    engine = new SyncEngine({ videoPlayer: player, handyManager: handy, funscriptEngine: funscript });
+    engine._active = true;
+    engine._scriptReady = true;
+  });
+
+  afterEach(() => { engine._stopDriftMonitor?.(); vi.clearAllTimers?.(); });
+
+  it('a second play does not make the first send a stop', async () => {
+    let releaseFirst;
+    handy.hsspPlay.mockImplementationOnce(() => new Promise((res) => { releaseFirst = () => res(true); }));
+    const first = engine._handlePlaying();      // hangs mid-flight
+    const second = engine._handlePlaying();     // lands while the first is in flight
+    releaseFirst();
+    await Promise.all([first, second]);
+    expect(handy.hsspPlay).toHaveBeenCalledTimes(2);
+    expect(handy.hsspStop, 'a newer PLAY must not stop the device').not.toHaveBeenCalled();
+  });
+
+  it('a pause DOES make an in-flight play undo itself', async () => {
+    // The behaviour the guard exists for — x0193143 #292, verified on
+    // hardware 2026-08-21.
+    let releasePlay;
+    handy.hsspPlay.mockImplementationOnce(() => new Promise((res) => { releasePlay = () => res(true); }));
+    const playing = engine._handlePlaying();
+    await engine._handlePause();
+    releasePlay();
+    await playing;
+    expect(handy.hsspStop.mock.calls.length, 'once for the pause, once for the late play')
+      .toBeGreaterThanOrEqual(2);
+  });
+
+  it('ended also makes an in-flight play undo itself', async () => {
+    let releasePlay;
+    handy.hsspPlay.mockImplementationOnce(() => new Promise((res) => { releasePlay = () => res(true); }));
+    const playing = engine._handlePlaying();
+    await engine._handleEnded();
+    releasePlay();
+    await playing;
+    expect(handy.hsspStop.mock.calls.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('an undisturbed play never stops the device', async () => {
+    await engine._handlePlaying();
+    expect(handy.hsspPlay).toHaveBeenCalledTimes(1);
+    expect(handy.hsspStop).not.toHaveBeenCalled();
+  });
+});

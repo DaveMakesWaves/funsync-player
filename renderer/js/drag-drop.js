@@ -169,6 +169,33 @@ export class DragDrop {
     }
   }
 
+  /**
+   * Real filesystem path for a dropped File, or '' if there isn't one.
+   *
+   * Electron removed the non-standard `File.path` in v32 (we are on 41), so
+   * a dropped file arrived with `path === undefined` and every path-keyed
+   * feature silently switched off — VR format panel, funscript auto-pairing,
+   * resume, script variations, queue context, screenshots, remux fallback,
+   * editor autosave target. Playback still worked via a blob URL, which is
+   * exactly why nobody noticed: the video played, so the drop looked fine.
+   * terijapl reported the one visible symptom (#284) — Ctrl+Shift+R saying
+   * "no video loaded" on a dropped video.
+   *
+   * `webUtils.getPathForFile` is the supported replacement, exposed through
+   * the preload because `webUtils` itself cannot cross the context bridge.
+   *
+   * Returns '' rather than throwing for the cases that legitimately have no
+   * path (a File constructed in-page, a synthetic drop in tests, a browser
+   * build with no preload), so callers keep the old blob behaviour.
+   */
+  _resolvePath(file) {
+    try {
+      return window.funsync?.getPathForFile?.(file) || '';
+    } catch {
+      return '';
+    }
+  }
+
   _onDrop(e) {
     if (!this._isFileDrag(e)) return; // internal drag — let the target handle it
     e.preventDefault();
@@ -182,13 +209,24 @@ export class DragDrop {
     let rejectedNames = [];
     for (const file of files) {
       const ext = this._getExtension(file.name);
+      const path = this._resolvePath(file);
       if (VIDEO_EXTENSIONS.includes(ext)) {
-        this.onVideoFile(file);
+        // With a real path, hand over the same shape the native dialog
+        // produces so the two entry points are indistinguishable
+        // downstream. Without one, pass the File through as before: it
+        // still plays via a blob URL, just without path-keyed features.
+        this.onVideoFile(path
+          ? { name: file.name, path, _isPathBased: true }
+          : file);
         acceptedCount++;
       } else if (FUNSCRIPT_EXTENSIONS.includes(ext)) {
+        // app.js reads `file.path` to set the editor's autosave target.
+        // Assigning rather than rebuilding keeps `file.text()` working.
+        if (path) file.path = path;
         this.onFunscriptFile(file);
         acceptedCount++;
       } else if (SUBTITLE_EXTENSIONS.includes(ext) && this.onSubtitleFile) {
+        if (path) file.path = path;
         this.onSubtitleFile(file);
         acceptedCount++;
       } else {

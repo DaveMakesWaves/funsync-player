@@ -7,6 +7,7 @@ import { describe, it, expect } from 'vitest';
 import {
   AXIS_DEFINITIONS, parseAxisSuffix, getBaseName, detectCompanionFiles,
   buildCompanionPath, getAxisBadges, tcodeToFeature,
+  getAxisBySuffix, axisSuffixVariants,
 } from '../../renderer/js/multi-axis.js';
 
 describe('multi-axis', () => {
@@ -40,11 +41,73 @@ describe('multi-axis', () => {
     });
 
     it('detects all standard suffixes', () => {
-      const expected = ['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve'];
+      const expected = ['surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suck', 'valve'];
       for (const suffix of expected) {
         const axis = parseAxisSuffix(`test.${suffix}.funscript`);
         expect(axis, `suffix "${suffix}" should be detected`).not.toBeNull();
         expect(axis.suffix).toBe(suffix);
+      }
+    });
+
+    // The channel is the whole point of the mapping — a suffix that parses but
+    // routes to the wrong wire does nothing useful. These are the MultiFunPlayer
+    // v0.3 assignments, which is what scripters name their files against.
+    it('routes each suffix to the TCode v0.3 channel MultiFunPlayer uses', () => {
+      const expected = {
+        surge: 'L1', sway: 'L2', twist: 'R0', roll: 'R1', pitch: 'R2',
+        vib: 'V0', pump: 'V1', valve: 'A0', suck: 'A1', lube: 'A2',
+      };
+      for (const [suffix, tcode] of Object.entries(expected)) {
+        expect(parseAxisSuffix(`v.${suffix}.funscript`).tcode, suffix).toBe(tcode);
+      }
+    });
+
+    it('detects the legacy and alternate spellings scripters actually use', () => {
+      // `suction` was FunSync's own name until 2026-08-16; the rest are MFP
+      // alternates and raw channel names. All must land on the same channel.
+      const aliases = {
+        suction: 'A1', forward: 'L1', left: 'L2', yaw: 'R0', vibrate: 'V0',
+        A1: 'A1', R0: 'R0', L1: 'L1', a2: 'A2',
+      };
+      for (const [alias, tcode] of Object.entries(aliases)) {
+        const axis = parseAxisSuffix(`test.${alias}.funscript`);
+        expect(axis, `alias "${alias}" should be detected`).not.toBeNull();
+        expect(axis.tcode, alias).toBe(tcode);
+      }
+    });
+
+    it('strips an alias suffix from the base name so companions still pair', () => {
+      // If `.suction.` isn't stripped, the base name becomes "video.suction"
+      // and the file never matches its own video.
+      expect(getBaseName('video.suction.funscript')).toBe('video');
+      expect(getBaseName('video.A1.funscript')).toBe('video');
+    });
+
+    it('never maps suction to V2, and never shares a channel between axes', () => {
+      // V2 was the old suction channel. No TCode device registers V2 as suction
+      // (a stock OSR2 registers no V2 at all), so it drove nothing. And `lube`
+      // used to collide with `pump` on V1, last write winning.
+      expect(getAxisBySuffix('suck').tcode).not.toBe('V2');
+      expect(getAxisBySuffix('lube').tcode).not.toBe(getAxisBySuffix('pump').tcode);
+
+      const channels = AXIS_DEFINITIONS.map((a) => a.tcode);
+      expect(new Set(channels).size, 'each axis owns its own channel').toBe(channels.length);
+    });
+
+    it('resolves any accepted spelling through getAxisBySuffix', () => {
+      // Saved associations are keyed by whatever was canonical when written.
+      expect(getAxisBySuffix('suction')).toBe(getAxisBySuffix('suck'));
+      expect(getAxisBySuffix('SUCTION').tcode).toBe('A1');
+      expect(getAxisBySuffix('nonsense')).toBeNull();
+      expect(getAxisBySuffix('')).toBeNull();
+    });
+
+    it('lists the canonical spelling first among the variants', () => {
+      // Auto-assign probes in order and takes the first hit, so a file named
+      // with the canonical suffix must win over one named with an alias.
+      for (const axis of AXIS_DEFINITIONS) {
+        expect(axisSuffixVariants(axis)[0]).toBe(axis.suffix);
+        expect(axisSuffixVariants(axis).length).toBeGreaterThan(1);
       }
     });
 

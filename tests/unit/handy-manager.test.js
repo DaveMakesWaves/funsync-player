@@ -222,6 +222,98 @@ describe('HandyManager', () => {
       const result = await manager.hsspPlay(0);
       expect(result).toBe(false);
     });
+
+    // Dave mashed X and Z: the stacked engage/release cycles timed out against
+    // the cloud, the device lost its HSSP setup, and `_mode` stayed at 1 — so
+    // every later call skipped the re-setup it needed and the Handy stopped
+    // following the video until the video was reloaded (2026-08-21).
+    it('drops the mode cache when a play fails', async () => {
+      await manager.connect('key');
+      manager._mode = 1;
+      mockHandy.hsspPlay.mockRejectedValueOnce(new Error('Device timeout'));
+      const result = await manager.hsspPlay(1000);
+      expect(result).toBe(false);
+      expect(manager._mode, 'a stale mode makes the next call skip its setup').toBeNull();
+    });
+
+    it('self-heals "mode specific setup required", not just "script set is required"', async () => {
+      await manager.connect('key');
+      manager._lastCloudUrl = 'http://cached.csv';
+      mockHandy.hsspPlay
+        .mockRejectedValueOnce(new Error('Illegal state. Mode specific setup required first.'))
+        .mockResolvedValueOnce({ result: 0 });
+      mockHandy.setScript.mockResolvedValueOnce({ result: 0 });
+      const result = await manager.hsspPlay(2000);
+      expect(mockHandy.setScript, 'must re-establish the script').toHaveBeenCalledWith('http://cached.csv');
+      expect(result).toBe(true);
+      expect(manager._mode).toBe(1);
+    });
+  });
+
+  // Mashing X and Z fired an engage/release pair per press, putting several
+  // 200-750ms cloud calls in flight at once. Under that pile-up the cloud
+  // returned "Device timeout" and the device lost its mode setup, so it
+  // stopped following the video (Dave, 2026-08-21).
+  describe('HSSP call serialisation', () => {
+    it('never runs two HSSP calls at once', async () => {
+      await manager.connect('key');
+      let inFlight = 0, maxInFlight = 0;
+      const track = () => new Promise((res) => {
+        inFlight++; maxInFlight = Math.max(maxInFlight, inFlight);
+        setTimeout(() => { inFlight--; res({ result: 0 }); }, 15);
+      });
+      mockHandy.hsspPlay.mockImplementation(track);
+      mockHandy.hsspStop.mockImplementation(track);
+      await Promise.all([
+        manager.hsspPlay(1), manager.hsspStop(), manager.hsspPlay(2),
+        manager.hsspStop(), manager.hsspPlay(3),
+      ]);
+      expect(maxInFlight, 'the device has ONE state machine').toBe(1);
+    });
+
+    it('sends only the newest of a burst of plays', async () => {
+      // Three plays issued back-to-back: the first two are already wrong by
+      // the time they would reach the device, and sending them is exactly the
+      // pile-up that caused the timeouts. Only the newest position matters.
+      await manager.connect('key');
+      mockHandy.hsspPlay.mockImplementation(() => new Promise(r => setTimeout(() => r({ result: 0 }), 15)));
+      await Promise.all([manager.hsspPlay(100), manager.hsspPlay(200), manager.hsspPlay(300)]);
+      const times = mockHandy.hsspPlay.mock.calls.map(c => c[0]);
+      expect(times).toEqual([300]);
+    });
+
+    it('a play already in flight is never dropped', async () => {
+      // Only QUEUED plays are droppable — one that already reached the device
+      // has to be allowed to finish, and the sync engine's own supersede
+      // handling deals with the result.
+      await manager.connect('key');
+      mockHandy.hsspPlay.mockImplementation(() => new Promise(r => setTimeout(() => r({ result: 0 }), 25)));
+      const inFlight = manager.hsspPlay(100);
+      await new Promise(r => setTimeout(r, 5));      // let it start
+      const later = manager.hsspPlay(500);
+      await Promise.all([inFlight, later]);
+      const times = mockHandy.hsspPlay.mock.calls.map(c => c[0]);
+      expect(times).toEqual([100, 500]);
+    });
+
+    it('NEVER drops a stop, however stale', async () => {
+      await manager.connect('key');
+      mockHandy.hsspPlay.mockImplementation(() => new Promise(r => setTimeout(() => r({ result: 0 }), 15)));
+      const play = manager.hsspPlay(100);
+      const stop = manager.hsspStop();
+      const after = manager.hsspPlay(400);
+      await Promise.all([play, stop, after]);
+      expect(mockHandy.hsspStop, 'a skipped stop leaves hardware running').toHaveBeenCalled();
+    });
+
+    it('one failure does not wedge every later call', async () => {
+      await manager.connect('key');
+      mockHandy.hsspPlay.mockRejectedValueOnce(new Error('Device timeout'));
+      await manager.hsspPlay(1);
+      mockHandy.hsspPlay.mockResolvedValueOnce({ result: 0 });
+      const ok = await manager.hsspPlay(2);
+      expect(ok, 'the chain must survive a rejected link').toBe(true);
+    });
   });
 
   describe('hsspStop', () => {
@@ -229,6 +321,14 @@ describe('HandyManager', () => {
       await manager.connect('key');
       await manager.hsspStop();
       expect(mockHandy.hsspStop).toHaveBeenCalled();
+    });
+
+    it('drops the mode cache when a stop fails', async () => {
+      await manager.connect('key');
+      manager._mode = 1;
+      mockHandy.hsspStop.mockRejectedValueOnce(new Error('Illegal state. Mode specific setup required first.'));
+      await manager.hsspStop();
+      expect(manager._mode).toBeNull();
     });
 
     it('handles errors gracefully', async () => {

@@ -10,6 +10,15 @@ import {
   computeNaturalRange,
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from './device-transform-stack.js';
+import {
+  createNoise1D,
+  fbm,
+  noiseToPercent,
+  patternValue,
+  shapeGeneratedValue,
+  axisPhase,
+  normaliseMotionConfig,
+} from './motion-source.js';
 
 // Poll/detect rate. This is NOT the number of moves sent — moves are emitted
 // per funscript keyframe (see _tick). It's how often we sample the clock to
@@ -76,6 +85,20 @@ export class TCodeSync {
     this._naturalRange = { min: 0, max: 100 };  // main script (L0)
     // Per-axis natural ranges live on the axis state inside _axisActions.
 
+    // Generated motion for axes with no script of their own (dio_likes_jojo,
+    // EroScripts #306). Off for every axis until the user opts in, per axis.
+    // tcode -> normalised { mode: 'link'|'random', depth, half, speed }
+    this._axisMotion = new Map();
+    this._genState = new Map();   // tcode -> { lastSentValue }
+    this._genCursor = -1;         // this generator's own index into the main script
+    this._genBeatIndex = -1;      // last main keyframe we emitted a value on
+    this._genClockSec = 0;        // noise clock - advances only while L0 drives
+    this._genLastTimeMs = -1;     // media time at the previous generated tick
+    // Fixed seed: a session that misbehaves should be reproducible from a bug
+    // report, and the variation people actually feel comes from the script's
+    // timing, not from a different noise field every launch.
+    this._noise = createNoise1D();
+
     // Interpolation
     this._interpolationMode = 'linear';
     this._interpolator = linearInterpolate;
@@ -121,6 +144,42 @@ export class TCodeSync {
     this._resetIndices();
   }
 
+  /** Whether a video is currently driving this engine. */
+  isDriving() {
+    return !!this._active;
+  }
+
+  /**
+   * Push one L0 target from OUTSIDE the video clock (the filler test button).
+   *
+   * Applies the same per-axis invert/range/cutoff a scripted position gets,
+   * for the same reason the Buttplug side does: a test that skipped them
+   * would not be a test of what the user will actually feel.
+   *
+   * @param {number} position 0-100
+   * @param {number} durationMs time to reach it
+   * @returns {boolean} false when refused
+   */
+  sendPositionNow(position, durationMs) {
+    if (this._active) return false;
+    if (!this.tcode?.connected) return false;
+    if (!this.isAxisEnabled('L0')) return false;
+
+    let value = applyInvert(position, this.isAxisInverted('L0'));
+    const range = this.getAxisRange('L0');
+    value = range.min + (value / 100) * (range.max - range.min);
+    value = applyCutoff(value, this._axisCutoff.get('L0'));
+
+    this.tcode.sendAxes({ L0: value }, undefined, { L0: this._clampMove(durationMs) });
+    return true;
+  }
+
+  /** Idle the device after an off-clock run. */
+  stopTestOutput() {
+    if (this._active) return;
+    try { this.tcode?.stop?.(); } catch { /* best-effort */ }
+  }
+
   /** Set actions for a companion axis. */
   setAxisActions(tcode, actions) {
     if (!actions || actions.length < 2) {
@@ -153,6 +212,32 @@ export class TCodeSync {
 
   clearAxisActions() {
     this._axisActions.clear();
+  }
+
+  /**
+   * Configure generated motion for an axis that has no script.
+   *
+   * @param {string} tcode  axis (L0 is refused - the stroke axis is the clock,
+   *                        generating it would leave nothing to follow)
+   * @param {{mode: 'script'|'link'|'random'|'pattern', depth?: number,
+   *          half?: 'off'|'top'|'bottom', speed?: number, pattern?: string}|null} cfg
+   *        'script' or null clears it. A real script for the axis always wins
+   *        over this - see _tickGeneratedAxes.
+   */
+  setAxisMotion(tcode, cfg) {
+    if (tcode === 'L0') return;
+    const norm = normaliseMotionConfig(cfg);
+    if (!norm) {
+      this._axisMotion.delete(tcode);
+      this._genState.delete(tcode);
+      return;
+    }
+    this._axisMotion.set(tcode, norm);
+    if (!this._genState.has(tcode)) this._genState.set(tcode, { lastSentValue: -1 });
+  }
+
+  getAxisMotion(tcode) {
+    return this._axisMotion.get(tcode) || null;
   }
 
   setAxisEnabled(tcode, enabled) {
@@ -253,6 +338,7 @@ export class TCodeSync {
     this._lastSentPos = -1;
     this._lastSendTime = 0;
     this._lastSentAxes = {};
+    this._resetGeneratedAxes();
   }
 
   _resetIndices() {
@@ -273,6 +359,19 @@ export class TCodeSync {
       state.lastSentValue = -1;
     }
     this._lastSentAxes = {};
+    this._resetGeneratedAxes();
+  }
+
+  /**
+   * Generated axes re-anchor on the next main keyframe after a seek. The noise
+   * clock keeps running - its phase isn't tied to media time, and resetting it
+   * would snap every generated axis back to the same starting value.
+   */
+  _resetGeneratedAxes() {
+    this._genCursor = -1;
+    this._genBeatIndex = -1;
+    this._genLastTimeMs = -1;
+    for (const [, state] of this._genState) state.lastSentValue = -1;
   }
 
   _binarySearch(actions, timeMs) {
@@ -496,9 +595,121 @@ export class TCodeSync {
       }
     }
 
+    // Generated axes - twist/roll/pitch with no script of their own.
+    if (this._axisMotion.size > 0) {
+      this._tickGeneratedAxes(timeMs, axisValues, axisIntervals);
+    }
+
     if (Object.keys(axisValues).length > 0) {
       this.tcode.sendAxes(axisValues, undefined, axisIntervals);
       this._lastSendTime = now;
+    }
+  }
+
+  /**
+   * The main script's current keyframe, used as the clock for generated axes.
+   *
+   * Deliberately its own cursor rather than reusing _lastActionIndex: that one
+   * only advances inside the L0 block, which is skipped when the user disables
+   * L0 output. Someone running twist-only off a stroke script is exactly the
+   * case this feature exists for, so the clock can't depend on L0 being sent.
+   *
+   * @returns {{index: number, pos: number, moveMs: number}|null} null when
+   *          there's no script, we're past the end, or the next keyframe is
+   *          further out than MAX_GAP_MS (an idle gap - generated axes hold
+   *          position rather than crawling toward a distant target).
+   */
+  _mainBeat(timeMs) {
+    const actions = this._actions;
+    if (!actions || actions.length < 2) return null;
+
+    // Re-anchor on a backward seek; otherwise walk forward.
+    if (this._genCursor < 0 || this._genCursor >= actions.length ||
+        actions[this._genCursor].at > timeMs) {
+      this._genCursor = this._binarySearch(actions, timeMs);
+    }
+    while (this._genCursor + 1 < actions.length &&
+           actions[this._genCursor + 1].at <= timeMs) {
+      this._genCursor++;
+    }
+
+    const i = this._genCursor;
+    if (i < 0 || i + 1 >= actions.length) return null;
+    const remaining = actions[i + 1].at - timeMs;
+    if (remaining <= 0 || remaining > MAX_GAP_MS) return null;
+    return { index: i, pos: actions[i + 1].pos, moveMs: remaining };
+  }
+
+  /**
+   * Emit one value per generated axis, once per MAIN keyframe.
+   *
+   * Rate matters here: sampling a noise function every tick would put 60
+   * moves/sec/axis on a 115200 serial link and drown the scripted axes. One
+   * value per main keyframe, travelling over that keyframe's own interval, is
+   * both cheap and the reason generated motion tracks the action instead of
+   * running to its own beat - the same trick XTPlayer uses.
+   */
+  _tickGeneratedAxes(timeMs, axisValues, axisIntervals) {
+    // The noise clock runs on MEDIA time, not wall time. Playback speed then
+    // scales generated motion the same way it scales the script, a seek lands
+    // somewhere new in the noise field instead of continuing from where the
+    // wall clock happened to be, and a paused tab can't accumulate drift.
+    // Clamped so a long seek re-anchors rather than fast-forwarding the field.
+    const dtMs = this._genLastTimeMs < 0
+      ? this._tickIntervalMs
+      : Math.min(Math.abs(timeMs - this._genLastTimeMs), 1000);
+    this._genLastTimeMs = timeMs;
+
+    const beat = this._mainBeat(timeMs);
+    if (!beat) {
+      // No clock (gap, end of script, or no script at all) - hold position and
+      // re-anchor when the script picks back up.
+      this._genBeatIndex = -1;
+      return;
+    }
+
+    // Noise advances only while the main axis has somewhere to go. MFP gates on
+    // the stroke axis being dirty for the same reason: motion that keeps
+    // wandering through a paused or empty stretch reads as a fault.
+    this._genClockSec += dtMs / 1000;
+
+    if (beat.index === this._genBeatIndex) return;   // same keyframe, nothing new to say
+    this._genBeatIndex = beat.index;
+
+    for (const [tcode, cfg] of this._axisMotion) {
+      if (!this.isAxisEnabled(tcode)) continue;
+      // A real script for this axis always wins - generated motion fills in
+      // for a missing track, it never overrides what a scripter wrote.
+      if (this._axisActions.has(tcode)) continue;
+
+      const state = this._genState.get(tcode) || { lastSentValue: -1 };
+      let raw;
+      if (cfg.mode === 'link') {
+        raw = shapeGeneratedValue(beat.pos, cfg);
+      } else if (cfg.mode === 'pattern') {
+        // No per-axis phase offset here, unlike random: two axes on the same
+        // pattern moving together is a coherent shape, and a user who wants
+        // them apart has the half and depth controls to say so.
+        raw = shapeGeneratedValue(patternValue(cfg.pattern, this._genClockSec * cfg.speed), cfg);
+      } else {
+        const t = this._genClockSec * cfg.speed + axisPhase(tcode);
+        raw = shapeGeneratedValue(noiseToPercent(fbm(this._noise, t)), cfg);
+      }
+
+      // Same output stack as a scripted axis (minus the extender, which
+      // stretches a narrow SCRIPT - a generated value is already full-scale),
+      // so Safety Cap and Ceiling apply to generated motion too.
+      let value = applyInvert(raw, this.isAxisInverted(tcode));
+      const range = this.getAxisRange(tcode);
+      value = range.min + (value / 100) * (range.max - range.min);
+      value = applyCutoff(value, this._axisCutoff.get(tcode));
+
+      if (state.lastSentValue < 0 || Math.abs(value - state.lastSentValue) >= MIN_POS_DELTA) {
+        axisValues[tcode] = value;
+        axisIntervals[tcode] = this._clampMove(beat.moveMs);
+        state.lastSentValue = value;
+      }
+      this._genState.set(tcode, state);
     }
   }
 

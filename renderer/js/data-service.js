@@ -26,6 +26,13 @@ const SETTINGS_DEFAULTS = {
     directory: '',
     associations: {},
   },
+  security: {
+    // Hide media file NAMES in main.log (directory and extension stay).
+    // Off by default: most users diagnose their own machine, where a
+    // redacted log is simply a worse log. This is for the case where a log
+    // is about to be pasted somewhere public.
+    hideLogFileNames: false,
+  },
   editor: {
     defaultCreator: '',
     patternPresets: [],

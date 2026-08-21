@@ -177,3 +177,49 @@ describe('DeviceSimulator', () => {
     });
   });
 });
+
+// Reported on Discord 2026-08-17: the simulator did not reflect the gap
+// filler, and the same held for the Orgasm Switch. Both come from the same
+// root cause — the indicator was drawing the SCRIPT, not what the devices
+// were being driven with.
+describe('DeviceSimulator — shows what the devices are doing', () => {
+  let sim, player, funscript;
+
+  beforeEach(() => {
+    if (!document.getElementById('app')) {
+      const app = document.createElement('div');
+      app.id = 'app';
+      document.body.appendChild(app);
+    }
+    player = { video: document.createElement('video'), currentTime: 4, paused: false };
+    funscript = { isLoaded: true, getPositionAt: vi.fn().mockReturnValue(20) };
+    sim = new DeviceSimulator({ videoPlayer: player, funscriptEngine: funscript });
+  });
+
+  afterEach(() => { sim?.destroy?.(); });
+
+  it('follows the Orgasm Switch while it is active, not the video clock', () => {
+    // The switch runs on its own clock with the sync engines stopped, so
+    // video.currentTime says nothing about what the hardware is doing.
+    sim.orgasmSwitch = { livePosition: 87 };
+    expect(sim.getPosition()).toBe(87);
+    expect(funscript.getPositionAt).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the script position the moment the switch stops', () => {
+    sim.orgasmSwitch = { livePosition: null };
+    expect(sim.getPosition()).toBe(20);
+    expect(funscript.getPositionAt).toHaveBeenCalled();
+  });
+
+  it('treats position 0 from the switch as a real position, not absent', () => {
+    // A bottom-of-stroke 0 is falsy; a truthiness check here would silently
+    // hand control back to the video clock at the bottom of every stroke.
+    sim.orgasmSwitch = { livePosition: 0 };
+    expect(sim.getPosition()).toBe(0);
+  });
+
+  it('works when no switch is wired at all', () => {
+    expect(sim.getPosition()).toBe(20);
+  });
+});

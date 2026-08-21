@@ -446,6 +446,89 @@ describe('script-modifiers', () => {
       }
     });
 
+    // The shape tests below exist because the two above do not test the shape
+    // (Dave, 2026-08-21). "Only min and max positions" is just as true of a
+    // TRIANGLE wave — its corners are min and max — and the sawtooth test only
+    // checks bounds. Both passed for months while `_dedupeByTime` deleted the
+    // point that ended each flat hold, leaving square as a triangle and
+    // sawtooth as a near-flat line, in the gap filler and the editor alike.
+    const sampleWave = (actions, from, to, n = 400) => {
+      const at = (t) => {
+        let i = 0;
+        while (i + 1 < actions.length && actions[i + 1].at <= t) i++;
+        const a = actions[i];
+        const b = actions[Math.min(i + 1, actions.length - 1)];
+        if (!b || b.at === a.at) return a.pos;
+        return a.pos + ((t - a.at) / (b.at - a.at)) * (b.pos - a.pos);
+      };
+      return Array.from({ length: n }, (_, i) => at(from + (i / (n - 1)) * (to - from)));
+    };
+
+    it('square HOLDS at each level rather than ramping between them', () => {
+      const result = generatePattern('square', 0, 8000, 25, 0, 100);
+      const vals = sampleWave(result, 0, 8000);
+      const atRail = vals.filter((v) => v <= 2 || v >= 98).length / vals.length;
+      // A square spends nearly all its time at one rail or the other. The
+      // triangle this used to produce spends nearly none.
+      expect(atRail).toBeGreaterThan(0.9);
+    });
+
+    it('square keeps a flat hold in its action list', () => {
+      // Two consecutive points at the same position and different times IS
+      // the hold. Deleting one of them is what broke the shape.
+      const result = generatePattern('square', 0, 8000, 25, 0, 100);
+      const holds = result.filter((a, i) => i > 0 && result[i - 1].pos === a.pos && a.at > result[i - 1].at);
+      expect(holds.length).toBeGreaterThan(2);
+    });
+
+    it('square alternates rails instead of sitting on one', () => {
+      const result = generatePattern('square', 0, 8000, 25, 0, 100);
+      const levels = [...new Set(result.map((a) => a.pos))].sort((a, b) => a - b);
+      expect(levels).toEqual([0, 100]);
+      const flips = result.filter((a, i) => i > 0 && result[i - 1].pos !== a.pos).length;
+      expect(flips).toBeGreaterThan(2);
+    });
+
+    it('sawtooth ramps one way and resets sharply', () => {
+      const result = generatePattern('sawtooth', 0, 8000, 25, 0, 100);
+      const vals = sampleWave(result, 0, 8000);
+      const deltas = vals.slice(1).map((v, i) => v - vals[i]);
+      const rises = deltas.filter((d) => d > 0);
+      const drops = deltas.filter((d) => d < 0);
+      // Many small rises, few big drops — that asymmetry IS the sawtooth.
+      expect(rises.length).toBeGreaterThan(drops.length * 5);
+      expect(Math.abs(Math.min(...deltas))).toBeGreaterThan(Math.max(...rises) * 5);
+    });
+
+    it('sawtooth actually travels the full range each cycle', () => {
+      // The broken version emitted min, min, min... and only reached max once,
+      // at the very end: a flat line that moved no device.
+      const result = generatePattern('sawtooth', 0, 8000, 25, 0, 100);
+      const vals = sampleWave(result, 0, 8000);
+      expect(Math.max(...vals)).toBeGreaterThan(95);
+      expect(Math.min(...vals)).toBeLessThan(5);
+      const reachedTop = result.filter((a) => a.pos >= 95).length;
+      expect(reachedTop).toBeGreaterThan(2);
+    });
+
+    it('no two actions share a timestamp', () => {
+      // Step edges are EDGE_MS wide rather than stacked on one instant, so a
+      // generated pattern is safe to save and to interpolate.
+      for (const type of ['sine', 'sawtooth', 'square', 'triangle', 'escalating', 'random']) {
+        const result = generatePattern(type, 0, 8000, 25, 0, 100);
+        const times = result.map((a) => a.at);
+        expect(new Set(times).size, type).toBe(times.length);
+      }
+    });
+
+    it('every pattern moves — none is a flat line', () => {
+      for (const type of ['sine', 'sawtooth', 'square', 'triangle', 'escalating', 'random']) {
+        const result = generatePattern(type, 0, 8000, 25, 0, 100);
+        const positions = result.map((a) => a.pos);
+        expect(Math.max(...positions) - Math.min(...positions), type).toBeGreaterThan(50);
+      }
+    });
+
     it('generates triangle pattern', () => {
       const result = generatePattern('triangle', 0, 2000, 60, 0, 100);
       expect(result.length).toBeGreaterThan(0);

@@ -571,3 +571,51 @@ describe('buildFillerActions guards', () => {
     expect(buildFillerActions(undefined, { thresholdMs: 5000 })).toEqual([]);
   });
 });
+
+// The shape has to survive the pipeline, not just the generator (Dave,
+// 2026-08-21). `pulse` promises a square; between generatePattern and the
+// device sit _dedupeByTime, the slew limiter and _simplify, and a bug in the
+// first of those silently shipped a triangle for months.
+describe('filler shapes survive the pipeline', () => {
+  const sampleWave = (actions, from, to, n = 400) => {
+    const at = (t) => {
+      let i = 0;
+      while (i + 1 < actions.length && actions[i + 1].at <= t) i++;
+      const a = actions[i];
+      const b = actions[Math.min(i + 1, actions.length - 1)];
+      if (!b || b.at === a.at) return a.pos;
+      return a.pos + ((t - a.at) / (b.at - a.at)) * (b.pos - a.pos);
+    };
+    return Array.from({ length: n }, (_, i) => at(from + (i / (n - 1)) * (to - from)));
+  };
+
+  const fill = (pattern) => buildGapFiller(
+    { startMs: 0, endMs: 12000 }, 50, 50,
+    { pattern, bpm: 25, min: 20, max: 80 },
+  );
+
+  it('the pulse preset still reads as a square after slew limiting', () => {
+    // Ramped edges are expected and wanted; flat holds are what make it a
+    // square rather than a triangle, and they must still dominate.
+    const vals = sampleWave(fill('square'), 2000, 10000);
+    const atRail = vals.filter((v) => v <= 22 || v >= 78).length / vals.length;
+    expect(atRail).toBeGreaterThan(0.5);
+  });
+
+  it('sawtooth still rises slowly and resets fast', () => {
+    const vals = sampleWave(fill('sawtooth'), 1000, 11000);
+    const deltas = vals.slice(1).map((v, i) => v - vals[i]);
+    const rises = deltas.filter((d) => d > 0.05);
+    const drops = deltas.filter((d) => d < -0.05);
+    expect(rises.length).toBeGreaterThan(drops.length * 2);
+    expect(Math.max(...vals) - Math.min(...vals)).toBeGreaterThan(40);
+  });
+
+  it('no shape collapses to a flat line', () => {
+    for (const pattern of ['sine', 'sawtooth', 'square', 'triangle', 'escalating', 'random']) {
+      const actions = fill(pattern);
+      const positions = actions.map((a) => a.pos);
+      expect(Math.max(...positions) - Math.min(...positions), pattern).toBeGreaterThan(20);
+    }
+  });
+});

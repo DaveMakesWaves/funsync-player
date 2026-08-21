@@ -41,12 +41,50 @@ function makeDataService(initial = {}) {
   };
 }
 
+// The gesture (Ctrl+scroll / pinch) and the panel write the SAME entry.
+// buildEntry rebuilds it field by field, so any field it does not name is
+// silently dropped — meaning a panel commit would wipe whatever the gesture
+// had just set. These pin that it carries them.
+describe('buildEntry carries the viewer zoom fields', () => {
+  it('round-trips viewZoom and pan', () => {
+    const e = buildEntry({ projection: 'sbs-half', eye: 'left', viewZoom: 2, panX: 0.1, panY: -0.1 });
+    expect(e.viewZoom).toBe(2);
+    expect(e.panX).toBeCloseTo(0.1, 6);
+    expect(e.panY).toBeCloseTo(-0.1, 6);
+  });
+
+  it('defaults them when absent rather than emitting undefined', () => {
+    const e = buildEntry({ projection: 'sbs-half', eye: 'left' });
+    expect(e.viewZoom).toBe(1);
+    expect(e.panX).toBe(0);
+    expect(e.panY).toBe(0);
+  });
+
+  it('clamps pan to what the zoom level can actually reveal', () => {
+    // At viewZoom 1 nothing is hidden, so any pan must collapse to 0 —
+    // otherwise an un-zoomed video sits off-centre with no way back.
+    const e = buildEntry({ projection: 'sbs-half', eye: 'left', viewZoom: 1, panX: 0.4 });
+    expect(e.panX).toBe(0);
+  });
+
+  it('keeps the packing correction separate from the viewer zoom', () => {
+    const e = buildEntry({ projection: 'sbs-half', eye: 'left', zoom: 1.5, viewZoom: 2 });
+    expect(e.zoom).toBe(1.5);
+    expect(e.viewZoom).toBe(2);
+  });
+});
+
 describe('buildEntry', () => {
-  it("'flat' projection clears eye and zoom", () => {
-    expect(buildEntry({ projection: 'flat', eye: 'left', zoom: 1.5 })).toEqual({
+  it("'flat' projection clears eye, zoom and viewer zoom/pan", () => {
+    expect(buildEntry({
+      projection: 'flat', eye: 'left', zoom: 1.5, viewZoom: 3, panX: 0.2, panY: -0.1,
+    })).toEqual({
       projection: 'flat',
       eye: null,
       zoom: 1,
+      viewZoom: 1,
+      panX: 0,
+      panY: 0,
       fov: 90,
       yaw: 0,
       pitch: 0,

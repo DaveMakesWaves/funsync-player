@@ -598,27 +598,58 @@ html, body {
    `fill` squashes the 32:9 source into the 16:9 element box (each eye
    becomes horizontally compressed), then `scaleX(2)` un-squashes it,
    so one eye fills the wrapper at correct aspect with no letterboxing.
-   Same logic for TB (16:18 → vertical squash → scaleY(2) un-squashes). */
+   Same logic for TB (16:18 → vertical squash → scaleY(2) un-squashes).
+
+   TRANSFORM ORDER MATTERS (CSS applies right-to-left):
+
+     translate(pan)  scale(view)  scaleX(2 * packing)  translateX(-50%)
+     └─ 4th ──────┘  └─ 3rd ───┘  └─ 2nd ───────────┘  └─ 1st ───────┘
+
+   1. translateX(-50%) selects the second eye, in the element's own
+      unscaled coords — must stay innermost or it picks the wrong crop.
+   2. the un-squash restores correct aspect for one eye. `--vr-flatten-zoom`
+      multiplies into it and is the PACKING CORRECTION for non-standard
+      sources: it is deliberately one-axis, so raising it stretches rather
+      than magnifies. It is not a viewer control.
+   3. `--vr-view-zoom` is the real viewer zoom, and is UNIFORM — it scales
+      the already-corrected picture, so aspect is preserved at any level.
+   4. `--vr-pan-x/y` move the magnified picture in screen space, clamped in
+      JS so it can never be dragged fully out of the frame. Percentages are
+      of the unscaled box, which keeps a drag tracking the cursor. */
 .player__video--flat-sbs-half,
 .player__video--flat-sbs-full {
   object-fit: fill;
-  transform: scaleX(calc(2 * var(--vr-flatten-zoom, 1)));
+  transform:
+    translate(calc(var(--vr-pan-x, 0) * 100%), calc(var(--vr-pan-y, 0) * 100%))
+    scale(var(--vr-view-zoom, 1))
+    scaleX(calc(2 * var(--vr-flatten-zoom, 1)));
 }
 .player__video--flat-tb-half,
 .player__video--flat-tb-full {
   object-fit: fill;
-  transform: scaleY(calc(2 * var(--vr-flatten-zoom, 1)));
+  transform:
+    translate(calc(var(--vr-pan-x, 0) * 100%), calc(var(--vr-pan-y, 0) * 100%))
+    scale(var(--vr-view-zoom, 1))
+    scaleY(calc(2 * var(--vr-flatten-zoom, 1)));
 }
 /* Right-eye / bottom-eye variants — same scale, opposite translate.
    Combined with the wrapper's `overflow: hidden`, the un-displayed eye
    simply paints off-canvas and is clipped. */
 .player__video--flat-sbs-half.player__video--flat-eye-2,
 .player__video--flat-sbs-full.player__video--flat-eye-2 {
-  transform: scaleX(calc(2 * var(--vr-flatten-zoom, 1))) translateX(-50%);
+  transform:
+    translate(calc(var(--vr-pan-x, 0) * 100%), calc(var(--vr-pan-y, 0) * 100%))
+    scale(var(--vr-view-zoom, 1))
+    scaleX(calc(2 * var(--vr-flatten-zoom, 1)))
+    translateX(-50%);
 }
 .player__video--flat-tb-half.player__video--flat-eye-2,
 .player__video--flat-tb-full.player__video--flat-eye-2 {
-  transform: scaleY(calc(2 * var(--vr-flatten-zoom, 1))) translateY(-50%);
+  transform:
+    translate(calc(var(--vr-pan-x, 0) * 100%), calc(var(--vr-pan-y, 0) * 100%))
+    scale(var(--vr-view-zoom, 1))
+    scaleY(calc(2 * var(--vr-flatten-zoom, 1)))
+    translateY(-50%);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -2456,6 +2487,28 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   width: 100%;
 }
 
+.settings-panel__filler-test-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.connection-panel__motion-preview-row {
+  display: flex;
+  width: 100%;
+  padding: 2px 0 4px;
+}
+
+/* Curve preview for a generated axis. Full-width and short — the shape is
+   the information, the amplitude is read against the centre line. */
+.connection-panel__motion-preview {
+  width: 100%;
+  height: 46px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+}
+
 .connection-panel__safety-slider {
   flex: 1;
   height: 4px;
@@ -2653,15 +2706,34 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   align-items: center;
   gap: 8px;
   pointer-events: none;
+  /* User-set in Settings > Playback (20-100). Applied to the whole widget so
+     the bar, its border and the readout fade together. Default matches the
+     inline-viz overlay so the two video overlays agree out of the box. */
+  opacity: var(--device-sim-opacity, 0.8);
 }
 
+/* Shape follows OpenFunscripter's simulator (OFS_ScriptSimulator.cpp): a
+   chunky square-cornered bar with a heavy border, filled from the bottom,
+   with height lines every 10%.
+
+   DELIBERATELY THINNER THAN OFS. Its bar is 120 wide x 400 long (ratio 0.3);
+   ours is 42 x 200 (ratio 0.21). That is Dave's call for how it sits over
+   video, not an oversight — do not "correct" it back to OFS's proportions.
+   The border IS scaled with the width (OFS border:width is ~6.7%; 3px of
+   42px is ~7%), because a fixed border on a narrower bar reads as heavier.
+
+   Colours are ours, not OFS's — its cyan front becomes the FunSync accent,
+   and its indicator pink is near-identical to our --accent-hover already. */
 .device-sim__track {
   position: relative;
-  width: 24px;
+  width: 42px;
   height: 200px;
-  background: rgba(0, 0, 0, 0.6);
-  border: 1px solid var(--border-strong);
-  border-radius: 12px;
+  /* Video-overlay context, like .device-sim__info below — deliberately dark
+     on BOTH themes so the bar stays readable over bright footage. */
+  background: rgba(16, 16, 16, 0.75);
+  border: 3px solid rgba(var(--accent-rgb), 0.5);
+  /* OFS draws quads, so corners are square; 2px only takes the jaggies off. */
+  border-radius: 2px;
   overflow: hidden;
 }
 
@@ -2670,21 +2742,31 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(to top, rgba(76, 175, 80, 0.4), rgba(76, 175, 80, 0.15));
+  background: linear-gradient(to top, var(--accent), var(--accent-hover));
   transition: height 50ms linear;
-  border-radius: 0 0 11px 11px;
+}
+
+/* Height lines at every 10%, drawn OVER the fill as OFS does. One repeating
+   gradient rather than nine elements. */
+.device-sim__lines {
+  position: absolute;
+  inset: 0;
+  background: repeating-linear-gradient(
+    to top,
+    transparent 0 calc(10% - 1px),
+    rgba(var(--accent-rgb), 0.5) calc(10% - 1px) 10%
+  );
 }
 
 .device-sim__marker {
   position: absolute;
-  left: 2px;
-  right: 2px;
-  height: 6px;
-  background: #4caf50;
-  border-radius: 3px;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--accent-hover);
   transform: translateY(50%);
   transition: bottom 50ms linear;
-  box-shadow: 0 0 6px rgba(76, 175, 80, 0.5);
+  box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.65);
 }
 
 .device-sim__info {
@@ -2693,11 +2775,18 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   align-items: center;
   gap: 2px;
   font-size: 10px;
+  font-variant-numeric: tabular-nums;
   /* Video-overlay context — stays white-on-dark on both themes. */
   color: var(--video-overlay-text-dim);
-  background: rgba(0, 0, 0, 0.5);
-  border-radius: 4px;
+  background: rgba(16, 16, 16, 0.75);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 2px;
   padding: 3px 6px;
+}
+
+.device-sim__pos {
+  color: var(--accent-hover);
+  font-weight: 600;
 }
 
 .device-sim__pos::after {
@@ -2706,6 +2795,11 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 
 .device-sim__speed::after {
   content: '/s';
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .device-sim__fill,
+  .device-sim__marker { transition: none; }
 }
 
 /* === Script Loading Overlay === */

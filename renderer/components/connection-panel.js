@@ -1,5 +1,6 @@
 // ConnectionPanel — UI for connecting to Handy or Buttplug.io devices
 
+import { PATTERN_TYPES, DEFAULT_PATTERN, sampleMotion } from '../js/motion-source.js';
 import { icon, X, Info } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import {
@@ -22,17 +23,21 @@ const LATENCY_SAMPLE_COUNT = 5;
 // are international protocol-standard TCode terminology — kept literal in every
 // locale so users recognise them across scripts, forums, and other tools.
 // Only L0's "Stroke (main)" label is app-flavour framing and gets translated.
+// Channels match MultiFunPlayer's TCode v0.3 profile — see AXIS_DEFINITIONS in
+// multi-axis.js and [[Device Specs]] in the vault. Corrected 2026-08-16: suction
+// was on V2 (a channel no TCode device registers) and lube shared V1 with pump.
 const TCODE_UI_AXES = [
   { tcode: 'L0', labelKey: 'connection.tcode.l0Label', type: 'linear'  },
-  { tcode: 'L1', label: 'Surge',           type: 'linear'  },
-  { tcode: 'L2', label: 'Sway',            type: 'linear'  },
-  { tcode: 'R0', label: 'Twist',           type: 'rotate'  },
+  { tcode: 'L1', label: 'Surge / Forward', type: 'linear'  },
+  { tcode: 'L2', label: 'Sway / Left',     type: 'linear'  },
+  { tcode: 'R0', label: 'Twist / Yaw',     type: 'rotate'  },
   { tcode: 'R1', label: 'Roll',            type: 'rotate'  },
   { tcode: 'R2', label: 'Pitch',           type: 'rotate'  },
   { tcode: 'V0', label: 'Vibe',            type: 'vibrate' },
-  { tcode: 'V1', label: 'Lube / Pump',     type: 'vibrate' },
-  { tcode: 'V2', label: 'Suction',         type: 'vibrate' },
+  { tcode: 'V1', label: 'Pump',            type: 'vibrate' },
   { tcode: 'A0', label: 'Valve',           type: 'linear'  },
+  { tcode: 'A1', label: 'Suck / Suction',  type: 'vibrate' },
+  { tcode: 'A2', label: 'Lube',            type: 'vibrate' },
 ];
 
 export class ConnectionPanel {
@@ -1439,6 +1444,8 @@ export class ConnectionPanel {
       if (dev.canRotate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeRotate'), 'rotate'));
       if (dev.canScalar) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeEstim'), 'estim'));
       if (dev.canOscillate) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeMachine'), 'machine'));
+      if (dev.canHeat) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeHeat'), 'heat'));
+      if (dev.canSpray) badges.appendChild(this._makeBadge(t('connection.buttplug.badgeSpray'), 'spray'));
       header.appendChild(badges);
 
       const testBtn = document.createElement('button');
@@ -1705,7 +1712,7 @@ export class ConnectionPanel {
         const maxRow = document.createElement('div');
         maxRow.className = 'connection-panel__device-safety';
         const maxLabel = document.createElement('span');
-        maxLabel.textContent = t('connection.buttplug.max');
+        maxLabel.textContent = t('connection.buttplug.safetyCap');
         const maxVal = document.createElement('span');
         maxVal.className = 'connection-panel__safety-value';
         const currentMax = this.buttplugSync?.getMaxIntensity(dev.index) ?? 70;
@@ -1767,6 +1774,54 @@ export class ConnectionPanel {
         safetySection.appendChild(rampLabel);
 
         row.appendChild(safetySection);
+      }
+
+      // Comfort / utility controls. Manual only — a heater is a setting you
+      // pick once, and a binary dispenser fired per action would empty
+      // itself. Never routed from the funscript; see the Device Specs note.
+      if (dev.canHeat || dev.canSpray) {
+        const utility = document.createElement('div');
+        utility.className = 'connection-panel__device-safety';
+
+        if (dev.canHeat) {
+          const heatLabel = document.createElement('label');
+          heatLabel.className = 'connection-panel__device-toggle';
+          const heatCheck = document.createElement('input');
+          heatCheck.type = 'checkbox';
+          heatCheck.checked = false;   // devices power up cold; do not imply state we did not set
+          heatCheck.addEventListener('change', async () => {
+            const res = await this.buttplug?.sendHeat(dev.index, heatCheck.checked);
+            if (res && res.ok === false) {
+              heatCheck.checked = !heatCheck.checked;   // it did not happen; do not pretend it did
+              const { showToast } = await import('../js/toast.js');
+              showToast(t('connection.buttplug.heatFailed'), 'warn');
+            }
+          });
+          heatLabel.appendChild(heatCheck);
+          heatLabel.appendChild(document.createTextNode(' ' + t('connection.buttplug.heater')));
+          utility.appendChild(heatLabel);
+        }
+
+        if (dev.canSpray) {
+          const sprayBtn = document.createElement('button');
+          sprayBtn.className = 'connection-panel__device-test';
+          sprayBtn.textContent = t('connection.buttplug.spray');
+          sprayBtn.addEventListener('click', async () => {
+            sprayBtn.disabled = true;   // it self-stops after a burst; block a queue of pulses
+            try {
+              const res = await this.buttplug?.sendSpray(dev.index);
+              if (res && res.ok === false) {
+                const { showToast } = await import('../js/toast.js');
+                showToast(t('connection.buttplug.sprayFailed'), 'warn');
+              }
+            } finally {
+              sprayBtn.disabled = false;
+            }
+          });
+          utility.appendChild(sprayBtn);
+        }
+
+        row.appendChild(utility);
       }
 
       list.appendChild(row);
@@ -2186,6 +2241,9 @@ export class ConnectionPanel {
       this.tcodeSync.setAxisRange(tcode, min, max);
       this.tcodeSync.setAxisInverted(tcode, inverted);
       this.tcodeSync.setAxisCutoff(tcode, cutMin, cutMax);
+      // Generated motion is opt-in per axis; absent config means "scripted",
+      // which setAxisMotion(null) clears back to.
+      this.tcodeSync.setAxisMotion(tcode, cfg.motion || null);
     }
   }
 
@@ -2404,6 +2462,228 @@ export class ConnectionPanel {
       cutoffRow.appendChild(cMaxSlider);
       cutoffRow.appendChild(cReadout);
       row.appendChild(cutoffRow);
+
+      // Generated motion (dio_likes_jojo, EroScripts #306) — drive an axis
+      // that has no script of its own. Companion axes only: L0 is the clock
+      // the generated axes follow, so generating it would leave nothing to
+      // follow. Defaults to Script everywhere, so nobody who doesn't go
+      // looking for this ever feels it.
+      if (tcode !== 'L0') {
+        const mCfg = cfg.motion || {};
+        const MOTION_MODES = ['link', 'random', 'pattern'];
+        const mMode = MOTION_MODES.includes(mCfg.mode) ? mCfg.mode : 'script';
+        const mPattern = PATTERN_TYPES.includes(mCfg.pattern) ? mCfg.pattern : DEFAULT_PATTERN;
+        const mDepth = Number.isFinite(mCfg.depth) ? mCfg.depth : 100;
+        const mHalf = mCfg.half === 'top' || mCfg.half === 'bottom' ? mCfg.half : 'off';
+        const mSpeed = Number.isFinite(mCfg.speed) ? mCfg.speed : 1;
+
+        const motionRow = document.createElement('div');
+        motionRow.className = 'connection-panel__device-safety';
+
+        const motionLabel = document.createElement('span');
+        motionLabel.className = 'connection-panel__tcode-range-label';
+        motionLabel.textContent = t('connection.tcode.motionLabel');
+
+        const motionSelect = document.createElement('select');
+        motionSelect.className = 'connection-panel__device-select';
+        for (const [value, key] of [
+          ['script', 'motionScript'], ['link', 'motionLink'],
+          ['random', 'motionRandom'], ['pattern', 'motionPattern'],
+        ]) {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = t(`connection.tcode.${key}`);
+          motionSelect.appendChild(opt);
+        }
+        motionSelect.value = mMode;
+        if (!enabled) motionSelect.disabled = true;
+
+        motionRow.appendChild(motionLabel);
+        motionRow.appendChild(motionSelect);
+        row.appendChild(motionRow);
+
+        // Shaping controls. Hidden entirely on Script — they'd be dead
+        // controls, and a dead control reads as a broken one.
+        const shapeRow = document.createElement('div');
+        shapeRow.className = 'connection-panel__device-safety';
+        shapeRow.hidden = mMode === 'script';
+
+        const depthLabel = document.createElement('span');
+        depthLabel.className = 'connection-panel__tcode-range-label';
+        depthLabel.textContent = t('connection.tcode.motionDepth');
+        const depthSlider = document.createElement('input');
+        depthSlider.type = 'range';
+        depthSlider.min = '0';
+        depthSlider.max = '100';
+        depthSlider.value = String(mDepth);
+        depthSlider.className = 'connection-panel__safety-slider';
+
+        const halfSelect = document.createElement('select');
+        halfSelect.className = 'connection-panel__device-select';
+        for (const [value, key] of [
+          ['off', 'motionHalfFull'], ['top', 'motionHalfTop'], ['bottom', 'motionHalfBottom'],
+        ]) {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = t(`connection.tcode.${key}`);
+          halfSelect.appendChild(opt);
+        }
+        halfSelect.value = mHalf;
+
+        // Waveform picker. Only meaningful in Pattern mode, so it is hidden
+        // otherwise rather than left as a dead control.
+        const patternSelect = document.createElement('select');
+        patternSelect.className = 'connection-panel__device-select';
+        for (const value of PATTERN_TYPES) {
+          const opt = document.createElement('option');
+          opt.value = value;
+          opt.textContent = t(`connection.tcode.pattern.${value}`);
+          patternSelect.appendChild(opt);
+        }
+        patternSelect.value = mPattern;
+
+        const speedLabel = document.createElement('span');
+        speedLabel.className = 'connection-panel__tcode-range-label';
+        speedLabel.textContent = t('connection.tcode.motionSpeed');
+        const speedSlider = document.createElement('input');
+        speedSlider.type = 'range';
+        speedSlider.min = '10';     // 0.1x — a slow wander
+        speedSlider.max = '300';    // 3x
+        speedSlider.step = '5';
+        speedSlider.value = String(Math.round(mSpeed * 100));
+        speedSlider.className = 'connection-panel__safety-slider';
+
+        const motionReadout = document.createElement('span');
+        motionReadout.className = 'connection-panel__safety-value';
+
+        // Curve preview. Picking a waveform from a list of names is picking
+        // blind — "sharp bounce" means nothing until you see it. Drawn from
+        // the same functions the engine runs, on its own row so it has the
+        // width to be readable.
+        const previewRow = document.createElement('div');
+        previewRow.className = 'connection-panel__motion-preview-row';
+        const preview = document.createElement('canvas');
+        preview.className = 'connection-panel__motion-preview';
+        preview.width = 320;
+        preview.height = 46;
+        preview.setAttribute('role', 'img');
+        previewRow.appendChild(preview);
+
+        const drawPreview = () => {
+          const ctx = preview.getContext('2d');
+          if (!ctx) return;
+          const mode = motionSelect.value;
+          const w = preview.width;
+          const h = preview.height;
+          ctx.clearRect(0, 0, w, h);
+          if (mode === 'script') return;
+
+          const cfg = {
+            mode,
+            depth: parseInt(depthSlider.value, 10),
+            half: halfSelect.value,
+            pattern: patternSelect.value,
+            speed: parseInt(speedSlider.value, 10) / 100,
+          };
+          const values = sampleMotion(cfg, { samples: w });
+          if (!values.length) return;
+
+          const css = getComputedStyle(document.documentElement);
+          const accent = css.getPropertyValue('--accent').trim() || '#4a9eff';
+          const muted = css.getPropertyValue('--text-secondary').trim() || '#888';
+          const pad = 4;
+          const y = (v) => pad + (1 - v / 100) * (h - pad * 2);
+
+          // Centre line, so Depth reads as "how far from rest" rather than
+          // an unanchored squash.
+          ctx.strokeStyle = muted;
+          ctx.globalAlpha = 0.25;
+          ctx.beginPath();
+          ctx.moveTo(0, y(50));
+          ctx.lineTo(w, y(50));
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+
+          ctx.strokeStyle = accent;
+          ctx.lineWidth = 2;
+          ctx.lineJoin = 'round';
+          ctx.beginPath();
+          values.forEach((v, i) => {
+            const px = (i / (values.length - 1)) * w;
+            if (i === 0) ctx.moveTo(px, y(v));
+            else ctx.lineTo(px, y(v));
+          });
+          ctx.stroke();
+
+          preview.setAttribute('aria-label', t('connection.tcode.motionPreviewAria', {
+            mode: motionSelect.selectedOptions[0]?.textContent || mode,
+          }));
+        };
+
+        // Speed only means anything to the noise generator — Link takes its
+        // timing from the main script's keyframes, which is the whole point.
+        const paintMotion = () => {
+          const mode = motionSelect.value;
+          // Speed sets the noise wander rate and the waveform's cycle rate.
+          // Follow stroke has no use for it: it takes its timing from the
+          // script's keyframes, which is the entire point of that mode.
+          const timed = mode === 'random' || mode === 'pattern';
+          shapeRow.hidden = mode === 'script';
+          patternSelect.hidden = mode !== 'pattern';
+          speedLabel.hidden = !timed;
+          speedSlider.hidden = !timed;
+          motionReadout.textContent = timed
+            ? `${depthSlider.value}% · ${(parseInt(speedSlider.value, 10) / 100).toFixed(2)}x`
+            : `${depthSlider.value}%`;
+          previewRow.hidden = mode === 'script';
+          drawPreview();
+        };
+        paintMotion();
+
+        const commitMotion = () => {
+          const motion = motionSelect.value === 'script' ? null : {
+            mode: motionSelect.value,
+            depth: parseInt(depthSlider.value, 10),
+            half: halfSelect.value,
+            speed: parseInt(speedSlider.value, 10) / 100,
+            pattern: patternSelect.value,
+          };
+          paintMotion();
+          if (this.tcodeSync) this.tcodeSync.setAxisMotion(tcode, motion);
+          this._saveTCodeAxis(tcode, { motion });
+        };
+        motionSelect.addEventListener('change', commitMotion);
+        patternSelect.addEventListener('change', commitMotion);
+        halfSelect.addEventListener('change', commitMotion);
+        depthSlider.addEventListener('input', commitMotion);
+        speedSlider.addEventListener('input', commitMotion);
+
+        // Keep the motion controls in lockstep with the axis enable toggle.
+        toggle.addEventListener('change', () => {
+          const on = toggle.checked;
+          motionSelect.disabled = !on;
+          depthSlider.disabled = !on;
+          halfSelect.disabled = !on;
+          patternSelect.disabled = !on;
+          speedSlider.disabled = !on;
+        });
+        if (!enabled) {
+          depthSlider.disabled = true;
+          halfSelect.disabled = true;
+          patternSelect.disabled = true;
+          speedSlider.disabled = true;
+        }
+
+        shapeRow.appendChild(depthLabel);
+        shapeRow.appendChild(depthSlider);
+        shapeRow.appendChild(halfSelect);
+        shapeRow.appendChild(patternSelect);
+        shapeRow.appendChild(speedLabel);
+        shapeRow.appendChild(speedSlider);
+        shapeRow.appendChild(motionReadout);
+        row.appendChild(shapeRow);
+        row.appendChild(previewRow);
+      }
 
       list.appendChild(row);
     }

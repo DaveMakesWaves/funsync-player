@@ -197,6 +197,78 @@ export class ButtplugSync {
   }
 
   /**
+   * Whether a video is currently driving this engine.
+   *
+   * An off-clock driver (the filler test button) must not write to devices
+   * that playback already owns — two writers on one device leaves whichever
+   * loses holding a stale value.
+   */
+  isDriving() {
+    return !!this._active;
+  }
+
+  /**
+   * Push one position to the devices from OUTSIDE the video clock.
+   *
+   * Deliberately routed through the same `_sendToDevices` funnel playback
+   * uses, so routing, invert, range, cutoff and the safety cap all apply.
+   * A test that bypassed the transform stack would tell the user their
+   * pattern feels like something it will never feel like.
+   *
+   * Mirrors playback's two-path split, and the caller is expected to use both:
+   * non-linear actuators (vibrate, rotate, oscillate, e-stim) do NOT
+   * interpolate — they take an intensity and hold it — so they need the
+   * interpolated position resampled every tick. Linear actuators travel to a
+   * target over a duration and want one command per keyframe instead. Sending
+   * only the keyframes makes a vibrator jump between the extremes with no
+   * ramp at all, which is exactly how the first version of the filler test
+   * button felt on a Lovense Edge (Dave, 2026-08-21).
+   *
+   * @param {number} position 0-100
+   * @param {number} durationMs time to reach it
+   * @param {number} [prevPosition] 0-100, for derived-intensity modes
+   * @param {{emitLinear?: boolean}} [opts] emitLinear:false for the tick path
+   * @returns {boolean} false when refused (playback owns the devices)
+   */
+  sendPositionNow(position, durationMs, prevPosition = position, opts = {}) {
+    if (this._active) return false;
+    if (!this.buttplug?.connected) return false;
+    this._sendToDevices(position, durationMs, prevPosition, {
+      sinceLastMs: durationMs,
+      emitLinear: opts.emitLinear !== false,
+    });
+    return true;
+  }
+
+  /**
+   * Send one LINEAR target from outside the video clock — the keyframe half
+   * of the split described on `sendPositionNow`.
+   *
+   * @returns {boolean} false when refused
+   */
+  sendLinearNow(position, durationMs, prevPosition = position) {
+    if (this._active) return false;
+    if (!this.buttplug?.connected) return false;
+    this._sendLinearToDevices(position, durationMs, prevPosition);
+    return true;
+  }
+
+  /**
+   * Idle the devices after an off-clock run. Same reasoning as `stop()`:
+   * sustained outputs hold their last value until told otherwise.
+   */
+  stopTestOutput() {
+    if (this._active) return;
+    if (this.buttplug?.stopAll) {
+      Promise.resolve(this.buttplug.stopAll()).catch((err) => {
+        console.error(
+          `[ButtplugSync] STOP-ALL FAILED after test — devices may still be running: ${err?.message || err}`,
+        );
+      });
+    }
+  }
+
+  /**
    * Reload cached actions (e.g. after editor changes).
    */
   reloadActions() {
@@ -719,7 +791,8 @@ export class ButtplugSync {
       // both would fight over one motor.
       if (dev.canVibrate && !dev.canOscillate && !this._vibActions) {
         const mode = this._vibeModeMap.get(dev.index) || 'speed';
-        const intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+        let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+        if (this._hasSafetyControls(dev)) intensity = this._applyScalarSafety(dev.index, intensity);
         this.buttplug.sendVibrate(dev.index, intensity);
       }
       // E-stim / scalar devices (skip if dedicated vib script is loaded — vib path drives them)
@@ -744,10 +817,12 @@ export class ButtplugSync {
         const mode = this._rotateModeMap.get(dev.index) || 'speed';
         if (mode === 'position') {
           const clockwise = pos < 50;
-          const speed = pos < 50 ? ((50 - pos) / 50) * 100 : ((pos - 50) / 50) * 100;
+          let speed = pos < 50 ? ((50 - pos) / 50) * 100 : ((pos - 50) / 50) * 100;
+          if (this._hasSafetyControls(dev)) speed = this._applyScalarSafety(dev.index, speed);
           this.buttplug.sendRotate(dev.index, speed, clockwise);
         } else {
-          const intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+          let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+          if (this._hasSafetyControls(dev)) intensity = this._applyScalarSafety(dev.index, intensity);
           const clockwise = pos >= prevPos;
           this.buttplug.sendRotate(dev.index, intensity, clockwise);
         }
@@ -760,6 +835,40 @@ export class ButtplugSync {
    * @param {number} deviceIndex
    * @param {number} intensity — raw intensity 0–100
    * @returns {number} capped and ramped intensity 0–100
+   */
+  /**
+   * Does this device show the Max / Ramp controls in the UI?
+   *
+   * connection-panel.js renders them for `canScalar || canOscillate`. The
+   * cap is applied ONLY where the user can see and change it — otherwise a
+   * plain vibrator, which has no slider at all, would be silently held at
+   * the 70%% default with no way to raise it. One user's bug must not become
+   * everyone's.
+   */
+  /** Shorthand: cap+ramp when the device shows the controls, else pass through. */
+  _safe(dev, value) {
+    return this._hasSafetyControls(dev) ? this._applyScalarSafety(dev.index, value) : value;
+  }
+
+  _hasSafetyControls(dev) {
+    return !!(dev && (dev.canScalar || dev.canOscillate));
+  }
+
+  /**
+   * Apply the user's Max cap and ramp-up.
+   *
+   * Named `Scalar` because e-stim was the first thing that needed it, and
+   * until 2026-08-16 it was ONLY reached from the scalar and oscillate
+   * paths. On a device exposing several outputs that made the single "Max"
+   * slider a lie: tintinfernando13's JoyHub Mirage 3 reports Vibrate,
+   * Rotate AND E-Stim, he set Max to 65%%, and the suction he was actually
+   * complaining about came out of the uncapped vibrate path at full script
+   * value with no ramp either. "I've tried changing the percentages, but
+   * it's still the same" was literally true.
+   *
+   * Now reached from vibrate and rotate as well, gated on
+   * `_hasSafetyControls`. A control presented per-device must act
+   * per-device.
    */
   _applyScalarSafety(deviceIndex, intensity) {
     // Apply max intensity cap
@@ -828,7 +937,10 @@ export class ButtplugSync {
         this._cutoffMap.get(dev.index),
       );
       if (dev.canVibrate) {
-        this.buttplug.sendVibrate(dev.index, ranged);
+        this.buttplug.sendVibrate(
+          dev.index,
+          this._hasSafetyControls(dev) ? this._applyScalarSafety(dev.index, ranged) : ranged,
+        );
       }
       if (dev.canScalar) {
         const scalarIntensity = this._applyScalarSafety(dev.index, ranged);
@@ -920,8 +1032,8 @@ export class ButtplugSync {
           // handled above by _dispatchAxisLinearAtBoundary when action-
           // boundary mode is on; skip it here to avoid double-send.
           if (dev.canLinear && !useActionBoundary) this.buttplug.sendLinear(dev.index, pos, duration);
-          else if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, pos);
-          else if (dev.canRotate) this.buttplug.sendRotate(dev.index, pos, pos >= 50);
+          else if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, this._safe(dev, pos));
+          else if (dev.canRotate) this.buttplug.sendRotate(dev.index, this._safe(dev, pos), pos >= 50);
           else if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
         } else if (featureType === 'L' || featureType === 'A') {
           if (dev.canLinear) this.buttplug.sendLinear(dev.index, pos, duration);
@@ -930,10 +1042,10 @@ export class ButtplugSync {
           if (dev.canRotate) {
             const clockwise = pos < 50;
             const speed = pos < 50 ? ((50 - pos) / 50) * 100 : ((pos - 50) / 50) * 100;
-            this.buttplug.sendRotate(dev.index, speed, clockwise);
+            this.buttplug.sendRotate(dev.index, this._safe(dev, speed), clockwise);
           }
         } else if (featureType === 'V') {
-          if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, pos);
+          if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, this._safe(dev, pos));
           if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
         }
       }

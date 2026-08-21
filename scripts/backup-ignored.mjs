@@ -62,6 +62,11 @@ const INCLUDE = [
   // parent; `p` is the name they take inside the backup.
   { p: 'FunSync-Discord', from: '../FunSync-Discord', why: 'Discord content pipeline (drafts/outbox/posted) — no git of its own' },
   { p: 'FunSync-Patreon', from: '../FunSync-Patreon', why: 'Patreon content pipeline (drafts/outbox/posted) — no git of its own' },
+  // The Obsidian vault. Every subsystem note, the release history and the
+  // vendored device specs live here and NOWHERE else — it is not a git repo,
+  // so until 2026-08-16 it had exactly one copy on disk. It is also the one
+  // thing that gets written on every fix, so it gains value continuously.
+  { p: 'Funsync-knowledgebase', from: '../Funsync knowledgebase', why: 'Obsidian vault: subsystem notes, release history, vendored device specs — no git of its own' },
   // THE APP'S OWN DATA. Nothing else protects it, and it is the only
   // irreplaceable thing here: associations, playlists, collections, device
   // settings and custom thumbnails are all user work that cannot be

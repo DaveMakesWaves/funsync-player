@@ -139,8 +139,8 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
   });
   afterEach(() => { delete global.window; });
 
-  it('sends DSTOP for legacy firmware AND a neutral-position frame for MFP consumers', async () => {
-    // The neutral frame is for MFP-protocol consumers (restim/Howl) over ws/udp
+  it('sends DSTOP for legacy firmware AND a rest frame for MFP consumers', async () => {
+    // The rest frame is for MFP-protocol consumers (restim/Howl) over ws/udp
     // that don't understand DSTOP. Serial firmware halts in place on DSTOP and
     // must NOT get the (violent) recenter frame — see the serial-only test in
     // tcode.test.js.
@@ -148,16 +148,44 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
     await m.connect('websocket', { url: 'ws://restim.local:81' });
     m.stop();
     expect(sent[0]).toBe('DSTOP\n');
-    // Second frame is `L0500 L1500 L2500 R0500 R1500 R2500 V0500 A0500 A1500 A2500\n`
-    expect(sent[1]).toMatch(/^L0500 L1500 L2500 R0500 R1500 R2500 V0500 A0500 A1500 A2500\n$/);
+    expect(sent[1]).toMatch(/^L0500 L1500 L2500 R0500 R1500 R2500 V0000 V1000 A0000 A1000 A2000\n$/);
   });
 
-  it('scales the neutral frame to 4-digit precision when configured', async () => {
+  // A stop must actually stop. Centring a position axis is right; "centring" a
+  // vibration axis parks it at half power, which is not a stop at all.
+  it('centres position axes but zeroes intensity axes on stop', async () => {
+    const m = new TCodeManager();
+    await m.connect('websocket', { url: 'ws://restim.local:81' });
+    m.stop();
+    const frame = sent[1].trim().split(' ');
+    const value = (axis) => frame.find((f) => f.startsWith(axis)).slice(axis.length);
+    for (const axis of ['L0', 'L1', 'L2', 'R0', 'R1', 'R2']) {
+      expect(value(axis), `${axis} should centre`).toBe('500');
+    }
+    for (const axis of ['V0', 'V1', 'A0', 'A1', 'A2']) {
+      expect(value(axis), `${axis} should be off, not half power`).toBe('000');
+    }
+  });
+
+  // Regression: the frame used to zero A1/A2 (which nothing drove) while
+  // skipping V1/V2 (which were driven), so those axes held their last value.
+  it('covers every channel the axis table can drive', async () => {
+    const { AXIS_DEFINITIONS } = await import('../../renderer/js/multi-axis.js');
+    const m = new TCodeManager();
+    await m.connect('websocket', { url: 'ws://restim.local:81' });
+    m.stop();
+    const frame = sent[1];
+    for (const { tcode, suffix } of AXIS_DEFINITIONS) {
+      expect(frame, `${suffix} (${tcode}) must be reset on stop`).toContain(tcode);
+    }
+  });
+
+  it('scales the rest frame to 4-digit precision when configured', async () => {
     const m = new TCodeManager();
     m.setPrecision(4);
     await m.connect('websocket', { url: 'ws://restim.local:81' });
     m.stop();
-    expect(sent[1]).toMatch(/L05000 .* A25000\n$/);
+    expect(sent[1]).toMatch(/^L05000 .* A20000\n$/);
   });
 
   it('stop is a no-op when not connected', () => {

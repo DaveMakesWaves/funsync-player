@@ -289,3 +289,105 @@ describe('_effectiveSort', () => {
     expect(lib._effectiveSort()).toEqual(['maxSpeed', 'asc']);
   });
 });
+
+// --- Sort survives a filter-tab round trip (Dave, 2026-08-20) ---
+//
+// Reported: pick a sort, switch to the Unmatched filter, switch back, and the
+// sort picker is dead — the popover still shows the old choice while the grid
+// is back on A-Z, and clicking any row does nothing.
+//
+// Two faults, one cause. `_switchTab` reset the sort on EVERY switch, not just
+// when the current sort was invalid for the new tab, and the reset nulled
+// `_sortDirs` — which only `_buildSortPicker` ever populates, and which every
+// row handler dereferences. After one tab switch the picker threw on click.
+describe('sort across filter tabs', () => {
+  beforeEach(() => { document.body.innerHTML = ''; });
+
+  function mountWithTabs(sortKey = 'duration:asc', tab = 'all') {
+    const container = document.createElement('div');
+    container.innerHTML = `
+      <button class="library__picker-btn" id="library-sort-btn" aria-expanded="false">
+        <span class="library__picker-icon"></span>
+        <span class="library__picker-label">Sort</span>
+      </button>
+      <div class="library__picker-pop" id="library-sort-pop" hidden></div>`;
+    document.body.appendChild(container);
+
+    const lib = Object.create(Library.prototype);
+    lib._container = container;
+    lib._sortKey = sortKey;
+    lib._activeTab = tab;
+    lib._applied = 0;
+    lib._closePicker = () => {};
+    lib._togglePicker = () => {};
+    lib._wirePickerDismissal = () => {};
+    lib._renderFilterChips = () => {};
+    lib._updateFiltersBadge = () => {};
+    lib._applyFilters = () => { lib._applied++; };
+    lib._buildSortPicker();
+    return { lib, container };
+  }
+
+  const rowFor = (container, field) =>
+    container.querySelector(`.library__picker-item[data-value="${field}"]`);
+  const labelOf = (container) =>
+    container.querySelector('#library-sort-btn .library__picker-label').textContent;
+
+  it('keeps a non-speed sort through unmatched and back', () => {
+    const { lib } = mountWithTabs('duration:asc');
+    lib._switchTab('unmatched');
+    lib._switchTab('matched');
+    expect(lib._sortKey).toBe('duration:asc');
+  });
+
+  it('the picker still works after a tab round trip', () => {
+    // The headline symptom: every row handler reads `_sortDirs`, which the
+    // reset nulled, so the first click after a switch threw and nothing moved.
+    const { lib, container } = mountWithTabs('duration:asc');
+    lib._switchTab('unmatched');
+    lib._switchTab('matched');
+    const before = lib._applied;
+    rowFor(container, 'dateAdded').querySelector('input').click();
+    expect(lib._sortKey).toBe('dateAdded:desc');
+    expect(lib._applied).toBeGreaterThan(before);
+  });
+
+  it('direction memory survives a tab round trip', () => {
+    const { lib, container } = mountWithTabs('name:asc');
+    rowFor(container, 'name').querySelector('input')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(lib._sortKey).toBe('name:desc');
+    lib._switchTab('unmatched');
+    lib._switchTab('matched');
+    expect(lib._sortDirs).toBeTruthy();
+    expect(lib._sortDirs.name).toBe('desc');
+  });
+
+  it('drops a SPEED sort when moving to unmatched — those videos have no stats', () => {
+    const { lib, container } = mountWithTabs('avgSpeed:desc');
+    lib._switchTab('unmatched');
+    expect(lib._sortKey).toBe('name:asc');
+    // ...and the trigger button says so, rather than still reading "Fastest".
+    expect(labelOf(container)).toBe('Name A-Z');
+  });
+
+  it('button label and popover selection never disagree', () => {
+    // The visible-state divergence in the report: the popover kept the old row
+    // highlighted because the reset hand-patched the DOM instead of going
+    // through the picker's own refresh.
+    const { lib, container } = mountWithTabs('avgSpeed:desc');
+    lib._switchTab('unmatched');
+    const selected = container.querySelector('.library__picker-item--selected');
+    expect(selected?.dataset.value).toBe('name');
+    expect(container.querySelector('input[name="library-sort"]:checked').value).toBe('name');
+    expect(labelOf(container)).toBe('Name A-Z');
+  });
+
+  it('disables speed rows on unmatched and re-enables them on the way back', () => {
+    const { lib, container } = mountWithTabs('name:asc');
+    lib._switchTab('unmatched');
+    expect(rowFor(container, 'avgSpeed').querySelector('input').disabled).toBe(true);
+    lib._switchTab('matched');
+    expect(rowFor(container, 'avgSpeed').querySelector('input').disabled).toBe(false);
+  });
+});

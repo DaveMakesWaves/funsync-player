@@ -1278,7 +1278,7 @@ export class Library {
     // so the scrollbar stays honest (the old 300px was roughly 2x reality).
     const isListMode = this._viewMode === 'list';
     const rowHeight = isListMode ? 50 : (this._vsMeasuredRowHeight || 180);
-    const columns = isListMode ? 1 : Math.max(1, Math.floor((wrapper.clientWidth - 32) / 236));
+    const columns = isListMode ? 1 : this._measureGridColumns(grid, wrapper);
 
     // Create spacers
     if (!this._topSpacer) {
@@ -1364,6 +1364,36 @@ export class Library {
     wrapper.addEventListener('scroll', this._scrollHandler, { passive: true });
 
     requestAnimationFrame(() => grid.classList.remove('library__grid--loading'));
+  }
+
+  /**
+   * The virtual-scroll column count must match what CSS actually lays out,
+   * so read the RESOLVED grid tracks instead of re-deriving them. The old
+   * formula `floor((clientWidth - 32) / 236)` disagreed with the grid's
+   * `repeat(auto-fill, minmax(220px, 1fr))` whenever
+   * `(clientWidth - 32) mod 236 >= 220` — auto-fill gets the column gap
+   * back for the last track, the formula doesn't — a 16px-wide band of
+   * window widths (~7% of them) where CSS packed one MORE column per row
+   * than the spacer math assumed. Every row boundary was then wrong:
+   * content height shrank each time the range re-rendered at the bottom,
+   * the browser clamped scrollTop, the range receded, the spacer re-grew
+   * the height — the reported "last row flickers and scroll snaps back to
+   * the last complete row", with the final partial row unreachable
+   * (Sylvain-Et-Un, EroScripts #300). Chromium resolves auto-fill tracks
+   * from container width even while the grid is EMPTY (verified), so this
+   * is safe to call right after `grid.innerHTML = ''`. The formula stays
+   * only as a fallback for a hidden grid (`display: none` computes to
+   * 'none').
+   */
+  _measureGridColumns(grid, wrapper) {
+    try {
+      const tracks = window.getComputedStyle(grid).gridTemplateColumns;
+      if (tracks && tracks !== 'none' && !tracks.includes('repeat')) {
+        const n = tracks.split(' ').filter(Boolean).length;
+        if (n > 0) return n;
+      }
+    } catch { /* fall through to the formula */ }
+    return Math.max(1, Math.floor((wrapper.clientWidth - 32) / 236));
   }
 
   _virtualScrollUpdate(wrapper, grid) {
@@ -1463,10 +1493,7 @@ export class Library {
     if (!wrapper || !grid) return;
 
     const isListMode = this._viewMode === 'list';
-    // Same formula as `_renderGrid` — card width 236px + 32px wrapper padding.
-    const newColumns = isListMode
-      ? 1
-      : Math.max(1, Math.floor((wrapper.clientWidth - 32) / 236));
+    const newColumns = isListMode ? 1 : this._measureGridColumns(grid, wrapper);
 
     if (newColumns !== this._vsColumns) {
       this._vsColumns = newColumns;
@@ -1773,6 +1800,27 @@ export class Library {
     return [field, dir];
   }
 
+  /**
+   * Per-field direction memory, created on demand. Flipping Name to Z-A and
+   * coming back to it later should still be Z-A, not silently reset.
+   *
+   * On demand, and never nulled, because every row handler dereferences it.
+   * It used to be built inline in `_buildSortPicker` (which runs once) while
+   * `_syncSortForActiveTab` set it to null on a tab switch — so after one
+   * switch every click on the sort picker threw, and the picker looked
+   * frozen on the old choice while the grid sat on A-Z (Dave, 2026-08-20).
+   */
+  _ensureSortDirs() {
+    if (!this._sortDirs) {
+      this._sortDirs = Object.fromEntries(
+        Library._SORT_OPTIONS.map((o) => [o.value, o.defaultDir]),
+      );
+      const [curField, curDir] = this._sortParts();
+      if (this._sortDirs[curField]) this._sortDirs[curField] = curDir;
+    }
+    return this._sortDirs;
+  }
+
   /** Current sort as `[field, dir]`. `_sortKey` stays the source of truth. */
   _sortParts() {
     const [field, dir] = String(this._sortKey || 'name:asc').split(':');
@@ -1792,15 +1840,7 @@ export class Library {
     const iconSlot = btn.querySelector('.library__picker-icon');
     iconSlot.replaceChildren(icon(ArrowDownAZ, { width: 14, height: 14 }));
 
-    // Per-field direction, remembered. Flipping Name to Z-A and coming back
-    // to it later should still be Z-A, not silently reset.
-    if (!this._sortDirs) {
-      this._sortDirs = Object.fromEntries(
-        Library._SORT_OPTIONS.map((o) => [o.value, o.defaultDir]),
-      );
-      const [curField, curDir] = this._sortParts();
-      if (this._sortDirs[curField]) this._sortDirs[curField] = curDir;
-    }
+    this._ensureSortDirs();
 
     const labelFor = (field, dir) => {
       const key = Library._SORT_LABELS[`${field}:${dir}`];
@@ -1813,9 +1853,10 @@ export class Library {
     // Redraw every row: wording, arrow and checked state all follow the
     // field's current direction, so each row describes itself.
     const refresh = () => {
+      const dirs = this._ensureSortDirs();
       const [curField] = this._sortParts();
       for (const row of rows) {
-        const dir = this._sortDirs[row.field];
+        const dir = dirs[row.field];
         const selected = row.field === curField;
         row.radio.checked = selected;
         row.text.textContent = labelFor(row.field, dir);
@@ -1828,8 +1869,12 @@ export class Library {
           : '';
       }
       labelEl.firstChild?.remove?.();
-      labelEl.textContent = labelFor(curField, this._sortDirs[curField]);
+      labelEl.textContent = labelFor(curField, dirs[curField]);
     };
+    // Anything that changes the sort from outside the picker (the tab sync)
+    // must redraw through this, or the rows, the arrows and the trigger
+    // button drift apart from `_sortKey`.
+    this._refreshSortPicker = refresh;
 
     for (const opt of Library._SORT_OPTIONS) {
       const item = document.createElement('label');
@@ -1858,7 +1903,7 @@ export class Library {
       // keyboard arrow-key navigation, which a click handler alone misses.
       radio.addEventListener('change', () => {
         if (!radio.checked) return;
-        this._sortKey = `${opt.value}:${this._sortDirs[opt.value]}`;
+        this._sortKey = `${opt.value}:${this._ensureSortDirs()[opt.value]}`;
         refresh();
         this._closePicker(pop, btn);
         if (!this._scanning) this._applyFilters();
@@ -1880,8 +1925,9 @@ export class Library {
         if (radio.disabled) return;
         const [curField] = this._sortParts();
         if (curField !== opt.value) return; // selection — `change` handles it
-        this._sortDirs[opt.value] = this._sortDirs[opt.value] === 'asc' ? 'desc' : 'asc';
-        this._sortKey = `${opt.value}:${this._sortDirs[opt.value]}`;
+        const dirs = this._ensureSortDirs();
+        dirs[opt.value] = dirs[opt.value] === 'asc' ? 'desc' : 'asc';
+        this._sortKey = `${opt.value}:${dirs[opt.value]}`;
         refresh();
         if (!this._scanning) this._applyFilters();
       });
@@ -5566,21 +5612,25 @@ export class Library {
     this._applyFilters();
   }
 
-  /** Enable/disable speed sort options for the active tab, and optionally
-   * reset the current sort to the default (name A-Z). Unmatched videos have
+  /** Enable/disable speed sort options for the active tab, and drop the
+   * current sort only if it cannot survive the new one. Unmatched videos have
    * no script → no speed stats, so speed sorts are meaningless there. */
   _syncSortForActiveTab({ reset = false } = {}) {
     const pop = this._container?.querySelector('#library-sort-pop');
     if (!pop) return;
-    if (reset) {
+    // Reset the sort only when the CURRENT one is invalid for the tab we're
+    // moving to. It used to reset on every switch, which threw away a
+    // perfectly valid Duration or Recently Added sort on a flick to Unmatched
+    // and back — and dropped the user on A-Z with the picker still showing
+    // their choice (Dave, 2026-08-20).
+    const [curField] = this._sortParts();
+    const curIsSpeed = !!Library._SORT_OPTIONS.find((o) => o.value === curField)?.isSpeed;
+    if (reset && curIsSpeed && this._activeTab === 'unmatched') {
       this._sortKey = 'name:asc';
-      pop.querySelectorAll('input[name="library-sort"]').forEach((r) => {
-        r.checked = r.value === 'name';
-      });
-      const labelEl = this._container.querySelector('#library-sort-btn .library__picker-label');
-      if (labelEl) labelEl.textContent = t('library.sortNameAsc');
-      // Direction memory resets with the sort itself.
-      this._sortDirs = null;
+      this._ensureSortDirs().name = 'asc';
+      // Through the picker's own redraw, so the rows, arrows, checked state
+      // and trigger label can't disagree with `_sortKey`.
+      this._refreshSortPicker?.();
     }
     // Disable speed-sort options when the user has filtered to the
     // unmatched tab (those videos have no funscripts → no speed stats).
@@ -5626,6 +5676,9 @@ export class Library {
       const vrRadio = pop.querySelector('input[name="library-filter-vr"][value="all"]');
       if (vrRadio) vrRadio.checked = true;
     }
+    // Back on 'all', so speed sorts are meaningful again — without this the
+    // rows stayed disabled after clearing filters from the Unmatched tab.
+    this._syncSortForActiveTab();
     this._applyFilters();
     this._renderFilterChips?.();
     this._updateFiltersBadge?.();

@@ -5,7 +5,7 @@ import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
-import { AXIS_DEFINITIONS } from './multi-axis.js';
+import { getAxisBySuffix } from './multi-axis.js';
 import { sourcesToProbe } from './source-state.js';
 import { BackendBannerState } from './backend-banner-state.js';
 
@@ -50,6 +50,7 @@ import { extendRawScriptContent, clampRawScriptContent } from './device-transfor
 import { fillRawScriptContent } from './filler-engine.js';
 import { createCategoryMark } from './category-icon.js';
 import { resolveFillerOptions } from './filler-presets.js';
+import { FillerTestPlayer } from './filler-test-player.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath } from './path-utils.js';
 import { Library, thumbRequestOpts, customThumbImagePath } from '../components/library.js';
@@ -77,6 +78,9 @@ import { isVideoInPip, teardownPlayback, beginDeferredPipTeardown } from './pip-
 import { shouldEnterMiniplayer, exitFullscreenForNav } from './miniplayer.js';
 import { pickRehomeCandidate, findMovedFile } from './association-rehome.js';
 import { classifyStereoFormat, isFlattenableStereo, isVRVideo } from './vr-detect.js';
+import {
+  applyZoomStep, resetZoomFields, applyPanDelta, wheelDirection, isSpherical,
+} from './vr-zoom.js';
 import { HandyHdspSync } from './handy-hdsp-sync.js';
 import { OrgasmSwitch } from './orgasm-switch.js';
 import { engageHandyFinisher, releaseHandyFinisher } from './orgasm-handy-engage.js';
@@ -101,6 +105,7 @@ import {
 
 /** Default opacity (percent) for the inline TL/HM overlays. */
 const INLINE_VIZ_OPACITY_DEFAULT = 80;
+const DEVICE_SIM_OPACITY_DEFAULT = 80;
 
 class App {
   constructor() {
@@ -331,6 +336,12 @@ class App {
       // the panel. Empty set = everything reachable (fail open).
       getUnreachableSources: () => this._sourceProbeCache || new Set(),
       onRecheckSources: () => this._recheckSources(),
+      // Filler test button. The panel has no devices of its own, so it hands
+      // the previewed actions back here and app.js drives them through the
+      // engines' off-clock send path — the same funnel playback uses, so the
+      // user feels what they will actually get, per-device transforms and all.
+      onTestFillerPattern: (actions, hooks) => this._startFillerTest(actions, hooks),
+      onStopFillerTest: () => this._fillerTest?.stop(),
       onSourcesChanged: () => {
         this._refreshCollectionsUI();
         if (this.library) this.library._lastScanKey = null;
@@ -395,6 +406,7 @@ class App {
       },
       // Inline TL/HM overlay opacity — live-applied while the slider moves.
       onInlineVizOpacityChanged: (v) => this._applyInlineVizOpacity(v),
+      onDeviceSimOpacityChanged: (v) => this._applyDeviceSimOpacity(v),
       // Per-card heatmap strip: cards are built once, so the row can only
       // appear/disappear via a re-render of the library view.
       // Any library-display setting that changes WHAT is listed or how a
@@ -616,9 +628,9 @@ class App {
     });
 
     // VR Format item — only present when the current video is detected
-    // (or manually flagged) as VR. Single discovery surface inside the
-    // player view; users who don't know Ctrl+Shift+R can still reach
-    // the panel.
+    // (or manually flagged) as VR. Since Ctrl+Shift+R was removed
+    // (2026-08-14) this and the library kebab are the ONLY ways into the
+    // panel, so it must stay discoverable.
     document.getElementById('btn-vr-format-menu')?.addEventListener('click', () => {
       if (this._currentVideoPath) this._openVRFormatPanel(this._currentVideoPath);
     });
@@ -1272,14 +1284,17 @@ class App {
         const label = this._cycleVRFlatten();
         if (label) showToast(t('toast.vrFlattenLabel', { label }), 'info', 1500);
       };
-      this._keyboard.onOpenVRFormat = () => {
-        this._openVRFormatPanel(this._currentVideoPath);
-      };
       this._keyboard.onVRPan = (yawDelta, pitchDelta) => {
         this._stepVRPan(yawDelta, pitchDelta);
       };
+      // Ctrl+= / Ctrl+- / Ctrl+0 mirror the scroll gesture for anyone
+      // without a wheel or trackpad, and for accessibility.
+      this._keyboard.onVRZoom = (direction) => this._stepVRZoom(direction);
+      this._keyboard.onVRZoomReset = () => this._resetVRZoom();
+      this._wireVRZoomGesture();
       // Orgasm Switch (hold X) — wired below once the controller exists.
       this._keyboard.onOrgasmHold = (active) => this._onOrgasmHold(active);
+      this._keyboard.onEdgeHold = (active) => this._onEdgeHold(active);
     }
 
     // --- Orgasm Switch ---
@@ -1393,7 +1408,10 @@ class App {
             // Stop the finisher; leave the device idle. Awaits any in-flight
             // engage first so a stop can't land before a late hsspPlay.
             Promise.resolve(this._orgasmEngagePromise)
-              .then(() => releaseHandyFinisher({ handyManager: this.handyManager }));
+              .then(() => releaseHandyFinisher({ handyManager: this.handyManager }))
+              // Unhandled otherwise: a cloud error here surfaced as
+              // "[Rejection] Illegal state…" with no owner (Dave, 2026-08-21).
+              .catch((err) => console.warn('[OrgasmSwitch] finisher release failed:', err?.message || err));
           }
           return;
         }
@@ -1428,6 +1446,11 @@ class App {
         }
       },
     });
+    // The simulator is built before the switch, so wire it up here. Without
+    // this the indicator keeps tracking video time during an orgasm loop,
+    // which the loop deliberately ignores.
+    if (this.deviceSimulator) this.deviceSimulator.orgasmSwitch = this.orgasmSwitch;
+
     // Load the saved global orgasm config (if any) into the controller.
     this._reloadOrgasmScripts();
 
@@ -3109,6 +3132,32 @@ class App {
   }
 
   /**
+   * Play a previewed filler pattern through the connected devices.
+   *
+   * Returns a status rather than a boolean so the panel can say WHY nothing
+   * happened — "a video is driving the devices" and "nothing is connected"
+   * are different problems with different fixes (Nielsen #9).
+   *
+   * @returns {'started'|'busy'|'no-devices'}
+   */
+  _startFillerTest(actions, { onProgress, onEnd } = {}) {
+    if (!this._fillerTest) {
+      this._fillerTest = new FillerTestPlayer({
+        buttplugSync: this.buttplugSync,
+        tcodeSync: this.tcodeSync,
+      });
+    }
+    const player = this._fillerTest;
+    player.onProgress = onProgress || null;
+    player.onEnd = onEnd || null;
+
+    if (player.blockedByPlayback) return 'busy';
+    const connected = !!(this.buttplugManager?.connected || this.tcodeManager?.connected);
+    if (!connected) return 'no-devices';
+    return player.play(actions) ? 'started' : 'no-devices';
+  }
+
+  /**
    * Push the current filler settings into the funscript engine so the
    * tick-driven devices (T-Code, Buttplug, Handy HDSP) pick filler up via
    * their existing `reloadActions()` path.
@@ -3892,6 +3941,14 @@ class App {
    */
   _onOrgasmHold(active) {
     if (!this.orgasmSwitch) return;
+    // An Edge hold (Z) must yield before the finisher arms: X's activation
+    // records which engines IT stopped so its release can restart exactly
+    // those — arming it while Edge already stopped them would record none
+    // and strand the engines on release. Restart them here (skipping the
+    // Handy resume — the finisher takes the Handy over immediately, and an
+    // in-flight resync() racing the engage's script swap could yank the
+    // device mid-finisher), then let X's activation stop them properly.
+    if (active && this._edgeActive) this._onEdgeHold(false, { skipHandyResume: true, force: true });
     const mode = this.settings?.get?.('player.orgasmSwitchMode') || 'hold';
 
     if (mode === 'toggle') {
@@ -4201,7 +4258,9 @@ class App {
       }
       for (const [suffix, p] of Object.entries(entry.multi.axes || {})) {
         if (!p) continue;
-        const def = AXIS_DEFINITIONS.find((a) => a.suffix === suffix);
+        // Alias-aware: older saved configs key axes by a legacy spelling
+        // (`suction`), so an exact-suffix match would fall back to the raw key.
+        const def = getAxisBySuffix(suffix);
         lines.push({ label: def?.label || suffix, name: base(p), missing: gone(p) });
       }
     } else if (d.mode === 'custom') {
@@ -4285,6 +4344,100 @@ class App {
    *     USING_CACHED) then resume at the current video time. Falls back to a
    *     full re-upload if no cached URL exists.
    */
+  /**
+   * Edge Hold (Z) — the Orgasm Switch's inverse (MattWritesNSFW, EroScripts
+   * #301): hold to stop ALL device output while the video keeps playing;
+   * release resumes the main script in sync at the current position. Unlike
+   * the finisher there is no takeover script, so activation is just "stop
+   * engines + idle devices" and release is "restart what we stopped".
+   *
+   * The Handy needs both halves done explicitly: syncEngine.stop() only
+   * kills the renderer's correction loop — HSSP playback lives ON the
+   * device, so without hsspStop() it strokes on to the end of the script.
+   * Release re-anchors via resync() (start() only anchors when the player
+   * reads unpaused at that instant — same unreliability the orgasm restore
+   * hit). The main script never left the device, so no re-upload is needed.
+   *
+   * Refuses to arm while the Orgasm Switch is active: X owns the devices
+   * during a finisher, and layering "stop everything" over its restore
+   * bookkeeping would corrupt whose job it is to restart what.
+   */
+  _onEdgeHold(active, { skipHandyResume = false, force = false } = {}) {
+    // Press-to-toggle (lr_x3, EroScripts #307). Keyboard still reports Z as
+    // a hold — press then release — so in toggle mode the release arrives as
+    // active=false and must be ignored, or the edge would end the instant
+    // the key came up. `force` is the escape hatch for the internal
+    // deactivate from _onOrgasmHold: X arming while Z holds MUST actually
+    // release Z (that's what restarts the engines Z stopped, so X's own
+    // bookkeeping can record them), and a bare active=false would be
+    // swallowed here and strand them.
+    const mode = this.settings?.get?.('player.edgeHoldMode') || 'hold';
+    if (mode === 'toggle' && !force) {
+      if (!active) return;               // release — ignored in toggle mode
+      active = !this._edgeActive;        // press flips whatever we're in
+    }
+    if (!!active === !!this._edgeActive) return;
+    if (active && this.orgasmSwitch?.active) return;
+    this._edgeActive = !!active;
+
+    if (active) {
+      this._edgeStoppedEngines = [];
+      if (this.buttplugSync?._active) {
+        this.buttplugSync.stop(); this._edgeStoppedEngines.push('buttplug');
+      }
+      if (this.tcodeSync?._active) {
+        this.tcodeSync.stop(); this._edgeStoppedEngines.push('tcode');
+      }
+      if (this.autoblowSync?._active) {
+        this.autoblowSync.stop(); this._edgeStoppedEngines.push('autoblow');
+      }
+      if (this.syncEngine?._active || this.handyHdspSync?.active) {
+        this.syncEngine?.stop();
+        if (this.handyHdspSync?.active) this.handyHdspSync.stop();
+        this._edgeStoppedEngines.push('handy');
+        if (this.handyManager?.connected) {
+          this.handyManager.hsspStop().catch(() => { /* best-effort */ });
+        }
+      }
+      // Devices to idle NOW — engine stop() alone leaves sustained outputs
+      // (vibrate/rotate) holding their last value, the exact failure the
+      // orgasm-switch release fixed on 2026-08-14.
+      this._stopAllDevicesIdle();
+      try { this.buttplugManager?.stopSustainedOutputs?.(); } catch { /* best-effort */ }
+    } else {
+      if (this._edgeStoppedEngines?.includes('buttplug')) this.buttplugSync.start();
+      if (this._edgeStoppedEngines?.includes('tcode')) this.tcodeSync.start();
+      if (this._edgeStoppedEngines?.includes('autoblow')) this.autoblowSync.start();
+      if (this._edgeStoppedEngines?.includes('handy') && !skipHandyResume) {
+        this._resumeHandyAfterEdge();
+      }
+      this._edgeStoppedEngines = [];
+    }
+  }
+
+  /**
+   * Mirror of _restoreHandyAfterOrgasm minus the script restore — Edge never
+   * replaced the script on the device, so resume is: HDSP engine at non-1x
+   * rates, otherwise HSSP start + a forced resync() anchor at current time.
+   */
+  async _resumeHandyAfterEdge() {
+    if (!this.handyManager?.connected) return;
+    const rate = this.videoPlayer?.playbackRate || 1;
+    if (rate !== 1) {
+      if (this.handyHdspSync && !this.handyHdspSync.active) this.handyHdspSync.start();
+      return;
+    }
+    if (!this.funscriptEngine?.isLoaded) return;  // no script → leave device idle
+    try {
+      if (this.syncEngine) {
+        this.syncEngine.start();
+        await this.syncEngine.resync();
+      }
+    } catch (err) {
+      console.warn('[EdgeHold] Handy resume failed:', err?.message || err);
+    }
+  }
+
   async _restoreHandyAfterOrgasm() {
     if (!this.handyManager?.connected) return;
     const rate = this.videoPlayer?.playbackRate || 1;
@@ -5651,7 +5804,12 @@ class App {
       const yaw = Number.isFinite(entry.yaw) ? entry.yaw : 0;
       const pitch = Number.isFinite(entry.pitch) ? entry.pitch : 0;
       const roll = Number.isFinite(entry.roll) ? entry.roll : 0;
-      this.videoPlayer.setVRFlatten(this._currentStereoFormat, eye, { zoom, fov, yaw, pitch });
+      const viewZoom = Number.isFinite(entry.viewZoom) ? entry.viewZoom : 1;
+      const panX = Number.isFinite(entry.panX) ? entry.panX : 0;
+      const panY = Number.isFinite(entry.panY) ? entry.panY : 0;
+      this.videoPlayer.setVRFlatten(this._currentStereoFormat, eye, {
+        zoom, fov, yaw, pitch, viewZoom, panX, panY,
+      });
       // Roll is independent of `setVRFlatten` (which handles projection
       // mount + planar zoom); pushed separately so it applies to the
       // spherical render path as soon as it's mounted.
@@ -5676,6 +5834,102 @@ class App {
     // Player overflow menu's "VR Format…" item — visible only for
     // videos detected (or manually flagged) as VR.
     this._refreshVRFormatMenuVisibility();
+  }
+
+  /**
+   * Merge fields into the current video's vrFormat entry, persist, and
+   * apply live. The single write path for the zoom gesture.
+   *
+   * Emits `vrFormat:changed` so an open VR Format panel tracks the gesture
+   * rather than showing a stale slider — the panel writes through the same
+   * entry, so the two stay one value.
+   */
+  _writeVRFormatFields(fields) {
+    const path = this._currentVideoPath;
+    if (!path || !fields) return;
+    const map = { ...(this.settings?.get?.('library.vrFormat') || {}) };
+    const next = { ...(map[path] || {}), ...fields, source: 'manual' };
+    map[path] = next;
+    this.settings?.set?.('library.vrFormat', map);
+    eventBus.emit('vrFormat:changed', { path, entry: next });
+
+    if (isSpherical(this._currentStereoFormat)) {
+      this.videoPlayer.updateVRProjection({ fov: next.fov });
+    } else {
+      this.videoPlayer.setVRViewZoom(next.viewZoom, next.panX, next.panY);
+    }
+  }
+
+  /** One notch of zoom. `direction` is +1 in, -1 out. */
+  _stepVRZoom(direction) {
+    if (!this._currentStereoFormat || !this._currentVideoPath) return;
+    const entry = (this.settings?.get?.('library.vrFormat') || {})[this._currentVideoPath] || null;
+    // Returns null at the limits, so holding the keys does not spam writes.
+    this._writeVRFormatFields(applyZoomStep(entry, this._currentStereoFormat, direction));
+  }
+
+  /** Ctrl+0 — back to fit (planar) or 90° (spherical). */
+  _resetVRZoom() {
+    if (!this._currentStereoFormat || !this._currentVideoPath) return;
+    this._writeVRFormatFields(resetZoomFields(this._currentStereoFormat));
+  }
+
+  /**
+   * Ctrl+scroll and trackpad pinch on the video.
+   *
+   * These are the SAME browser event — a pinch arrives as `wheel` with
+   * `ctrlKey: true` — so one handler serves both and there is no
+   * trackpad-specific branch anywhere.
+   *
+   * `preventDefault` is not optional: without it Chromium's own page zoom
+   * fires and rescales the entire UI. Nothing in this app pinned
+   * `zoomFactor`, so that was already happening on any Ctrl+scroll.
+   */
+  _wireVRZoomGesture() {
+    const wrap = document.getElementById('video-wrapper');
+    if (!wrap || this._vrZoomWired) return;
+    this._vrZoomWired = true;
+
+    wrap.addEventListener('wheel', (e) => {
+      if (!e.ctrlKey) return;               // plain scroll keeps its meaning
+      e.preventDefault();                    // ... and page zoom never fires
+      if (!this._currentStereoFormat) return;
+      this._stepVRZoom(wheelDirection(e.deltaY));
+    }, { passive: false });
+
+    // Drag-to-pan for PLANAR only. Spherical already has its own
+    // drag-to-pan on the WebGL canvas (`_wireVRPanForCurrent`), which
+    // moves the camera rather than the picture.
+    let drag = null;
+    wrap.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      if (!this._currentStereoFormat || isSpherical(this._currentStereoFormat)) return;
+      if ((this.videoPlayer.vrViewZoom || 1) <= 1) return;   // nothing hidden
+      drag = { x: e.clientX, y: e.clientY, moved: 0 };
+    });
+    wrap.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.x;
+      const dy = e.clientY - drag.y;
+      drag.moved += Math.abs(dx) + Math.abs(dy);
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+      const box = wrap.getBoundingClientRect();
+      const entry = (this.settings?.get?.('library.vrFormat') || {})[this._currentVideoPath] || null;
+      this._writeVRFormatFields(applyPanDelta(entry, dx, dy, box.width, box.height));
+    });
+    const endDrag = (e) => {
+      if (!drag) return;
+      // Below the same 6px threshold the spherical pan uses, treat it as a
+      // click so play/pause still works while zoomed in.
+      const wasClick = drag.moved < 6;
+      drag = null;
+      if (wasClick) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    wrap.addEventListener('pointerup', endDrag);
+    wrap.addEventListener('pointercancel', () => { drag = null; });
   }
 
   /**
@@ -9062,6 +9316,7 @@ class App {
     wire('btn-inline-tl', 'player.inlineTimeline', (on) => this.inlineViz.setTimelineVisible(on));
     wire('btn-inline-hm', 'player.inlineHeatmap', (on) => this.inlineViz.setHeatmapVisible(on));
     this._applyInlineVizOpacity();
+    this._applyDeviceSimOpacity();
   }
 
   /**
@@ -9139,6 +9394,19 @@ class App {
     const pct = Number.isFinite(Number(raw)) ? Number(raw) : INLINE_VIZ_OPACITY_DEFAULT;
     const clamped = Math.min(100, Math.max(20, pct));
     document.documentElement.style.setProperty('--inline-viz-opacity', String(clamped / 100));
+  }
+
+  /**
+   * Push the configured device-simulator opacity onto the widget. Stored
+   * 20-100 (percent) under `player.deviceSimOpacity`, defaulting to 80 to
+   * match the inline-viz overlay. Clamped rather than trusted: a hand-edited
+   * config should not be able to make the indicator invisible.
+   */
+  _applyDeviceSimOpacity(value = null) {
+    const raw = value !== null ? value : this.settings?.get?.('player.deviceSimOpacity');
+    const pct = Number.isFinite(Number(raw)) ? Number(raw) : DEVICE_SIM_OPACITY_DEFAULT;
+    const clamped = Math.min(100, Math.max(20, pct));
+    document.documentElement.style.setProperty('--device-sim-opacity', String(clamped / 100));
   }
 
   /**

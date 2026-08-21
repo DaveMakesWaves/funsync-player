@@ -1,4 +1,4 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('funsync', {
   // Static platform identifier from the main process — used by anything
@@ -27,6 +27,30 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // File handling — native Electron dialog
   openFileDialog: (options) => ipcRenderer.invoke('open-file-dialog', options),
+
+  // Real filesystem path for a dropped File object.
+  //
+  // Electron REMOVED the non-standard `File.path` in v32; we are on 41. A
+  // dropped video therefore arrived with `path === undefined`, which set
+  // `app._currentVideoPath = null` and silently disabled everything keyed on
+  // the path — VR format panel, funscript auto-pairing, resume, variations,
+  // queue context, screenshots, remux fallback. The video still PLAYED,
+  // because playback falls back to a blob URL, so the breakage was invisible.
+  // Reported by terijapl (#284) as "Ctrl+Shift+R says no video loaded after
+  // drag and drop", which was one visible symptom of about a dozen.
+  //
+  // `webUtils.getPathForFile` is Electron's supported replacement and must be
+  // called from the preload: `webUtils` is not reachable across the context
+  // bridge, only its result is. Returns '' for anything without a real path
+  // (a File built in-page, a synthetic drop in tests), so callers can treat
+  // falsy as "no path" exactly as they did before.
+  getPathForFile: (file) => {
+    try {
+      return webUtils.getPathForFile(file) || '';
+    } catch {
+      return '';
+    }
+  },
 
   // Data store — all data
   getAllData: () => ipcRenderer.invoke('get-all-data'),

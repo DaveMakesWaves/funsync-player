@@ -217,6 +217,15 @@ export function reverseActions(actions) {
  * @param {number} max — maximum position (0-100)
  * @returns {Array<{at: number, pos: number}>}
  */
+/**
+ * Width of an "instant" edge in a step waveform. One millisecond rather than
+ * zero: a zero-length segment means two actions on the same timestamp, which
+ * is ambiguous for anything that interpolates and is awkward in a saved
+ * funscript. At 1ms the edge is instant for every practical purpose, and the
+ * filler's slew limiter ramps it exactly as it would a true vertical.
+ */
+const EDGE_MS = 1;
+
 export function generatePattern(type, startMs, endMs, bpm, min = 0, max = 100) {
   if (endMs <= startMs || bpm <= 0) return [];
 
@@ -260,16 +269,16 @@ function _sinePattern(startMs, endMs, durationMs, cycleDurationMs, minStepMs, mi
 
 function _sawtoothPattern(startMs, endMs, durationMs, cycleDurationMs, minStepMs, min, max) {
   const result = [];
-  const range = max - min;
   let t = startMs;
 
-  while (t <= endMs) {
-    // Bottom of stroke
-    result.push({ at: Math.round(t), pos: min });
-    // Top of stroke (end of cycle)
+  // Ramp up across the cycle, then drop back in EDGE_MS. The drop is the
+  // NEXT iteration's opening point one millisecond later, which is what makes
+  // it a saw rather than a triangle.
+  while (t < endMs) {
     const topT = Math.min(t + cycleDurationMs, endMs);
-    result.push({ at: Math.round(topT), pos: max });
-    t += cycleDurationMs;
+    result.push({ at: Math.round(t), pos: min });
+    if (topT > t) result.push({ at: Math.round(topT), pos: max });
+    t = topT + EDGE_MS;
   }
 
   return _dedupeByTime(result);
@@ -279,17 +288,18 @@ function _squarePattern(startMs, endMs, durationMs, cycleDurationMs, minStepMs, 
   const result = [];
   const halfCycle = cycleDurationMs / 2;
   let t = startMs;
+  let high = true;
 
-  while (t <= endMs) {
-    result.push({ at: Math.round(t), pos: max });
-    const midT = Math.min(t + halfCycle, endMs);
-    result.push({ at: Math.round(midT), pos: max });
-    if (midT < endMs) {
-      result.push({ at: Math.round(midT), pos: min });
-      const endT = Math.min(t + cycleDurationMs, endMs);
-      result.push({ at: Math.round(endT), pos: min });
-    }
-    t += cycleDurationMs;
+  // Two points per half cycle — the start and the end of the HOLD — and the
+  // next half cycle opens EDGE_MS later at the opposite position. The hold is
+  // what makes it square; without it this is a triangle wave.
+  while (t < endMs) {
+    const holdEnd = Math.min(t + halfCycle, endMs);
+    const pos = high ? max : min;
+    result.push({ at: Math.round(t), pos });
+    if (holdEnd > t) result.push({ at: Math.round(holdEnd), pos });
+    t = holdEnd + EDGE_MS;
+    high = !high;
   }
 
   return _dedupeByTime(result);
@@ -362,13 +372,26 @@ function _randomPattern(startMs, endMs, durationMs, cycleDurationMs, minStepMs, 
   return result;
 }
 
-/** Remove consecutive actions with the same timestamp, keeping the last one. */
+/**
+ * Remove consecutive actions that share a timestamp AND a position.
+ *
+ * It used to drop any point whose neighbour shared its timestamp, keeping the
+ * later one. But in a step waveform the two points of a same-instant pair are
+ * not duplicates: the first ENDS A FLAT HOLD and the second starts the edge.
+ * Dropping the first deleted every hold, which silently turned `square` into a
+ * triangle wave and `sawtooth` into an almost flat line — in the gap filler
+ * and in the editor's Generate Pattern alike (Dave, 2026-08-21).
+ *
+ * The generators now separate their edges by EDGE_MS instead of stacking them
+ * on one timestamp, so nothing depends on that behaviour any more, and this
+ * only removes points that are genuinely identical.
+ */
 function _dedupeByTime(actions) {
   if (actions.length <= 1) return actions;
   const result = [];
   for (let i = 0; i < actions.length; i++) {
-    // If the next action has the same timestamp, skip this one
-    if (i < actions.length - 1 && actions[i].at === actions[i + 1].at) continue;
+    const next = actions[i + 1];
+    if (next && next.at === actions[i].at && next.pos === actions[i].pos) continue;
     result.push(actions[i]);
   }
   return result;

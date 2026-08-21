@@ -1202,6 +1202,37 @@ body::-webkit-scrollbar {
 @keyframes player__spin {
   to { transform: rotate(360deg); }
 }
+/* Buffering indicator: spinner only, no dim, no text — it must not block
+   the controls (a stalled seek is exactly when users retarget the seek
+   bar), unlike the variant-switch overlay above which blocks on purpose. */
+.player__buffer-spinner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9;
+  pointer-events: none;
+}
+
+/* Escape hatch back to the browser's own player. Understated on purpose —
+   it should be findable when the custom controls misbehave, not compete
+   with them the rest of the time. */
+.player__controls-toggle {
+  display: block;
+  margin: 10px auto 0;
+  padding: 8px 14px;
+  min-height: 40px;
+  border: 1px solid var(--border, rgba(255,255,255,0.18));
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary, rgba(255,255,255,0.65));
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.player__controls-toggle:active {
+  background: rgba(255, 255, 255, 0.08);
+}
 
 .player__sync-pill {
   margin: 10px 16px 0;

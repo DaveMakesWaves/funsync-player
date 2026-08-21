@@ -265,3 +265,51 @@ describe('FunscriptEngine', () => {
     });
   });
 });
+
+// Reported on Discord 2026-08-17: "built in device simulator (D hotkey) does
+// not show gap filler". getPositionAt read the AUTHORED actions, so the
+// indicator interpolated flatly across a gap while the devices were being
+// driven through it on filler strokes.
+describe('getPositionAt — reflects what is actually played', () => {
+  let engine;
+
+  beforeEach(async () => {
+    engine = new FunscriptEngine({ backendPort: 5123 });
+    // A deliberate 10s hole between 1000ms and 11000ms.
+    await engine.loadContent(JSON.stringify({
+      actions: [
+        { at: 0, pos: 0 },
+        { at: 1000, pos: 100 },
+        { at: 11000, pos: 0 },
+      ],
+    }), 'gap.funscript');
+  });
+
+  it('interpolates across the raw gap when filler is off', () => {
+    expect(engine.hasFiller).toBe(false);
+    // Straight line from 100 down to 0 across ten seconds.
+    expect(engine.getPositionAt(6000)).toBeCloseTo(50, 0);
+  });
+
+  it('follows the filler strokes once the filler is on', () => {
+    engine.setFillerOptions({ enabled: true, totalDurationMs: 11000 });
+    expect(engine.hasFiller, 'filler should have produced actions').toBe(true);
+
+    // The filler adds strokes inside the hole, so the mid-gap position must
+    // no longer sit on the flat authored interpolation. Sample across the gap
+    // and require that the played curve actually moves.
+    const samples = [];
+    for (let t = 2000; t <= 10000; t += 250) samples.push(engine.getPositionAt(t));
+    const spread = Math.max(...samples) - Math.min(...samples);
+    expect(spread, 'the indicator should move through the gap').toBeGreaterThan(20);
+  });
+
+  it('agrees with getActions, which is what the sync engines send', () => {
+    engine.setFillerOptions({ enabled: true, totalDurationMs: 11000 });
+    const played = engine.getActions();
+    // Every played keyframe should be reproduced exactly by getPositionAt.
+    for (const a of played) {
+      expect(engine.getPositionAt(a.at), `at ${a.at}`).toBeCloseTo(a.pos, 5);
+    }
+  });
+});

@@ -59,7 +59,7 @@ describe('groupAttachments — clean multi-axis posts', () => {
   it('orders axes canonically, not by upload order', () => {
     // Uploaded twist, pitch, roll — AXIS_DEFINITIONS order is twist, roll, pitch.
     const { groups } = groupAttachments(VIRTUALTABOO);
-    expect(axisLabels(groups[0])).toEqual(['Twist', 'Roll', 'Pitch']);
+    expect(axisLabels(groups[0])).toEqual(['Twist / Yaw', 'Roll', 'Pitch']);
   });
 });
 

@@ -56,25 +56,71 @@ export class Modal {
 
       overlay.appendChild(panel);
 
+      // Mount point. The Fullscreen API paints ONLY the fullscreen element
+      // and its descendants on the top layer, so an overlay attached to
+      // <body> is invisible AND unclickable while the player is
+      // fullscreened — the dialog opens behind the video and the page
+      // underneath is inert, which reads as a frozen player (lr_x3,
+      // EroScripts #307: Add Variation. The `?` shortcut list, the VR
+      // format panel and the orgasm config had the same fault).
+      // connection-panel and queue-panel each solve this locally; doing it
+      // here covers every Modal.* call site at once.
+      const mountTarget = () => document.fullscreenElement || document.body;
+
       // `inert` on the rest of the page so AT/keyboard can't reach it
       // while the modal is open. Modern Electron supports `inert`
-      // natively. Stash any pre-existing inert children so we restore
-      // exactly the prior state on close (otherwise we'd un-inert
-      // siblings the host page intentionally inerted).
+      // natively. This can NOT be a flat pass over document.body.children:
+      // once the overlay lives inside the fullscreen element, inerting
+      // that element's body-level ancestor would inert the overlay too —
+      // inert propagates to descendants and a descendant can't opt back
+      // out, so the modal would be visible but dead. Walk from the overlay
+      // up to <body> instead, inerting siblings at each level and leaving
+      // the ancestor chain itself alone. Stash only what we actually set,
+      // so a host page that intentionally inerted something keeps it.
       const inertedSiblings = [];
-      for (const sib of [...document.body.children]) {
-        if (!sib.hasAttribute('inert')) {
-          sib.setAttribute('inert', '');
-          inertedSiblings.push(sib);
+      const applyInert = () => {
+        for (let node = overlay; node && node !== document.body; node = node.parentElement) {
+          const parent = node.parentElement;
+          if (!parent) break;
+          for (const sib of [...parent.children]) {
+            if (sib === node || sib.hasAttribute('inert')) continue;
+            sib.setAttribute('inert', '');
+            inertedSiblings.push(sib);
+          }
         }
-      }
-      document.body.appendChild(overlay);
+      };
+      const clearInert = () => {
+        for (const sib of inertedSiblings) sib.removeAttribute('inert');
+        inertedSiblings.length = 0;
+      };
+
+      mountTarget().appendChild(overlay);
+      applyInert();
+
+      // Entering or leaving fullscreen with a modal open moves the top
+      // layer out from under it. Re-home the overlay and redo the inert
+      // walk against the new ancestor chain. Moving a node in the DOM
+      // blurs any focused descendant, so restore focus afterwards.
+      const onFullscreenChange = () => {
+        const target = mountTarget();
+        if (overlay.parentElement === target) return;
+        const focused = panel.contains(document.activeElement) ? document.activeElement : null;
+        clearInert();
+        target.appendChild(overlay);
+        applyInert();
+        if (focused) {
+          try { focused.focus({ preventScroll: true }); }
+          catch { /* ignore — element may be unfocusable now */ }
+        }
+      };
+      document.addEventListener('fullscreenchange', onFullscreenChange);
 
       const close = (value = null) => {
         document.removeEventListener('keydown', onKeydown, true);
+        document.removeEventListener('fullscreenchange', onFullscreenChange);
         // Restore inert state of siblings before removal so focus can
         // legitimately land on the previously-focused element.
-        for (const sib of inertedSiblings) sib.removeAttribute('inert');
+        clearInert();
         overlay.remove();
         if (previouslyFocused && document.contains(previouslyFocused)) {
           try { previouslyFocused.focus({ preventScroll: true }); }
