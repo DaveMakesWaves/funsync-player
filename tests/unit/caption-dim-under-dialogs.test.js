@@ -32,7 +32,8 @@ const COLORS = { background: '#1a1a2e', chrome: '#16213e', symbol: '#e0e0e6' };
 const TRANSPARENT = '#00000000';
 
 // --- main.js's handler, lifted -------------------------------------------
-const MAIN_SRC = fs.readFileSync('electron/main.js', 'utf8');
+// LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+const MAIN_SRC = fs.readFileSync('electron/main.js', 'utf8').replace(/\r\n/g, '\n');
 const lift = (start, end) => {
   const i = MAIN_SRC.indexOf(start);
   if (i < 0) throw new Error(`not found in main.js: ${start}`);

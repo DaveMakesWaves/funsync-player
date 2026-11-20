@@ -143,6 +143,14 @@ async function openSettings(settings, opts = {}) {
   const panel = new SettingsPanel({ settings, ...opts });
   showing = panel.show();
   await settle();
+  // The dialog gives its first focus a frame after it opens (Modal:
+  // requestAnimationFrame). Wait for that frame: when it came later, it took
+  // the focus away from whatever the test had just focused. On Windows the
+  // settle above (coarse 15 ms timers) happened to outlast a frame; on Linux
+  // (1 ms timers) it did not, and CI's ubuntu job failed on the focus
+  // assertions (v0.10.0 tag, 2026-11-20).
+  await new Promise((r) => requestAnimationFrame(() => r()));
+  await settle();
   return panel;
 }
 

@@ -19,7 +19,8 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const mainSrc = readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8');
+// LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+const mainSrc = readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 function liftReadFunscript(log) {
   const start = mainSrc.indexOf("ipcMain.handle('read-funscript'");

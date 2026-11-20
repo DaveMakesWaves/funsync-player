@@ -17,7 +17,8 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 
-const SRC = fs.readFileSync('backend/web-remote/app.js', 'utf8');
+// LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+const SRC = fs.readFileSync('backend/web-remote/app.js', 'utf8').replace(/\r\n/g, '\n');
 
 /** `async function loadHeatmap(...) { ... }`: from its line to the next top-level `}`. */
 function liftTopLevel(name) {

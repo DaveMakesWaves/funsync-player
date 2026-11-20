@@ -74,7 +74,10 @@ describe('main: select-funscript with { defaultPath }', () => {
     const dialog = {
       showOpenDialog: vi.fn(async (_win, opts) => { calls.push(opts); return { canceled: !filePaths.length, filePaths }; }),
     };
-    const nearest = vi.fn(async (p) => (isPlainAbsolutePath(p) ? found : null));
+    // Windows rules for these Windows-style paths, on every platform: with
+    // the host's own rules `E:\...` is not absolute on Linux, so the fake
+    // found nothing there and CI's ubuntu job failed (v0.10.0 tag, 2026-11-20).
+    const nearest = vi.fn(async (p) => (isPlainAbsolutePath(p, path.win32) ? found : null));
     const fakeRequire = (m) => (m === './dialog-default-path' ? { ...dialogDefaultPath, nearestExistingFolder: nearest } : requireElectron(m));
     return { handler: liftMainHandler('select-funscript', { dialog, mainWindow: {}, path: path.win32, require: fakeRequire }), calls, nearest };
   }

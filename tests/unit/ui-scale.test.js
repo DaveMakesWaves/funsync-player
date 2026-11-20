@@ -241,7 +241,8 @@ describe('a pop-out keeps its own zoom (main window only)', () => {
 // page's zoom from its first commit, a menu item with a `role` runs the role
 // and ignores its `click`, setTitleBarOverlay() changes only what it is given.
 describe('main.js wires it in (createWindow, the View menu, set-setting, window chrome)', () => {
-  const MAIN_SRC = fs.readFileSync('electron/main.js', 'utf8');
+  // LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+  const MAIN_SRC = fs.readFileSync('electron/main.js', 'utf8').replace(/\r\n/g, '\n');
   const lift = (start, end) => {
     const i = MAIN_SRC.indexOf(start);
     if (i < 0) throw new Error(`not found in main.js: ${start}`);

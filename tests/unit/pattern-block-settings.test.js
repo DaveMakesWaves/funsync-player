@@ -57,8 +57,9 @@ const BUNDLES = Object.fromEntries(PATTERN_BLOCK_LOCALES.map((l) => [
   l, withPatternFixupStrings(withPatternBlockStrings(JSON.parse(fs.readFileSync(`renderer/locales/${l}.json`, 'utf8')), l), l),
 ]));
 const EN = BUNDLES.en;
-const MODAL_CSS = fs.readFileSync('renderer/styles/modal.css', 'utf8');
-const PLAYER_CSS = fs.readFileSync('renderer/styles/player.css', 'utf8');
+// LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+const MODAL_CSS = fs.readFileSync('renderer/styles/modal.css', 'utf8').replace(/\r\n/g, '\n');
+const PLAYER_CSS = fs.readFileSync('renderer/styles/player.css', 'utf8').replace(/\r\n/g, '\n');
 
 const FEATURES = ['gapFiller', 'orgasm', 'edge'];
 const PREFIX = { gapFiller: 'sp-filler-pattern', orgasm: 'sp-orgasm-pattern', edge: 'sp-edge-pattern' };

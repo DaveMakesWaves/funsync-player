@@ -61,6 +61,10 @@ const NOSCRIPT = 'C:\\Clips\\Alpha Scene (copy).mp4';
 const LIBVID = 'C:\\Lib\\Library Clip.mp4';
 const ASSOC_FS = 'C:\\Scripts\\Associated.funscript';
 
+// "It played" is waited for, not read after a fixed settle: how long a settle
+// lasts depends on the platform's timers (coarse 15 ms on Windows, 1 ms on
+// Linux), which is how CI's ubuntu job failed on the v0.10.0 tag (2026-11-20).
+const WAIT = { timeout: 2000, interval: 5 };
 const settle = async (n = 14) => { for (let i = 0; i < n; i++) await new Promise((r) => setTimeout(r, 0)); };
 
 let Lifted;
@@ -86,6 +90,11 @@ beforeEach(async () => {
   expect(await manager.connect('TESTKEY01')).toBe(true);
   manager._stopHealthCheck();
   manager._hsspSpacingMs = 0;
+  // And the 220 ms between two setScripts: a new video's setup came within it
+  // of the last one and waited it out, longer than the settles below on Linux
+  // (1 ms timers) though not on Windows (coarse 15 ms ones), so CI's ubuntu
+  // job saw no play yet (v0.10.0 tag, 2026-11-20).
+  manager._setScriptSpacingMs = 0;
   ({ app, video, relayed } = buildLoadApp(Lifted, { handyManager: manager }));
   scriptsOnDisk = new Map([[VARIANT_FS, SCRIPT_VARIANT]]);
   globalThis.__liftedFunsync.readFunscript = vi.fn(async (p) => scriptsOnDisk.get(p) ?? null);
@@ -125,7 +134,7 @@ async function playLongClip() {
   video.fire('loadeddata');
   await settle();
   expect(app._currentVideoPath).toBe(LONG);
-  expect(deviceRunning(), 'Long Clip plays on the Handy').toBe(true);
+  await vi.waitFor(() => expect(deviceRunning(), 'Long Clip plays on the Handy').toBe(true), WAIT);
 }
 
 describe('O / drag-and-drop with a video and its script: the video waits for the Handy upload', () => {
@@ -146,7 +155,7 @@ describe('O / drag-and-drop with a video and its script: the video waits for the
 
     held.resolve({ result: 0 });
     await settle();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
     const legs = legsSince(mark);
     expect(legs.indexOf('setScript:Variant.csv')).toBeGreaterThan(-1);
     expect(legs.indexOf('hsspPlay')).toBeGreaterThan(legs.indexOf('setScript:Variant.csv'));
@@ -159,7 +168,7 @@ describe('O / drag-and-drop with a video and its script: the video waits for the
     opts.onVideoFile(fileItem(VARIANT), { withScript: true });
     opts.onFunscriptFile(scriptFile(VARIANT_FS, SCRIPT_VARIANT));
     video.fire('loadeddata');
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
   });
 
   it('a script that fails to load lets the waiting video play (no 8 s stall)', async () => {
@@ -174,7 +183,7 @@ describe('O / drag-and-drop with a video and its script: the video waits for the
     expect(video.play).not.toHaveBeenCalled();
     opts.onFunscriptFile(scriptFile(VARIANT_FS, 'not json'));
     await settle();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
   });
 });
 
@@ -193,7 +202,7 @@ describe('O with the video alone loads the script a library open loads', () => {
 
     held.resolve({ result: 0 });
     await settle();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
     expect(deviceRunning()).toBe(true);
   });
 
@@ -222,7 +231,7 @@ describe('O with the video alone loads the script a library open loads', () => {
     video.fire('loadeddata');   // even before the look-up answered
     await settle();
     expect(app.loadFunscript).not.toHaveBeenCalled();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
     expect(app._waitingForScript).toBe(false);
   });
 
@@ -275,7 +284,7 @@ describe('the REAL DragDrop tells the handler whether a script came with the vid
     expect(video.play).not.toHaveBeenCalled();
     held.resolve({ result: 0 });
     await settle();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
     expect(deviceRunning()).toBe(true);
     // The picked script is the one: nothing else is looked up or loaded.
     expect(app.loadFunscript).toHaveBeenCalledTimes(1);
@@ -301,7 +310,7 @@ describe('the REAL DragDrop tells the handler whether a script came with the vid
     expect(video.play).not.toHaveBeenCalled();
     held.resolve({ result: 0 });
     await settle();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
     expect(app.loadFunscript).toHaveBeenCalledTimes(1);
     expect(globalThis.__liftedFunsync.readFunscript).not.toHaveBeenCalled();
   });
@@ -338,7 +347,7 @@ describe('FN-01 on the O route: a video with no script stops every device', () =
     // The new video loads and plays: the old script must not come back.
     video.fire('loadeddata');
     await settle();
-    expect(video.play).toHaveBeenCalled();
+    await vi.waitFor(() => expect(video.play).toHaveBeenCalled(), WAIT);
     expect(legsSince(mark)).not.toContain('hsspPlay');
     expect(deviceRunning()).toBe(false);
     app.buttplugSync.stop(); app.tcodeSync.stop();

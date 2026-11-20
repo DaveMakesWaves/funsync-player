@@ -22,7 +22,8 @@ import { mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-const mainSrc = readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8');
+// LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+const mainSrc = readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
 
 function liftThumbnailHandler({ log, fetchWithTimeout }) {
   const start = mainSrc.indexOf('async function _errorDetail(resp)');

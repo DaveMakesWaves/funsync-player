@@ -152,7 +152,8 @@ describe('rotatedLogPath', () => {
 // is asserted is the CONTENT of the log at the moment main.js hands it to the
 // OS, which is what the user reads and pastes.
 describe('main.js hands over a redacted log (V56)', () => {
-  const mainSrc = readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8');
+  // LF whatever the checkout: CI's Windows runner checks out with CRLF (v0.10.0 tag, 2026-11-20).
+  const mainSrc = readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8').replace(/\r\n/g, '\n');
   const lift = (start, end) => {
     const i = mainSrc.indexOf(start);
     if (i < 0) throw new Error(`not found in main.js: ${start}`);
