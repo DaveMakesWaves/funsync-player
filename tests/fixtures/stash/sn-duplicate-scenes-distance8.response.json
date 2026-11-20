@@ -1,0 +1,104 @@
+{
+  "data": {
+    "findDuplicateScenes": [
+      [
+        {
+          "id": "2",
+          "title": "",
+          "rating100": 100,
+          "organized": true,
+          "play_count": 5,
+          "last_played_at": "2026-11-17T21:45:00Z",
+          "o_counter": 3,
+          "play_history": [
+            "2026-11-17T21:45:00Z",
+            "2026-11-12T08:00:00Z",
+            "2026-11-10T20:15:00Z",
+            "2026-11-05T12:30:00Z",
+            "2026-11-01T10:00:00Z"
+          ],
+          "o_history": [
+            "2026-11-17T22:00:00Z",
+            "2026-11-10T20:30:00Z",
+            "2026-11-05T12:40:00Z"
+          ],
+          "updated_at": "2026-11-19T09:24:26Z",
+          "tags": [
+            {
+              "id": "2",
+              "name": "Synthetic Tag B",
+              "aliases": [
+                "synthetic-child"
+              ],
+              "parents": [
+                {
+                  "id": "3",
+                  "name": "Synthetic Parent Tag"
+                }
+              ]
+            }
+          ],
+          "groups": [
+            {
+              "scene_index": 1,
+              "group": {
+                "id": "1",
+                "name": "Synthetic Series A"
+              }
+            }
+          ],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_large.mkv",
+              "basename": "synthetic_large.mkv",
+              "size": 7427628,
+              "duration": 12.02,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "60f7da65ec8d5d1d"
+                },
+                {
+                  "type": "phash",
+                  "value": "ab63cd1cc33c3343"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "10",
+          "title": "",
+          "rating100": null,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-19T09:23:57Z",
+          "tags": [],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_large_reencode.mp4",
+              "basename": "synthetic_large_reencode.mp4",
+              "size": 1076264,
+              "duration": 12.01,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "456cb0eefc8bb4e7"
+                },
+                {
+                  "type": "phash",
+                  "value": "ab63cd1cc33c3343"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    ]
+  }
+}

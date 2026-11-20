@@ -266,6 +266,7 @@
 }
 
 .audience-room__card-buzz-btn,
+.audience-room__card-resend-btn,
 .audience-room__card-mute-btn {
   display: inline-flex;
   align-items: center;
@@ -281,9 +282,18 @@
   transition: background 0.15s;
 }
 
-.audience-room__card-buzz-btn:hover,
+.audience-room__card-buzz-btn:hover:not(:disabled),
+.audience-room__card-resend-btn:hover:not(:disabled),
 .audience-room__card-mute-btn:hover {
   background: var(--surface-card-hover);
+}
+
+/* Off while the bridge would refuse it: Test buzz while that viewer plays
+   or is muted (FT-119), Resend while muted or connecting (FT-121). */
+.audience-room__card-buzz-btn:disabled,
+.audience-room__card-resend-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .audience-room__card-mute-btn[aria-pressed="true"] {

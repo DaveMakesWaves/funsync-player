@@ -130,8 +130,16 @@ function _lookup(dict, key) {
 
 /**
  * Activate a locale. Loads the JSON bundle if it isn't already loaded,
- * updates the document <html lang>, clears the compile cache, and
- * emits `language:changed` so subscribing components can re-render.
+ * updates the document <html lang>, clears the compile cache, walks the
+ * static `data-i18n*` keys (`translatePage(document)`), and THEN emits
+ * `language:changed` so subscribing components can re-render.
+ *
+ * The walk comes first on purpose, and callers must not walk the document
+ * again after this resolves. A static key only knows an element's boot
+ * text; a component that owns an element re-derives it from its state in
+ * its `language:changed` handler. Walking after the handlers threw that
+ * away: a connected Handy's "Connected" / "Disconnect" went back to "Not
+ * connected" / "Connect" on every language switch (app test V69).
  *
  * Always preloads English alongside the requested locale so the fallback
  * chain works (decision #4).
@@ -153,6 +161,9 @@ export async function setLocale(locale) {
 
   if (typeof document !== 'undefined' && document.documentElement) {
     document.documentElement.lang = resolved;
+    // Static keys first, so every language:changed handler below has the
+    // last word over the elements it owns.
+    translatePage(document);
   }
   if (eventBus?.emit) eventBus.emit('language:changed', { locale: resolved });
 }
@@ -176,7 +187,9 @@ async function _loadBundle(locale) {
 
 /**
  * Walk the document and translate every element carrying a data-i18n*
- * attribute. Called after each `setLocale()` and once at boot.
+ * attribute. `setLocale()` calls it before emitting `language:changed`;
+ * the app also calls it once at boot. Don't call it on the document after
+ * a language switch: it would overwrite what components set from state.
  *
  * Recognised attributes:
  *   data-i18n               → textContent

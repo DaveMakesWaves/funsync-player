@@ -128,3 +128,51 @@ export function drawFillerWaveform(canvas, actions, colors = {}, opts = {}) {
     ctx.stroke();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Any rendered sample (Dave, 2026-11-19: Gap Filler, Orgasm Switch and Edge
+// Hold get one Pattern block, each with this preview). The block renders the
+// sample through pattern-choice.js renderPatternSample (the same actions the
+// Test button plays); these only draw it, in the theme's own colours.
+
+/**
+ * The script range a preview stands in with: Settings has no script loaded,
+ * and 0-100 is the honest stand-in for "whatever you play it over" (a
+ * "Follow the script" depth is a share of it, as the old filler preview did).
+ */
+export const PREVIEW_SCRIPT_RANGE = Object.freeze({ min: 0, max: 100 });
+
+/**
+ * The preview's colours from the semantic tokens, so light and dark each get
+ * their own: the curve in the accent, the midline and the Test playhead in
+ * the theme's border and text colours (a red playhead over the red accent
+ * curve could not be told apart).
+ * @param {Element} [root] — defaults to <html>, where data-theme lives
+ * @returns {{stroke: string, grid: string, playhead: string}}
+ */
+export function previewColors(root) {
+  const el = root || (typeof document !== 'undefined' ? document.documentElement : null);
+  let css = null;
+  try {
+    css = el && typeof getComputedStyle === 'function' ? getComputedStyle(el) : null;
+  } catch { css = null; }
+  const read = (name, fallback) => {
+    const v = css && typeof css.getPropertyValue === 'function' ? String(css.getPropertyValue(name) || '').trim() : '';
+    return v || fallback;
+  };
+  return {
+    stroke: read('--accent', '#e94560'),
+    grid: read('--border-strong', 'rgba(127,127,127,0.25)'),
+    playhead: read('--text-primary', '#ff5c5c'),
+  };
+}
+
+/**
+ * Draw any rendered sample, with the Test playhead while a test runs.
+ * @param {HTMLCanvasElement} canvas
+ * @param {Array<{at:number,pos:number}>} actions
+ * @param {{playhead?: number|null, colors?: object}} [opts]
+ */
+export function drawSamplePreview(canvas, actions, { playhead = null, colors } = {}) {
+  drawFillerWaveform(canvas, actions, colors || previewColors(), { playhead });
+}

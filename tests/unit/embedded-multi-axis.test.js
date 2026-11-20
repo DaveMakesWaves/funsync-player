@@ -420,3 +420,56 @@ describe('companionPathMap', () => {
     expect(companionPathMap('', ['twist'])).toEqual({});
   });
 });
+
+// Format F — funscript 2.0 `channels` (dio_likes_jojo, EroScripts #311).
+// The site's "download as 2.0" button emits this; before support, a 2.0 file
+// played the stroke axis and nothing else.
+describe('Format F: funscript 2.0 channels', () => {
+  const v2 = (channels) => ({
+    version: 'funscript@2.0.0-alpha.1',
+    actions: [{ at: 0, pos: 0 }, { at: 100, pos: 100 }],
+    channels,
+  });
+
+  it('reads channels keyed by axis name', () => {
+    const got = extractEmbeddedAxes(v2({
+      twist: { actions: [{ at: 0, pos: 10 }, { at: 100, pos: 90 }] },
+      roll: { actions: [{ at: 0, pos: 20 }, { at: 100, pos: 80 }] },
+    }));
+    expect([...got.keys()].sort()).toEqual(['roll', 'twist']);
+  });
+
+  it('accepts a TCode id as the key too, since writers vary', () => {
+    const got = extractEmbeddedAxes(v2({ R2: { actions: [{ at: 0, pos: 1 }, { at: 9, pos: 2 }] } }));
+    expect(got.has('pitch')).toBe(true);
+  });
+
+  it('never treats `stroke` as a companion axis', () => {
+    // Per the spec it overrides the main actions; it is not a second axis.
+    const got = extractEmbeddedAxes(v2({
+      stroke: { actions: [{ at: 0, pos: 5 }, { at: 100, pos: 95 }] },
+      twist: { actions: [{ at: 0, pos: 10 }, { at: 100, pos: 90 }] },
+    }));
+    expect(got.has('stroke')).toBe(false);
+    expect([...got.keys()]).toEqual(['twist']);
+  });
+
+  it('tolerates a bare array instead of {actions}', () => {
+    const got = extractEmbeddedAxes(v2({ twist: [{ at: 0, pos: 10 }, { at: 5, pos: 20 }] }));
+    expect(got.get('twist')).toHaveLength(2);
+  });
+
+  it('ignores an unknown channel name rather than guessing', () => {
+    const got = extractEmbeddedAxes(v2({ wobble: { actions: [{ at: 0, pos: 1 }, { at: 2, pos: 3 }] } }));
+    expect(got.size).toBe(0);
+  });
+
+  it('ignores a channel with no usable actions', () => {
+    const got = extractEmbeddedAxes(v2({ twist: { range: [10, 90] }, roll: { actions: [] } }));
+    expect(got.size).toBe(0);
+  });
+
+  it('does not fire on a 1.0 script that happens to lack channels', () => {
+    expect(extractEmbeddedAxes({ actions: [{ at: 0, pos: 0 }] }).size).toBe(0);
+  });
+});

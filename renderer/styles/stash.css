@@ -1,0 +1,447 @@
+/* Settings > Sources > Stash (S1): the block at the bottom of Sources that
+   links your own Stash server (renderer/components/settings-stash.js;
+   notes/features/DESIGN-stash-s1.md (f), with Dave's answer 1: a block in
+   Sources, not a rail item). Semantic tokens only (notes/DESIGN.md 2.1);
+   targets at least 36 px and Settings' focus ring (DESIGN (f) Accessibility). */
+
+.stash-settings {
+  margin-top: 24px;
+}
+
+.stash-settings__intro {
+  margin-bottom: 12px;
+}
+
+/* ---- buttons: one shape for every Stash action ---- */
+
+.stash-settings__btn {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: border-color var(--transition-fast), background var(--transition-fast);
+}
+
+.stash-settings__btn:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.stash-settings__btn:focus-visible,
+.stash-settings__rules-summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.stash-settings__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A call is running: still focusable, says so, does nothing. */
+.stash-settings__btn[aria-disabled="true"] {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.stash-settings__btn--primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.stash-settings__btn--primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+.stash-settings__btn--danger {
+  color: var(--state-error);
+  border-color: var(--state-error);
+}
+
+.stash-settings__btn--danger:hover:not(:disabled) {
+  background: var(--state-error-soft);
+  border-color: var(--state-error);
+}
+
+/* ---- set up: Address, API key, Test, Link ---- */
+
+.stash-settings__field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stash-settings__input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+.stash-settings__key-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stash-settings__key-saved {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.stash-settings__key-text {
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.stash-settings__key-hint,
+.stash-settings__link-hint {
+  margin-top: 0;
+}
+
+/* The notes next to fields: where the key is kept, the key travelling in
+   the clear, damaged data. */
+.stash-settings__note {
+  margin: 4px 0 8px;
+  padding: 6px 10px;
+  border-left: 3px solid var(--border-strong);
+  border-radius: 4px;
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.stash-settings__note--warn {
+  border-left-color: var(--state-warning);
+  background: var(--state-warning-soft);
+  color: var(--text-primary);
+}
+
+.stash-settings__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.stash-settings__result {
+  min-height: 1.2em;
+  margin: 4px 0 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.stash-settings__result--ok {
+  color: var(--state-connected);
+}
+
+.stash-settings__result--error {
+  color: var(--state-error);
+}
+
+/* Dave's help line (keep Stash on this PC, or set a password). */
+.stash-settings__help {
+  position: relative;
+  margin: 8px 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.stash-settings__help::before {
+  content: 'ⓘ';
+  position: absolute;
+  left: 0;
+  top: 0;
+  color: var(--text-secondary);
+}
+
+/* ---- the certificate trust step and the pin ---- */
+
+.stash-settings__cert {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--state-warning);
+  border-radius: 8px;
+  background: var(--state-warning-soft);
+}
+
+.stash-settings__cert-title {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stash-settings__cert-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.stash-settings__cert-facts dt {
+  color: var(--text-secondary);
+}
+
+.stash-settings__cert-facts dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.stash-settings__fingerprint {
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 11px;
+  word-break: break-all;
+}
+
+.stash-settings__pin {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+}
+
+.stash-settings__pin-text {
+  display: flex;
+  flex: 1 1 240px;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.stash-settings__pin-label {
+  color: var(--text-primary);
+}
+
+.stash-settings__pin-subject {
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+/* ---- linked ---- */
+
+.stash-settings__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stash-settings__spacer {
+  flex: 1 1 auto;
+}
+
+.stash-settings__linked-text {
+  min-width: 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.stash-settings__last,
+.stash-settings__off-text {
+  margin: 4px 0 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.stash-settings__sync {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.stash-settings__progress {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 8px;
+  width: 100%;
+}
+
+.stash-settings__progress-label {
+  grid-column: 1 / -1;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.stash-settings__progress-bar {
+  grid-column: 1;
+  width: 100%;
+  height: 8px;
+  accent-color: var(--accent);
+}
+
+.stash-settings__step {
+  grid-column: 1;
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.stash-settings__progress > .stash-settings__btn {
+  grid-column: 2;
+  grid-row: 2 / span 2;
+}
+
+.stash-settings__start {
+  margin-top: 8px;
+}
+
+/* Need a check: one row per video, its reason, Choose…. */
+.stash-settings__checks {
+  margin: 12px 0;
+}
+
+.stash-settings__subhead {
+  margin: 0 0 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.stash-settings__check-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.stash-settings__check-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: var(--surface-overlay);
+}
+
+.stash-settings__check-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stash-settings__check-reason {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+/* Path rules (advanced, collapsed). */
+.stash-settings__rules {
+  margin: 12px 0;
+}
+
+.stash-settings__rules-summary {
+  min-height: 36px;
+  padding: 8px 0;
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.stash-settings__rule-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.stash-settings__rule {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.stash-settings__rule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.stash-settings__rule-label {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.stash-settings__rule-arrow {
+  padding-bottom: 10px;
+  color: var(--text-secondary);
+}
+
+/* The block's live line: what the last action did, and its Undo. */
+.stash-settings__live {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 1.2em;
+  margin-top: 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+/* Narrow: labels over fields, rules stacked. */
+@media (max-width: 620px) {
+  .stash-settings__field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stash-settings__rule {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .stash-settings__rule-arrow {
+    display: none;
+  }
+
+  .stash-settings__rule > .stash-settings__btn {
+    justify-self: start;
+  }
+
+  .stash-settings__check-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .stash-settings__check-reason {
+    grid-column: 1;
+  }
+}

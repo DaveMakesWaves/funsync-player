@@ -1,0 +1,227 @@
+# S1 ("own Stash server") queries, tried against a local Stash v0.32.0 test
+# install on 2026-11-17 with a synthetic library only. Sample responses sit
+# beside this file (*.response.json).
+
+fragment FunSyncSceneFile on VideoFile {
+  id
+  path
+  basename
+  size
+  duration
+  width
+  height
+  frame_rate
+  video_codec
+  mod_time
+  fingerprints {
+    type
+    value
+  }
+  oshash: fingerprint(type: "oshash")
+  phash: fingerprint(type: "phash")
+}
+
+fragment FunSyncScene on Scene {
+  id
+  title
+  code
+  date
+  details
+  director
+  urls
+  rating100
+  organized
+  interactive
+  interactive_speed
+  created_at
+  updated_at
+  files {
+    ...FunSyncSceneFile
+  }
+  paths {
+    screenshot
+    stream
+    funscript
+    interactive_heatmap
+  }
+  studio {
+    id
+    name
+    parent_studio {
+      id
+      name
+    }
+    stash_ids {
+      endpoint
+      stash_id
+      updated_at
+    }
+  }
+  performers {
+    id
+    name
+    disambiguation
+    alias_list
+    gender
+    stash_ids {
+      endpoint
+      stash_id
+      updated_at
+    }
+  }
+  tags {
+    id
+    name
+    aliases
+    parents {
+      id
+      name
+    }
+  }
+  scene_markers {
+    id
+    title
+    seconds
+    end_seconds
+    primary_tag {
+      id
+      name
+    }
+    tags {
+      id
+      name
+    }
+  }
+  stash_ids {
+    endpoint
+    stash_id
+    updated_at
+  }
+}
+
+# Server identity. Works without auth only when no username/password is set.
+query StashVersion {
+  version {
+    version
+    hash
+    build_time
+  }
+}
+
+# One scene by oshash (exact). Returns null when nothing matches.
+query FindSceneByOshash($oshash: String!) {
+  findSceneByHash(input: { oshash: $oshash }) {
+    ...FunSyncScene
+  }
+}
+
+# Scenes by oshash through the scene filter (a list instead of one scene).
+# Use EQUALS with the lowercase hash. In v0.32.0 MATCHES_REGEX on oshash
+# fails with a server error ("argument must be BLOB or TEXT"); for several
+# hashes in one call nest OR filters, or use aliases as in the next query.
+query FindScenesByOshashFilter($value: String!, $modifier: CriterionModifier!) {
+  findScenes(scene_filter: { oshash: { value: $value, modifier: $modifier } }, filter: { per_page: -1, sort: "path", direction: ASC }) {
+    count
+    scenes {
+      ...FunSyncScene
+    }
+  }
+}
+
+# Several oshashes in one request: one aliased findSceneByHash per hash.
+query FindScenesByOshashes($a: String!, $b: String!, $c: String!) {
+  a: findSceneByHash(input: { oshash: $a }) {
+    id
+    title
+    files {
+      path
+      oshash: fingerprint(type: "oshash")
+    }
+  }
+  b: findSceneByHash(input: { oshash: $b }) {
+    id
+    title
+    files {
+      path
+      oshash: fingerprint(type: "oshash")
+    }
+  }
+  c: findSceneByHash(input: { oshash: $c }) {
+    id
+    title
+    files {
+      path
+      oshash: fingerprint(type: "oshash")
+    }
+  }
+}
+
+# Scenes by file path. The path must be spelled as Stash stores it (on Windows
+# with backslashes; forward slashes find nothing). EQUALS ignores case.
+# INCLUDES splits the value on spaces and matches ANY word; wrap the value in
+# double quotes for a plain substring match.
+query FindScenesByPath($path: String!, $modifier: CriterionModifier!) {
+  findScenes(scene_filter: { path: { value: $path, modifier: $modifier } }, filter: { per_page: -1, sort: "path", direction: ASC }) {
+    count
+    scenes {
+      ...FunSyncScene
+    }
+  }
+}
+
+# A file by its exact path, with the scenes that use it. Case-sensitive;
+# forward slashes are accepted. No match is an error ("file not found"),
+# not null.
+query FindFileByPath($path: String!) {
+  findFile(path: $path) {
+    __typename
+    id
+    path
+    size
+    fingerprints {
+      type
+      value
+    }
+    ... on VideoFile {
+      duration
+      scenes {
+        id
+        title
+      }
+    }
+  }
+}
+
+# Every scene, for a full sync (page with per_page/page for big libraries).
+query AllScenes($page: Int!, $perPage: Int!) {
+  findScenes(filter: { page: $page, per_page: $perPage, sort: "path", direction: ASC }) {
+    count
+    duration
+    filesize
+    scenes {
+      ...FunSyncScene
+    }
+  }
+}
+
+# All tags with hierarchy, for the tag model.
+query AllTags {
+  findTags(filter: { per_page: -1, sort: "name", direction: ASC }) {
+    count
+    tags {
+      id
+      name
+      sort_name
+      aliases
+      scene_count
+      parents {
+        id
+        name
+      }
+      children {
+        id
+        name
+      }
+    }
+  }
+}

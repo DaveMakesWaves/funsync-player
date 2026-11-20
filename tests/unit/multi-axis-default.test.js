@@ -517,3 +517,53 @@ describe('Library._autoPromoteEligibleVideos — round-trip carry-over', () => {
     expect(associations['/lib/a.mp4'].single).toBe('/lib/manual-pick.funscript');
   });
 });
+
+// The DEFAULT is the whole bug (stingray, PM, 2026-08-23). His files were
+// named correctly and detected correctly; the promoter then bailed on its
+// first line because the setting shipped as 'single', so pitch and roll were
+// found and ignored with nothing in the log to say so.
+// There are TWO constants and only one of them is read at runtime. The first
+// version of this block asserted the settings-panel one, which is a
+// falsy-fallback the app never reaches, and passed green while every user
+// still got 'single' from the store (stingray, 2026-08-24: "the drop down
+// remains on single-axis"). Assert the value the app ACTUALLY reads, and
+// assert the two agree — the drift between them is the bug, not either value.
+describe('default preference', () => {
+  it('the store — the copy every read resolves against — ships as multi', async () => {
+    const { DEFAULTS } = await import('../../electron/store.js');
+    expect(DEFAULTS.settings.player.preferMultiAxis).toBe('multi');
+  });
+
+  // Generic, because `preferMultiAxis` will not be the last one to drift.
+  // Any `player.*` key declared in BOTH files must declare the same value —
+  // the store's copy is what the app reads, the panel's is the reset button
+  // and the falsy fallback, and a user cannot tell which one you edited.
+  it('no player.* default disagrees between store.js and settings-panel.js', async () => {
+    const { DEFAULTS } = await import('../../electron/store.js');
+    const fs = await import('node:fs');
+    const src = fs.readFileSync('renderer/components/settings-panel.js', 'utf8');
+
+    const block = src.slice(src.indexOf('const SETTINGS_DEFAULTS'));
+    const panel = new Map();
+    const re = /'player\.([A-Za-z0-9_.]+)':\s*(?:'([^']*)'|(true|false)|(-?\d+(?:\.\d+)?))\s*,/g;
+    for (let m = re.exec(block); m; m = re.exec(block)) {
+      const [, key, str, bool, num] = m;
+      // Nested paths (`rangeExtender.enabled`) address nested store objects.
+      let storeVal = DEFAULTS.settings.player;
+      for (const part of key.split('.')) storeVal = storeVal?.[part];
+      if (storeVal === undefined) continue;   // panel-only tunable — nothing to agree with
+      const panelVal = str !== undefined ? str
+        : bool !== undefined ? bool === 'true'
+          : Number(num);
+      panel.set(`player.${key}`, { panelVal, storeVal });
+    }
+
+    // A regex that silently matched nothing would make this test vacuous.
+    expect(panel.size).toBeGreaterThan(3);
+
+    const mismatched = [...panel.entries()]
+      .filter(([, v]) => v.panelVal !== v.storeVal)
+      .map(([k, v]) => `${k}: store.js=${JSON.stringify(v.storeVal)} settings-panel.js=${JSON.stringify(v.panelVal)}`);
+    expect(mismatched, 'defaults drifted — electron/store.js is the one the app reads').toEqual([]);
+  });
+});

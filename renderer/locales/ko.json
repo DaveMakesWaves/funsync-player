@@ -95,6 +95,8 @@
       "testBuzzAll": "전체 테스트",
       "testBuzzAllTitle": "동작 확인을 위해 연결된 모든 기기를 진동시킵니다",
       "testBuzz": "진동 테스트",
+      "resend": "다시 보내기",
+      "resendTitle": "이 시청자의 Handy 연결이 끊어졌다면 다시 연결한 뒤 현재 스크립트를 다시 보냅니다",
       "mute": "음소거",
       "unmute": "음소거 해제",
       "remove": "시청자 제거",
@@ -111,13 +113,23 @@
       "statusSynced": "동기화됨",
       "statusPlaying": "재생 중",
       "statusPlayingWithRtd": "재생 중 · {rtd}ms RTD",
+      "statusWaiting": "스크립트 대기 중",
+      "statusReady": "준비됨",
+      "statusRemoteHeld": "정지됨 · 시청자는 휴대폰이나 헤드셋 재생을 따르지 않음",
+      "statusNoScript": "이 동영상에는 스크립트가 없습니다",
+      "statusSpeed": "정지됨 · {rate}× 속도",
+      "statusScriptFailed": "스크립트를 불러오지 못했습니다",
+      "errorStopFailed": "정지에 실패했습니다. 기기가 아직 움직이고 있을 수 있습니다.",
+      "errorSetupFailed": "기기가 스크립트를 받지 않았습니다.",
+      "errorPlayFailed": "기기가 재생을 시작하지 않았습니다.",
       "statusPaused": "일시 중지",
       "statusMuted": "음소거",
       "statusError": "오류",
       "statusDisconnected": "연결 끊김"
     },
     "toast": {
-      "selfKey": "본인의 Handy입니다 — 이미 Handy 탭에서 제어 중입니다."
+      "selfKey": "본인의 Handy입니다 — 이미 Handy 탭에서 제어 중입니다.",
+      "uploadFailed": "새 스크립트를 시청자에게 보내지 못했습니다. 시청자의 기기는 정지되어 있습니다."
     },
     "popoutWindowTitle": "오디언스 룸"
   },
@@ -157,7 +169,8 @@
     "sourceDisconnected": "소스 연결 끊김",
     "edit": "편집",
     "addSourceFolder": "+ 소스 폴더 추가…",
-    "newCollection": "+ 새 컬렉션…"
+    "newCollection": "+ 새 컬렉션…",
+    "notResponding": "응답 없음"
   },
   "common": {
     "ok": "확인",
@@ -198,6 +211,7 @@
     "scriptEditor": "스크립트 에디터 (E)",
     "inlineTimeline": "스크립트 타임라인",
     "inlineHeatmap": "히트맵 바",
+    "deviceSimulator": "장치 시뮬레이터",
     "screenshot": "스크린샷",
     "pictureInPicture": "PIP",
     "miniPlayPause": "재생 / 일시정지",
@@ -229,6 +243,8 @@
     "replayTitle": "다시 재생 (K)",
     "playTitle": "재생 (K)",
     "pauseTitle": "일시정지 (K)",
+    "muteTitle": "음소거 (M)",
+    "unmuteTitle": "음소거 해제 (M)",
     "infoResolution": "해상도",
     "infoDuration": "재생 시간",
     "infoCurrent": "현재",
@@ -245,7 +261,13 @@
     "windowWaiting": "플레이어 창이 연결되었습니다. 동영상 재생은 향후 업데이트에서 여기로 이동합니다.",
     "popOutUnavailableRemote": "휴대폰 또는 VR 헤드셋이 연결된 동안에는 사용할 수 없습니다.",
     "popOutUnavailableSrc": "팝아웃은 현재 로컬 라이브러리 동영상을 지원합니다.",
-    "popOutOpening": "플레이어 창을 여는 중…"
+    "popOutOpening": "플레이어 창을 여는 중…",
+    "windowCrashed": "플레이어 창이 비정상 종료되었습니다. 동영상이 이 창으로 돌아왔습니다.",
+    "windowHung": "플레이어 창이 응답하지 않습니다. 기기가 정지되었습니다. 기다리거나, 창을 닫고 여기에서 계속 시청하세요.",
+    "windowHungClose": "플레이어 창 닫기",
+    "windowRecovered": "플레이어 창이 다시 응답합니다. 일시정지된 상태입니다. 재생을 누르면 기기가 다시 시작됩니다.",
+    "stashMarker": "Stash 마커: {title}",
+    "stashMarkerUntitled": "Stash 마커"
   },
   "backend": {
     "title": "백엔드가 응답하지 않습니다",
@@ -291,16 +313,26 @@
     "filterVR": "VR",
     "filterVROnly": "VR만",
     "filterNonVR": "비 VR",
-    "kebabResetVRCurrentlyVR": "VR 재설정 (현재: VR)",
-    "kebabResetVRCurrentlyFlat": "VR 재설정 (현재: 평면)",
-    "kebabMarkFlat": "평면으로 표시",
-    "kebabMarkVR": "VR로 표시",
+    "filterTags": "태그",
+    "filterTagsFind": "태그 찾기",
+    "filterTagsFindAria": "태그와 카테고리에서 찾기",
+    "filterTagsEmpty": "아직 동영상에 태그나 카테고리가 없습니다.",
+    "filterTagsNoMatch": "“{query}”와 일치하는 항목이 없습니다.",
+    "filterTagsShowAll": "모두 보기 ({count})",
+    "filterTagsShowFewer": "간단히 보기",
+    "filterCategory": "카테고리",
+    "filterTagSource": "태그 출처",
+    "filterTagSourceEroscripts": "EroScripts",
+    "filterTagSourceFile": "스크립트 파일",
+    "filterTagSourceUser": "나",
+    "filterTagOptionAria": "{label}, {count, plural, other {동영상 #개}}",
+    "filterChipFacet": "{facet}: {value}",
+    "filterChipFacetNot": "{facet}: {value} 제외",
+    "cardTagsMore": "+{count}",
     "kebabVRFormat": "VR 형식…",
-    "kebabRemoveFunscript": "펀스크립트 제거",
-    "kebabChangeSubtitle": "자막 변경",
+    "kebabRemoveFunscript": "펀스크립트 연결 해제",
     "kebabAssociateSubtitle": "자막 연결",
-    "kebabRemoveSubtitle": "자막 제거",
-    "kebabOptions": "옵션",
+    "kebabRemoveSubtitle": "자막 연결 해제",
     "kebabFolderOptions": "폴더 옵션",
     "clearFolderScope": "폴더 범위 지우기",
     "funscriptManual": "펀스크립트 (수동)",
@@ -311,6 +343,7 @@
     "subtitlesAuto": "자막 (자동 감지)",
     "multiAxis": "멀티 축",
     "multiAxisCount": "{count, plural, other {멀티 축 (스크립트 #개)}}",
+    "multiAxisEmbedded": "{count, plural, other {멀티 축 — 스크립트에 축 #개 포함됨: {axes}}}",
     "vrBadge": "VR",
     "flatBadge": "FLAT",
     "limitToFolder": "이 폴더로 제한",
@@ -324,6 +357,8 @@
     "select": "선택",
     "cancelSelect": "취소",
     "noSourcesEmpty": "동영상 라이브러리를 탐색하려면 소스 폴더를 추가하세요",
+    "noVideoTrack": "영상 트랙 없음",
+    "sourcesAllOff": "모든 소스 폴더가 꺼져 있습니다. 탐색하려면 {settings} > {tab}에서 하나를 켜세요.",
     "addSourceFolder": "+ 소스 폴더 추가",
     "gridView": "그리드 보기",
     "listView": "목록 보기",
@@ -333,6 +368,13 @@
     "shuffleAll": "모두 셔플",
     "shuffleAllTitle": "표시된 모든 동영상을 무작위·비반복 순서로 재생",
     "shuffleEmpty": "여기에 셔플할 동영상이 없습니다",
+    "playOptions": {
+      "openTitle": "재생 옵션",
+      "title": "라이브러리 및 카테고리 재생 옵션",
+      "loopLabel": "반복",
+      "loopWhy": "마지막 동영상 이후 첫 번째 동영상부터 다시 시작합니다.",
+      "shuffleNote": "동일한 기회와 '안 본 영상 우선'은 셔플할 때만 적용됩니다. 카테고리의 '모두 재생'은 목록 순서를 유지합니다. 재생 목록은 자체 설정을 사용합니다."
+    },
     "selectionCount": "{count}개 선택됨",
     "vrType": "VR 유형",
     "loading": "로드 중…",
@@ -355,10 +397,6 @@
     "variantDefault": "기본",
     "assignScriptBulk": "스크립트 할당",
     "bulkScriptAssigned": "{name}을(를) {count}개 동영상에 할당했습니다",
-    "kebabGroupOrganize": "정리",
-    "kebabGroupScripts": "스크립트 및 자막",
-    "kebabGroupThumbnail": "썸네일",
-    "kebabGroupVR": "VR",
     "kebabExtractAxes": "내장된 축 추출 ({count})…",
     "kebabExtractAxesTitle": "{axes}을(를) 별도 .funscript 파일로 저장",
     "customThumbTitle": "썸네일 프레임 선택",
@@ -379,7 +417,6 @@
     "resetVRClassification": "자동으로 재설정",
     "pinAsCollection": "컬렉션으로 고정",
     "selectAllInFolder": "이 폴더의 모두 선택",
-    "changeFunscriptBtn": "펀스크립트 변경",
     "associateFunscriptBtn": "펀스크립트 연결",
     "noSourcesToRefresh": "새로 고칠 소스 폴더가 없습니다",
     "refreshedNoChanges": "라이브러리 새로 고침 — 변경 없음",
@@ -443,6 +480,7 @@
       "changeTo": "변경 대상:",
       "selectScript": "스크립트 선택:",
       "noFunscripts": "디렉토리에 펀스크립트가 없습니다. 찾아보기를 사용하세요.",
+      "noNameMatch": "이 동영상과 이름이 같은 스크립트가 없습니다. 같은 폴더의 모든 스크립트:",
       "browse": "찾아보기…",
       "save": "저장",
       "variations": "변형",
@@ -469,11 +507,24 @@
       "selectScriptBtn": "선택",
       "addRoute": "+ 경로 추가",
       "variantSearchTitle": "변형용 스크립트 선택",
+      "routeScriptSearchTitle": "경로용 스크립트 선택",
       "searchEroScripts": "EroScripts 검색..."
     },
     "heatmapUnavailable": "히트맵을 사용할 수 없음",
     "sortSwitchTo": "{order}(으)로 전환",
-    "selectedAll": "{count, plural, other {동영상 #개를 선택했습니다}}"
+    "selectedAll": "{count, plural, other {동영상 #개를 선택했습니다}}",
+    "contextAllOptions": "모든 옵션…",
+    "filterTagIncludesSubTags": "{count, plural, other {하위 태그 #개 포함}}",
+    "sortStashRatingDesc": "Stash 평점 높은 순",
+    "sortStashRatingAsc": "Stash 평점 낮은 순",
+    "sortStashLastPlayedDesc": "Stash 최근 재생순",
+    "sortStashLastPlayedAsc": "Stash 오래전 재생순",
+    "filterStash": "Stash",
+    "filterStashRating": "Stash 평점",
+    "filterStashRatingAny": "모든 평점",
+    "filterStashRatingAtLeast": "{count, plural, other {별 #개 이상}}",
+    "filterStashOrganised": "Stash에서 정리됨",
+    "filterChipStashRating": "{count, plural, other {Stash: 별 #개 이상}}"
   },
   "playlists": {
     "title": "재생 목록",
@@ -492,6 +543,8 @@
     "moveDown": "아래로 이동",
     "moveUpNamed": "{name} 위로 이동",
     "moveDownNamed": "{name} 아래로 이동",
+    "moveToTop": "맨 위로 이동",
+    "moveToBottom": "맨 아래로 이동",
     "reorderAnnounce": "{name}을(를) {total}개 중 {pos}번째로 이동했습니다",
     "renamePlaylist": "재생 목록 이름 변경",
     "deletePlaylist": "재생 목록 삭제",
@@ -502,7 +555,7 @@
     "gridView": "그리드 보기",
     "listView": "목록 보기",
     "detailEmpty": "이 재생 목록에 동영상이 없습니다",
-    "detailEmptyHint": "케밥 메뉴를 사용하여 라이브러리에서 동영상을 추가하세요",
+    "detailEmptyHint": "라이브러리에서 동영상을 추가하세요: 동영상의 옵션(⋮)을 열고 ‘정리’에서 이 재생 목록을 선택하세요.",
     "advanced": {
       "openTitle": "재생목록 고급 설정",
       "title": "재생목록 고급 설정",
@@ -528,7 +581,36 @@
     "unavailableCount": "{count, plural, other {동영상 #개를 사용할 수 없습니다}}",
     "unavailableOnVolume": "{count, plural, other {{volume}에 있는 동영상 #개를 사용할 수 없습니다}}",
     "unavailableHint": "드라이브를 다시 연결하면 재생할 수 있습니다. 재생목록에는 그대로 남아 있습니다.",
-    "unavailableTooltip": "현재 사용할 수 없음: {path}"
+    "unavailableTooltip": "현재 사용할 수 없음: {path}",
+    "sortAzTitle": "이름순 정렬 (A-Z)",
+    "sortZaTitle": "이름순 정렬 (Z-A)",
+    "sortedAz": "“{name}”을(를) 이름순(A-Z)으로 정렬했습니다",
+    "sortedZa": "“{name}”을(를) 이름순(Z-A)으로 정렬했습니다",
+    "selectModeTitle": "동영상을 선택해 여러 개를 한 번에 이동하거나 제거합니다",
+    "selectVideoNamed": "{name} 선택",
+    "movedSelection": "{count, plural, other {“{name}”에서 영상 #개를 이동했습니다}}",
+    "removedSelection": "{count, plural, other {“{name}”에서 영상 #개를 제거했습니다}}. 영상 파일은 그대로입니다.",
+    "confirmRemoveSelection": "{count, plural, other {“{name}”에서 영상 #개를 제거할까요?}} 영상 파일은 그대로 둡니다.",
+    "stashGroups": {
+      "sectionTitle": "Stash에서",
+      "sectionHint": "Stash의 그룹으로, FunSync가 Stash와 동기화할 때마다 최신 상태로 유지됩니다. 그룹을 바꾸려면 Stash에서 바꾸세요.",
+      "name": "Stash: {name}",
+      "unnamed": "이름 없는 그룹",
+      "readOnly": "읽기 전용",
+      "readOnlyReason": "Stash의 이 그룹과 동기화됩니다. FunSync에서는 동영상이나 순서를 바꿀 수 없습니다. Stash에서 그룹을 바꾼 다음 동기화하세요.",
+      "missingCount": "{count, plural, other {라이브러리에 없는 장면 #개}}",
+      "missingScene": "FunSync 라이브러리에 없음",
+      "missingSceneTooltip": "이 Stash 장면에는 FunSync 라이브러리에 연결된 동영상이 없어서 그룹을 재생할 때 건너뜁니다.",
+      "untitledScene": "제목 없는 Stash 장면",
+      "playOptionsNote": "이 옵션은 라이브러리 및 카테고리와 함께 사용됩니다. 동일한 기회와 ‘안 본 영상 우선’은 셔플할 때만 적용됩니다. ‘모두 재생’은 Stash의 순서를 유지합니다.",
+      "addToQueue": "대기열에 추가",
+      "addToQueueTitle": "이 그룹의 동영상을 대기열 끝에 추가",
+      "addedToQueue": "{count, plural, other {동영상 #개를 대기열에 추가했습니다}}",
+      "copy": "내 재생 목록에 복사",
+      "copyTitle": "이 동영상으로 내 재생 목록을 만듭니다. 자유롭게 편집할 수 있으며 Stash를 따르지 않습니다.",
+      "copied": "“{name}”을(를) 재생 목록에 추가했습니다",
+      "copyFailed": "재생 목록을 만들 수 없습니다. 다시 시도하세요."
+    }
   },
   "categories": {
     "title": "카테고리",
@@ -548,7 +630,8 @@
     "gridView": "그리드 보기",
     "listView": "목록 보기",
     "detailEmpty": "이 카테고리에 동영상이 없습니다",
-    "detailEmptyHint": "케밥 메뉴를 사용하여 라이브러리에서 동영상을 할당하세요",
+    "unavailableHint": "드라이브를 다시 연결하면 재생할 수 있습니다. 카테고리에는 그대로 남아 있습니다.",
+    "detailEmptyHint": "라이브러리에서 동영상을 할당하세요: 동영상의 옵션(⋮)을 열고 ‘정리’에서 이 카테고리를 선택하세요.",
     "iconLabel": "아이콘",
     "iconModeColor": "색상",
     "iconModeShape": "모양",
@@ -570,6 +653,8 @@
     "removeAria": "필터 제거: {label}"
   },
   "collectionModal": {
+    "titleCreate": "컬렉션 만들기",
+    "titleEdit": "편집 — {name}",
     "sourceLabel": "소스:",
     "allSources": "모든 소스",
     "sourceDisconnected": "{name} (연결 끊김)",
@@ -600,8 +685,11 @@
     "tcodePrecision4": "4자리 (TCode-0.3)"
   },
   "toast": {
+    "tcodeGoHomePauseFirst": "먼저 휴대폰이나 헤드셋에서 동영상을 일시정지하세요. 지금 그쪽이 기기를 움직이고 있습니다.",
     "dismissAria": "알림 닫기",
     "tryAgain": "다시 시도",
+    "vrTimestampServerHint": "VR 컴패니언이 HereSphere의 타임스탬프 서버에 도달할 수 없습니다. Quest에서 HereSphere → Settings → Timestamp Server를 열고 활성화되어 있는지 확인한 다음 IP 필드 옆의 자동 찾기 버튼을 누르세요 — Quest의 IP는 {ip}이고 포트는 23554여야 합니다. 그래도 해결되지 않으면 타임스탬프 서버를 껐다가 다시 켜서 재초기화를 강제로 수행하세요.",
+    "vrQuestIpUnknown": "Quest의 Wi-Fi 설정에 표시된 주소",
     "connecting": "연결 중…",
     "undo": "실행 취소",
     "getScript": "스크립트 받기",
@@ -634,6 +722,7 @@
     "vrFlattenLabel": "VR 평면화: {label}",
     "noVRDetected": "이 동영상에서 VR 스테레오 패킹이 감지되지 않았습니다",
     "vrLooksLikeVR": "VR 영상 같습니다. 플레이어 메뉴에서 형식을 설정하세요",
+    "vrSetFormatInMenu": "이 영상에는 아직 VR 형식이 설정되지 않았습니다. 플레이어 메뉴(⋮)의 VR 형식에서 선택하세요.",
     "noVideoLoaded": "동영상이 로드되지 않았습니다",
     "tcodePort": "포트 선택",
     "tcodeHost": "호스트 입력",
@@ -641,6 +730,7 @@
     "tcodeWsUrlInvalid": "URL은 ws:// 또는 wss://로 시작해야 합니다",
     "scriptLoadFailed": "펀스크립트 로드 실패: {error}",
     "handyUploadFailed": "Handy로 스크립트 업로드 실패",
+    "handyStopFailed": "Handy를 정지하지 못했습니다. 아직 움직이고 있을 수 있으니 기기의 버튼을 누르세요.",
     "variantSwitchFailed": "스크립트 변형 전환 실패",
     "noPlaylists": "재생 목록이 없습니다 — 재생 목록 뷰에서 만드세요",
     "addNoPath": "추가할 수 없음 — 동영상에 파일 경로가 없습니다",
@@ -654,6 +744,8 @@
     "remoteDisconnected": "원격 연결 끊김",
     "remoteTakenOver": "{ip}에 의해 원격 인계됨",
     "funscriptUnreadable": "{name}의 펀스크립트를 읽을 수 없습니다 — 동기화 없이 재생",
+    "scriptAccessDenied": "{name}을(를) 읽을 수 없습니다: 액세스가 거부되었습니다. 동기화 없이 재생합니다.",
+    "scriptUnreadableNow": "지금은 {name}을(를) 읽을 수 없습니다. 동기화 없이 재생합니다.",
     "playlistNoPlayable": "이 재생 목록에 재생 가능한 동영상이 없습니다",
     "fullscreenBlocked": "전체 화면 차단됨: {error}",
     "fullscreenUnavailable": "이 컨텍스트에서 전체 화면을 사용할 수 없습니다.",
@@ -662,7 +754,7 @@
     "pipFailed": "PIP 실패.",
     "nameSourcePrompt": "이 소스 이름 지정",
     "nameSourcePlaceholder": "소스 이름",
-    "deleteCollectionTitle": "라이브러리 삭제",
+    "deleteCollectionTitle": "컬렉션 삭제",
     "deleteCollectionConfirm": "\"{name}\"를 삭제하시겠습니까? 동영상은 영향받지 않습니다.",
     "renameVariationTitle": "변형 이름 변경",
     "renameVariationLabel": "이름",
@@ -676,12 +768,17 @@
     "vrScriptLoadFailed": "VR 스크립트 로드 실패",
     "remoteNoScript": "원격으로 {name} 재생 중 — 스크립트 없음",
     "vrReconnected": "VR 컴패니언 재연결됨 — 장치 동기화 중",
+    "settingSaveFailed": "이 설정을 저장하지 못했습니다. 이전 값으로 되돌렸습니다",
+    "globalShortcutTaken": "{key} 은(는) 다른 앱이 사용 중입니다. 다른 단축키를 선택하세요",
+    "globalShortcutInvalid": "{key} 은(는) 유효한 키 조합이 아닙니다. 다른 단축키를 선택하세요",
     "vrConnected": "VR 컴패니언 연결됨 — 장치 동기화 중",
     "restartFailed": "재시작 실패: {error}",
     "logsOpenFailed": "로그 파일을 열 수 없음: {error}",
     "handyAutoFailed": "Handy 자동 연결 실패 — H를 눌러 수동으로 연결하세요",
     "sourceDisconnectedFile": "소스 연결 끊김 — 파일을 더 이상 사용할 수 없습니다",
+    "videoFileMissing": "{name}을(를) 찾을 수 없습니다. 파일이 이동되었거나 이름이 바뀌었거나, 저장된 드라이브가 연결되어 있지 않을 수 있습니다.",
     "multiAxisFailed": "다중 축: {suffix} 스크립트 로드 실패 ({error})",
+    "extractKeptExisting": "{count, plural, other {기존 컴패니언 파일 #개는 덮어쓰지 않고 유지했습니다: {names}}}",
     "queueReadFailed": "대기열 항목 {name}: 스크립트 {script}를 읽을 수 없음 — 동기화 없이 재생",
     "queueReadError": "대기열 항목 {name}: 스크립트 읽기 실패 ({error}) — 동기화 없이 재생",
     "handyUploadTimeout": "Handy 스크립트 업로드 시간 초과 — 동영상은 재생되지만 Handy는 동기화되지 않습니다. 연결을 확인하고 동영상을 다시 로드하세요.",
@@ -690,7 +787,10 @@
     "videoUnavailable": "이 동영상은 지금 사용할 수 없습니다. 저장된 드라이브를 다시 연결하세요.",
     "playlistAllUnavailable": "이 동영상 중 지금 사용할 수 있는 것이 없습니다. 드라이브를 다시 연결하세요.",
     "playlistSkippedUnavailable": "{count, plural, other {사용할 수 없는 동영상 #개를 건너뛰었습니다}}",
-    "nextAllUnavailable": "해당 방향에 재생할 수 있는 동영상이 없습니다. 나머지를 재생하려면 드라이브를 다시 연결하세요."
+    "nextAllUnavailable": "해당 방향에 재생할 수 있는 동영상이 없습니다. 나머지를 재생하려면 드라이브를 다시 연결하세요.",
+    "settingsRecovered": "최근 백업에서 설정을 복구했습니다. 백업 기록은 설정 → 데이터에서 볼 수 있습니다.",
+    "settingsNotRecovered": "설정을 복구할 수 없습니다. 처음 상태로 시작합니다 — 백업 파일에서 복원하려면 설정 → 데이터 → 백업 파일 가져오기를 사용하세요.",
+    "patternTestHandyFailed": "Handy에서 테스트를 재생하지 못했습니다. 연결을 확인하고 다시 시도하세요."
   },
   "modal": {
     "noItemsAvailable": "사용 가능한 항목 없음",
@@ -730,7 +830,9 @@
       "clear": "검색 지우기"
     },
     "filterChips": {
-      "aria": "활성 필터"
+      "aria": "활성 필터",
+      "removeAria": "필터 제거: {label}",
+      "tag": "{facet}: {label}"
     },
     "actions": {
       "sort": "정렬",
@@ -762,7 +864,12 @@
       "vrAria": "VR 필터",
       "vrAll": "전체",
       "vrOnly": "VR만",
-      "vrFlat": "VR 아님"
+      "vrFlat": "VR 아님",
+      "tagsHeader": "태그",
+      "tagsFindLabel": "태그 찾기",
+      "tagsFindPlaceholder": "태그 찾기…",
+      "tagsNoMatch": "‘{query}’와(과) 일치하는 태그가 없습니다.",
+      "tagAria": "{label}, {count, plural, other {동영상 #개}}"
     },
     "sortSheet": {
       "title": "정렬 기준",
@@ -849,7 +956,12 @@
       "avg": "평균",
       "max": "최대",
       "speedUnit": "유닛/초",
-      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초"
+      "speedTooltip": "평균 {avg} 유닛/초 • 최대 {max} 유닛/초",
+      "variantListAria": "Funscript 변형",
+      "edgeHold": "엣지 홀드 - 길게 누르기",
+      "edgeRelease": "놓으면 재개됩니다",
+      "edgeTap": "엣지 홀드 - 탭",
+      "edgeResume": "탭하여 재개"
     }
   },
   "hevc": {
@@ -874,11 +986,18 @@
     "browse": "찾아보기…",
     "noManualVariations": "수동 변형 없음",
     "defaultLabel": "기본",
+    "mainTag": "메인",
     "addScriptVariation": "스크립트 변형 추가",
     "setDefault": "이 영상의 기본값으로 설정",
     "unsetDefault": "이 영상의 기본값에서 제거",
     "defaultSet": "\"{label}\"을(를) 이 영상의 기본값으로 설정함",
-    "defaultCleared": "기본 변형이 초기화됨"
+    "defaultCleared": "기본 변형이 초기화됨",
+    "bulkNamingTitle": "{count, plural, other {변형 #개 이름 지정}}",
+    "bulkNamingHint": "각 스크립트는 변형 메뉴에 표시될 이름을 갖습니다. 이름을 바꾸거나 아래의 제안을 클릭하세요.",
+    "bulkSkipped": "{count, plural, other {이미 목록에 있어 #개를 건너뜀: {names}}}",
+    "bulkAddButton": "{count, plural, other {변형 #개 추가}}",
+    "bulkAdded": "{count, plural, other {변형 #개를 추가했습니다}}",
+    "alreadyListed": "{count, plural, other {이미 변형 목록에 있습니다: {names}}}"
   },
   "syncChip": {
     "noDevices": "기기 없음",
@@ -980,7 +1099,10 @@
       "alreadyAdded": "이미 \"{name}\"로 추가됨",
       "childOverlapTitle": "폴더가 이미 포함됨",
       "childOverlapBody": "\"{path}\"는 \"{parentName}\" ({parentPath}) 내부에 있습니다. 여기 파일은 이미 스캔되었으므로 추가하면 모든 동영상이 두 번 카운트됩니다.\n\n그래도 추가하시겠습니까?",
+      "addAnyway": "그래도 추가",
       "parentOverlapTitle": "중복 소스",
+      "parentOverlapBody": "\"{path}\"에 이미 추가한 소스 {count}개가 들어 있습니다: {names}. 해당 파일이 두 번 스캔됩니다.\n\n그 소스를 제거하고 대신 이 폴더를 추가하시겠습니까?",
+      "parentOverlapConfirm": "제거하고 추가",
       "convertedCollections": "{count, plural, other {동기화된 컬렉션 #개}}가 이제 폴더를 직접 추적합니다. 동영상을 보려면 폴더를 소스로 다시 추가하세요.",
       "added": "소스 \"{name}\" 추가됨",
       "removed": "소스 \"{name}\" 제거됨",
@@ -1001,6 +1123,7 @@
       "title": "기본을 다중 축으로 전환하시겠습니까?",
       "bodyUnknown": "FunSync는 감지된 컴패니언 파일이 있는 모든 동영상에 다중 축 재생을 자동 할당합니다.",
       "bodyNone": "현재 라이브러리에 감지된 컴패니언 파일이 있는 동영상이 없습니다. 컴패니언이 있는 새 동영상은 나타나는 대로 자동 할당됩니다.",
+      "bodyAllAssigned": "감지된 컴패니언 파일이 있는 라이브러리의 모든 동영상에 이미 재생 모드가 설정되어 있어 지금은 변경되는 것이 없습니다. 컴패니언이 있는 새 동영상은 나타나는 대로 자동 할당됩니다.",
       "bodyCount": "FunSync는 감지된 컴패니언 파일이 있는 {count, plural, other {동영상 #개}}에 다중 축 재생을 자동 할당합니다.",
       "warning": "나중에 단일로 다시 전환해도 이러한 할당은 되돌려지지 않습니다. 개별 동영상에서 펀스크립트 변경을 사용하여 취소하세요.",
       "confirm": "다중 축으로 전환"
@@ -1030,9 +1153,9 @@
       "autoplayOnAdvanceResetAria": "자동 재생을 기본값으로 재설정",
       "multiHeader": "다중 축",
       "fieldDefaultPlayback": "기본 재생",
-      "preferSingle": "단일 축 (기본값)",
-      "preferMulti": "가능한 경우 다중 축",
-      "preferResetTitle": "기본값으로 재설정 (단일 축)",
+      "preferSingle": "단일 축",
+      "preferMulti": "가능한 경우 다중 축 (기본값)",
+      "preferResetTitle": "기본값으로 재설정 (다중 축)",
       "preferResetAria": "기본 재생을 기본값으로 재설정",
       "multiHint": "다중 축으로 설정하면 FunSync는 감지된 컴패니언 파일 (twist, surge 등)이 있는 동영상에 다중 축 재생을 자동 할당합니다. 이미 설정된 동영상은 현재 선택을 유지합니다. 단일로 다시 전환해도 자동 할당은 되돌려지지 않습니다 — 개별 동영상에서 펀스크립트 변경을 사용하여 취소하세요.",
       "smoothingHeader": "모션 스무딩",
@@ -1052,6 +1175,10 @@
       "rangeExtenderHint": "스크립트의 위치가 좁은 범위(예: 30–70)에 머무를 때, 장치의 전체 범위를 사용하도록 늘립니다. 다음 동영상 로드 시 모든 장치에 적용됩니다.",
       "rangeExtenderResetTitle": "기본값으로 재설정 (끔)",
       "rangeExtenderResetAria": "범위가 좁은 스크립트 늘이기를 기본값으로 재설정",
+      "rangeLivePreviewLabel": "기기에서 범위 미리보기",
+      "rangeLivePreviewHint": "재생 중이 아닐 때 연결 패널의 범위 슬라이더를 끌면 기기가 해당 한계로 이동해 현재 위치를 확인할 수 있습니다. 슬리브를 바꾼 뒤에 유용합니다. 위치 제어 기기 전용이며 재생 중에는 동작하지 않습니다.",
+      "rangeLivePreviewResetTitle": "기본값으로 재설정 (켜짐)",
+      "rangeLivePreviewResetAria": "기기에서 범위 미리보기를 기본값으로 재설정",
       "orgasmScriptLabel": "오르가즘 스위치 스크립트",
       "orgasmScriptChoose": "설정…",
       "orgasmScriptClear": "오르가즘 스크립트 지우기",
@@ -1061,11 +1188,29 @@
       "orgasmModeHold": "누르는 동안 재생(놓으면 복귀)",
       "orgasmModeToggle": "눌러서 마무리(이후 정지)",
       "orgasmModeHint": "누르는 동안 재생: X를 누르고 있는 동안 반복 스크립트를 재생하고, 놓으면 메인 스크립트로 돌아갑니다. 눌러서 마무리: X를 누르면 반복 시작, 다시 누르면 기기를 정지합니다(메인 스크립트로 돌아가지 않음).",
+      "orgasmSourceLabel": "소스",
+      "orgasmSourceFile": "스크립트 파일",
+      "orgasmSourcePattern": "생성된 패턴",
+      "orgasmPatternHint": "스크립트 파일 대신 생성된 패턴을 반복 재생합니다. 다시 전환할 때를 위해 스크립트 선택은 유지됩니다.",
+      "orgasmSummaryGenerated": "생성됨: {shape}, {bpm} BPM",
       "edgeHeader": "엣지 홀드",
       "edgeModeLabel": "Z 키 동작",
       "edgeModeHold": "누르는 동안 정지(놓으면 재개)",
       "edgeModeToggle": "눌러서 정지(다시 누르면 재개)",
       "edgeModeHint": "누르는 동안 정지: Z를 누르고 있는 동안 기기를 정지하고 영상은 계속 재생합니다. 놓으면 현재 위치에 맞춰 스크립트가 다시 시작됩니다. 눌러서 정지: Z를 누르면 정지, 다시 누르면 재개합니다(긴 엣징에 편리).",
+      "globalHotkeysHeader": "전역 단축키",
+      "globalHotkeysHint": "FunSync가 최소화되어 있거나 다른 앱을 사용 중일 때도 작동하며, 여기에 지정한 키는 다른 어떤 앱에도 전달되지 않습니다. 칸을 클릭한 뒤 Ctrl, Alt, Shift 중 두 개와 함께 키를 누르거나, F13~F24 또는 미디어 키를 단독으로 누르세요. Ctrl+Alt에는 Shift도 필요합니다. 많은 키보드에서 Ctrl+Alt는 @ 같은 문자를 입력하는 AltGr이기 때문입니다. 복사, 붙여넣기, 실행 취소, 저장 같은 일상적인 단축키, 보조 키가 두 개 미만인 F1~F12, 커서 및 편집 키는 지정할 수 없습니다. 전역 단축키에서는 Orgasm Switch와 엣지 홀드가 항상 전환 방식으로 작동합니다(누르면 시작, 다시 누르면 정지).",
+      "globalHotkeyPlayPause": "재생 / 일시정지",
+      "globalHotkeyOrgasm": "Orgasm Switch",
+      "globalHotkeyEdge": "엣지 홀드",
+      "globalHotkeyClear": "{action} 단축키 삭제",
+      "globalHotkeyNeedsModifier": "{key}을(를) 지정하면 다른 모든 앱에서 그 키로 입력할 수 없게 됩니다. Ctrl+Alt+Shift와 함께 사용해 보세요",
+      "globalHotkeyAppShortcut": "{key}은(는) 다른 앱이 사용하는 단축키(복사, 붙여넣기, 실행 취소, 저장, 새로 고침 등)라서 지정하면 그 모든 앱에서 작동하지 않습니다. Ctrl+Alt+Shift와 함께 사용하거나 F13~F24를 사용하세요",
+      "globalHotkeyAltGr": "많은 키보드에서 Ctrl+Alt는 AltGr이므로 {key}을(를) 지정하면 모든 앱에서 @나 € 같은 문자를 입력하지 못할 수 있습니다. Shift를 추가하세요",
+      "globalHotkeyCursorKey": "{key}은(는) 다른 앱이 모든 보조 키 조합으로 사용하는 커서, 편집 또는 스크린샷 키입니다. 대신 문자, 숫자 또는 F 키를 선택하세요",
+      "globalHotkeyKeptRisky": "저장된 대로 계속 작동 중입니다. {reason}",
+      "globalHotkeyNotActiveTaken": "작동하지 않음: {key} 은(는) 시스템 또는 다른 앱이 사용 중입니다. 다른 단축키를 선택하세요",
+      "globalHotkeyNotActiveInvalid": "작동하지 않음: {key} 은(는) 유효한 키 조합이 아닙니다. 다른 단축키를 선택하세요",
       "randomVariantLabel": "무작위 스크립트 변형",
       "randomVariantHint": "여러 스크립트 변형이 있는 동영상은 재생할 때마다 무작위로 하나를 선택합니다. 켜져 있는 동안 고정된 기본 변형보다 우선합니다.",
       "bpHeader": "Buttplug 선형 출력 (BLE)",
@@ -1086,15 +1231,23 @@
       "inlineVizOpacityLabel": "오버레이 불투명도",
       "inlineVizOpacityResetTitle": "기본 불투명도로 되돌리기",
       "deviceSimOpacityLabel": "기기 시뮬레이터 불투명도",
-      "deviceSimOpacityHint": "영상 위에 표시되는 스트로크 표시기의 진하기입니다. D 키로 표시하세요.",
+      "deviceSimOpacityHint": "영상 위에 표시되는 스트로크 표시기의 진하기입니다. D 키나 플레이어의 ⋮ 메뉴에서 표시하세요.",
       "deviceSimOpacityResetTitle": "기본 불투명도로 되돌리기",
       "inlineVizOpacityHint": "영상 위에 표시되는 스크립트 타임라인과 히트맵 띠의 진하기입니다. 플레이어의 ⋮ 메뉴에서 켜세요.",
+      "heatmapPlayheadLabel": "히트맵 바에 재생 위치 표시",
+      "heatmapPlayheadHint": "타임라인 커서처럼 히트맵 바의 현재 위치에 선을 표시합니다. 바는 플레이어의 ⋮ 메뉴에서 켜세요.",
       "orgasmScriptMissing": "(파일을 찾을 수 없음)",
       "playbackHeader": "재생",
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "비디오 및 성능",
       "rememberSpeedLabel": "재생 속도 기억",
       "rememberSpeedHint": "다른 영상을 불러와도 현재 속도를 유지합니다. 기본값은 꺼짐이며, 각 영상은 1배속으로 시작합니다.",
+      "openFullscreenLabel": "동영상을 전체 화면으로 열기",
+      "openFullscreenHint": "라이브러리에서 동영상을 재생할 때 전체 화면으로 시작합니다. Esc로 평소처럼 해제할 수 있습니다.",
+      "autoplayOnOpenLabel": "열면 바로 재생",
+      "autoplayOnOpenHint": "라이브러리에서 영상을 열 때 일시정지 상태로 불러오지 않고 바로 재생합니다. 기본값은 꺼짐입니다. 클릭 한 번으로 기기가 저절로 움직이지 않도록 하기 위함입니다.",
+      "autoplayOnOpenResetTitle": "기본값으로 재설정 (꺼짐)",
+      "autoplayOnOpenResetAria": "열면 바로 재생을 기본값으로 재설정",
       "fillerHeader": "간격 채우기",
       "fillerEnable": "간격을 움직임으로 채우기",
       "fillerResetEnable": "간격 채우기 초기화",
@@ -1110,7 +1263,19 @@
       "fillerDepth": "깊이",
       "fillerAbsolute": "범위 직접 지정",
       "fillerAbsMin": "최소",
-      "fillerAbsMax": "최대"
+      "fillerAbsMax": "최대",
+      "orgasmSourceLibrary": "라이브러리의 패턴",
+      "orgasmSummaryLibrary": "패턴: {name}",
+      "orgasmLibraryHint": "스크립트 파일 대신 내장 라이브러리의 패턴을 반복 재생합니다. 다시 전환할 때를 위해 스크립트 선택은 유지됩니다.",
+      "edgeActionLabel": "엣지 홀드 중 동작",
+      "edgeActionStop": "기기 정지",
+      "edgeActionPattern": "패턴 재생",
+      "edgeActionHint": "기기 정지: 영상은 계속 재생되고 기기는 쉽니다. 패턴 재생: 대신 아래 패턴을 재생합니다(영상이 일시정지되어 있어도). 어느 쪽이든 홀드가 끝나면 스크립트가 동기화되어 다시 시작됩니다(영상이 일시정지되어 있으면 재생할 때까지 기다립니다).",
+      "patternRangeWidened": "이 범위는 패턴에 비해 너무 좁아서 조금 더 넓게 재생됩니다: {lo}~{hi}.",
+      "orgasmLibraryNone": "아직 패턴을 선택하지 않았습니다. 선택하기 전까지 X는 이전처럼 스크립트 파일을 재생합니다.",
+      "edgePatternNone": "아직 패턴을 선택하지 않아 Z는 '기기 정지'와 같이 기기를 정지합니다. 위에서 패턴을 선택하세요.",
+      "fillerThreshold": "다음보다 긴 간격 채우기",
+      "fillerResetThresholdAria": "간격 채우기 임계값을 기본값으로 재설정 (10초)"
     },
     "appearance": {
       "themeHeader": "테마",
@@ -1127,6 +1292,10 @@
       "styleClassicDesc": "FunSync의 원래 디자인",
       "styleModern": "모던",
       "styleModernDesc": "더 부드러운 깊이, 여백, 모션",
+      "scaleHeader": "인터페이스 크기",
+      "scaleHint": "기본 창의 모든 요소를 크게 또는 작게 표시합니다. Ctrl+= 및 Ctrl+-로도 바꿀 수 있고, Ctrl+0을 누르면 100%로 돌아갑니다. VR 동영상이 열려 있는 동안에는 이 키로 동영상을 확대/축소합니다.",
+      "scaleOption": "{percent}%",
+      "scaleOptionDefault": "{percent}% (기본값)",
       "languageHeader": "언어",
       "languageHint": "인터페이스 언어를 전환합니다. 변경 사항은 즉시 적용됩니다.",
       "libraryHeader": "라이브러리",
@@ -1141,10 +1310,16 @@
       "hwDecodeRestart": "비디오 디코딩 변경을 적용하려면 FunSync를 다시 시작하세요.",
       "cardHeatmapLabel": "라이브러리 카드에 히트맵",
       "cardHeatmapHint": "각 썸네일 아래에 스트로크 속도 히트맵을 표시합니다. 영상의 메인 스크립트를 사용합니다. 카드마다 스크립트를 읽으므로 기본값은 꺼짐입니다.",
+      "tagsOnCardsLabel": "라이브러리 카드에 태그 표시",
+      "tagsOnCardsHint": "각 동영상의 태그 몇 개를 이름 아래에 표시합니다. 동영상 옵션(⋮, 그다음 태그)에서 모두 볼 수 있습니다.",
       "resumeProgressLabel": "재생목록에 재생 위치 표시",
       "resumeProgressHint": "재생목록 카드와 행에 막대로 시청 위치를 표시합니다. 재생목록 재생에만 적용되며 메인 라이브러리에는 표시되지 않습니다.",
       "hideDupesLabel": "중복 이름 숨기기",
-      "hideDupesHint": "여러 영상이 같은 파일 이름을 가질 때 하나만 표시합니다(같은 파일이 두 소스 폴더에 있는 경우 등). 스크립트가 있는 사본이 유지됩니다."
+      "hideDupesHint": "여러 영상이 같은 파일 이름을 가질 때 하나만 표시합니다(같은 파일이 두 소스 폴더에 있는 경우 등). 스크립트가 있는 사본이 유지됩니다.",
+      "folderScriptsAsVariantsLabel": "동영상이 하나뿐인 폴더: 폴더의 모든 스크립트를 변형으로 제공",
+      "folderScriptsAsVariantsHint": "저니와 FapLand 라운드용: 폴더에 동영상이 하나뿐이면 그 폴더의 다른 모든 스크립트가 해당 동영상의 스크립트 메뉴에 표시됩니다(휴대폰에서도). 동영상 자체 스크립트는 계속 기본값이고, 축 파일은 축 파일로 유지됩니다. 디스크에서는 아무것도 바뀌지 않으므로, 끄면 더 이상 표시되지 않을 뿐입니다.",
+      "navHeader": "탐색 표시줄",
+      "navHint": "체크를 해제하면 해당 버튼이 표시줄에서 숨겨집니다. 라이브러리와 설정은 항상 표시됩니다. 장치는 H 키로 계속 열 수 있지만 웹 원격과 VR은 다른 방법으로 열 수 없으니 필요할 때 다시 체크하세요."
     },
     "data": {
       "backupHeader": "백업 및 복구",
@@ -1162,6 +1337,7 @@
       "restoreModalTitle": "백업에서 복원",
       "restoreConfirmTitle": "이 스냅샷을 복원하시겠습니까?",
       "restoreConfirmBody": "현재 설정이 비상 스냅샷으로 먼저 저장되므로 필요한 경우 되돌릴 수 있습니다. 복원된 상태를 적용하기 위해 앱이 재시작됩니다.",
+      "restoreConfirmBtn": "복원",
       "restoreFailed": "복원 실패",
       "restoreFailedReason": "복원 실패: {error}",
       "noBackupsList": "백업 목록을 로드할 수 없습니다",
@@ -1169,7 +1345,7 @@
       "openFolder": "백업 폴더 열기",
       "openFolderFailed": "폴더를 열 수 없습니다",
       "exportHeader": "내보내기 및 가져오기",
-      "exportBlurb": "설정, 재생 목록, 카테고리 및 연결을 휴대용 파일에 저장 — 다른 컴퓨터로 이동하거나 추가 오프호스트 백업에 유용합니다.",
+      "exportBlurb": "설정, 재생 목록, 카테고리, 연결 및 사용자 지정 썸네일을 휴대용 파일에 저장 — 다른 컴퓨터로 이동하거나 추가 오프호스트 백업에 유용합니다.",
       "export": "백업 파일 내보내기",
       "exporting": "내보내는 중…",
       "exportSaved": "백업 저장됨: {path}",
@@ -1179,6 +1355,9 @@
       "importDone": "가져옴 ({count}개 스크립트)",
       "importCancelled": "가져오기 취소됨",
       "importFailed": "가져오기 실패",
+      "importFailedReason": "가져오기 실패: {error}",
+      "importConfirmTitle": "백업 파일을 가져오시겠습니까?",
+      "importConfirmBody": "다음 단계에서 FunSync 백업 파일을 선택하세요. 파일의 재생 목록, 카테고리, 연결은 현재 항목에 추가되고(이미 있는 재생 목록은 그대로 유지됩니다), 설정은 현재 설정을 대체합니다. 여기에 이미 있는 키와 로그인 정보는 유지됩니다. 먼저 재생과 모든 기기가 정지됩니다. 현재 상태는 스냅샷으로 저장되므로 '백업에서 복원'으로 되돌릴 수 있습니다. 결과를 불러오기 위해 앱이 재시작됩니다.",
       "triggerStartup": "시작",
       "triggerDebounced": "자동 저장",
       "triggerPreAction": "{label} 전",
@@ -1192,7 +1371,12 @@
       "summarySources": "{count, plural, other {소스 #개}}",
       "summaryCollections": "{count, plural, other {컬렉션 #개}}",
       "summaryPlaylists": "{count, plural, other {재생 목록 #개}}",
+      "summaryCategories": "{count, plural, other {카테고리 #개}}",
+      "summaryCategoryAssignments": "{count, plural, other {카테고리 지정 #개}}",
+      "summaryAssociations": "{count, plural, other {연결 #개}}",
       "summaryRoutings": "{count, plural, other {라우팅 #개}}",
+      "summaryTagAssignments": "{count, plural, other {추가한 태그 #개}}",
+      "summaryEroscriptsLinks": "{count, plural, other {EroScripts 게시물 링크 #개}}",
       "relJustNow": "방금 전",
       "relMinutesAgo": "{count, plural, other {#분 전}}",
       "relHoursAgo": "{count, plural, other {#시간 전}}",
@@ -1217,7 +1401,201 @@
       "logsHeader": "로그 개인정보",
       "logsBlurb": "로그에는 재생한 영상이 기록됩니다. 문제 진단에는 유용하지만 공개적으로 공유하기 전에 한 번 확인하는 것이 좋습니다.",
       "hideFileNames": "로그에서 파일 이름 숨기기",
-      "hideFileNamesHint": "영상, 스크립트, 자막 파일 이름을 로그에서 [hidden] 으로 바꿉니다. 폴더와 파일 형식은 그대로 남아 진단에는 계속 쓸 수 있습니다. 기본값은 꺼짐입니다."
+      "hideFileNamesHint": "영상, 스크립트, 자막 파일 이름을 로그에서 [hidden] 으로 바꿉니다. 폴더와 파일 형식은 그대로 남아 진단에는 계속 쓸 수 있습니다. 켜면 이미 로그에 있는 이름도 숨겨지며, 다시 꺼도 복원되지 않습니다. 기본값은 꺼짐입니다."
+    },
+    "duplicates": {
+      "sectionHeader": "중복",
+      "findBtn": "중복 찾기…",
+      "sectionBlurb": "여러 개 있는 영상을 찾아 여분을 {os, select, win {휴지통} other {휴지통}}으로 옮겨 공간을 되찾습니다.",
+      "title": "중복 영상",
+      "scanning": "라이브러리 확인 중…",
+      "noneTitle": "중복을 찾지 못했습니다",
+      "noneHint": "라이브러리에 복사본으로 보이는 항목이 없습니다.",
+      "summary": "{groups}개 그룹, 최대 {size} 확보 가능",
+      "caveat": "파일 크기, 길이, 내용, 비슷한 이름으로 판단합니다. 화질이 크게 다른 재인코딩본은 찾지 못합니다.",
+      "tierIdentical": "동일",
+      "tierLikely": "가능성 높음",
+      "tierPossible": "가능성 있음",
+      "whyIdentical": "크기, 길이, 내용이 같음",
+      "whyLikely": "길이는 같고 크기가 다름. 재인코딩일 가능성",
+      "whyPossible": "이름만 비슷함. 직접 확인하세요",
+      "groupHead": "{count}개 사본, {size} 확보 가능",
+      "keep": "유지",
+      "hasScript": "funscript 있음",
+      "scriptBadge": "스크립트",
+      "selectTier": "{tier}의 여분 선택 ({count})",
+      "clearSelection": "선택 해제",
+      "nothingSelected": "선택 없음",
+      "selectedCount": "{count}개 파일 선택됨, {size}",
+      "remove": "{os, select, win {휴지통} other {휴지통}}으로 이동",
+      "confirmTitle": "{os, select, win {휴지통} other {휴지통}}으로 옮길까요?",
+      "confirmBody": "{count}개 파일({size})을 {os, select, win {휴지통} other {휴지통}}으로 옮길까요? 나중에 되돌릴 수 있습니다. 각 그룹에서 유지로 표시된 사본은 건드리지 않습니다.",
+      "confirmBtn": "{os, select, win {휴지통} other {휴지통}}으로 이동",
+      "removedToast": "{count}개 파일을 {os, select, win {휴지통} other {휴지통}}으로 옮기고 {size}를 확보했습니다",
+      "removeSomeFailed": "{count}개 파일을 옮기지 못했습니다. 열려 있거나 읽기 전용일 수 있습니다",
+      "removeFailed": "파일을 삭제하지 못했습니다: {error}",
+      "tierStash": "같아 보임 (Stash)",
+      "whyStash": "Stash에서 이미지 지문(phash)이 같음. 재인코딩일 가능성",
+      "selectTierStash": "Stash에서 같아 보이는 여분 선택 ({count})"
+    },
+    "support": {
+      "header": "프로젝트 후원",
+      "blurb": "FunSync는 무료이며 앞으로도 그렇습니다. 다른 사용자와 이야기하거나, 문제를 알리거나, 개발을 돕고 싶다면 여기를 이용하세요.",
+      "discord": "Discord 참여",
+      "kofi": "커피 사주기",
+      "footnote": "계정도 유료 장벽도 없으며, 이걸로 잠기는 기능도 없습니다."
+    },
+    "stash": {
+      "header": "Stash",
+      "intro": "내 Stash 서버를 연결해 태그, 출연자, 스튜디오를 FunSync로 가져옵니다. 읽기 전용: FunSync는 Stash의 어떤 것도 바꾸지 않습니다.",
+      "addressLabel": "주소",
+      "keyLabel": "API 키",
+      "keyHint": "Stash에 사용자 이름과 비밀번호가 있을 때만 필요합니다. Stash: Settings > Security > API Key.",
+      "keyNotePlain": "이 FunSync는 키를 암호화하지 않고 데이터 폴더에 저장합니다.",
+      "keyNotePortable": "포터블 FunSync는 Handy 키처럼 키를 암호화하지 않고 포터블 데이터 폴더에 저장합니다.",
+      "keyNoteNoEncryption": "이 컴퓨터에서는 키를 암호화할 수 없어 FunSync가 키를 암호화하지 않고 데이터 폴더에 저장합니다.",
+      "keyNoteMemory": "키는 FunSync를 닫을 때까지 보관됩니다(여기서는 계정에 묶을 수 없습니다).",
+      "keySavedEncrypted": "API 키 저장됨, 이 PC에서 암호화됨",
+      "keySavedPlain": "API 키 저장됨, FunSync 데이터 폴더에 암호화 없이 저장됨",
+      "keySavedMemory": "API 키는 FunSync를 닫을 때까지 보관됨",
+      "noKey": "API 키 없음",
+      "replaceKey": "바꾸기",
+      "removeKey": "제거",
+      "addKey": "키 추가",
+      "removeKeyTitle": "API 키를 제거할까요?",
+      "removeKeyBody": "FunSync가 저장된 Stash API 키를 지웁니다. Stash에 비밀번호가 있다면 다시 붙여 넣어야 합니다.",
+      "keyRemoved": "API 키를 제거했습니다.",
+      "test": "연결 테스트",
+      "testing": "테스트 중…",
+      "connected": "Stash {version}에 연결되었습니다. {count, plural, other {장면이 #개 있습니다.}}",
+      "help": "Stash는 따로 설정하지 않으면 모든 네트워크 주소에서 연결을 받습니다. 이 PC에서 실행한다면 127.0.0.1을 사용하거나(Stash의 호스트도 127.0.0.1로 설정), Stash에서 사용자 이름과 비밀번호를 설정하고 여기에 API 키를 붙여 넣으세요.",
+      "keyInClear": "키가 암호화되지 않은 채 네트워크를 거쳐 {host}(으)로 전송됩니다. Stash를 이 PC에서 실행하거나 https를 사용하세요.",
+      "link": "Stash 연결",
+      "linkNeedsTest": "먼저 연결을 테스트하세요. 테스트에 성공하면 Stash를 연결할 수 있습니다.",
+      "linkedDone": "Stash가 연결되었습니다. 지금 동기화를 눌러 태그, 출연자, 스튜디오를 가져오세요.",
+      "linked": "{address}에 연결됨",
+      "linkedVersion": "{address}에 연결됨 · Stash {version}",
+      "change": "변경…",
+      "turnOff": "끄기",
+      "turnOn": "켜기",
+      "turnedOff": "Stash를 껐습니다. 데이터는 보관됩니다.",
+      "turnedOn": "Stash를 켰습니다.",
+      "offText": "Stash가 꺼져 있습니다. Stash의 내용은 FunSync에 표시되지 않고 데이터는 보관됩니다. 연결된 주소: {address}",
+      "neverSynced": "아직 동기화하지 않았습니다.",
+      "lastSync": "마지막 동기화 {date}: {counts}",
+      "lastSyncPartial": "중간에 멈췄습니다. 아무것도 제거되지 않았습니다.",
+      "countMatched": "{count, plural, other {#개 일치}}",
+      "countMatchedVideos": "{count, plural, other {동영상 #개 일치}}",
+      "countCheck": "{count, plural, other {#개 확인 필요}}",
+      "countNotInStash": "{count, plural, other {#개 Stash에 없음}}",
+      "countGone": "{count, plural, other {#개 Stash에서 사라짐}}",
+      "countChanged": "{count, plural, other {파일 #개 변경됨}}",
+      "countSkipped": "{count, plural, other {#개 건너뜀}}",
+      "syncNow": "지금 동기화",
+      "syncing": "Stash와 동기화하는 중…",
+      "progressLabel": "동기화 진행률",
+      "stepStart": "시작하는 중…",
+      "stepHash": "파일 지문을 읽는 중, {done, number}/{total, number}.",
+      "stepList": "Stash 장면 목록을 읽는 중, {done, number}/{total, number}페이지.",
+      "stepMatch": "맞추는 중.",
+      "stepDetails": "세부 정보를 가져오는 중, {done, number}/{total, number}.",
+      "stepWrite": "저장하는 중.",
+      "cancelling": "취소하는 중…",
+      "syncDone": "동기화 완료: {counts}",
+      "syncCancelled": "동기화를 취소했습니다. 아무것도 제거되지 않았습니다.",
+      "syncFailed": "동기화가 멈췄습니다: {reason} 아무것도 제거되지 않았습니다.",
+      "syncPartial": "장면 {total, number}개 중 {done, number}개에서 동기화가 멈췄습니다: {reason} 끝난 부분은 저장되었고 아무것도 제거되지 않았습니다.",
+      "errorBusy": "Stash 동기화가 이미 실행 중입니다.",
+      "errorNotLinked": "먼저 Stash를 연결하고 켜세요.",
+      "errorOther": "문제가 발생했습니다({code}).",
+      "syncOnStart": "FunSync를 시작할 때 Stash와 동기화",
+      "syncOnStartHint": "첫 라이브러리 스캔 후 한 번 동기화합니다. 그 밖에는 지금 동기화를 누를 때만 동기화합니다.",
+      "checkHeader": "확인 필요({count, number})",
+      "checkSeveral": "{count, plural, other {Stash 장면 #개에 이 파일이 있음}}",
+      "checkPathChanged": "Stash에 같은 경로가 있지만 다른 파일",
+      "choose": "선택…",
+      "chooseAria": "{name}의 Stash 장면 선택",
+      "checkVideoMissing": "그 동영상은 지금 라이브러리에 없습니다.",
+      "showAll": "모두 보기({count, number})",
+      "pathRules": "경로 규칙(고급)",
+      "pathRulesHint": "Stash가 동영상을 다른 폴더 이름으로 볼 때만 필요합니다(예: Docker나 NAS). FunSync는 먼저 파일 지문으로 맞추고, 경로 규칙은 두 번째 확인에만 쓰입니다.",
+      "ruleLocal": "FunSync 폴더",
+      "ruleStash": "Stash 폴더",
+      "addRule": "규칙 추가",
+      "removeRule": "제거",
+      "removeRuleAria": "{folder}의 경로 규칙 제거",
+      "ruleIncomplete": "규칙에는 두 폴더가 모두 필요합니다. 둘 다 입력하거나 규칙을 제거하세요.",
+      "remove": "Stash 데이터 제거…",
+      "removeTitle": "Stash 데이터를 제거할까요?",
+      "removeConfirm": "{count, plural, other {동영상 #개}}의 Stash 데이터와 저장된 키를 제거할까요? Stash에서는 아무것도 바뀌지 않습니다. 직접 단 태그와 숨김은 그대로 남습니다.",
+      "removeConfirmNoKey": "{count, plural, other {동영상 #개}}의 Stash 데이터를 제거할까요? Stash에서는 아무것도 바뀌지 않습니다. 직접 단 태그와 숨김은 그대로 남습니다.",
+      "removed": "Stash 데이터를 제거했습니다.",
+      "removeUndone": "Stash 데이터를 되돌렸습니다.",
+      "removeFailed": "FunSync가 Stash 데이터를 제거하지 못했습니다. 아무것도 바뀌지 않았습니다.",
+      "undoFailed": "Stash 데이터를 되돌리지 못했습니다.",
+      "undoRemoveAria": "Stash 데이터 제거 실행 취소",
+      "damaged": "FunSync가 Stash 데이터를 읽지 못했습니다. {name}(으)로 따로 보관했습니다. 동기화하면 다시 만듭니다.",
+      "certTitle": "이 컴퓨터는 이 Stash의 https 인증서를 신뢰하지 않습니다.",
+      "certChanged": "이 Stash가 신뢰했던 인증서와 다른 인증서를 보여 줍니다.",
+      "certSubject": "발급 대상",
+      "certFingerprint": "SHA-256 지문",
+      "certExplain": "내 Stash(예: 자체 서명 인증서를 쓰는 NAS)이고 지문이 서버에 표시된 것과 같을 때만 신뢰하세요. 그러면 FunSync는 이 인증서를 {address}에 대해서만 신뢰합니다.",
+      "certTrust": "이 인증서 신뢰",
+      "certTrusted": "{address}의 인증서를 신뢰했습니다.",
+      "certTrustFailed": "FunSync가 그 인증서를 신뢰하지 못했습니다. 연결을 다시 테스트하세요.",
+      "certPinned": "{address}의 신뢰하는 인증서",
+      "certForget": "신뢰 해제",
+      "certForgetAria": "{address}의 인증서 신뢰 해제",
+      "certForgotten": "인증서를 더 이상 신뢰하지 않습니다.",
+      "certForgetFailed": "FunSync가 신뢰하는 인증서를 제거하지 못했습니다.",
+      "keyElsewhere": "저장된 API 키는 {address}의 키이므로 FunSync는 이 주소로 보내지 않습니다. 이 Stash의 키를 붙여 넣거나 저장된 키를 삭제하세요.",
+      "damagedRecovered": "FunSync가 Stash 데이터를 읽지 못했습니다. {name}(으)로 따로 보관하고 이전 사본을 사용했습니다.",
+      "recoveredMissing": "FunSync의 Stash 데이터 파일이 없었습니다. 이전 사본을 사용했습니다.",
+      "removeUndoneMerged": "Stash 데이터를 되돌렸습니다. 그 이후에 동기화된 내용도 함께 유지됩니다.",
+      "undoFailedKept": "Stash 데이터를 되돌리지 못했습니다. FunSync 데이터 폴더에 따로 보관되어 있으며, 실행 취소를 다시 시도할 수 있습니다.",
+      "syncRelinked": "{count, plural, other {동영상 #개가 다른 Stash 장면에 다시 연결되었습니다.}}",
+      "relinkHeader": "다시 연결됨({count, number})",
+      "relinkHint": "동기화로 이 동영상들이 다른 Stash 장면에 연결되었습니다(예: Stash에서 장면이 병합된 경우). 실행 취소하면 이전 연결로 돌아갑니다.",
+      "relinkTo": "현재 {name}에 연결됨",
+      "relinkToUntitled": "현재 다른 Stash 장면에 연결됨",
+      "relinkUndoAria": "{name}의 다시 연결 실행 취소",
+      "relinkUndoAll": "모두 실행 취소",
+      "relinkUndoAllAria": "다시 연결 {count, number}개 모두 실행 취소",
+      "undoRelinksAria": "{count, plural, other {다시 연결 #개 실행 취소}}",
+      "relinkUndone": "{name}이(가) 이전 Stash 장면에 다시 연결되었습니다.",
+      "relinksUndone": "{count, plural, other {다시 연결 #개를 실행 취소했습니다.}}",
+      "relinkUndoFailed": "{name}의 다시 연결을 실행 취소하지 못했습니다. 그 사이 Stash 데이터가 바뀌었거나 FunSync가 저장하지 못했습니다.",
+      "relinksUndonePartial": "다시 연결 {total, number}개 중 {done, number}개를 실행 취소했습니다. 나머지는 그 사이 바뀌었거나 저장하지 못했습니다.",
+      "keyElsewhereNoAddress": "저장된 API 키는 다른 주소의 키이므로 FunSync는 이 주소로 보내지 않습니다. 이 Stash의 키를 붙여 넣거나 저장된 키를 제거하세요.",
+      "useTagRules": "Stash의 태그 별칭과 하위 태그 사용",
+      "useTagRulesHint": "Stash가 별칭으로 등록한 표기의 태그는 어느 소스에서 왔든 Stash의 이름으로 표시되며, 태그 필터에서 태그를 고르면 그 하위 태그도 함께 찾습니다. 숨긴 태그는 계속 숨겨집니다. 바로 적용되며, 마지막 동기화에서 받은 태그 목록을 사용합니다. 끄면 모든 태그가 이전처럼 표시됩니다."
+    },
+    "patternBlock": {
+      "quickPicks": "빠른 선택",
+      "preview": "미리보기",
+      "previewAria": "재생될 패턴 미리보기, 8초",
+      "rangeExact": "직접 지정",
+      "rangeScript": "스크립트 따르기",
+      "depthValue": "{pct}%",
+      "centre": "중심",
+      "centreOwn": "스크립트 기준",
+      "centreReset": "스크립트 고유 중심으로 되돌리기",
+      "rangeScriptHint": "깊이: 패턴이 재생되는 지점 주변에서 스크립트 고유 범위를 얼마나 쓸지. 중심: 그 범위 안의 위치.",
+      "testHint": "연결된 기기에서 미리보기를 재생합니다",
+      "groupAria": "{feature}: 패턴",
+      "oneShotHintGap": "마무리: 각 간격이 시작될 때 한 번 재생되고, 간격이 끝날 때까지 마지막 위치를 유지합니다.",
+      "setPattern": "패턴 설정…",
+      "setPatternAria": "{feature} 패턴 설정",
+      "drawerTitle": "{feature} 패턴",
+      "apply": "적용",
+      "summary": "{name}, {speed} 단위/초, {range}",
+      "summaryReversed": "{name}, {speed} 단위/초, 반전, {range}",
+      "summaryRangeOwn": "고유 범위",
+      "summaryRangeExact": "{lo}~{hi}",
+      "summaryRangeScript": "스크립트를 따라 {pct}%",
+      "summaryNone": "아직 선택한 패턴이 없습니다",
+      "statsWithInstant": "평균 {avg} 단위/초, 최대 {max} 단위/초, 순간 점프 포함",
+      "statsInstantOnly": "순간 점프, 기기가 움직일 수 있는 가장 빠른 속도"
     }
   },
   "feedback": {
@@ -1265,6 +1643,8 @@
     "searching": "검색 중…",
     "noResultsTitle": "\"{query}\"에 대한 스크립트를 찾을 수 없습니다",
     "noResultsHint": "더 짧거나 일반적인 검색어를 시도하세요 — 부분 제목이 전체 파일 이름보다 더 잘 일치하는 경우가 많습니다.",
+    "fewerWords": "더 적은 단어로 검색",
+    "fewerWordsTitle": "“{query}” 검색",
     "likes": "{count, plural, other {좋아요 #개}}",
     "views": "{count, plural, other {조회수 #회}}",
     "getScript": "스크립트 받기",
@@ -1272,10 +1652,32 @@
     "fetching": "가져오는 중…",
     "savingScript": "스크립트 저장 중…",
     "scriptSaved": "스크립트 저장됨",
+    "upToDate": "이미 최신 상태",
     "noAttachments": "이 주제에 펀스크립트 첨부 파일이 없습니다",
     "downloadFailed": "다운로드 실패",
+    "downloadFailedStatus": "다운로드 실패 (HTTP {status})",
+    "saveNotAFile": "{name}을(를) 저장할 수 없습니다: 같은 이름의 폴더가 있습니다.",
+    "unusableName": "\"{name}\"을(를) 저장할 수 없습니다: 이 컴퓨터에서는 쓸 수 없는 파일 이름입니다.",
     "savedToast": "스크립트 저장됨: {name}",
+    "savedFileToast": "저장됨: {name}",
+    "alreadyUpToDate": "이미 최신 상태: {name}",
+    "replaceTitle": "{name}을(를) 바꿀까요?",
+    "replaceMessage": "이 이름으로 다른 파일이 이미 저장되어 있습니다. 다운로드한 파일로 바꿀까요? 기존 파일은 {os, select, win {휴지통} other {휴지통}}으로 옮겨지므로 나중에 되돌릴 수 있습니다.",
+    "replaceBtn": "바꾸기",
+    "replaceManyTitle": "{count}개 파일을 바꿀까요?",
+    "replaceManyMessage": "이 이름들로 다른 파일이 이미 저장되어 있습니다: {names}. 다운로드한 파일로 바꿀까요? 기존 파일은 {os, select, win {휴지통} other {휴지통}}으로 옮겨지므로 나중에 되돌릴 수 있습니다.",
+    "notReplaced": "{name}을(를) 저장하지 않았습니다: 다른 파일이 이미 있습니다.",
+    "notDownloaded": "{name}을(를) 저장하지 않았습니다: 다운로드할 수 없었습니다.",
+    "trashFailed": "{name}을(를) {os, select, win {휴지통} other {휴지통}}으로 옮길 수 없어서 다운로드한 파일로 덮어쓰지 않았습니다.",
     "sessionExpired": "EroScripts 세션 만료됨 — EroScripts 패널을 통해 다시 로그인하세요",
+    "error": {
+      "rateLimited": "EroScripts가 요청을 제한하고 있습니다. 잠시 후 다시 시도하세요.",
+      "accessDenied": "액세스가 거부되었습니다. 다시 로그인하세요.",
+      "searchFailed": "검색에 실패했습니다 (HTTP {status}). 로그아웃한 후 다시 로그인하세요.",
+      "topicFailed": "해당 게시물을 불러올 수 없습니다 (HTTP {status}).",
+      "noPosts": "이 주제에는 게시물이 없습니다.",
+      "network": "EroScripts에 연결할 수 없습니다. 연결을 확인하고 다시 시도하세요."
+    },
     "inline": {
       "title": "EroScripts에서 스크립트 찾기",
       "axesLine": "메인 + {count}개 축 ({list})",
@@ -1288,7 +1690,8 @@
       "noMain": "축 파일만 있고 메인 스크립트가 없습니다",
       "zipNote": "zip 첨부 {count}개는 아직 열 수 없습니다",
       "loadingPost": "게시물 불러오는 중..."
-    }
+    },
+    "loginToSearch": "검색하려면 EroScripts에 로그인하세요."
   },
   "upNext": {
     "regionAria": "다음 항목",
@@ -1302,7 +1705,8 @@
     "funscriptChip": "펀스크립트",
     "endLabel": "목록 끝",
     "endDismissAria": "닫기",
-    "endText": "이 {source}에 더 이상 동영상이 없습니다.",
+    "endText": "“{source}”에 더 이상 동영상이 없습니다.",
+    "endTextGeneric": "이 목록에 더 이상 동영상이 없습니다.",
     "endCta": "{source}로 돌아가기",
     "endSourceFallback": "목록",
     "sourcePlaylist": "재생 목록",
@@ -1390,13 +1794,21 @@
     "hostHint": "팁: 호스트 필드에 Quest의 IP를 유지하세요 — FunSync가 기억하고 다음 시작 시 자동으로 다시 연결합니다.",
     "subnetWarning": "⚠ {host}은(는) 이 PC({pcIp})와 다른 네트워크에 있습니다. Quest의 IP는 {pcNet}.x 형태여야 합니다. 같은 Wi-Fi에서 확인하고 VPN을 끄세요 — VPN은 이 PC가 접근할 수 없는 주소를 Quest에 할당합니다.",
     "playing": "재생 중",
-    "offset": "오프셋",
+    "offset": "오프셋 (모든 동영상)",
     "offsetHint": "VR 디스플레이 지연을 보상합니다. 각 장치 자체의 오프셋 위에 쌓입니다 — 장치별 결합된 유효 값은 동기화 탭에서 확인하세요.",
     "backendNotRunning": "백엔드가 실행되지 않음"
+  },
+  "videoSyncOffset": {
+    "label": "이 동영상",
+    "earlier": "{ms}ms 빠르게",
+    "later": "{ms}ms 느리게",
+    "reset": "초기화",
+    "hint": "이 동영상을 재생하는 동안 각 장치의 오프셋에 더해집니다(VR에서도). 음수면 더 일찍 작동합니다. 이 동영상에만 저장됩니다."
   },
   "editor": {
     "toolbarAria": "스크립트 에디터 도구",
     "mainAxisLabel": "메인 (L0)",
+    "embeddedAxisLabel": "{axis} (내장됨): 추출하여 편집…",
     "btn": {
       "undo": "실행 취소 (Ctrl+Z)",
       "redo": "다시 실행 (Ctrl+Y)",
@@ -1410,11 +1822,17 @@
       "waveform": "파형 전환 (W)",
       "beats": "비트에서 생성",
       "zoomIn": "확대 (+)",
-      "zoomOut": "축소 (-)",
+      "zoomOut": "축소 (Ctrl+-)",
       "fitAll": "모두 맞춤",
       "save": "저장 (Ctrl+S)",
       "stacked": "스택 보기 — 모든 축 표시",
-      "popout": "에디터를 별도 창으로 팝아웃"
+      "popout": "에디터를 별도 창으로 팝아웃",
+      "dock": "에디터를 기본 창으로 되돌리기"
+    },
+    "unsaved": {
+      "title": "{name}의 변경 내용을 저장하시겠습니까?",
+      "message": "이 스크립트의 편집 내용이 저장되지 않았습니다. 저장하지 않으면 편집 내용이 사라집니다.",
+      "dontSave": "저장 안 함"
     },
     "modify": {
       "title": "스크립트 수정",
@@ -1427,7 +1845,21 @@
       "removePauses": "일시 정지 제거…",
       "rangeExtend": "범위 확장/압축…",
       "generatePattern": "패턴 생성…",
+      "fillPattern": "패턴으로 채우기…",
       "exportHeatmap": "히트맵 PNG 내보내기…"
+    },
+    "select": {
+      "title": "포인트 선택",
+      "placeholder": "선택…",
+      "all": "모두 선택 (Ctrl+A)",
+      "beforePlayhead": "재생 헤드 앞 선택 (Ctrl+Alt+왼쪽 화살표)",
+      "afterPlayhead": "재생 헤드 뒤 선택 (Ctrl+Alt+오른쪽 화살표)",
+      "topThird": "상단 3분의 1 (Ctrl+1)",
+      "middleThird": "중간 3분의 1 (Ctrl+2)",
+      "bottomThird": "하단 3분의 1 (Ctrl+3)",
+      "everyNth": "N개마다 포인트…",
+      "created": "새 포인트만 (N)",
+      "none": "선택 해제 (Esc)"
     },
     "speedLabel": "속도:",
     "autosaveLabel": "자동 저장",
@@ -1454,6 +1886,14 @@
     "extendTitle": "범위 확장 / 압축",
     "extendFactor": "시간 스케일 계수",
     "extendHint": "1.0 = 변경 없음, 2.0 = 두 배 기간, 0.5 = 절반 기간",
+    "everyNthTitle": "N개마다 포인트 선택",
+    "everyNthEvery": "간격",
+    "everyNthStart": "시작 포인트",
+    "everyNthScopeSelected": "선택된 {count, plural, other {포인트 #개}}를 시간 순서로 셉니다.",
+    "everyNthScopeAll": "전체 {count, plural, other {포인트 #개}}를 시간 순서로 셉니다.",
+    "everyNthResult": "{count, plural, other {포인트 #개}}를 선택합니다.",
+    "everyNthTooFew": "세려면 포인트가 2개 이상 필요합니다.",
+    "everyNthSelect": "선택",
     "patternTitle": "패턴 생성",
     "patternStyle": "패턴",
     "patternBpm": "BPM",
@@ -1509,7 +1949,16 @@
       "offsetBy": "{ms}ms만큼 오프셋됨",
       "pausesRemoved": "일시 정지 제거됨",
       "selectToExtend": "확장/압축하려면 2개 이상의 액션을 선택하세요",
+      "selectionChanged": "대화 상자가 열려 있는 동안 선택이 바뀌었습니다. 아무것도 적용되지 않았습니다.",
       "timeScaled": "시간이 {factor}x로 스케일됨",
+      "needsContinuous": "{name}에는 연속된 선택이 필요합니다. N개마다 선택처럼 간격이 있는 선택은 이동, 미세 조정, 반전, 재매핑에 사용할 수 있습니다.",
+      "nothingChanged": "변경된 내용 없음",
+      "selectToEqualize": "균등화하려면 3개 이상의 액션을 선택하세요",
+      "equalized": "{count, plural, other {액션 #개}} 균등화됨",
+      "everyNthSelected": "{total, plural, other {포인트 #개}} 중 {count, number}개를 선택했습니다.",
+      "everyNthNone": "선택할 항목이 없습니다: N개마다 선택에는 포인트가 2개 이상 필요합니다.",
+      "newPointsSelected": "새 {count, plural, other {포인트 #개}}를 선택했습니다.",
+      "newPointsNone": "선택할 새 포인트가 없습니다. 먼저 수정 메뉴의 작업이나 생성 기능을 실행하세요.",
       "recordingOn": "녹음 모드 켜짐 — 숫자패드 키가 라이브 재생 헤드에 삽입됩니다",
       "recordingOff": "녹음 모드 꺼짐",
       "patternInserted": "{count, plural, other {액션 #개}} 삽입됨 ({type})",
@@ -1527,7 +1976,9 @@
       "gapsFilled": "{gaps, plural, other {간격 #개}}를 {actions, plural, other {액션 #개}}로 채움",
       "saved": "펀스크립트 저장됨",
       "saveFailed": "저장 실패: {error}",
-      "created": "{name} 생성됨"
+      "created": "{name} 생성됨",
+      "remoteScriptNotShown": "휴대폰 또는 VR 헤드셋이 자체 스크립트를 재생하고 있어서 에디터에 표시되지 않습니다. 에디터는 이 창의 동영상을 편집합니다.",
+      "popoutUnavailable": "에디터를 팝아웃할 수 없습니다: 창과 앱 사이의 연결이 없습니다."
     },
     "extractingWaveform": "파형 추출 중…",
     "extractingWaveformPct": "파형 추출 중… {pct}%",
@@ -1549,7 +2000,60 @@
     "customKeysDuplicateWarn": "{key}는 이미 위치 {pos}에 바인딩되어 있습니다",
     "customKeysMidiHint": "MIDI 키보드 사용자는 보통 MIDI-키 변환 소프트웨어 (예: MIDIKey2Key) 와 함께 사용합니다.",
     "customKeysHelpGroup": "사용자 정의 위치 키",
-    "popoutWindowTitle": "스크립트 편집기"
+    "popoutWindowTitle": "스크립트 편집기",
+    "popout": {
+      "dock": "도킹",
+      "waveformTitle": "기본 창의 파형 전환 (W)"
+    },
+    "patternFill": {
+      "title": "패턴으로 채우기",
+      "menu": "패턴으로 채우기…",
+      "contextMenu": "타임라인 작업",
+      "needSelection": "포인트를 2개 이상 선택하거나 타임라인의 빈 구간을 드래그하세요. 그 사이의 시간을 패턴으로 채웁니다.",
+      "search": "패턴 검색",
+      "family": "그룹",
+      "allFamilies": "전체",
+      "patterns": "패턴",
+      "noMatch": "“{query}”와(과) 일치하는 패턴이 없습니다.",
+      "speed": "속도",
+      "speedValue": "{speed} 유닛/초",
+      "ownSpeed": "패턴 기본 속도: {speed} 유닛/초",
+      "rampTo": "끝 속도",
+      "rampOff": "끔",
+      "reverse": "반전",
+      "range": "범위",
+      "rangeOwn": "패턴 기본 범위",
+      "rangeMin": "아래",
+      "rangeMax": "위",
+      "variation": "변화",
+      "seed": "시드",
+      "reroll": "다시 굴리기",
+      "rerollTitle": "다른 변화 시도 (새 시드)",
+      "join": "이음새 부드러움",
+      "endFit": "끝",
+      "endFitStretch": "마지막 포인트까지 늘리기",
+      "endFitPartial": "부분 스트로크",
+      "mode": "채우기",
+      "modeReplace": "포인트 바꾸기",
+      "modeGap": "빈 구간만",
+      "selection": "선택: {seconds}초, 포인트 {count}개",
+      "rangeSelection": "시간 범위: {seconds}초, {count, plural, =0 {포인트 없음} other {포인트 #개}}",
+      "stats": "새 포인트 {points}개, 평균 {mean} 유닛/초, 최대 {max} 유닛/초.",
+      "replaces": "포인트 {count}개를 바꿉니다.",
+      "apply": "적용",
+      "applied": "“{name}” 패턴으로 채웠습니다: 포인트 {count}개.",
+      "noGap": "충분히 긴 빈 구간이 없습니다. 빈 구간은 1초 이상이면서 스트로크 두 번 길이여야 합니다.",
+      "tooShort": "선택이 너무 짧아 채울 수 없습니다. 더 긴 구간을 선택하세요.",
+      "endFitFallback": "패턴을 마지막 포인트까지 늘릴 수 없어 부분 스트로크로 끝납니다.",
+      "joinTooFast": "이 시간에 비해 양 끝이 너무 멀리 떨어져 있습니다. 이음새는 속도 한도로 제한됩니다.",
+      "speedCapped": "일부 움직임을 패턴의 최고 속도인 {max} 유닛/초로 제한했습니다.",
+      "speedUnreachable": "이 패턴은 여기서 그 속도에 닿을 수 없습니다. 최대한 가깝게 재생합니다.",
+      "rangeAdjusted": "패턴의 스트로크가 들어가도록 범위를 넓혔습니다.",
+      "failed": "이 채우기를 만들 수 없습니다. 다른 패턴이나 설정을 시도하세요.",
+      "changed": "이 미리보기 이후 스크립트나 선택이 바뀌었습니다. 아무것도 채우지 않았습니다.",
+      "editingPaused": "적용하거나 취소할 때까지 편집 키는 일시 중지됩니다.",
+      "updating": "미리보기를 업데이트하는 중…"
+    }
   },
   "connection": {
     "vibeHelp": {
@@ -1570,7 +2074,18 @@
       "connectedToIntiface": "Intiface에 연결됨",
       "disconnected": "연결 끊김",
       "failed": "연결 실패",
-      "failedIntiface": "연결 실패 — Intiface가 실행 중입니까?"
+      "failedIntiface": "연결 실패 — Intiface가 실행 중입니까?",
+      "notResponding": "연결됨, 응답 없음",
+      "respondingSlowly": "연결됨, 응답이 느림"
+    },
+    "failure": {
+      "tcodePortNotFound": "포트를 찾을 수 없습니다. 케이블을 확인한 후 포트를 다시 선택하세요.",
+      "tcodePortBusy": "포트가 사용 중이거나 액세스가 거부되었습니다. 포트를 사용 중인 다른 프로그램을 닫은 후 다시 시도하세요.",
+      "tcodeWsRefused": "해당 WebSocket 주소에 연결할 수 없습니다. 주소를 확인하고 장치나 프로그램이 실행 중인지 확인하세요.",
+      "autoblowOffline": "장치가 연결되지 않았습니다. 전원과 WiFi를 확인하세요.",
+      "autoblowRateLimited": "요청이 너무 많습니다. 잠시 기다린 후 다시 시도하세요.",
+      "generic": "연결 실패: {detail}",
+      "withDetail": "{reason} ({detail})"
     },
     "btn": {
       "connect": "연결",
@@ -1585,7 +2100,9 @@
       "test": "테스트",
       "measure": "측정",
       "measuring": "측정 중…",
-      "applyLatency": "적용"
+      "applyLatency": "적용",
+      "reconnect": "다시 연결",
+      "reconnectHint": "연결을 끊고 저장된 키로 다시 연결합니다."
     },
     "handy": {
       "connectionKey": "연결 키",
@@ -1607,9 +2124,13 @@
       "cutoffMinAria": "출력 하한",
       "cutoffMaxAria": "출력 상한",
       "cutoffHint": "하드 제한: 하한보다 낮거나 상한보다 높은 위치는 해당 값으로 고정되고 나머지는 그대로 재생됩니다. 다음 동영상을 불러올 때 적용됩니다.",
+      "invert": "방향 반전",
+      "invertHint": "모든 스트로크를 반전합니다(0이 100이 됩니다). Handy가 영상과 반대로 움직일 때 사용하세요. 일반 재생 중에는 바로 적용되고, 그 외에는 다음 동영상을 불러올 때 적용됩니다.",
       "syncing": "동기화 중…",
       "syncFailed": "동기화 실패",
-      "rtdResult": "RTD: {rtd}ms"
+      "rtdResult": "RTD: {rtd}ms",
+      "showKey": "연결 키 표시",
+      "hideKey": "연결 키 숨기기"
     },
     "buttplug": {
       "axisMainStroke": "메인 / 스트로크 (L0)",
@@ -1637,7 +2158,8 @@
       "safetyCap": "안전 상한:",
       "vibScriptOverride": "진동은 전용 스크립트로 제어됩니다 — 모드 및 반전 설정은 효과가 없습니다.",
       "highIntensityTitle": "고강도",
-      "highIntensityBody": "전기 자극 강도를 {percent}%로 설정 — 높은 수준은 불편함을 유발할 수 있습니다. 계속하시겠습니까?",
+      "highIntensityBody": "기기가 최대 {percent}% 강도로 작동할 수 있게 됩니다. 높은 수준은 불편함을 유발할 수 있으며, 특히 전기 자극이나 머신에서 주의하세요. 안전 상한을 {percent}%로 설정하시겠습니까?",
+      "highIntensityConfirm": "{percent}%로 설정",
       "vibrationModeTitle": "진동 모드",
       "rotationModeTitle": "회전 모드",
       "estimModeTitle": "전기 자극 모드",
@@ -1681,6 +2203,8 @@
       "motionHalfTop": "위쪽 절반",
       "motionHalfBottom": "아래쪽 절반",
       "motionSpeed": "속도",
+      "motionBlend": "혼합",
+      "motionBlendHint": "메인 축의 움직임을 이 축에 섞습니다. 0%는 생성된 움직임만, 100%는 메인 축을 따라갑니다.",
       "type": {
         "linear": "선형",
         "rotate": "회전",
@@ -1705,6 +2229,8 @@
       "wsUrl": "WebSocket URL",
       "wsUrlAria": "WebSocket URL",
       "wsHint": "MultiFunPlayer 프로토콜 컨슈머 (restim, Howl 등)와 호환 — 해당 수신 URL을 가리키세요.",
+      "goHome": "가운데로",
+      "goHomeTitle": "모든 축을 천천히 가운데로 되돌리고 진동과 흡입을 끕니다. 먼저 동영상을 일시정지합니다.",
       "precision": "TCode 정밀도",
       "precisionAria": "TCode 정밀도",
       "updateRate": "업데이트 속도",
@@ -1741,7 +2267,9 @@
       "latencyToast": "Autoblow 지연: {ms} ms",
       "latencyFailed": "지연 측정 실패: {error}",
       "latencyNoReading": "지연 시간을 측정하지 못했습니다. 기기 연결을 확인하세요.",
-      "latencyApplied": "동기화 오프셋을 {ms}ms로 설정했습니다"
+      "latencyApplied": "동기화 오프셋을 {ms}ms로 설정했습니다",
+      "showToken": "장치 토큰 표시",
+      "hideToken": "장치 토큰 숨기기"
     },
     "sync": {
       "experimental": "실험적",
@@ -1753,14 +2281,15 @@
       "vrTransport": "VR 전송",
       "noVrSession": "VR 세션 없음",
       "handyNotConnected": "Handy 연결되지 않음",
-      "perDeviceOffsets": "장치별 오프셋",
-      "perDeviceHint": "각 장치에는 명령 지연을 보상하기 위한 자체 오프셋이 있습니다. 음수 값은 명령을 더 일찍 실행합니다. 여기의 슬라이더는 장치 자체 탭의 오프셋과 미러링됩니다 — 하나를 변경하면 둘 다 업데이트됩니다.",
+      "perDeviceOffsets": "장치별 오프셋 (모든 동영상)",
+      "perDeviceHint": "각 장치에는 명령 지연을 보상하기 위한 자체 오프셋이 있습니다. Buttplug 및 T-Code 장치는 음수 값이 명령을 더 일찍 실행하고, Handy와 Autoblow는 각 API의 방식대로 양수 값이 더 일찍 실행합니다. VR 합계 줄은 모든 장치를 '음수 = 더 일찍'으로 계산합니다. 여기의 슬라이더는 장치 자체 탭의 오프셋과 미러링됩니다 — 하나를 변경하면 둘 다 업데이트됩니다.",
       "connectDeviceHint": "장치를 연결하여 해당 오프셋 컨트롤을 확인하세요.",
       "deviceHandy": "The Handy (WiFi)",
       "deviceButtplug": "Buttplug.io 장치",
       "deviceTcode": "TCode (시리얼)",
       "suggested": "제안: {ms} ms",
       "vrModeTotal": "VR 모드: {device} (장치) {vr} (VR) = {total} ms 유효",
+      "vrModeTotalVideo": "VR 모드: {device} (장치) {vr} (VR) {thisVideo} (이 동영상) = {total} ms 유효",
       "latencyRefreshed": "지연 새로 고침됨",
       "refreshFailed": "새로 고침 실패: {error}"
     }
@@ -1769,7 +2298,9 @@
     "connectionFailed": "연결 실패",
     "uploadFailed": "업로드 실패",
     "handyConnectionFailed": "연결 실패 — 연결 키를 확인하세요",
-    "connectionKeyTooShort": "연결 키는 5자 이상이어야 합니다"
+    "handyStopFailed": "Handy가 정지를 확인하지 않았습니다. 아직 움직이고 있을 수 있으니 기기의 버튼을 누르세요.",
+    "connectionKeyTooShort": "연결 키는 5자 이상이어야 합니다",
+    "handyNotAnswering": "Handy가 응답하지 않습니다. WiFi와 기기 화면을 확인하세요."
   },
   "deviceTest": {
     "handyNotConnected": "Handy가 연결되지 않음",
@@ -1820,8 +2351,8 @@
     "cycleAspect": "화면 비율 순환",
     "vrFlatten": "VR 평면 전환 (꺼짐 / 왼쪽 눈 / 오른쪽 눈)",
     "vrPan": "VR 투영 이동 (구면 모드 활성 시)",
-    "vrZoom": "VR 영상 확대/축소 (핀치 / Ctrl +-)",
-    "vrZoomReset": "VR 확대/축소 초기화",
+    "vrZoom": "VR 영상 확대/축소 (핀치 / Ctrl +-). VR 영상이 열려 있지 않으면 Ctrl +- 로 화면 전체를 확대/축소",
+    "vrZoomReset": "VR 확대/축소 초기화 (VR 영상이 열려 있지 않으면 화면 전체 확대/축소)",
     "speedDown": "재생 속도 낮추기",
     "speedUp": "재생 속도 높이기",
     "toggleInfo": "정보 오버레이 전환",
@@ -1846,7 +2377,6 @@
     "prevBookmark": "이전 북마크",
     "nextBookmark": "다음 북마크",
     "openFile": "파일 열기 (네이티브 대화상자)",
-    "backToLibrary": "플레이어에서 라이브러리로 돌아가기",
     "showHelp": "이 도움말 표시",
     "editorSelection": "선택 및 탐색",
     "editorEdit": "선택 항목 편집",
@@ -1858,6 +2388,7 @@
     "editorFastFrame": "빠른 프레임 이동 (구성 가능; 기본 6)",
     "editorSelectAll": "모두 선택",
     "editorSelectThird": "상단 / 중간 / 하단 3분의 1 선택",
+    "editorSelectCreated": "마지막 수정 작업이나 생성 기능이 만든 포인트만 선택",
     "editorClearSelection": "선택 해제 / 편집기 닫기",
     "editorNudgeCoarse": "위치 ±5 미세 조정 (큰 단위)",
     "editorNudgeFine": "위치 ±1 미세 조정 (작은 단위)",
@@ -1865,6 +2396,7 @@
     "editorMoveFrames": "시간상 동작 ±N 프레임 이동",
     "editorDelete": "선택 항목 삭제",
     "editorInvert": "위치 반전",
+    "editorFillPattern": "선택 영역을 패턴으로 채우기",
     "editorPlaceNumpad": "0 / 10 / 20 / … / 90 에 액션 배치",
     "editorPlaceTop": "100 (최상단) 에 액션 배치",
     "editorInsertAtClick": "클릭 위치에 동작 삽입",
@@ -1881,13 +2413,16 @@
     "editorZoom": "확대 / 축소",
     "editorAlternatingInsert": "교대 삽입 (이전 위치 반전)",
     "editorRepeatLastStroke": "마지막 두 액션 스트로크 반복",
-    "editorBookmarkNav": "다음/이전 북마크로 이동",
+    "editorBookmarkNav": "이전/다음 북마크로 이동",
     "editorMultiBand": "다중 대역 파형 전환 (저/중/고)",
     "editorVAD": "음성 활동 트랙 전환",
     "editorSpeedStep": "재생 속도 낮추기/높이기",
     "editorSelectLeftRightOfCursor": "재생 헤드 앞/뒤 모두 선택",
     "editorEqualize": "균등화 — 중간 액션을 시간상 균등 재배치",
-    "editorMoveToPlayhead": "단일 선택 액션을 재생 헤드로 이동"
+    "editorMoveToPlayhead": "단일 선택 액션을 재생 헤드로 이동",
+    "edgeHoldPattern": "엣지 홀드 — 엣지 패턴 재생, 영상은 계속",
+    "edgeHoldPatternToggle": "엣지 홀드(전환) — 엣지 패턴 재생, 영상은 계속",
+    "videoOptions": "동영상 옵션 (포커스된 카드에서)"
   },
   "orgasmConfig": {
     "title": "오르가즘 스위치 설정",
@@ -1932,6 +2467,870 @@
       "activity": "활동",
       "objects": "사물",
       "travel": "여행과 장소"
+    }
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "space": "스페이스",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "insert": "Insert",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down",
+    "printScreen": "Print Screen",
+    "escape": "Esc",
+    "arrowLeft": "왼쪽 화살표",
+    "arrowRight": "오른쪽 화살표",
+    "arrowUp": "위쪽 화살표",
+    "arrowDown": "아래쪽 화살표",
+    "arrows": "화살표 키",
+    "mediaPlayPause": "재생/일시정지",
+    "mediaNext": "다음 트랙",
+    "mediaPrevious": "이전 트랙",
+    "mediaStop": "정지",
+    "volumeUp": "볼륨 크게",
+    "volumeDown": "볼륨 작게",
+    "volumeMute": "음소거",
+    "scroll": "휠",
+    "click": "클릭",
+    "dragPoint": "포인트 드래그",
+    "numpad": "숫자패드 {key}"
+  },
+  "patterns": {
+    "family": {
+      "full-strokes": {
+        "name": "풀·하프 스트로크",
+        "desc": "전체 길이나 가운데를 오가는 단순한 스트로크. 한 번씩, 두 번씩, 세 번씩."
+      },
+      "tip-work": {
+        "name": "끝부분 위주",
+        "desc": "끝부분에서 깊이 들어가지 않는 스트로크와 짧은 튕김."
+      },
+      "base-grind": {
+        "name": "뿌리 쪽과 그라인드",
+        "desc": "뿌리 쪽에서 깊게 머무는 스트로크와 좁게 비비는 움직임."
+      },
+      "buzz": {
+        "name": "진동",
+        "desc": "단독으로 또는 스트로크 위에 얹힌 빠른 진동."
+      },
+      "climbs": {
+        "name": "오르기와 사다리",
+        "desc": "진행하면서 길이를 따라 위나 아래로 옮겨 가는 스트로크."
+      },
+      "holds": {
+        "name": "멈춤과 내려앉기",
+        "desc": "위, 아래, 중간에서의 멈춤과 멈추기 전의 짧은 내려앉기."
+      },
+      "waves": {
+        "name": "물결과 너울",
+        "desc": "진행하면서 커지거나 잦아들거나 빨라지거나 느려지는 스트로크."
+      },
+      "stutters": {
+        "name": "끊김과 덜컹임",
+        "desc": "도중에 걸리거나 멈추거나 살짝 되튀는 스트로크."
+      },
+      "endings": {
+        "name": "마무리",
+        "desc": "끝내는 방법: 마지막으로 아래까지 한 번, 감속, 스프린트, 급강하 또는 진동."
+      },
+      "flutters": {
+        "name": "잔떨림과 여진",
+        "desc": "방향이 바뀌는 곳에서 아주 빠르게 잔떨림이 이는 스트로크와, 뿌리 쪽에서 계속 진동하는 마무리."
+      },
+      "simple-shapes": {
+        "name": "단순한 파형",
+        "desc": "익숙한 생성 파형: 사인파, 삼각파, 톱니파, 사각파, 상승, 랜덤."
+      }
+    },
+    "quick-full-strokes": {
+      "name": "경쾌한 풀 스트로크",
+      "desc": "전체 길이를 쓰는 경쾌한 스트로크."
+    },
+    "uneven-long-strokes": {
+      "name": "불규칙한 롱 스트로크",
+      "desc": "가운데를 오가는 느긋한 긴 스트로크. 리듬과 깊이가 흔들려 똑같이 반복되지 않는다."
+    },
+    "full-strokes-slow-up-quick-down": {
+      "name": "풀 스트로크, 천천히 올리고 빠르게 내리기",
+      "desc": "전체 길이를 쓰는 일정한 스트로크. 올라갈 때는 천천히, 내려갈 때는 빠르게."
+    },
+    "frantic-long-strokes": {
+      "name": "최고 속도의 롱 스트로크",
+      "desc": "가운데를 오가는 전속력의 긴 스트로크."
+    },
+    "slow-long-strokes-top-linger": {
+      "name": "느린 롱 스트로크, 위에서 머물기",
+      "desc": "가운데를 오가는 느리고 신중한 긴 스트로크. 위에서 잠시 머문다."
+    },
+    "full-strokes-long-short-top": {
+      "name": "풀 스트로크, 위에서 길게·짧게",
+      "desc": "전체 길이를 쓰는 일정한 스트로크: 긴 한 번, 그다음 절반쯤 깊이로 바닥 전에 돌아오는 한 번."
+    },
+    "long-strokes-long-short-top": {
+      "name": "롱 스트로크, 위에서 길게·짧게",
+      "desc": "가운데를 오가는 일정한 긴 스트로크: 긴 한 번, 그다음 조금 짧게 바닥 전에 돌아오는 한 번."
+    },
+    "slow-full-strokes-slow-up-quick-down": {
+      "name": "느린 풀 스트로크, 천천히 올리고 빠르게 내리기",
+      "desc": "전체 길이를 쓰는 느리고 신중한 스트로크. 천천히 올리고 빠르게 내리며 위에서 머문다."
+    },
+    "fast-full-stroke-pairs": {
+      "name": "빠른 풀 스트로크 두 번씩",
+      "desc": "전체 길이를 쓰는 빠른 스트로크를 두 번씩. 두 번째는 첫 번째보다 조금 일찍 돌아온다."
+    },
+    "fast-full-strokes-bottom-bump": {
+      "name": "빠른 풀 스트로크, 아래에서 톡",
+      "desc": "전체 길이를 쓰는 빠른 스트로크. 긴 스트로크마다 아래에서 작게 톡 튄다."
+    },
+    "slow-full-strokes-slow-quick": {
+      "name": "느린 풀 스트로크, 느리게·빠르게",
+      "desc": "전체 길이를 쓰는 느리고 신중한 스트로크: 더 느린 한 번, 그다음 더 빠른 한 번."
+    },
+    "quick-full-strokes-threes": {
+      "name": "경쾌한 풀 스트로크 세 번씩",
+      "desc": "전체 길이를 쓰는 경쾌한 스트로크를 세 번 주기로. 거의 일반 스트로크처럼 느껴진다."
+    },
+    "uneven-tip-strokes": {
+      "name": "불규칙한 끝부분 스트로크",
+      "desc": "끝부분에서 느긋한 짧은 스트로크. 리듬과 깊이가 흔들려 똑같이 반복되지 않는다."
+    },
+    "fast-tip-flicks": {
+      "name": "끝부분 빠른 튕김",
+      "desc": "끝부분에서 빠르고 작게 튕기며, 깊이 들어가지 않는다."
+    },
+    "slow-tip-strokes": {
+      "name": "느린 끝부분 스트로크",
+      "desc": "끝부분 주변의 느리고 신중한 긴 스트로크. 깊이 들어가지 않는다."
+    },
+    "tip-strokes-slow-up-quick-down": {
+      "name": "끝부분 스트로크, 천천히 올리고 빠르게 내리기",
+      "desc": "끝부분에서 일정한 하프 스트로크. 천천히 올리고 빠르게 내린다."
+    },
+    "quick-tip-strokes-long-short-high": {
+      "name": "경쾌한 끝부분 스트로크, 길게·짧게, 높게",
+      "desc": "끝부분 높은 곳에서 경쾌한 하프 스트로크: 긴 한 번, 그다음 절반쯤 깊이의 한 번."
+    },
+    "frantic-tip-strokes": {
+      "name": "최고 속도의 끝부분 스트로크",
+      "desc": "끝부분에서 전속력의 하프 스트로크."
+    },
+    "tip-strokes-long-short": {
+      "name": "끝부분 스트로크, 길게·짧게",
+      "desc": "끝부분에서 일정한 하프 스트로크: 긴 한 번, 그다음 절반쯤 깊이의 한 번."
+    },
+    "quick-tip-strokes-long-short-low": {
+      "name": "경쾌한 끝부분 스트로크, 길게·짧게, 낮게",
+      "desc": "더 아래까지 닿는 끝부분 주변의 경쾌한 긴 스트로크: 긴 한 번, 그다음 짧은 한 번."
+    },
+    "tip-strokes-slow-quick": {
+      "name": "끝부분 스트로크, 느리게·빠르게",
+      "desc": "끝부분에서 일정한 하프 스트로크: 더 느린 한 번, 그다음 훨씬 빠른 한 번."
+    },
+    "frantic-tip-strokes-top-dip": {
+      "name": "최고 속도의 끝부분 스트로크, 위에서 살짝 내려앉기",
+      "desc": "끝부분에서 전속력의 하프 스트로크. 긴 스트로크마다 위에서 살짝 내려앉는다."
+    },
+    "fast-base-strokes": {
+      "name": "빠른 뿌리 쪽 스트로크",
+      "desc": "뿌리 쪽 아래에서 깊게 머무는 빠른 하프 스트로크."
+    },
+    "uneven-base-strokes": {
+      "name": "불규칙한 뿌리 쪽 스트로크",
+      "desc": "뿌리 쪽에서 경쾌한 짧은 스트로크. 리듬과 깊이가 흔들려 똑같이 반복되지 않는다."
+    },
+    "slow-base-grind": {
+      "name": "느린 뿌리 쪽 그라인드",
+      "desc": "뿌리 쪽 맨 아래에서 느리고 좁게 비비기. 천천히 올리고 빠르게 내린다."
+    },
+    "base-strokes-slow-up-quick-down": {
+      "name": "뿌리 쪽 스트로크, 천천히 올리고 빠르게 내리기",
+      "desc": "뿌리 쪽에서 경쾌한 하프 스트로크. 천천히 올리고 빠르게 내린다."
+    },
+    "fast-base-strokes-long-short": {
+      "name": "빠른 뿌리 쪽 스트로크, 길게·짧게",
+      "desc": "뿌리 쪽에서 빠른 하프 스트로크: 긴 한 번, 그다음 꼭대기 전에 돌아오는 짧은 한 번."
+    },
+    "frantic-base-grind": {
+      "name": "최고 속도의 뿌리 쪽 그라인드",
+      "desc": "뿌리 쪽 맨 아래에서 전속력으로 좁게 비비기. 천천히 올리고 빠르게 내린다."
+    },
+    "base-strokes-high-low": {
+      "name": "뿌리 쪽 스트로크, 높게·낮게",
+      "desc": "뿌리 쪽에서 경쾌한 하프 스트로크: 한 번은 높이, 다음은 낮게."
+    },
+    "frantic-base-strokes-bottom-bump": {
+      "name": "최고 속도의 뿌리 쪽 스트로크, 아래에서 톡",
+      "desc": "뿌리 쪽에서 전속력의 하프 스트로크. 긴 스트로크마다 아래에서 작게 톡 튄다."
+    },
+    "buzz-uneven-short-base-strokes": {
+      "name": "불규칙한 짧은 뿌리 쪽 스트로크에 진동",
+      "desc": "뿌리 쪽에서 불규칙하고 경쾌한 짧은 스트로크. 대부분에 진동이 얹힌다."
+    },
+    "buzz-uneven-half-base-strokes": {
+      "name": "불규칙한 뿌리 쪽 하프 스트로크에 진동",
+      "desc": "뿌리 쪽에서 불규칙하고 차분한 하프 스트로크. 대부분에 진동이 얹힌다."
+    },
+    "buzz-uneven-long-strokes": {
+      "name": "불규칙한 롱 스트로크에 진동",
+      "desc": "가운데를 오가는 불규칙하고 빠른 긴 스트로크. 대부분에 진동이 얹힌다."
+    },
+    "steady-buzz-base": {
+      "name": "뿌리 쪽의 일정한 진동",
+      "desc": "뿌리 쪽에서 제자리에 머무는 진동. 그 아래에 제대로 된 스트로크는 없다."
+    },
+    "buzz-long-strokes": {
+      "name": "롱 스트로크에 진동",
+      "desc": "가운데를 오가는 일정한 긴 스트로크 위에 진동을 얹은 것."
+    },
+    "steady-buzz-tip-high": {
+      "name": "끝부분의 일정한 진동, 높게",
+      "desc": "끝부분 높은 곳에서 제자리에 머무는 진동. 그 아래에 제대로 된 스트로크는 없다."
+    },
+    "buzz-frantic-base-strokes": {
+      "name": "최고 속도의 뿌리 쪽 스트로크에 진동",
+      "desc": "뿌리 쪽에서 불규칙한 전속력의 짧은 스트로크. 대부분에 진동이 얹힌다."
+    },
+    "buzz-uneven-tip-strokes": {
+      "name": "불규칙한 끝부분 스트로크에 진동",
+      "desc": "끝부분에서 불규칙하고 차분한 하프 스트로크. 대부분에 진동이 얹힌다."
+    },
+    "buzz-tiny-base-strokes": {
+      "name": "아주 작은 뿌리 쪽 스트로크에 진동",
+      "desc": "뿌리 쪽에서 아주 작은 전속력 스트로크 위에 진동을 얹은 것."
+    },
+    "steady-buzz-tip-low": {
+      "name": "끝부분의 일정한 진동, 낮게",
+      "desc": "끝부분 낮은 곳에서 제자리에 머무는 진동. 그 아래에 제대로 된 스트로크는 없다."
+    },
+    "buzz-short-tip-strokes": {
+      "name": "짧은 끝부분 스트로크에 진동",
+      "desc": "끝부분에서 짧은 전속력 스트로크 위에 진동을 얹은 것."
+    },
+    "climbing-long-strokes": {
+      "name": "올라가는 롱 스트로크",
+      "desc": "중간에서 시작해 점점 끝부분 쪽으로 올라가는 빠른 긴 스트로크."
+    },
+    "sinking-full-strokes": {
+      "name": "내려가는 풀 스트로크",
+      "desc": "중간에서 시작해 점점 뿌리 쪽으로 내려가는 느린 스트로크."
+    },
+    "climbing-half-strokes-from-low": {
+      "name": "아래에서 올라가는 하프 스트로크",
+      "desc": "낮은 곳에서 시작해 점점 끝부분 쪽으로 올라가는 전속력 하프 스트로크."
+    },
+    "ladder-stepping-up": {
+      "name": "사다리, 한 칸씩 위로",
+      "desc": "아래 끝이 매번 한 칸씩 올라가다가 다시 처음부터 시작하는 일정한 스트로크."
+    },
+    "pause-at-top": {
+      "name": "위에서 멈춤",
+      "desc": "올라와서 끝부분 근처에서 약 2초 기다린 뒤 다시 내려간다."
+    },
+    "pause-at-bottom": {
+      "name": "아래에서 멈춤",
+      "desc": "뿌리 쪽 맨 아래에서 약 2초 쉰 뒤 다음 스트로크로 올라간다."
+    },
+    "pause-halfway": {
+      "name": "중간에서 멈춤",
+      "desc": "스트로크 도중에 약 2초 멈췄다가 계속한다."
+    },
+    "dip-climb-hold-top": {
+      "name": "내려앉고, 올라가서, 위에서 멈춤",
+      "desc": "한 번 내려앉고, 끝부분까지 천천히 올라간 뒤, 2초 정도 기다린다."
+    },
+    "fading-long-strokes-bottoms-rising": {
+      "name": "잦아드는 롱 스트로크, 바닥이 올라감",
+      "desc": "바닥이 올라가면서 점점 짧고 빨라지는 경쾌한 긴 스트로크."
+    },
+    "swelling-long-strokes-deeper": {
+      "name": "커지는 롱 스트로크, 더 깊게",
+      "desc": "더 깊이 닿으면서 점점 길어지는 일정한 긴 스트로크."
+    },
+    "slowing-full-strokes": {
+      "name": "느려지는 풀 스트로크",
+      "desc": "전체 길이를 쓰는 일정한 스트로크가 점점 느려진다."
+    },
+    "swelling-long-strokes-higher": {
+      "name": "커지는 롱 스트로크, 더 높게",
+      "desc": "더 높이 닿으면서 점점 길어지는 경쾌한 긴 스트로크."
+    },
+    "fading-long-strokes-tops-falling": {
+      "name": "잦아드는 롱 스트로크, 꼭대기가 내려감",
+      "desc": "꼭대기가 내려가면서 점점 짧고 빨라지는 경쾌한 긴 스트로크."
+    },
+    "speeding-up-low-strokes": {
+      "name": "빨라지는 낮은 스트로크",
+      "desc": "낮은 곳에서 경쾌한 긴 스트로크가 점점 빨라진다. 천천히 올리고 빠르게 내린다."
+    },
+    "fading-half-strokes-tops-falling": {
+      "name": "잦아드는 하프 스트로크, 꼭대기가 내려감",
+      "desc": "꼭대기가 내려가면서 점점 짧아지는 뿌리 쪽의 빠른 하프 스트로크."
+    },
+    "fading-tip-strokes-bottoms-rising": {
+      "name": "잦아드는 끝부분 스트로크, 바닥이 올라감",
+      "desc": "바닥이 올라가면서 점점 짧고 빨라지는 끝부분의 일정한 하프 스트로크."
+    },
+    "stuttering-middle-strokes": {
+      "name": "가운데에서 끊기는 스트로크",
+      "desc": "가운데를 오가는 일정한 하프 스트로크. 자꾸 걸리며 살짝 되튄다."
+    },
+    "stuttering-tip-strokes": {
+      "name": "끝부분에서 끊기는 스트로크",
+      "desc": "끝부분에서 일정한 하프 스트로크. 자꾸 걸리며 살짝 되튄다."
+    },
+    "stuttering-base-strokes": {
+      "name": "뿌리 쪽에서 끊기는 스트로크",
+      "desc": "뿌리 쪽에서 경쾌한 짧은 스트로크. 자꾸 걸리며 살짝 되튄다."
+    },
+    "mixed-flutters-tip": {
+      "name": "끝부분의 섞인 잔떨림",
+      "desc": "끝부분에서 작은 잔떨림과 더 크고 느린 움직임이 섞인다. 부드럽고 결코 규칙적이지 않다."
+    },
+    "long-strokes-catch-up": {
+      "name": "롱 스트로크, 올라가며 걸림",
+      "desc": "올라가는 도중에 살짝 미끄러져 내려왔다가 꼭대기까지 계속하는 일정한 긴 스트로크."
+    },
+    "full-strokes-stall-down": {
+      "name": "풀 스트로크, 내려가며 멈칫",
+      "desc": "내려가는 도중에 잠깐 멈추는, 전체 길이를 쓰는 경쾌한 스트로크."
+    },
+    "fast-full-strokes-catch-up": {
+      "name": "빠른 풀 스트로크, 올라가며 걸림",
+      "desc": "올라가는 도중에 살짝 미끄러지는, 전체 길이를 쓰는 빠른 스트로크. 천천히 올리고 빠르게 내린다."
+    },
+    "half-strokes-catch-down": {
+      "name": "하프 스트로크, 내려가며 걸림",
+      "desc": "내려가는 도중에 살짝 위로 튀는, 끝부분의 일정한 하프 스트로크."
+    },
+    "long-strokes-stall-up": {
+      "name": "롱 스트로크, 올라가며 멈칫",
+      "desc": "올라가는 도중에 잠깐 멈추는 일정한 긴 스트로크: 느린 한 번, 그다음 빠른 한 번."
+    },
+    "last-stroke-then-still": {
+      "name": "마지막으로 아래까지, 그리고 정지",
+      "desc": "스트로크가 멈춘다: 마지막으로 맨 아래까지 내려가 그대로 머문다."
+    },
+    "slow-down-finish": {
+      "name": "감속하며 마무리",
+      "desc": "스트로크는 계속되지만 점점 느려지다가 멈춘다."
+    },
+    "sprint-finish": {
+      "name": "끝까지 스프린트",
+      "desc": "이전보다 빠르게, 끝까지 유지한 뒤 멈춘다."
+    },
+    "plunge-finish": {
+      "name": "급강하",
+      "desc": "높은 곳에서 맨 아래까지 마지막으로 빠르게 떨어져 그대로 머문다."
+    },
+    "buzz-finish": {
+      "name": "진동으로 마무리",
+      "desc": "마지막 구간이 스트로크 대신 대부분 진동이 된다."
+    },
+    "finishing-fast-strokes-long-short": {
+      "name": "마무리 빠른 스트로크, 길게·짧게",
+      "desc": "전체 길이를 쓰는 빠른 스트로크: 긴 한 번, 그다음 짧은 한 번. 천천히 올리고 빠르게 내린다."
+    },
+    "full-strokes-base-flutter": {
+      "name": "풀 스트로크, 뿌리 쪽에서 잔떨림",
+      "desc": "바닥까지 닿는 큰 스트로크. 그곳에서 잠깐 잔떨림 후 곧장 다시 올라간다."
+    },
+    "drop-buzzing-aftershocks": {
+      "name": "떨어진 뒤 진동하는 여진",
+      "desc": "스트로크가 바닥까지 내려와 그곳에서 몇 초간 진동하며 움찔거린다."
+    },
+    "fast-strokes-flutter-both-ends": {
+      "name": "빠른 스트로크, 양 끝에서 잔떨림",
+      "desc": "위에서 잔떨림, 아래로 쏜살같이, 아래에서 잔떨림, 다시 쏜살같이 올라가는 경쾌한 스트로크."
+    },
+    "fast-full-strokes-long-short-bottom": {
+      "name": "빠른 풀 스트로크, 아래에서 길게·짧게",
+      "desc": "전체 길이를 쓰는 빠른 스트로크: 긴 한 번, 그다음 절반쯤 깊이로 꼭대기 전에 돌아오는 한 번."
+    },
+    "frantic-base-strokes-long-short": {
+      "name": "최고 속도의 뿌리 쪽 스트로크, 길게·짧게",
+      "desc": "뿌리 쪽에서 전속력의 긴 스트로크: 긴 한 번, 그다음 꼭대기 전에 돌아오는 짧은 한 번."
+    },
+    "full-strokes-bottom-linger": {
+      "name": "풀 스트로크, 아래에서 머물기",
+      "desc": "전체 길이를 쓰는 일정한 스트로크. 아래에서 잠시 머문다."
+    },
+    "ui": {
+      "pattern": "패턴",
+      "family": "그룹",
+      "allFamilies": "모든 그룹",
+      "choose": "선택…",
+      "pickerTitle": "패턴 선택",
+      "search": "패턴 검색",
+      "noMatch": "일치하는 패턴이 없습니다.",
+      "speed": "속도",
+      "speedValue": "초당 {speed} 유닛",
+      "reverse": "반전",
+      "range": "범위",
+      "rangeOwn": "패턴 고유 범위",
+      "rangeMin": "최소",
+      "rangeMax": "최대",
+      "reset": "패턴 고유 속도로 되돌리기",
+      "speedLimited": "초당 {max} 유닛으로 제한됨",
+      "tooShort": "이 패턴에는 너무 짧습니다.",
+      "choosePattern": "패턴 선택…",
+      "oneShotName": "{name} (한 번 재생 후 유지)",
+      "oneShotHint": "마무리: 키를 누른 순간부터 한 번 재생되고, 키를 뗄 때까지 마지막 위치를 유지합니다."
+    },
+    "shape-sine": {
+      "name": "사인파",
+      "desc": "방향을 바꿀 때마다 부드럽게 감속하는 고르고 매끄러운 스트로크."
+    },
+    "shape-triangle": {
+      "name": "삼각파",
+      "desc": "일정한 속도의 고른 스트로크로, 양 끝에서 날카롭게 방향을 바꿉니다."
+    },
+    "shape-sawtooth": {
+      "name": "톱니파",
+      "desc": "일정하게 올라간 뒤 순간적으로 맨 아래로 떨어집니다."
+    },
+    "shape-square": {
+      "name": "사각파",
+      "desc": "위와 아래에서 멈추고, 그 사이를 빠르게 이동합니다."
+    },
+    "shape-escalating": {
+      "name": "상승",
+      "desc": "얕게 시작해 전체 범위를 쓸 때까지 점점 깊어지는 스트로크."
+    },
+    "shape-random": {
+      "name": "랜덤",
+      "desc": "반 스트로크마다 새로운 무작위 깊이로 움직이는 스트로크."
+    }
+  },
+  "videoOptions": {
+    "openAria": "{name} 옵션",
+    "openTitle": "동영상 옵션 (Alt+Enter)",
+    "railAria": "동영상 옵션 섹션",
+    "rail": {
+      "organise": "정리",
+      "tags": "태그",
+      "script": "스크립트",
+      "subtitles": "자막",
+      "playback": "재생",
+      "thumbnail": "썸네일",
+      "vr": "VR",
+      "file": "파일"
+    },
+    "header": {
+      "script": "스크립트: {how}",
+      "vrAuto": "VR (자동)",
+      "vrYours": "VR (직접 설정)",
+      "flatYours": "평면 (직접 설정)"
+    },
+    "organise": {
+      "libraries": "라이브러리",
+      "noPlaylists": "아직 재생 목록이 없습니다.",
+      "noCategories": "아직 카테고리가 없습니다.",
+      "newPlaylist": "새 재생 목록…",
+      "newCategory": "새 카테고리…",
+      "synced": "(소스와 동기화됨)"
+    },
+    "tags": {
+      "heading": "이 동영상의 태그 ({count})",
+      "empty": "이 동영상에는 아직 태그가 없습니다. 아래에서 추가하거나 EroScripts에서 게시물의 태그를 가져오세요.",
+      "noMatch": "‘{query}’와(과) 일치하는 태그가 없습니다.",
+      "filter": {
+        "placeholder": "태그 찾기…",
+        "label": "이 동영상의 태그 찾기"
+      },
+      "showAll": "모두 보기 ({count})",
+      "showFewer": "간단히 보기",
+      "removeAria": "이 동영상에서 {name} 제거",
+      "add": {
+        "placeholder": "태그 추가…",
+        "label": "이 동영상에 태그 추가",
+        "button": "추가",
+        "hint": "태그를 그룹에 넣으려면 그룹을 먼저 입력하세요 (예: device:the handy, performer:Jane Doe).",
+        "suggestionsAria": "추천 태그"
+      },
+      "sourcesHeading": "태그 출처",
+      "source": {
+        "post": "‘{title}’ - {creator}",
+        "postNoCreator": "‘{title}’",
+        "postId": "게시물 {id}",
+        "got": "{date}에 가져옴",
+        "stale": "EroScripts에서 삭제됨",
+        "fileRow": "스크립트 파일",
+        "tagCount": "{count, plural, other {태그 #개}}",
+        "notRead": "태그를 아직 가져오지 않음",
+        "stashRow": "{tags, plural, other {태그 #개}}, {performers, plural, other {출연자 #명}}, {studios, plural, other {스튜디오 #개}}",
+        "stashGone": "Stash에서 사라짐",
+        "stashHidden": "파일이 변경되어 다음 동기화까지 Stash 태그가 숨겨집니다"
+      },
+      "viewPost": "게시물 보기",
+      "pasteLink": "게시물 링크 붙여넣기…",
+      "findPost": "EroScripts에서 게시물 찾기…",
+      "paste": {
+        "title": "EroScripts 게시물 연결",
+        "label": "게시물 링크",
+        "hint": "게시물 주소를 붙여넣으세요 (예: https://discuss.eroscripts.com/t/scene-name/12345). 태그를 가져오기 전까지는 아무것도 보내지 않습니다.",
+        "invalid": "EroScripts 게시물 링크가 아닙니다. 링크는 https://discuss.eroscripts.com/t/ 로 시작합니다",
+        "ok": "연결"
+      },
+      "find": {
+        "title": "EroScripts에서 게시물 찾기",
+        "hint": "검색한 다음 이 동영상의 스크립트가 올라온 게시물을 고르세요. 아무것도 다운로드하지 않습니다.",
+        "prompt": "게시물 이름을 입력한 다음 검색하세요.",
+        "pick": "이 게시물 연결",
+        "pickAria": "게시물 ‘{title}’ 연결"
+      },
+      "hiddenHeading": "이 동영상에서 숨김 ({count})",
+      "showAgain": "다시 표시",
+      "showAgainAria": "이 동영상에서 {name} 다시 표시",
+      "undoAria": "실행 취소: {message}",
+      "menu": {
+        "aria": "태그 {name} 옵션",
+        "showVideos": "이 태그가 있는 동영상 보기",
+        "makeCategory": "이 태그로 카테고리 만들기…",
+        "remove": "이 동영상에서 제거"
+      },
+      "category": {
+        "title": "이 태그로 카테고리 만들기",
+        "nameLabel": "카테고리 이름",
+        "count": "{count, plural, =0 {라이브러리에 이 태그가 있는 동영상이 없습니다.} other {이 태그가 있는 동영상은 #개입니다.}}",
+        "exists": "{name} 카테고리가 이미 있습니다. 동영상이 그 카테고리에 추가됩니다.",
+        "create": "카테고리 만들기",
+        "addTo": "{name}에 추가",
+        "emptyName": "카테고리 이름을 입력하세요."
+      },
+      "live": {
+        "added": "{name}을(를) 추가했습니다.",
+        "addedShown": "{name}을(를) 추가했습니다. 이 동영상에서 다시 표시됩니다.",
+        "already": "{name}은(는) 이미 이 동영상에 있습니다.",
+        "removed": "이 동영상에서 {name}을(를) 제거했습니다.",
+        "shownAgain": "{name}이(가) 이 동영상에서 다시 표시됩니다.",
+        "undone": "실행 취소했습니다.",
+        "undoPartial": "실행 취소했습니다. 그 뒤에 한 변경은 유지됩니다.",
+        "linked": "게시물을 연결했습니다. 태그를 가져오기 전까지는 아무것도 보내지 않습니다.",
+        "categoryMade": "카테고리 {name}을(를) 만들었습니다 ({count, plural, other {동영상 #개}}).",
+        "categoryAdded": "{name}에 {count, plural, other {동영상 #개}}를 추가했습니다.",
+        "categoryNothing": "이 태그가 있는 동영상은 모두 이미 {name}에 있습니다.",
+        "categoryFailed": "카테고리를 만들 수 없습니다.",
+        "categoryRemoved": "실행 취소했습니다. 카테고리 {name}을(를) 삭제했습니다.",
+        "categoryUnassigned": "실행 취소했습니다. 동영상을 {name}에서 다시 뺐습니다.",
+        "reason": {
+          "empty": "먼저 태그를 입력하세요.",
+          "tooLong": "태그가 너무 깁니다 (최대 {max}자).",
+          "badStore": "이 동영상에 저장된 태그가 손상되어 아무것도 바꾸지 않았습니다.",
+          "noPath": "이 동영상에는 파일 경로가 없어 태그를 저장할 수 없습니다."
+        },
+        "postChanged": "게시물을 변경했습니다. 태그는 태그 가져오기를 누르면 들어옵니다.",
+        "samePost": "이미 이 동영상의 게시물입니다. 바뀐 것이 없습니다.",
+        "undoChangedSince": "실행 취소하지 않았습니다. 이 동영상의 게시물이 그 뒤에 다시 바뀌었습니다.",
+        "getTagsUndone": "실행 취소됨: 태그가 ‘태그 가져오기’ 전으로 돌아갔습니다.",
+        "getTagsUndoChanged": "실행 취소 안 됨: 이 동영상의 EroScripts 태그가 그 뒤에 다시 바뀌었습니다."
+      },
+      "fetch": {
+        "button": "EroScripts에서 태그 가져오기",
+        "loginButton": "로그인하여 태그 가져오기…",
+        "running": "태그를 가져오는 중…",
+        "success": "EroScripts에서 {count, plural, other {태그 #개}}를 가져왔습니다 (새 태그 {newCount}개).",
+        "successEmpty": "이 게시물에는 EroScripts 태그가 없습니다.",
+        "unknown": "EroScripts에서 이 게시물의 태그를 알려 주지 않았습니다.",
+        "gone": "이 게시물은 EroScripts에서 삭제되었습니다. 태그는 그대로 유지됩니다.",
+        "loginAgain": "EroScripts에 다시 로그인하세요",
+        "loginAction": "로그인…",
+        "loginRequired": "태그를 가져오려면 EroScripts에 로그인해야 합니다. 아무것도 보내지 않았습니다.",
+        "cooldown": "EroScripts에서 잠시 기다려 달라고 요청했습니다. {seconds}초 후에 다시 시도하세요",
+        "otherScript": "연결된 게시물은 다른 스크립트({name})용입니다",
+        "noPost": "이 동영상의 스크립트에 연결된 EroScripts 게시물이 없습니다",
+        "noScript": "이 동영상에는 스크립트가 없으므로 연결된 EroScripts 게시물이 없습니다.",
+        "superseded": "태그를 가져오는 동안 이 동영상의 게시물이 바뀌었습니다. 아무것도 저장되지 않았습니다.",
+        "hub": "이 게시물은 제작자의 스크립트 목록이며 이 동영상의 게시물이 아니므로 태그를 사용하지 않았습니다. 이 동영상의 게시물을 찾아 태그를 가져오세요.",
+        "hubNote": "이 스크립트는 이 동영상의 게시물이 아니라 제작자의 스크립트 목록에 연결되어 있습니다"
+      },
+      "changePost": "게시물 변경…",
+      "change": {
+        "title": "EroScripts 게시물 변경",
+        "message": "{post}의 태그는 지금부터 이 동영상에 표시되지 않습니다. 새 게시물의 태그는 태그 가져오기를 누르면 들어옵니다."
+      }
+    },
+    "script": {
+      "heading": "펀스크립트",
+      "none": "이 동영상에는 아직 스크립트가 없습니다.",
+      "change": "변경…",
+      "findOnEroScripts": "EroScripts에서 찾기…",
+      "fallback": "지금 {name}을(를) 읽을 수 없어 이 동영상은 그동안 자체 스크립트를 재생합니다. 연결은 유지됩니다.",
+      "modeHeading": "모드",
+      "modeSingle": "단일 스크립트",
+      "modeMulti": "다중 축 ({count, plural, other {#개 축}})",
+      "modeCustom": "사용자 정의 라우팅 ({count, plural, other {#개 경로}})",
+      "modeHint": "모드는 ‘변경…’에서 편집합니다.",
+      "slotsHeading": "저장된 연결",
+      "slot": {
+        "single": "단일 스크립트: {name}",
+        "multi": "다중 축 세트 ({count, plural, other {#개 축}})",
+        "plays": "사용 중",
+        "saved": "저장됨, 사용 안 함",
+        "unpairRemoves": "연결 해제 시 제거됨",
+        "unpairKeeps": "연결 해제 시 유지됨"
+      },
+      "playFirst": "먼저 재생",
+      "playFirstSet": "이제 {name}을(를) 먼저 재생합니다.",
+      "variation": {
+        "folder": "폴더에서",
+        "added": "직접 추가함",
+        "removeAria": "이 동영상의 변형에서 {name} 제거",
+        "removed": "변형에서 {name}을(를) 제거했습니다."
+      },
+      "addVariation": "변형 추가…",
+      "randomHint": "설정의 ‘무작위 스크립트 변형’이 켜져 있어 무작위로 재생됩니다. 이 선택은 끄면 적용됩니다.",
+      "embeddedHeading": "내장된 축",
+      "unpairHeading": "연결 해제",
+      "pairing": {
+        "none": "스크립트 없음",
+        "byName": "이름으로 연결됨",
+        "folder": "폴더의 첫 번째 스크립트",
+        "autoMulti": "이름으로 연결됨 (축 파일 포함)",
+        "single": "직접 선택함",
+        "multi": "다중 축, 직접 선택함",
+        "custom": "사용자 정의 라우팅, 직접 선택함"
+      },
+      "status": {
+        "missing": "스크립트를 찾을 수 없음",
+        "unknown": "지금은 스크립트를 확인할 수 없음"
+      },
+      "unpair": {
+        "byName": "파일 이름으로 연결되었습니다. 연결을 해제하려면 .funscript 파일의 이름을 바꾸거나 옮기세요.",
+        "autoMulti": "파일 이름으로 축 파일과 함께 연결되었습니다. 연결을 해제하려면 .funscript 파일의 이름을 바꾸거나 옮기세요.",
+        "folder": "이 동영상 폴더의 첫 번째 스크립트가 재생됩니다. 멈추려면 .funscript 파일을 다른 폴더로 옮기세요.",
+        "ownScript": "메인 스크립트는 이 동영상 자체의 스크립트입니다 (같은 파일 이름). 나머지는 ‘변경…’에서 편집하세요.",
+        "noMain": "이 연결에는 메인 스크립트가 없습니다. ‘변경…’에서 편집하세요.",
+        "confirmTitle": "펀스크립트 연결 해제",
+        "confirmQuestion": "{name}의 연결을 해제할까요? 파일은 디스크에 남아 있습니다.",
+        "nextOwn": "이 동영상은 자체 스크립트 {name}을(를) 사용합니다.",
+        "nextNone": "이 동영상에는 스크립트가 없게 됩니다.",
+        "confirmButton": "연결 해제",
+        "removesMulti": "직접 만든 다중 축 세트({count, plural, other {#개 축}})도 함께 제거됩니다.",
+        "removesCustom": "직접 만든 사용자 정의 라우팅({count, plural, other {#개 경로}})도 함께 제거됩니다.",
+        "keepsSingle": "유지됨: 저장한 단일 축 스크립트 {name}. ‘변경…’에서 다시 사용할 수 있습니다.",
+        "keepsMulti": "유지됨: 저장한 다중 축 세트({count, plural, other {#개 축}}). ‘변경…’에서 다시 사용할 수 있습니다.",
+        "keepsCustom": "유지됨: 저장한 사용자 정의 라우팅({count, plural, other {#개 경로}}). ‘변경…’에서 다시 사용할 수 있습니다.",
+        "done": "{name} 연결을 해제했습니다.",
+        "undone": "{name}을(를) 다시 연결했습니다.",
+        "undoChanged": "실행 취소할 수 없음: 이후 이 동영상의 스크립트가 변경되었습니다."
+      },
+      "removeSet": {
+        "multiTitle": "다중 축 세트 제거",
+        "customTitle": "사용자 정의 라우팅 제거",
+        "multiQuestion": "직접 만든 다중 축 세트({count, plural, other {#개 축}})를 제거할까요? 스크립트 파일은 디스크에 남아 있습니다.",
+        "customQuestion": "직접 만든 사용자 정의 라우팅({count, plural, other {#개 경로}})을 제거할까요? 스크립트 파일은 디스크에 남아 있습니다.",
+        "playsSame": "지금은 사용되지 않으므로 이 동영상이 재생하는 내용은 바뀌지 않습니다.",
+        "multiDone": "다중 축 세트를 제거했습니다.",
+        "customDone": "사용자 정의 라우팅을 제거했습니다.",
+        "multiUndone": "다중 축 세트를 되돌렸습니다.",
+        "customUndone": "사용자 정의 라우팅을 되돌렸습니다.",
+        "singleTitle": "저장된 단일 스크립트 제거",
+        "singleQuestion": "저장한 단일 스크립트 {name}을(를) 제거할까요? 파일은 디스크에 남아 있습니다.",
+        "singleDone": "저장된 연결에서 {name}을(를) 제거했습니다.",
+        "singleUndone": "{name}을(를) 다시 저장했습니다."
+      },
+      "locate": {
+        "aria": "스크립트를 찾을 수 없음: {name}의 현재 위치를 선택하세요",
+        "done": "이제 {name} 대신 {newName}을(를) 재생합니다.",
+        "undone": "다시 {name}(으)로 되돌렸습니다."
+      }
+    },
+    "subtitles": {
+      "heading": "자막",
+      "none": "이 동영상에는 자막이 없습니다.",
+      "byName": "파일 이름으로 연결되었습니다. 연결을 해제하려면 자막 파일의 이름을 바꾸거나 옮기세요."
+    },
+    "playback": {
+      "progressHeading": "진행 상황",
+      "watchedTo": "{duration} 중 {position}까지 시청 ({percent}%)",
+      "notStarted": "시작 안 함",
+      "progressReset": "진행 상황을 초기화했습니다."
+    },
+    "thumbnail": {
+      "auto": "동영상에서 생성됨",
+      "frame": "직접 고른 프레임",
+      "image": "직접 올린 이미지"
+    },
+    "vr": {
+      "legend": "이 동영상 유형",
+      "auto": "자동 (감지: {detected, select, vr {VR} other {평면}})",
+      "vr": "VR",
+      "flat": "평면",
+      "formatAuto": "파일에서 감지됨"
+    },
+    "file": {
+      "path": "경로",
+      "folder": "폴더",
+      "size": "크기",
+      "source": "소스",
+      "unknown": "알 수 없음",
+      "copyPath": "경로 복사",
+      "copied": "경로를 복사했습니다.",
+      "copyFailed": "경로를 복사할 수 없습니다."
+    },
+    "live": {
+      "addedTo": "{name}에 추가했습니다.",
+      "removedFrom": "{name}에서 제거했습니다.",
+      "undone": "실행 취소했습니다.",
+      "undoGone": "실행 취소할 수 없음: 그사이 삭제되었습니다.",
+      "undoChanged": "실행 취소할 수 없음: 그사이 변경되었습니다."
+    },
+    "stash": {
+      "heading": "Stash",
+      "sceneTitle": "‘{title}’",
+      "untitled": "장면 {id}",
+      "studioOf": "{studio} ({parent})",
+      "code": "코드 {code}",
+      "rated": "평점 {rating}/100",
+      "organised": "정리됨",
+      "director": "감독: {name}",
+      "markerCount": "{count, plural, other {마커 #개}}",
+      "by": {
+        "oshash": "파일 지문으로 일치",
+        "chosen": "직접 선택함",
+        "manual": "직접 연결함"
+      },
+      "synced": "{date}에 동기화",
+      "verify": "이동됨. 다음 동기화 때 다시 확인합니다",
+      "performers": "출연자",
+      "markers": "마커",
+      "moreMarkers": "{count, plural, other {외 #개}}",
+      "urls": "링크",
+      "copyUrl": "복사",
+      "copyUrlAria": "{url} 복사",
+      "urlCopied": "링크를 복사했습니다.",
+      "urlCopyFailed": "링크를 복사하지 못했습니다.",
+      "showDescription": "설명 보기",
+      "copy": "라이브러리의 다른 파일도 같은 동영상입니다: {path}",
+      "open": "Stash에서 열기",
+      "openAria": "Stash에서 열기(브라우저가 열립니다)",
+      "syncVideo": "이 동영상 동기화",
+      "syncing": "동기화 중…",
+      "notThis": "이 장면이 아님…",
+      "unlink": "연결 해제",
+      "find": "Stash에서 찾기…",
+      "notSynced": "FunSync가 아직 Stash와 동기화하지 않았습니다.",
+      "notFound": "Stash에서 찾을 수 없습니다.",
+      "changed": "이 파일은 일치된 후 변경되었습니다. 다음 동기화까지 Stash 데이터가 숨겨집니다.",
+      "gone": "이 장면은 Stash에서 사라졌습니다. 데이터는 유지됩니다.",
+      "refused": "이 파일은 {name}이(가) 아니라고 지정했습니다.",
+      "refusedSome": "{count, plural, other {이 파일은 제안된 Stash 장면 #개 중 어느 것도 아니라고 지정했습니다.}}",
+      "otherServer": "다른 Stash({address})의 데이터입니다.",
+      "check": {
+        "several": "{count, plural, other {Stash 장면 #개에 이 파일과 똑같은 파일이 있습니다.}} 어느 것인가요?",
+        "pathChanged": "Stash에 이 경로의 파일이 있지만 같은 파일이 아닙니다. Stash가 마지막으로 스캔한 후 변경되었습니다.",
+        "keptLink": "현재 연결: {name}.",
+        "legend": "어느 Stash 장면인가요?",
+        "use": "이 장면 사용",
+        "none": "해당 없음",
+        "useAnyway": "그래도 사용",
+        "ignore": "무시",
+        "durationDiff": "길이가 {seconds}초 다릅니다"
+      },
+      "notThisConfirm": {
+        "title": "이 장면이 아닌가요?",
+        "message": "FunSync는 이 동영상과 {name}의 연결을 해제하고 이 파일을 다시 연결하지 않습니다. Stash에서는 아무것도 바뀌지 않습니다.",
+        "button": "이 장면이 아님"
+      },
+      "live": {
+        "syncing": "이 동영상을 Stash와 동기화하는 중…",
+        "synced": "Stash와 동기화했습니다.",
+        "syncedLinked": "동기화했습니다. 이 동영상은 Stash의 {name}입니다.",
+        "syncedCheck": "동기화했습니다. 이 동영상이 어떤 장면인지 정할 수 없었습니다. 아래에서 선택하세요.",
+        "syncedNotFound": "동기화했습니다. 이 동영상은 Stash에서 찾을 수 없습니다.",
+        "syncedGone": "동기화했습니다. {name}은(는) Stash에서 사라졌습니다. 데이터는 유지됩니다.",
+        "syncedChanged": "동기화했습니다. 이 파일은 여전히 일치된 파일과 다릅니다. Stash 데이터는 계속 숨겨집니다.",
+        "relinked": "이 파일은 이제 {name}에 연결되었습니다.",
+        "linked": "이 동영상을 {name}에 연결했습니다.",
+        "unlinked": "이 동영상과 {name}의 연결을 해제했습니다.",
+        "noneOfThese": "이 장면들은 이 파일에 다시 제안되지 않습니다.",
+        "ignored": "그 Stash 장면은 이 파일에 다시 제안되지 않습니다.",
+        "undoFailed": "실행 취소할 수 없습니다: FunSync가 Stash 데이터를 변경하지 못했습니다.",
+        "refusedLinkChanged": "현재 {name}에 연결되어 있으며, 그 연결은 그대로 두었습니다."
+      },
+      "error": {
+        "fileOffline": "FunSync가 이 동영상 파일을 읽지 못했습니다(드라이브가 오프라인일 수 있습니다). 아무것도 변경되지 않았습니다.",
+        "busy": "이미 Stash와 동기화 중입니다. 끝난 후 다시 시도하세요.",
+        "cancelled": "중지했습니다. 아무것도 변경되지 않았습니다.",
+        "changedMeanwhile": "그사이 이 동영상의 Stash 데이터가 바뀌었습니다. 아무것도 변경되지 않았습니다.",
+        "saveFailed": "FunSync가 Stash 데이터를 저장하지 못했습니다. 아무것도 변경되지 않았습니다.",
+        "generic": "Stash에 요청하지 못했습니다. 아무것도 변경되지 않았습니다."
+      },
+      "sceneChanged": "이 ID의 Stash 장면에 더 이상 이 파일이 없습니다(Stash가 초기화되었거나 다시 스캔되었을 수 있습니다). 해당 데이터는 숨겨집니다. 연결을 해제하거나 'Stash에서 찾기…'로 다시 연결하세요.",
+      "plays": "재생 횟수",
+      "lastPlayed": "마지막 재생",
+      "lastPlayedNever": "없음",
+      "oCount": "O 카운트"
+    }
+  },
+  "tags": {
+    "facet": {
+      "vr": "VR",
+      "display": "디스플레이",
+      "length": "길이",
+      "device": "기기",
+      "axis": "축",
+      "scriptType": "스크립트 유형",
+      "sexuality": "섹슈얼리티",
+      "threesome": "쓰리섬",
+      "content": "내용",
+      "performer": "출연자",
+      "creator": "제작자",
+      "studio": "스튜디오"
+    },
+    "lengthMinutes": "{range}분",
+    "source": {
+      "user": "나",
+      "stash": "Stash",
+      "stashbox": "StashDB",
+      "funscript": "파일",
+      "eroscripts": "EroScripts"
+    }
+  },
+  "stash": {
+    "error": {
+      "unreachable": "{address}의 Stash에 연결할 수 없습니다. Stash가 실행 중인가요?",
+      "timeout": "Stash가 제시간에 응답하지 않았습니다.",
+      "badKey": "Stash가 API 키를 거부했습니다. Stash에 비밀번호가 없다면 키를 제거하세요.",
+      "needsKey": "이 Stash에는 비밀번호가 있습니다. API 키를 붙여 넣으세요 (Stash: Settings > Security).",
+      "forbidden": "Stash가 이 컴퓨터를 거부했습니다. Stash에서 비밀번호를 설정하고 API 키를 붙여 넣으세요.",
+      "tooOld": "이 Stash({version})는 너무 오래되었습니다. FunSync에는 v{minVersion} 이상이 필요합니다.",
+      "tooOldNoVersion": "이 Stash는 너무 오래되었습니다. FunSync에는 v{minVersion} 이상이 필요합니다.",
+      "notStash": "이 주소에서 응답했지만 Stash가 아닙니다.",
+      "redirect": "Stash가 FunSync를 다른 주소로 보냈지만 FunSync는 따라가지 않습니다. 주소를 확인하세요.",
+      "certificate": "이 컴퓨터는 Stash의 https 인증서를 신뢰하지 않습니다. 주소를 확인하세요.",
+      "graphql": "Stash가 FunSync의 요청에 응답하지 못했습니다.",
+      "http": "Stash가 오류로 응답했습니다 (HTTP {status}).",
+      "tooLarge": "Stash의 응답이 너무 커서 읽을 수 없습니다.",
+      "cancelled": "취소했습니다.",
+      "badAddress": "http:// 또는 https://로 시작하는 주소를 입력하세요 (예: http://127.0.0.1:9999).",
+      "badInput": "FunSync가 해당 요청을 Stash에 보낼 수 없습니다.",
+      "invalidKey": "Stash API 키가 아닙니다. Stash의 Settings > Security > API Key에서 복사하세요.",
+      "writeFailed": "FunSync가 API 키를 저장하지 못했습니다. FunSync를 닫을 때까지 유지됩니다.",
+      "removeFailed": "FunSync가 저장된 API 키 파일을 제거하지 못했습니다.",
+      "keyUnreadable": "저장된 API 키를 이 컴퓨터에서 읽을 수 없습니다. 다시 붙여 넣으세요."
+    },
+    "picker": {
+      "title": "Stash에서 찾기",
+      "label": "내 Stash 검색",
+      "placeholder": "장면 제목, 코드 또는 파일 이름",
+      "search": "검색",
+      "hint": "이 동영상에 해당하는 장면을 고르세요. FunSync는 연결만 하며 Stash에서는 아무것도 바뀌지 않습니다.",
+      "prompt": "입력한 뒤 검색을 누르세요. 그 전에는 아무것도 보내지 않습니다.",
+      "searching": "검색 중…",
+      "none": "‘{query}’에 해당하는 장면이 없습니다.",
+      "found": "{count, plural, other {장면 #개를 찾았습니다.}}",
+      "someOf": "{count}개 중 처음 {shown}개를 표시합니다. 단어를 더 넣어 검색 범위를 좁히세요.",
+      "link": "연결",
+      "linkAria": "이 동영상을 {name}에 연결",
+      "resultsAria": "Stash 장면"
     }
   }
 }

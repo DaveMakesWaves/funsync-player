@@ -20,6 +20,16 @@
 
 let _installed = false;
 
+/**
+ * Whether console.log/info/warn/error already reach the log file. A module
+ * that also writes through `window.funsync.logLine` itself (the startup
+ * timer) must not do it then: each of its lines landed in main.log twice
+ * (FT-086).
+ */
+export function isConsoleForwardingInstalled() {
+  return _installed;
+}
+
 /** Best-effort stringify of a single console argument for the log file. */
 function _serializeArg(arg) {
   if (typeof arg === 'string') return arg;

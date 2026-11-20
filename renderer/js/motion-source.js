@@ -161,6 +161,17 @@ export function noiseToPercent(n) {
  * @param {{depth?: number, half?: 'off'|'top'|'bottom'}} [opts]
  * @returns {number} 0-100
  */
+export function blendWithStroke(generated, strokePos, blend = 0) {
+  const b = clamp(blend, 0, 100) / 100;
+  if (!(b > 0) || !Number.isFinite(strokePos)) return generated;
+  // MFP's MotionProviderBlend, and what the guide dio linked describes as a
+  // "50/50" starting point: the axis is part its own motion, part the stroke.
+  // Blended against the STROKE rather than the axis's own script, because a
+  // generated axis has no script of its own — that is the whole reason it is
+  // being generated (dio_likes_jojo, EroScripts #320).
+  return clamp(generated * (1 - b) + strokePos * b, 0, 100);
+}
+
 export function shapeGeneratedValue(pos, { depth = 100, half = 'off' } = {}) {
   let v = clamp(pos, 0, 100);
   if (half === 'top') v = 50 + v / 2;
@@ -209,7 +220,17 @@ export function sampleMotion(cfg, { samples = 96, cycles = 2, noise = null } = {
       // nothing to it — draw a plain stroke at the reference rate.
       raw = patternValue('sine', u * 4 * cycles);
     }
-    out.push(shapeGeneratedValue(raw, norm));
+    // Blend against the same synthetic stroke the link mode draws, shaped by
+    // Depth and the travel half as the engine shapes it (tcode-sync.js), so
+    // at 100% the curve is exactly the Follow stroke curve. Follow stroke
+    // itself is never blended: it already is the stroke (FT-020).
+    const shaped = shapeGeneratedValue(raw, norm);
+    if (norm.mode === 'link' || !(norm.blend > 0)) {
+      out.push(shaped);
+    } else {
+      const strokeRef = shapeGeneratedValue(patternValue('sine', u * 4 * cycles), norm);
+      out.push(blendWithStroke(shaped, strokeRef, norm.blend));
+    }
   }
   return out;
 }
@@ -236,5 +257,7 @@ export function normaliseMotionConfig(cfg) {
     half: cfg.half === 'top' || cfg.half === 'bottom' ? cfg.half : 'off',
     speed: Number.isFinite(cfg.speed) ? clamp(cfg.speed, 0.05, 4) : 1,
     pattern: PATTERN_TYPES.includes(cfg.pattern) ? cfg.pattern : DEFAULT_PATTERN,
+    // 0 = pure generated motion (the previous behaviour, and still default).
+    blend: Number.isFinite(cfg.blend) ? clamp(cfg.blend, 0, 100) : 0,
   };
 }

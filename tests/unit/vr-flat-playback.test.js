@@ -30,7 +30,20 @@ describe('classifyStereoFormat', () => {
     expect(classifyStereoFormat('Title-SBS-1080p.mkv')).toBe('sbs-half');
     expect(classifyStereoFormat('foo_lr_180.mp4')).toBe('sbs-half');
     expect(classifyStereoFormat('clip_3DH.mp4')).toBe('sbs-half');
-    expect(classifyStereoFormat('mono180.mp4')).toBe('sbs-half');
+  });
+
+  // This file used to assert `mono180.mp4` → 'sbs-half', pinning the bug:
+  // a mono frame has one picture, and Shift+R cut it in half (V62).
+  it('mono 180 / 360 are one picture, never side by side', () => {
+    expect(classifyStereoFormat('mono180.mp4')).toBe('nonplanar');
+    expect(classifyStereoFormat('Scene_mono180.mp4')).toBe('nonplanar');
+    expect(classifyStereoFormat('Scene_180_mono.mp4')).toBe('nonplanar');
+    expect(classifyStereoFormat('Scene 180 mono.mp4')).toBe('nonplanar');
+    expect(classifyStereoFormat('Scene_360_mono.mp4')).toBe('nonplanar');
+    // `mono` before the FOV: VR on all three detectors (V61), so the
+    // flatten classifier must agree it is one picture.
+    expect(classifyStereoFormat('Scene_mono_180.mp4')).toBe('nonplanar');
+    expect(classifyStereoFormat('Scene mono 360.mp4')).toBe('nonplanar');
   });
 
   it('detects full-SBS via the _SBSF / _LRF (HereSphere) suffix', () => {
@@ -199,5 +212,153 @@ describe('VideoPlayer.setVRFlatten + cycleVRFlatten', () => {
     // practice app.js passes the SAME format here per-call so this is
     // a corner case but worth pinning.
     expect(player.cycleVRFlatten('tb-half')).toBe('tb-half (right)');
+  });
+});
+
+// Shift+R on a mono 180 file, through the REAL app.js path (lifted, see
+// helpers/app-methods.js) and the REAL VideoPlayer. Before V62 the file was
+// classified 'sbs-half', so the first press cropped the left half of a
+// single picture and stretched it to full width.
+describe('Shift+R on a mono VR file (V62)', () => {
+  const toasts = [];
+  let Lifted;
+  let app;
+  let classes;
+
+  beforeEach(async () => {
+    const { liftAppClass } = await import('./helpers/app-methods.js');
+    const { isVRVideo } = await import('../../renderer/js/vr-detect.js');
+    Lifted = liftAppClass(['_applyVRFlattenForCurrent', '_cycleVRFlatten', '_videoAspectLooksVR'], {
+      classifyStereoFormat, isFlattenableStereo, isVRVideo,
+      showToast: (msg) => toasts.push(msg),
+      t: (key) => key,
+    });
+    toasts.length = 0;
+    const player = Object.create(VideoPlayer.prototype);
+    classes = new Set();
+    player.video = {
+      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    };
+    player._vrFlattenFormat = null;
+    player._vrFlattenEye = 1;
+    const store = {};
+    app = new Lifted();
+    app.videoPlayer = player;
+    app.settings = { get: (k) => store[k], set: (k, v) => { store[k] = v; } };
+    for (const m of ['_maybeMigrateVRFlattenEntry', '_scheduleVRHintCheck', '_wireVRPanForCurrent',
+      '_unwireVRPan', '_refreshVRFormatMenuVisibility']) app[m] = () => {};
+  });
+
+  const pressShiftR = (path) => {
+    app._currentVideoPath = path;
+    app._currentVideoName = path.split('/').pop();
+    app._applyVRFlattenForCurrent();
+    return app._cycleVRFlatten();
+  };
+
+  for (const path of ['D:/vr/Scene_mono180.mp4', 'D:/vr/Scene_180_mono.mp4']) {
+    it(`${path.split('/').pop()}: no half-frame crop`, () => {
+      expect(pressShiftR(path)).toBeNull();
+      expect([...classes].filter((c) => c.startsWith('player__video--flat'))).toEqual([]);
+      expect(toasts).toEqual(['toast.noVRDetected']);
+    });
+  }
+
+  it('a real side-by-side file still crops to the left eye', () => {
+    expect(pressShiftR('D:/vr/Scene_180_LR.mp4')).toBe('sbs-half (left)');
+    expect(classes.has('player__video--flat-sbs-half')).toBe(true);
+  });
+});
+
+// FT-077 (#377; also in v0.9.2): a square over-under file (1440x1440,
+// 4096x4096) got no VR Format item in the player menu (the aspect check
+// only took 2:1 and wider), and Shift+R on a file whose name says nothing
+// toasted "No VR detected" however VR the picture looked. The REAL app.js
+// methods (lifted) over the REAL menu item and the REAL VideoPlayer.
+describe('FT-077: VR Format for square files, and Shift+R on an untagged VR-shaped file', () => {
+  const toasts = [];
+  let app;
+  let classes;
+  let store;
+  let writes;
+
+  beforeEach(async () => {
+    const { liftAppClass } = await import('./helpers/app-methods.js');
+    const { isVRVideo } = await import('../../renderer/js/vr-detect.js');
+    const Lifted = liftAppClass(
+      ['_applyVRFlattenForCurrent', '_cycleVRFlatten', '_videoAspectLooksVR', '_refreshVRFormatMenuVisibility'],
+      { classifyStereoFormat, isFlattenableStereo, isVRVideo, showToast: (msg) => toasts.push(msg), t: (key) => key },
+    );
+    toasts.length = 0;
+    document.body.innerHTML = '<button id="btn-vr-format-menu" hidden></button>';
+    const player = Object.create(VideoPlayer.prototype);
+    classes = new Set();
+    player.video = {
+      videoWidth: 0, videoHeight: 0,
+      classList: { add: (c) => classes.add(c), remove: (c) => classes.delete(c), contains: (c) => classes.has(c) },
+    };
+    player._vrFlattenFormat = null;
+    player._vrFlattenEye = 1;
+    store = {};
+    writes = [];
+    app = new Lifted();
+    app.videoPlayer = player;
+    app.settings = { get: (k) => store[k], set: (k, v) => { writes.push(k); store[k] = v; } };
+    for (const m of ['_maybeMigrateVRFlattenEntry', '_scheduleVRHintCheck', '_wireVRPanForCurrent', '_unwireVRPan']) {
+      app[m] = () => {};
+    }
+  });
+
+  /** Open `path` decoded at w x h, as the overflow menu's open refreshes it. */
+  const open = (path, w, h) => {
+    app.videoPlayer.video.videoWidth = w;
+    app.videoPlayer.video.videoHeight = h;
+    app._currentVideoPath = path;
+    app._currentVideoName = path.split('/').pop();
+    app._applyVRFlattenForCurrent();
+    app._refreshVRFormatMenuVisibility();
+    return document.getElementById('btn-vr-format-menu');
+  };
+
+  for (const [w, h] of [[1440, 1440], [4096, 4096], [2880, 2880]]) {
+    it(`a square ${w}x${h} file with no VR name: the VR Format item shows`, () => {
+      expect(open('D:/lib/Square Clip.mp4', w, h).hidden).toBe(false);
+    });
+  }
+
+  it('a 16:9 1920x1080 file: no VR Format item', () => {
+    expect(open('D:/lib/Plain Clip.mp4', 1920, 1080).hidden).toBe(true);
+  });
+
+  it('a 4:3 or near-square-but-not-square frame (1440x1350) still gets none', () => {
+    expect(open('D:/lib/Old TV.mp4', 1440, 1080).hidden).toBe(true);
+    expect(open('D:/lib/Odd.mp4', 1440, 1350).hidden).toBe(true);
+  });
+
+  it('nothing is applied for a square file: no flatten class, nothing saved', () => {
+    open('D:/lib/Square Clip.mp4', 1440, 1440);
+    expect([...classes].filter((c) => c.startsWith('player__video--flat'))).toEqual([]);
+    expect(writes).toEqual([]);
+  });
+
+  it('Shift+R on an untagged 1920x960 file points to the menu, guesses nothing, saves nothing', () => {
+    open('D:/lib/Untagged Wide.mp4', 1920, 960);
+    expect(app._cycleVRFlatten()).toBeNull();
+    expect(toasts).toEqual(['toast.vrSetFormatInMenu']);
+    expect([...classes].filter((c) => c.startsWith('player__video--flat'))).toEqual([]);
+    expect(writes).toEqual([]);
+    expect(store['library.vrFormat']).toBeUndefined();
+  });
+
+  it('Shift+R on a square untagged file points to the menu too', () => {
+    open('D:/lib/Square Clip.mp4', 1440, 1440);
+    app._cycleVRFlatten();
+    expect(toasts).toEqual(['toast.vrSetFormatInMenu']);
+  });
+
+  it('Shift+R on an ordinary 16:9 file still says no VR was detected', () => {
+    open('D:/lib/Plain Clip.mp4', 1920, 1080);
+    app._cycleVRFlatten();
+    expect(toasts).toEqual(['toast.noVRDetected']);
   });
 });

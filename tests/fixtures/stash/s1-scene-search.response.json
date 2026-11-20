@@ -1,0 +1,56 @@
+{
+  "note": "Find in Stash: a search for \"Synthetic Scene\". Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by stage s1-1a-client, with the document from electron/stash-queries.js.",
+  "operationName": "FunSyncSceneSearch",
+  "documentSha256": "f632c793df0b956a200c0efbb2b8e16e27db39c7cd43cbec41f102503b7fb642",
+  "variables": {
+    "q": "Synthetic Scene"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/graphql-response+json"
+  },
+  "body": {
+    "data": {
+      "findScenes": {
+        "count": 2,
+        "scenes": [
+          {
+            "id": "1",
+            "title": "Synthetic Scene Small",
+            "code": "SYN-001",
+            "date": "2026-11-17",
+            "updated_at": "2026-11-17T20:32:20Z",
+            "studio": {
+              "id": "2",
+              "name": "Synthetic Studio"
+            },
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+                "size": 213390,
+                "duration": 6,
+                "oshash": "6b3f3b3ee9e8c31a"
+              }
+            ]
+          },
+          {
+            "id": "3",
+            "title": "Synthetic Scene Mid",
+            "code": "",
+            "date": null,
+            "updated_at": "2026-11-17T20:32:20Z",
+            "studio": null,
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_mid.mp4",
+                "size": 97200,
+                "duration": 3,
+                "oshash": "69577801585835d2"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

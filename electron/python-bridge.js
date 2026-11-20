@@ -4,6 +4,8 @@ const http = require('http');
 const log = require('./logger');
 
 let pythonProcess = null;
+// Whether pythonProcess is the packaged one-file exe (see stopBundledBackend).
+let pythonProcessIsBundled = false;
 let backendPort = 5123;
 
 // --- Health monitor ---
@@ -44,25 +46,79 @@ let healthIntervalHandle = null;
 let healthListener = null;     // callback: (state, detail) => void
 
 /**
+ * Log one chunk of backend output at the level the PYTHON side meant, not the
+ * level implied by the stream it arrived on.
+ *
+ * Python's logging writes INFO to stderr by default and uvicorn follows suit,
+ * so the stream tells us nothing useful; the level prefix does. Lines with no
+ * recognised prefix keep `fallback` — for stderr that means `error`, so
+ * tracebacks (which carry no prefix, and are the reason stderr is watched at
+ * all) stay loud.
+ *
+ * @param {string} chunk — raw text from stdout/stderr, may hold several lines
+ * @param {'info'|'error'} fallback — level for lines with no recognised prefix
+ * @param {object} [sink] — logger to write through. Injectable purely so this
+ *   is testable: `vi.mock` does not intercept a CJS `require`, so the real
+ *   logger cannot be swapped out from a test any other way.
+ */
+function logBackendChunk(chunk, fallback, sink = log) {
+  const text = String(chunk ?? '');
+  if (!text.trim()) return;
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trimEnd();
+    if (!line.trim()) continue;
+    sink[classifyBackendLine(line, fallback)](`[Backend] ${line}`);
+  }
+}
+
+/**
+ * Which log level one line of backend output belongs at.
+ *
+ * @param {string} line
+ * @param {'info'|'error'} fallback — used when the line carries no prefix
+ * @returns {'info'|'warn'|'error'}
+ */
+function classifyBackendLine(line, fallback) {
+  // The level may follow one `[tag]`: backend/main.py prints
+  // `[ffmpeg] WARNING: falling back to PATH...` to stdout, which the old
+  // start-of-line anchor logged at info (FT-042). After a tag the level must
+  // end in a colon, so a tagged line whose next word only spells a level is
+  // not promoted: `[remote-seek] <kind> to=...` carries a label the phone
+  // chose.
+  const m = /^\s*(?:\[[^\]]+\]\s*(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL):|(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL|FATAL)\b)/i.exec(line);
+  const level = m ? (m[1] || m[2]).toUpperCase() : null;
+  if (level === 'DEBUG' || level === 'INFO') return 'info';
+  if (level === 'WARNING' || level === 'WARN') return 'warn';
+  if (level) return 'error';
+  return fallback === 'error' ? 'error' : 'info';
+}
+
+/**
  * Kill anything currently holding `port` so we don't fight an orphan backend
  * from a previous session. Cross-platform best-effort: swallows errors, logs
  * what it killed. Called on both startBackend (defensive) and stopBackend
  * (catches children that taskkill/SIGKILL on the parent PID missed).
  */
+/** Windows: the PIDs in LISTENING state on `port` (netstat), as strings. */
+function windowsListeningPids(port) {
+  const output = execSync(`netstat -ano -p tcp`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  const pids = new Set();
+  for (const line of output.split(/\r?\n/)) {
+    // "  TCP    0.0.0.0:5123    0.0.0.0:0    LISTENING   12345"
+    if (!line.includes('LISTENING')) continue;
+    if (!line.includes(`:${port} `) && !line.endsWith(`:${port}`)) continue;
+    const parts = line.trim().split(/\s+/);
+    const pid = parts[parts.length - 1];
+    if (/^\d+$/.test(pid) && pid !== '0') pids.add(pid);
+  }
+  return [...pids];
+}
+
 function killProcessesOnPort(port) {
   try {
     if (process.platform === 'win32') {
       // Find PIDs in LISTENING state on the given port.
-      const output = execSync(`netstat -ano -p tcp`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-      const pids = new Set();
-      for (const line of output.split(/\r?\n/)) {
-        // "  TCP    0.0.0.0:5123    0.0.0.0:0    LISTENING   12345"
-        if (!line.includes('LISTENING')) continue;
-        if (!line.includes(`:${port} `) && !line.endsWith(`:${port}`)) continue;
-        const parts = line.trim().split(/\s+/);
-        const pid = parts[parts.length - 1];
-        if (/^\d+$/.test(pid) && pid !== '0') pids.add(pid);
-      }
+      const pids = windowsListeningPids(port);
       for (const pid of pids) {
         try {
           execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
@@ -183,12 +239,13 @@ async function startBackend() {
       stdio: ['pipe', 'pipe', 'pipe'],
       detached: process.platform !== 'win32', // detached on Linux for process group kill
     });
+    pythonProcessIsBundled = cmd === bundledBackend;
 
     let started = false;
 
     pythonProcess.stdout.on('data', (data) => {
       const output = data.toString();
-      log.info(`[Backend] ${output}`);
+      logBackendChunk(output, 'info');
       if (!started && output.includes('Uvicorn running')) {
         started = true;
         resolve();
@@ -197,7 +254,13 @@ async function startBackend() {
 
     pythonProcess.stderr.on('data', (data) => {
       const output = data.toString();
-      log.error(`[Backend] ${output}`);
+      // NOT blanket log.error. Uvicorn writes its whole access log to stderr,
+      // so every routine request landed in the log file as an error — a user
+      // log full of `[error] [Backend] INFO: Started server process` reads as
+      // a failing app and buries the lines that are genuinely wrong.
+      // Welliambrisk's log (2026-08-27) had 6 [error] lines, 4 of which were
+      // uvicorn reporting that it had started successfully.
+      logBackendChunk(output, 'error');
       // Uvicorn logs startup to stderr
       if (!started && output.includes('Uvicorn running')) {
         started = true;
@@ -234,6 +297,57 @@ async function startBackend() {
   });
 }
 
+/** Whether process `pid` is still running (signal 0 only tests it). */
+function isProcessAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return err?.code === 'EPERM';
+  }
+}
+
+/** Block this thread for `ms` (a bounded wait at stop; no event loop needed). */
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/**
+ * Stop the PACKAGED backend on Windows so it cleans up after itself (FT-107
+ * finding, also in v0.9.2). The PyInstaller one-file exe is a bootloader: it
+ * unpacks itself into %TEMP%\_MEIxxxxx, runs the app as its child, and
+ * deletes that folder when the child exits. `taskkill /T /F` on the
+ * bootloader killed both at once, so EVERY session left its ~25 MB folder
+ * behind: 148 of them, 415 MB, in one user's TEMP since May.
+ *
+ * The child (the process listening on the port) goes first; the bootloader
+ * then deletes its folder and exits by itself. Only if it is still there
+ * after a bounded wait is the whole tree killed, as before, so a stop never
+ * leaves the backend running.
+ *
+ * @returns {'clean'|'tree'} how it ended (for the log and the tests)
+ */
+function stopBundledBackend(pid, port, deps = {}) {
+  const exec = deps.exec || ((cmd) => execSync(cmd, { stdio: 'ignore' }));
+  const listeners = deps.listenerPids || windowsListeningPids;
+  const alive = deps.isAlive || isProcessAlive;
+  const sleep = deps.sleep || sleepSync;
+  const waitMs = deps.waitMs ?? 3000;
+  let children = [];
+  try {
+    children = listeners(port).filter((p) => String(p) !== String(pid));
+  } catch { /* netstat failed: the tree kill below */ }
+  for (const child of children) {
+    try { exec(`taskkill /PID ${child} /T /F`); } catch { /* already gone */ }
+  }
+  if (children.length) {
+    for (let waited = 0; waited < waitMs && alive(pid); waited += 50) sleep(50);
+  }
+  if (!alive(pid)) return 'clean';
+  try { exec(`taskkill /pid ${pid} /T /F`); } catch { /* already gone */ }
+  return 'tree';
+}
+
 function stopBackend() {
   stopHealthMonitor();
   if (pythonProcess) {
@@ -241,7 +355,11 @@ function stopBackend() {
     try {
       // On Windows, .kill() sends SIGTERM which PyInstaller exes can ignore.
       // Use taskkill /T to kill the process tree (includes child processes).
-      if (process.platform === 'win32' && pid) {
+      // The packaged one-file exe stops child-first so its _MEI folder goes.
+      if (process.platform === 'win32' && pid && pythonProcessIsBundled) {
+        const how = stopBundledBackend(pid, backendPort);
+        if (how === 'tree') log.warn('[Backend] bootloader did not exit after its child; killed the tree (its _MEI folder may stay in TEMP)');
+      } else if (process.platform === 'win32' && pid) {
         execSync(`taskkill /pid ${pid} /T /F`, { stdio: 'ignore' });
       } else if (pid) {
         // Kill process group on Linux (spawned with detached: true)
@@ -378,7 +496,10 @@ async function restartBackend() {
 
 module.exports = {
   startBackend,
+  logBackendChunk,
+  classifyBackendLine,
   stopBackend,
+  stopBundledBackend,
   getBackendPort,
   setHealthListener,
   getHealthState,

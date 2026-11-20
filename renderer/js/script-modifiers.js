@@ -208,6 +208,33 @@ export function reverseActions(actions) {
 }
 
 /**
+ * Range Extend / Compress: scale every timestamp away from the first action
+ * (factor > 1 stretches, factor < 1 compresses). Positions are unchanged.
+ *
+ * This used to be a loop in the editor's modal that called updateAction once
+ * per point over indices computed BEFORE the loop. updateAction re-sorts, so
+ * as soon as one stretched point overtook the next, the remaining indices
+ * named the wrong points: 4 points at 0/100/200/300 ×2 came out 0, 200, 300,
+ * 800 (one point scaled twice, another not at all). As a pure function every
+ * new time comes from the original one, and a positive factor keeps the order.
+ *
+ * Note OFS's "Range extend" stretches POSITIONS per stroke; FunSync's scales
+ * TIME. The name is kept (Dave, 2026-11-04).
+ *
+ * @param {Array<{at: number, pos: number}>} actions — sorted by time
+ * @param {number} factor — time scale, > 0
+ * @returns {Array<{at: number, pos: number}>}
+ */
+export function rangeExtend(actions, factor) {
+  const copy = actions.map(a => ({ at: a.at, pos: a.pos }));
+  // A non-positive factor would reverse or collapse the order; hand the input
+  // back so applyModifier reports "Nothing changed" instead of scrambling it.
+  if (copy.length < 2 || !Number.isFinite(factor) || factor <= 0) return copy;
+  const anchor = copy[0].at;
+  return copy.map(a => ({ at: Math.round(anchor + (a.at - anchor) * factor), pos: a.pos }));
+}
+
+/**
  * Generate a pattern of actions.
  * @param {'sine'|'sawtooth'|'square'|'triangle'|'escalating'|'random'} type
  * @param {number} startMs

@@ -1,0 +1,114 @@
+{
+  "data": {
+    "findTags": {
+      "count": 6,
+      "tags": [
+        {
+          "id": "5",
+          "name": "Synthetic Grandparent Tag",
+          "aliases": [
+            "syn-gp",
+            "synthetic-grand"
+          ],
+          "scene_count": 0,
+          "parent_count": 0,
+          "child_count": 1,
+          "parents": [],
+          "children": [
+            {
+              "id": "3",
+              "name": "Synthetic Parent Tag",
+              "aliases": [
+                "synthetic-parent"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "4",
+          "name": "Synthetic Marker Tag",
+          "aliases": [],
+          "scene_count": 0,
+          "parent_count": 0,
+          "child_count": 0,
+          "parents": [],
+          "children": []
+        },
+        {
+          "id": "3",
+          "name": "Synthetic Parent Tag",
+          "aliases": [
+            "synthetic-parent"
+          ],
+          "scene_count": 1,
+          "parent_count": 1,
+          "child_count": 1,
+          "parents": [
+            {
+              "id": "5",
+              "name": "Synthetic Grandparent Tag",
+              "aliases": [
+                "syn-gp",
+                "synthetic-grand"
+              ]
+            }
+          ],
+          "children": [
+            {
+              "id": "2",
+              "name": "Synthetic Tag B",
+              "aliases": [
+                "synthetic-child"
+              ]
+            }
+          ]
+        },
+        {
+          "id": "1",
+          "name": "Synthetic Tag A",
+          "aliases": [
+            "syn-a-two",
+            "synthetic-a"
+          ],
+          "scene_count": 2,
+          "parent_count": 0,
+          "child_count": 0,
+          "parents": [],
+          "children": []
+        },
+        {
+          "id": "2",
+          "name": "Synthetic Tag B",
+          "aliases": [
+            "synthetic-child"
+          ],
+          "scene_count": 2,
+          "parent_count": 1,
+          "child_count": 0,
+          "parents": [
+            {
+              "id": "3",
+              "name": "Synthetic Parent Tag",
+              "aliases": [
+                "synthetic-parent"
+              ]
+            }
+          ],
+          "children": []
+        },
+        {
+          "id": "6",
+          "name": "Synthetic Tag C",
+          "aliases": [
+            "synthetic-c"
+          ],
+          "scene_count": 2,
+          "parent_count": 0,
+          "child_count": 0,
+          "parents": [],
+          "children": []
+        }
+      ]
+    }
+  }
+}

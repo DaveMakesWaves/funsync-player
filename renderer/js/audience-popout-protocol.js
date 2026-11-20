@@ -21,13 +21,17 @@
 // - `INITIAL_STATE` — pop-out's first hello receives the full snapshot:
 //     { type, roomActive, viewers, hideKeys, theme }
 //   where `viewers` is an array of viewer snapshots: { key, label,
-//   offsetMs, status, rtdMs, lastError, muted }.
+//   offsetMs, status, rtdMs, lastError, errorCode, rate, muted }.
+//   `status` is a VIEWER_STATUS value (audience-bridge.js); `errorCode` a
+//   VIEWER_ERROR value or null; `rate` the player rate when status is
+//   'speed', else null.
 // - `VIEWER_ADDED` — a new viewer joined the room:
 //     { type, viewer }
 // - `VIEWER_REMOVED` — a viewer was removed:
 //     { type, key }
-// - `VIEWER_STATUS` — per-viewer status / RTD change (high-frequency):
-//     { type, key, status, rtdMs, lastError }
+// - `VIEWER_STATUS` — per-viewer status / RTD / mute change (high-frequency):
+//     { type, key, status, rtdMs, lastError, errorCode, rate, muted }
+//   The pop-out mirrors `muted` from here; every mute change sends one.
 // - `VIEWER_OFFSET` — confirmation of a setOffset (echo to keep the
 //   slider value in sync if multiple sources can mutate it):
 //     { type, key, offsetMs }
@@ -52,6 +56,9 @@
 //     { type, key }
 // - `TEST_BUZZ_ALL` — Test buzz on all viewers:
 //     { type }
+// - `RESEND` — Resend on one viewer's row (FT-121): connect again if it
+//   dropped, then send the current script again:
+//     { type, key }
 // - `SET_HIDE_KEYS` — Hide-keys toggle:
 //     { type, hideKeys }
 // - `END_ROOM` — user clicked End Room (in pop-out or main tab):
@@ -62,7 +69,7 @@
 // `OP_BEGIN_BATCH` / `OP_END_BATCH` wrap a stream of related updates
 // so the pop-out can defer re-render until the batch closes. Used when
 // fanning out multi-viewer status changes (e.g. all viewers transition
-// CALIBRATING → PLAYING during syncTimeAll). Mirrors the editor-popout
+// WAITING → READY after a video change). Mirrors the editor-popout
 // pattern.
 
 // Main → pop-out
@@ -82,6 +89,7 @@ export const SET_OFFSET     = 'set-offset';
 export const SET_MUTED      = 'set-muted';
 export const TEST_BUZZ      = 'test-buzz';
 export const TEST_BUZZ_ALL  = 'test-buzz-all';
+export const RESEND         = 'resend';
 export const SET_HIDE_KEYS  = 'set-hide-keys';
 export const END_ROOM       = 'end-room';
 
@@ -124,6 +132,6 @@ export const ALL_MESSAGE_TYPES = Object.freeze([
   INITIAL_STATE, VIEWER_ADDED, VIEWER_REMOVED, VIEWER_STATUS, VIEWER_OFFSET,
   HIDE_KEYS_CHANGED, THEME,
   READY, ADD_VIEWER, REMOVE_VIEWER, SET_OFFSET, SET_MUTED, TEST_BUZZ,
-  TEST_BUZZ_ALL, SET_HIDE_KEYS, END_ROOM,
+  TEST_BUZZ_ALL, RESEND, SET_HIDE_KEYS, END_ROOM,
   OP_BEGIN_BATCH, OP_END_BATCH,
 ]);

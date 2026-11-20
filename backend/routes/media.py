@@ -7,19 +7,27 @@ Also serves funscript files and generates/caches thumbnails.
 import hashlib
 import mimetypes
 import os
+import re
 import secrets
 import stat
 import subprocess
+import sys
+import time
 from urllib.parse import unquote
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
 from starlette.concurrency import run_in_threadpool
 
+from routes.desktop_gate import DESKTOP_ONLY
+
 router = APIRouter()
 
 # Video ID → file path mapping (populated by scan)
 _video_registry: dict[str, dict] = {}
+# Bumps on every registration of the video list (the phone's tag-slice
+# version includes it: /api/remote/tags answers per registered video).
+_registry_gen = 0
 
 # Collections / playlists / categories — populated alongside the video
 # registry when the renderer registers its library. Kept as lists of dicts
@@ -67,6 +75,21 @@ def set_thumb_cache_dir(path: str):
     os.makedirs(path, exist_ok=True)
 
 
+def _ensure_thumb_cache_dir() -> str:
+    """The thumbnail cache dir, falling back to a temp folder if none was set.
+
+    main.py sets it from `--user-data-dir` at startup, which every Electron
+    spawn passes. A backend started by hand without that flag would otherwise
+    answer 500 for every thumbnail until a registration carried
+    `thumbCacheDir` (V22); a missing setting is not a reason to fail a request
+    that can be served.
+    """
+    if not _thumb_cache_dir:
+        import tempfile
+        set_thumb_cache_dir(os.path.join(tempfile.gettempdir(), "funsync_vr_thumbs"))
+    return _thumb_cache_dir
+
+
 def register_videos(videos: list[dict]):
     """Register videos from a library scan for streaming.
 
@@ -91,13 +114,31 @@ def register_videos(videos: list[dict]):
     # perfectly fine. Rebinding the name is atomic, and every reader goes
     # through `get_video_registry()`, so a request either sees the entire
     # old registry or the entire new one.
-    global _video_registry
+    global _video_registry, _registry_gen
+    old_registry = _video_registry
     new_registry: dict[str, dict] = {}
     for v in videos:
         vid_id = _path_to_id(v.get("path", ""))
+        _carry_speed_stats(v, old_registry.get(vid_id))
         new_registry[vid_id] = v
     _video_registry = new_registry
-    _speed_probed.clear()  # new library scan → re-compute speed stats
+    _registry_gen += 1
+    # A script paired now that was not before is checked against the
+    # metadata harvest again (a stat; a read only if it changed), so the
+    # renderer's next "what changed" answer carries its record (P1 tags).
+    def _paired(reg):
+        return {e.get("funscriptPath") for e in reg.values() if isinstance(e, dict) and e.get("funscriptPath")}
+    for newly_paired in _paired(new_registry) - _paired(old_registry):
+        _meta_checked.pop(newly_paired, None)
+    # New library → stats unknown so far are probed again (a script that
+    # could not be read may be readable now). Except the ones a running pass
+    # still holds for the same script: re-queuing those would run two passes
+    # over them at once (FT-044/FT-045: an association change re-registers).
+    _speed_probed.clear()
+    _speed_probed.update(
+        vid_id for vid_id, fs_path in list(_speed_probe_inflight)
+        if (new_registry.get(vid_id) or {}).get("funscriptPath") == fs_path
+    )
 
     _queue_duration_probes()
     _queue_speed_probes()
@@ -195,7 +236,42 @@ def _probe_duration(vid_id: str, filepath: str):
 # hurts throughput (benched at bench/bench_speed_stats.py).
 
 import json as _json
+import logging as _logging
+from services import script_meta as _script_meta
+_log = _logging.getLogger("funsync.media")
 _speed_probed: set = set()   # video IDs already probed (success or fail)
+_speed_probe_inflight: set = set()   # (video ID, funscript path) queued, not yet probed
+# The funscript metadata harvest (P1 tags, 2026-11-18) rides the same pass:
+# a script read for its speed is also handed to services/script_meta.py. A
+# script whose speed the desktop already sent (its speedStatsCache) is not
+# read for speed, so it is queued as a metadata-only item `(None, path)`:
+# the pass stats it and reads it only when the harvest cache holds nothing
+# for that exact size and mtime (once per changed file, not per launch).
+# Every registration (a scan, a Refresh, a pairing) queues a stat of every
+# paired script, so a script edited outside FunSync is read again on the next
+# Refresh; an unchanged one is only stat'ed (r3-fixup, r3-verify area 2:
+# it used to be checked once per process, and Refresh never saw an edit).
+_meta_checked: dict = {}     # script path -> (size, mtime_ns) the harvest last checked, this process
+_meta_inflight: set = set()  # script paths queued metadata-only, not yet checked
+
+
+def _carry_speed_stats(new_entry: dict, old_entry):
+    """Keep stats the probe already computed across a re-registration.
+
+    The desktop re-registers the whole library on many edits (an association,
+    a VR override, a backend restart), and it sends only the stats IT has
+    polled so far. Without this, every value the probe had computed but the
+    desktop had not picked up yet was dropped and parsed again. Only for the
+    same script: a new association is a different file (FT-044/FT-045).
+    """
+    if not isinstance(new_entry, dict) or not isinstance(old_entry, dict):
+        return
+    if new_entry.get("avgSpeed") is not None or old_entry.get("avgSpeed") is None:
+        return
+    if not new_entry.get("funscriptPath") or new_entry.get("funscriptPath") != old_entry.get("funscriptPath"):
+        return
+    new_entry["avgSpeed"] = old_entry.get("avgSpeed")
+    new_entry["maxSpeed"] = old_entry.get("maxSpeed")
 
 
 def _compute_speed_stats(actions):
@@ -240,10 +316,24 @@ def _queue_speed_probes():
         and v.get("avgSpeed") is None
         and vid_id not in _speed_probed
     ]
+    for vid_id, fs_path in pending:
+        _speed_probed.add(vid_id)
+        _speed_probe_inflight.add((vid_id, fs_path))
+
+    # Metadata-only items, after the speed ones (the badges come first): every
+    # associated script, for a stat (a read only when it changed), unless a
+    # speed item (this pass or a running one) reads it anyway or it is
+    # already queued.
+    read_anyway = {p for _vid, p in list(_speed_probe_inflight)}   # list(): the worker discards meanwhile
+    for v in _video_registry.values():
+        fs_path = v.get("funscriptPath")
+        if (not isinstance(fs_path, str) or not fs_path or fs_path in read_anyway
+                or fs_path in _meta_inflight):
+            continue
+        _meta_inflight.add(fs_path)
+        pending.append((None, fs_path))
     if not pending:
         return
-    for vid_id, _p in pending:
-        _speed_probed.add(vid_id)
 
     threading.Thread(
         target=_speed_probe_worker, args=(pending,), daemon=True
@@ -263,27 +353,99 @@ def _speed_probe_worker(pending: list):
     (sleep(0) re-acquires too fast to help); across 2318 scripts that is
     ~0.09 s of added wall-clock on a pass that already takes tens of
     seconds.
+
+    The same single read feeds the funscript metadata harvest
+    (services/script_meta.py, P1 tags). An item `(None, path)` is
+    metadata-only: the file is read only when the harvest cache has nothing
+    for its size and mtime, and its speed is left alone. A file that cannot
+    be read keeps its last harvested record (absence is never destructive).
     """
     import time as _time
-    for i, (vid_id, fs_path) in enumerate(pending):
-        if i % 25 == 24:
-            _time.sleep(0.001)
+    try:
+        for i, (vid_id, fs_path) in enumerate(pending):
+            if i % 25 == 24:
+                _time.sleep(0.001)
+            _probe_one_script(vid_id, fs_path)
+    finally:
+        _script_meta.save()
+
+
+def _probe_one_script(vid_id, fs_path):
+    """One item of `_speed_probe_worker`: speed (when `vid_id` is a video) and
+    the metadata harvest (when the cache is not fresh for this file).
+
+    The speed and the harvest each have their own try: the harvest is an
+    extra and must never cost a video its speed stats (r3-fixup R3R-1: an
+    odd string in the metadata block made the harvest raise BEFORE the
+    speed was computed, and the video lost its speed badge for good)."""
+    try:
+        if not fs_path:
+            return
         try:
-            if not fs_path or not os.path.isfile(fs_path):
-                continue
-            with open(fs_path, encoding="utf-8") as f:
-                data = _json.load(f)
-            stats = _compute_speed_stats(data.get("actions") or [])
-            entry = _video_registry.get(vid_id)
-            if entry is not None:
-                entry["avgSpeed"] = stats["avgSpeed"]
-                entry["maxSpeed"] = stats["maxSpeed"]
-        except Exception:
-            # Failure: mark as probed but with 0 speeds so we don't retry.
-            entry = _video_registry.get(vid_id)
-            if entry is not None and entry.get("avgSpeed") is None:
-                entry["avgSpeed"] = 0
-                entry["maxSpeed"] = 0
+            st = os.stat(fs_path)
+        except OSError:
+            return
+        if not stat.S_ISREG(st.st_mode):
+            return
+        version = (st.st_size, st.st_mtime_ns)
+        if vid_id is None and _meta_checked.get(fs_path) == version:
+            return   # this exact file version was checked in this process: a stat, no read
+        want_meta = not _script_meta.is_fresh(fs_path, st.st_size, st.st_mtime_ns)
+        if not want_meta:
+            # Up to date: no read for it, but a renderer that asks only for
+            # what changed is sent it again when this process had not
+            # checked this version yet (newly paired, or a restart).
+            if _meta_checked.get(fs_path) != version:
+                _script_meta.touch(fs_path)
+            if vid_id is None:
+                _meta_checked[fs_path] = version
+                return
+        # utf-8-sig: a funscript saved with a UTF-8 BOM (Notepad, some
+        # editors) is valid JSON once the BOM is gone. Plain utf-8 made
+        # json.load raise on it, so every BOM script got speed 0 (FT-044).
+        with open(fs_path, encoding="utf-8-sig") as f:
+            data = _json.load(f)
+        if vid_id is not None:
+            _apply_speed_stats(vid_id, fs_path, data)
+        if want_meta:
+            try:
+                _script_meta.put(fs_path, st.st_size, st.st_mtime_ns, _script_meta.harvest_metadata(data))
+            except Exception:  # noqa: BLE001 - keeps the last record; never touches the speed
+                _log.warning("metadata harvest failed for %s", fs_path, exc_info=True)
+        # Checked at this version (a failed harvest too: tried again when the
+        # file changes or the backend restarts, not on every registration).
+        _meta_checked[fs_path] = version
+    except Exception:
+        # The file could not be read or parsed. The harvest keeps the
+        # script's last record and the version is not marked, so the next
+        # registration tries again; the speed stays unknown (below).
+        return
+    finally:
+        if vid_id is None:
+            _meta_inflight.discard(fs_path)
+        else:
+            _speed_probe_inflight.discard((vid_id, fs_path))
+
+
+def _apply_speed_stats(vid_id, fs_path, data):
+    """The speed half of `_probe_one_script`, in its own try.
+
+    Failure: leave the stats UNKNOWN (None). The video stays in
+    `_speed_probed`, so this pass does not retry it, and /speed-stats leaves
+    it out. Writing 0/0 here used to be read as a real "speed 0": the
+    renderer cached it, sent it back on every register, and the probe never
+    ran again (FT-044)."""
+    try:
+        stats = _compute_speed_stats(data.get("actions") or [])
+    except Exception:  # noqa: BLE001 - not a funscript's shape: speed unknown
+        return
+    entry = _video_registry.get(vid_id)
+    # Only onto the entry for THIS script: a re-registration since
+    # this pass started may have given the video another one (an
+    # association), and that one is probed on its own.
+    if entry is not None and entry.get("funscriptPath") == fs_path:
+        entry["avgSpeed"] = stats["avgSpeed"]
+        entry["maxSpeed"] = stats["maxSpeed"]
 
 
 def register_collections(collections: list[dict]):
@@ -316,9 +478,128 @@ def register_sources(sources: list[dict]):
             _sources.append(s)
 
 
+# --- The phone's tag slice (P1 tags, 2026-11-18) ---------------------------
+# The desktop merges every tag source once (renderer/js/video-tags.js
+# effectiveTags, hidden tags already removed) and sends the result here as
+# `videoTags` in /register: `{videoPath: [{key, facet, label}]}`. The phone's
+# Tags filter reads it through /api/remote/tags and filters with its copy of
+# the desktop's filter (web-remote/tag-filter.js). No merge logic lives here:
+# this only checks shapes and caps sizes. View only, like the groupings.
+
+TAG_FACETS = (
+    "vr", "display", "length", "device", "axis", "script-type", "sexuality", "threesome",
+    "content", "performer", "creator", "studio",
+)
+_TAG_FACET_SET = frozenset(TAG_FACETS)
+# The names a video is found by: never the first to go when a list is cut.
+NAME_FACETS = frozenset(("performer", "creator", "studio"))
+# One cap on both sides (r3-fixup R3R-2): renderer/js/library-tag-filter.js
+# applies the same MAX_TAGS_PER_VIDEO / MAX_TAG_KEY / MAX_TAG_LABEL to the
+# desktop's own index (so the desktop's Tags filter and the phone's filter the
+# same tags), with the same rule: names first, then the rest in facet order.
+# The desktop's slice is already within them; here they are a junk guard.
+# Pinned equal by tests/unit/tag-slice-parity.test.js.
+MAX_TAGS_PER_VIDEO = 1000
+MAX_TAG_KEY = 512
+MAX_TAG_LABEL = 512
+MAX_TAG_PATH = 4096
+_TAG_SCAN = MAX_TAGS_PER_VIDEO * 4   # items looked at per video (a junk list stops here)
+
+_video_tags: dict[str, list[dict]] = {}
+_video_tags_seq = 0   # bumps when the slice changes; /api/remote/tags' version
+
+
+def _text_ok(text) -> bool:
+    """Text a JSON answer can carry: a string with no lone UTF-16 surrogate
+    (`"\\ud83d"` decodes to one, and would make /api/remote/tags fail whole)."""
+    if not isinstance(text, str):
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _clean_tag(item) -> "dict | None":
+    if isinstance(item, str):
+        item = {"key": item}
+    if not isinstance(item, dict):
+        return None
+    key = item.get("key")
+    if not _text_ok(key) or not key.strip() or len(key) > MAX_TAG_KEY:
+        return None
+    facet = item.get("facet")
+    if not isinstance(facet, str) or facet not in _TAG_FACET_SET:
+        prefix = key.split(":", 1)[0] if ":" in key else ""
+        facet = prefix if prefix in _TAG_FACET_SET else "content"
+    label = item.get("label")
+    if not _text_ok(label) or not label.strip() or len(label) > MAX_TAG_LABEL:
+        label = key.split(":", 1)[1] if ":" in key else key
+    return {"key": key, "facet": facet, "label": label}
+
+
+def cap_video_tags(tags: list) -> list:
+    """At most MAX_TAGS_PER_VIDEO tags, the names (performer, creator,
+    studio) kept first, then the rest in the order given (facet order);
+    the kept ones stay in the order given. Same rule as the desktop's
+    library-tag-filter.js capVideoTags."""
+    if len(tags) <= MAX_TAGS_PER_VIDEO:
+        return tags
+    names = [i for i, t in enumerate(tags) if t.get("facet") in NAME_FACETS][:MAX_TAGS_PER_VIDEO]
+    room = MAX_TAGS_PER_VIDEO - len(names)
+    others = [i for i, t in enumerate(tags) if t.get("facet") not in NAME_FACETS][:room]
+    keep = set(names) | set(others)
+    return [t for i, t in enumerate(tags) if i in keep]
+
+
+def register_tags(video_tags) -> None:
+    """Replace the tag slice (a whole new map, swapped in one rebind like the
+    registry). Anything that is not `{path: [tag, ...]}` is skipped; a video
+    keeps each key once and at most MAX_TAGS_PER_VIDEO tags (names first,
+    `cap_video_tags`). The version /api/remote/tags reports moves only when
+    the slice changed."""
+    global _video_tags, _video_tags_seq
+    out: dict[str, list[dict]] = {}
+    if isinstance(video_tags, dict):
+        for path, tags in video_tags.items():
+            if (not _text_ok(path) or not path or len(path) > MAX_TAG_PATH
+                    or not isinstance(tags, list)):
+                continue
+            seen: set[str] = set()
+            clean: list[dict] = []
+            for item in tags[:_TAG_SCAN]:
+                tag = _clean_tag(item)
+                if tag is None or tag["key"] in seen:
+                    continue
+                seen.add(tag["key"])
+                clean.append(tag)
+            clean = cap_video_tags(clean)
+            if clean:
+                out[path] = clean
+    if out != _video_tags:
+        _video_tags_seq += 1
+    _video_tags = out
+
+
+def video_tags_seq() -> int:
+    """Bumps each time register_tags changed the slice (this process)."""
+    return _video_tags_seq
+
+
+def get_video_tags() -> dict:
+    """The last tag slice the desktop sent, `{videoPath: [{key, facet, label}]}`."""
+    return _video_tags
+
+
 def get_video_registry():
     """Return the current video registry."""
     return _video_registry
+
+
+def registry_gen() -> int:
+    """Bumps on every registration of the video list (this process)."""
+    return _registry_gen
 
 
 def get_collections() -> list[dict]:
@@ -358,10 +639,27 @@ def record_vr_activity(client_ip: str, video_id: str):
     _vr_activity["timestamp"] = time.time()
 
 
+# A scene request is evidence that a headset is in use now, not for the rest
+# of the backend's life. Without an expiry, one request (a Quest that has
+# since left, or anything on the LAN fetching /deovr/{id}) had the renderer
+# re-dialing that IP forever and showing the timestamp-server hint for it
+# (V21). Long enough to cover fixing HereSphere's timestamp-server setting
+# after a failed auto-connect; a dropped link that has worked is re-dialed by
+# the renderer's own retry, which does not depend on this record.
+VR_ACTIVITY_TTL_S = 300
+
+
 @router.get("/vr-activity")
 async def get_vr_activity():
-    """Get the last VR scene request (polled by renderer for auto-connect)."""
-    return _vr_activity
+    """Get the last VR scene request (polled by renderer for auto-connect).
+
+    Reads as "no activity" once the request is older than VR_ACTIVITY_TTL_S.
+    """
+    import time
+    ts = _vr_activity["timestamp"]
+    if not ts or time.time() - ts > VR_ACTIVITY_TTL_S:
+        return {"clientIp": None, "videoId": None, "timestamp": 0}
+    return dict(_vr_activity)
 
 
 @router.get("/rescan-request")
@@ -374,7 +672,7 @@ async def get_rescan_request():
     return {"seq": get_rescan_request_seq()}
 
 
-@router.post("/remux")
+@router.post("/remux", dependencies=DESKTOP_ONLY)
 def remux(
     video_path: str = Query(..., description="Absolute path to the source video"),
 ):
@@ -411,7 +709,7 @@ _remote_streams: "dict[str, dict]" = {}
 _REMOTE_MAX = 32
 
 
-@router.post("/resolve")
+@router.post("/resolve", dependencies=DESKTOP_ONLY)
 def resolve_remote(url: str = Query(..., description="Web page URL to resolve")):
     """Resolve a page URL to a playable stream via yt-dlp. `def` → threadpool
     (yt-dlp extraction blocks). Returns public metadata + a proxy URL; the
@@ -540,6 +838,22 @@ async def remote_file(token: str, request: Request):
     return await _proxy_fetch(entry["streamUrl"], entry["headers"], request.headers.get("range"))
 
 
+@router.get("/video/{video_id}")
+async def get_video_entry(video_id: str):
+    """Look a registered video up by its id (V63).
+
+    The URLs this server hands a headset name a video by id, never by file:
+    `/api/media/stream/{id}` and `/heresphere/{id}` (`id` = md5(path)[:12]).
+    When HereSphere reports one of those as the playing video's path, the
+    desktop has no filename to match a script by, so it asks here. Exposes
+    nothing new: `/api/remote/videos` already lists every path on this port.
+    """
+    video = _video_registry.get(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return {"id": video_id, "name": video.get("name", ""), "path": video.get("path", "")}
+
+
 @router.get("/durations")
 async def get_durations():
     """Return all known video durations, keyed by absolute video path.
@@ -602,9 +916,72 @@ async def get_speed_stats():
     return out
 
 
-@router.post("/register")
+MAX_SCRIPT_META_PATHS = 50
+
+
+@router.get("/script-meta", dependencies=DESKTOP_ONLY)
+async def get_script_meta(request: Request, since: int = 0, cache: "str | None" = None):
+    """The funscript metadata harvest (P1 tags), for the desktop's tag engine.
+
+    Without `path`: the harvested record of every script the registered
+    library pairs, `{scriptPath: {metadata, readAt, topicId}}`. `metadata` is
+    the file's own `metadata` block, capped (services/script_meta.py), and
+    goes straight into renderer/js/video-tags.js `funscriptMetaRecord`; null
+    means the file was read and has none. With `since` and the `cache` id of
+    an earlier answer, only records stored after it (a backend restart starts
+    a new id, and then everything is sent again).
+
+    With `path` (repeatable, at most 50): those scripts' records. A path the
+    library pairs is checked against its file first and read again only when
+    it changed since (the video options dialog's on-demand read); any other
+    path is answered from the cache only, never read.
+
+    `pending` counts the scripts the background pass has still to check, so
+    the renderer polls until it is 0. Nothing here deletes a record: a script
+    that is missing or unreadable keeps the last one.
+    """
+    paths = request.query_params.getlist("path")
+    return await run_in_threadpool(_script_meta_answer, paths, since, cache)
+
+
+def _script_meta_answer(paths, since, cache):
+    state = _script_meta.state()   # before reading: a later store is sent again, never skipped
+    if cache != state["cacheId"] or not isinstance(since, int) or since < 0:
+        since = 0
+    paired = {
+        v.get("funscriptPath") for v in _video_registry.values()
+        if isinstance(v.get("funscriptPath"), str) and v.get("funscriptPath")
+    }
+    if paths:
+        wanted = [p for p in paths[:MAX_SCRIPT_META_PATHS] if isinstance(p, str) and p]
+        for p in wanted:
+            if p in paired:
+                try:
+                    _script_meta.read_and_store(p)
+                except Exception:  # noqa: BLE001 - that script keeps its last record (R3R-1)
+                    _log.warning("on-demand script-meta read failed for %s", p, exc_info=True)
+        records = _script_meta.records(wanted)
+    else:
+        records = _script_meta.records(paired, since=since)
+    # list(): one C-level copy each, so the worker thread cannot change a set mid-count.
+    pending = len(set(list(_meta_inflight)) | {p for _vid, p in list(_speed_probe_inflight)})
+    return {
+        "records": records,
+        "pending": pending,
+        "registered": len(_video_registry),
+        "cacheId": state["cacheId"],
+        "seq": state["seq"],
+    }
+
+
+@router.post("/register", dependencies=DESKTOP_ONLY)
 async def register_library(request: Request):
     """Register videos from a library scan (called by Electron main process).
+
+    DESKTOP ONLY (FT-009): a registration decides which files `/stream`
+    serves, and where thumbnails and custom posters are read from. It used to
+    take any path from any LAN host or web page, which made it a remote read
+    of any file on the disk. See routes/desktop_gate.py.
 
     Also accepts collections/playlists/categories so the web remote can show
     the same groupings the desktop app does. Every field is independent:
@@ -635,6 +1012,9 @@ def _apply_registration(data: dict):
     """
     if "videos" in data:
         register_videos(data.get("videos") or [])
+        # A Refresh / rescan is the user asking to look again: thumbnails
+        # that failed are retried on their next poll (FT-085).
+        _thumb_failed.clear()
 
     # Groupings — view-only on the phone, but they follow the desktop's
     # settings shape so no translation is needed.
@@ -649,6 +1029,10 @@ def _apply_registration(data: dict):
         )
     if "sources" in data:
         register_sources(data.get("sources") or [])
+    # The phone's Tags filter (P1): each video's merged tags, as the desktop
+    # computed them. Sent on its own, only when a tag input changed.
+    if "videoTags" in data:
+        register_tags(data.get("videoTags"))
 
     thumb_dir = data.get("thumbCacheDir")
     if thumb_dir:
@@ -684,6 +1068,124 @@ MIME_TYPES = {
 }
 
 
+# One byte range: "bytes=N-M", "bytes=N-" or the suffix "bytes=-N" (the last
+# N bytes). Range units compare case-insensitively (RFC 9110 14.1).
+_SINGLE_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$", re.IGNORECASE)
+_RANGE_UNSATISFIABLE = "unsatisfiable"
+
+
+def _parse_byte_range(header: str, file_size: int):
+    """Read a Range header against a file of ``file_size`` bytes (FT-083).
+
+    Returns ``(start, end)`` (inclusive, end clamped to EOF) for a range to
+    answer with a 206, ``_RANGE_UNSATISFIABLE`` for one that asks for nothing
+    the file has (a 416), or ``None`` when the header is malformed or names
+    several ranges: then the Range is ignored and the whole file is the
+    answer (a 200), which RFC 9110 14.2 allows.
+
+    The old parser split on "-": "bytes=-100" (the last 100 bytes) became
+    0-100, and "bytes=999-0" or a start past EOF promised a negative
+    Content-Length.
+    """
+    m = _SINGLE_RANGE_RE.match((header or "").strip())
+    if not m:
+        return None
+    first, last = m.group(1), m.group(2)
+    if first == "" and last == "":
+        return None
+    if first == "":
+        suffix = int(last)
+        if suffix == 0 or file_size == 0:
+            return _RANGE_UNSATISFIABLE
+        return (max(0, file_size - suffix), file_size - 1)
+    start = int(first)
+    if start >= file_size:
+        return _RANGE_UNSATISFIABLE
+    end = int(last) if last != "" else file_size - 1
+    if end < start:
+        return _RANGE_UNSATISFIABLE
+    return (start, min(end, file_size - 1))
+
+
+def _regular_file_size(path):
+    """Size of the regular file at ``path``, or None when there is none (E-12).
+
+    A stat, so a route on the event loop runs it in the threadpool: a stat on
+    a spun-down USB drive or an offline network share can take seconds, and
+    /health must keep answering meanwhile (a busy backend is not a dead one).
+    """
+    try:
+        st = os.stat(path)
+    except (OSError, ValueError):
+        return None
+    return st.st_size if stat.S_ISREG(st.st_mode) else None
+
+
+def _read_whole_file(path):
+    """A small file's bytes, or the status to answer instead (E-04).
+
+    Returns ``(data, None)`` or ``(None, status)``: 404 when there is no
+    regular file at ``path``, 403 when there is one this process may not
+    read (denied, or held by another process). Reading it whole BEFORE the
+    response starts is the point: a FileResponse promises a 200 and a
+    Content-Length from a stat, then fails on the open, so a phone got a
+    cut-off body and uvicorn logged ~80 lines of "Too little data for
+    declared Content-Length" per request. Runs in the threadpool.
+    """
+    if not os.path.isfile(path):
+        return None, 404
+    try:
+        with open(path, "rb") as f:
+            return f.read(), None
+    except PermissionError:
+        return None, 403
+    except (OSError, ValueError):
+        return None, 404
+
+
+def _read_text_sig(path):
+    """A text file read whole as UTF-8 (BOM stripped); for the threadpool."""
+    with open(path, "r", encoding="utf-8-sig") as f:
+        return f.read()
+
+
+def _readable_file_size(path):
+    """``(size, None)`` for a regular file this process can open, else
+    ``(None, status)``: 404 when there is none, 403 when it cannot be read.
+
+    The video stream's E-04 (found while E-04, verify-2 2026-11-07; also in
+    v0.9.2): the stat alone passes for a file with a deny ACL or one held by
+    another process, so the response promised a 200 / 206 and a
+    Content-Length, then failed on the open with the headers already out: a
+    cut-off body and uvicorn's "Too little data for declared Content-Length".
+    The open is tried here, before anything is sent. Runs in the threadpool.
+    """
+    size = _regular_file_size(path)
+    if size is None:
+        return None, 404
+    try:
+        with open(path, "rb"):
+            pass
+    except PermissionError:
+        return None, 403
+    except (OSError, ValueError):
+        return None, 404
+    return size, None
+
+
+class _WholeFileResponse(FileResponse):
+    """The whole file as a 200, whatever Range the request carried (FT-083).
+
+    Starlette's FileResponse reads the request's Range header itself (a
+    multipart 206 for several ranges, a 400 for a malformed one), so a Range
+    `stream_video` has decided to ignore must not reach it.
+    """
+
+    async def __call__(self, scope, receive, send):
+        headers = [(k, v) for (k, v) in scope.get("headers", []) if k.lower() != b"range"]
+        await super().__call__({**scope, "headers": headers}, receive, send)
+
+
 @router.get("/stream/{video_id}")
 async def stream_video(video_id: str, request: Request):
     """Stream a video file with HTTP Range request support.
@@ -696,25 +1198,34 @@ async def stream_video(video_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Video not found")
 
     filepath = video.get("path", "")
-    if not filepath or not os.path.isfile(filepath):
+    # Off the event loop (E-12), and opened once before anything is sent:
+    # see _readable_file_size.
+    file_size, status = (
+        await run_in_threadpool(_readable_file_size, filepath) if filepath else (None, 404)
+    )
+    if file_size is None:
+        if status == 403:
+            raise HTTPException(status_code=403, detail="This video cannot be read")
         raise HTTPException(status_code=404, detail="File not found on disk")
 
-    file_size = os.path.getsize(filepath)
     ext = os.path.splitext(filepath)[1].lower()
     content_type = MIME_TYPES.get(ext, "application/octet-stream")
 
-    # Parse Range header
+    # Parse Range header (FT-083): one range, a suffix, or ignored.
     range_header = request.headers.get("range")
-    if range_header:
-        # Parse "bytes=start-end"
-        try:
-            range_spec = range_header.replace("bytes=", "").strip()
-            parts = range_spec.split("-")
-            start = int(parts[0]) if parts[0] else 0
-            end = int(parts[1]) if parts[1] else file_size - 1
-        except (ValueError, IndexError):
-            start = 0
-            end = file_size - 1
+    byte_range = _parse_byte_range(range_header, file_size) if range_header else None
+    if byte_range == _RANGE_UNSATISFIABLE:
+        return Response(
+            status_code=416,
+            headers={
+                "Content-Range": f"bytes */{file_size}",
+                "Accept-Ranges": "bytes",
+                "Access-Control-Allow-Origin": "*",
+                "Cache-Control": "no-store",
+            },
+        )
+    if byte_range is not None:
+        start, end = byte_range
 
         # An open-ended "bytes=X-" is answered to EOF, as nginx and every
         # other conventional file server does.
@@ -790,8 +1301,9 @@ async def stream_video(video_id: str, request: Request):
             },
         )
     else:
-        # No range — serve full file
-        return FileResponse(
+        # No range, or a malformed / multi-range one (ignored, FT-083) —
+        # serve full file
+        return _WholeFileResponse(
             filepath,
             media_type=content_type,
             headers={
@@ -838,11 +1350,19 @@ async def get_funscript(video_id: str, variant: str | None = None):
     else:
         fs_path = video.get("funscriptPath")
 
-    if not fs_path or not os.path.isfile(fs_path):
+    if not fs_path:
         raise HTTPException(status_code=404, detail="No funscript for this video")
 
-    return FileResponse(
-        fs_path,
+    # Read whole, off the event loop, before anything is promised (E-04,
+    # E-12): an unreadable script is a 403, never a 200 with a cut-off body.
+    data, status = await run_in_threadpool(_read_whole_file, fs_path)
+    if data is None:
+        if status == 403:
+            raise HTTPException(status_code=403, detail="The funscript for this video cannot be read")
+        raise HTTPException(status_code=404, detail="No funscript for this video")
+
+    return Response(
+        content=data,
         media_type="application/json",
         headers={"Access-Control-Allow-Origin": "*"},
     )
@@ -858,7 +1378,15 @@ async def get_subtitle(video_id: str):
         raise HTTPException(status_code=404, detail="Video not found")
 
     sub_path = video.get("subtitlePath")
-    if not sub_path or not os.path.isfile(sub_path):
+    if not sub_path:
+        raise HTTPException(status_code=404, detail="No subtitle for this video")
+    # Read whole, off the event loop (E-12), before anything is sent: an
+    # unreadable subtitle is a 403, never a 200 with a cut-off body (as
+    # E-04 for the script; found while E-04, also in v0.9.2).
+    data, status = await run_in_threadpool(_read_whole_file, sub_path)
+    if data is None:
+        if status == 403:
+            raise HTTPException(status_code=403, detail="The subtitle for this video cannot be read")
         raise HTTPException(status_code=404, detail="No subtitle for this video")
 
     ext = os.path.splitext(sub_path)[1].lower()
@@ -866,8 +1394,7 @@ async def get_subtitle(video_id: str):
     # Convert SRT to WebVTT on-the-fly — HereSphere handles VTT seeks more reliably
     if ext == ".srt":
         try:
-            with open(sub_path, "r", encoding="utf-8-sig") as f:
-                srt_content = f.read()
+            srt_content = data.decode("utf-8-sig")
             # SRT uses comma for ms separator, VTT uses dot.
             # `str.replace(old, new)` with no count argument already
             # replaces every occurrence — the `99999` cap was misleading.
@@ -883,8 +1410,8 @@ async def get_subtitle(video_id: str):
             pass  # Fall through to serve raw file
 
     mime = "text/vtt" if ext == ".vtt" else "text/plain"
-    return FileResponse(
-        sub_path,
+    return Response(
+        content=data,
         media_type=mime,
         headers={"Access-Control-Allow-Origin": "*"},
     )
@@ -923,11 +1450,11 @@ async def get_thumbnail(video_id: str):
         raise HTTPException(status_code=404, detail="Video not found")
 
     filepath = video.get("path", "")
-    if not filepath or not os.path.isfile(filepath):
+    # Off the event loop (E-12): see _regular_file_size.
+    if not filepath or not await run_in_threadpool(os.path.isfile, filepath):
         raise HTTPException(status_code=404, detail="File not found")
 
-    if not _thumb_cache_dir:
-        raise HTTPException(status_code=500, detail="Thumbnail cache not configured")
+    thumb_cache_dir = _ensure_thumb_cache_dir()
 
     custom = _custom_thumb_for(filepath)
 
@@ -938,7 +1465,7 @@ async def get_thumbnail(video_id: str):
         # Untrusted path from a pushed payload — only serve from inside
         # the registered custom-thumbs dir; anything else falls through
         # to the normal auto-thumb path.
-        if img.startswith(root + os.sep) and os.path.isfile(img):
+        if img.startswith(root + os.sep) and await run_in_threadpool(os.path.isfile, img):
             mime = _IMAGE_MIME.get(os.path.splitext(img)[1].lower(), "image/jpeg")
             return FileResponse(img, media_type=mime,
                                 headers={"Access-Control-Allow-Origin": "*",
@@ -950,16 +1477,31 @@ async def get_thumbnail(video_id: str):
         pin_pct = min(0.999, max(0.0, float(custom["seekPct"])))
 
     thumb_name = f"{video_id}.jpg" if pin_pct is None else f"{video_id}_p{int(pin_pct * 1000):04d}.jpg"
-    thumb_path = os.path.join(_thumb_cache_dir, thumb_name)
+    thumb_path = os.path.join(thumb_cache_dir, thumb_name)
 
-    # Return cached thumbnail if exists
-    if os.path.isfile(thumb_path):
+    # Return cached thumbnail if it is a whole JPEG (FT-084). Off the event
+    # loop: it reads the file's ends and stats the video (FT-085).
+    state = await run_in_threadpool(_thumb_cache_lookup, thumb_path, thumb_name, filepath)
+    if state == "hit":
         return FileResponse(thumb_path, media_type="image/jpeg",
                             headers={"Access-Control-Allow-Origin": "*",
                                      "Cache-Control": "public, max-age=86400"})
 
-    # Not cached — generate in background, return placeholder now
-    _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=pin_pct)
+    # No video stream (an audio file, N-05; also in v0.9.2): no frame will
+    # ever come, and the 1x1 transparent placeholder below showed the
+    # phone's and the headset's tile black. The app logo in grey instead,
+    # once a generation has failed for that reason. `no-cache`, so a poster
+    # the user uploads later is what the next request gets.
+    if await run_in_threadpool(_no_video_known, filepath) and os.path.isfile(NO_VIDEO_THUMB):
+        return FileResponse(NO_VIDEO_THUMB, media_type="image/png",
+                            headers={"Access-Control-Allow-Origin": "*",
+                                     "Cache-Control": "no-cache"})
+
+    # Not cached — generate in background, return placeholder now. A video
+    # whose thumbnail failed recently, unchanged since, gets the placeholder
+    # without another ffmpeg run on every poll (FT-085).
+    if state != "failed-recently":
+        _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=pin_pct)
 
     # 1x1 transparent PNG placeholder (67 bytes)
     import base64
@@ -976,6 +1518,79 @@ async def get_thumbnail(video_id: str):
 # Background thumbnail generation — limits concurrency to avoid thrashing I/O
 _thumb_generating = set()
 _thumb_semaphore = None
+
+# Thumbnails that failed (FT-085): {thumb_name: (size, mtime_ns, monotonic)}
+# of the video when it failed. `_thumb_generating` only dedupes a job in
+# flight, so a file that always fails (corrupt, not really a video) spawned
+# ffmpeg again on every poll of /thumb. While the video is unchanged and the
+# failure is under THUMB_FAILURE_RETRY_SEC old, the placeholder is served
+# without a new job. Cleared on success and on a library registration (a
+# Refresh is the user asking to look again). Nothing is deleted for it.
+_thumb_failed = {}
+THUMB_FAILURE_RETRY_SEC = 600
+
+# Files whose thumbnail failed because they have no video stream (N-05):
+# {video path: (size, mtime_ns)} when it was found. Kept while the file is
+# unchanged (a library registration does not clear it: the file did not
+# change), and never written anywhere. The image is the web remote's own.
+_thumb_no_video = {}
+NO_VIDEO_THUMB = os.path.join(
+    getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "web-remote", "icons", "no-video-thumb.png",
+)
+
+
+def _no_video_known(filepath):
+    """True when this file, unchanged since, was found to have no video stream."""
+    sig = _thumb_no_video.get(filepath)
+    return sig is not None and _video_signature(filepath) == sig
+
+
+def _note_if_no_video(filepath):
+    """After a failed thumbnail: remember the file when ffprobe (cached by
+    then, the generator probed it first) finds audio and no video stream.
+    A file ffprobe cannot read is not marked: it may be a broken video."""
+    try:
+        from services.ffmpeg import get_metadata
+        meta = get_metadata(filepath)
+    except Exception:
+        return False
+    if meta.get("width") or meta.get("height") or not (meta.get("duration") or 0) > 0:
+        return False
+    sig = _video_signature(filepath)
+    if sig is None:
+        return False
+    _thumb_no_video[filepath] = sig
+    return True
+
+
+def _video_signature(filepath):
+    try:
+        st = os.stat(filepath)
+        return (st.st_size, st.st_mtime_ns)
+    except OSError:
+        return None
+
+
+def _thumb_cache_lookup(thumb_path, thumb_name, filepath):
+    """'hit' (a whole cached JPEG), 'failed-recently' (FT-085) or 'miss'.
+
+    A cached file that is not a whole JPEG (cut off by a killed copy or
+    ffmpeg run) is the backend's own cache output: it is removed and the
+    thumbnail generated again (FT-084).
+    """
+    from services.ffmpeg import is_complete_jpeg, _safe_unlink
+    if os.path.isfile(thumb_path):
+        if is_complete_jpeg(thumb_path):
+            return "hit"
+        _safe_unlink(thumb_path)
+    failed = _thumb_failed.get(thumb_name)
+    if failed:
+        size, mtime_ns, at = failed
+        if (time.monotonic() - at < THUMB_FAILURE_RETRY_SEC
+                and _video_signature(filepath) == (size, mtime_ns)):
+            return "failed-recently"
+    return "miss"
 
 
 def _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=None):
@@ -1002,7 +1617,7 @@ def _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=None):
             # command here used `-ss 25%` (ffmpeg can't parse a percentage
             # for -ss) with a `-ss 5` fallback that landed squarely in the
             # black intro of most videos → black thumbnails on the phone.
-            from services.ffmpeg import generate_single_thumbnail
+            from services.ffmpeg import generate_single_thumbnail, _safe_unlink
             import shutil
             result = (
                 generate_single_thumbnail(filepath, seek_pct=seek_pct, width=320, exact=True)
@@ -1011,9 +1626,26 @@ def _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=None):
             )
             src = result.get("path") if result else None
             if src and os.path.isfile(src) and os.path.abspath(src) != os.path.abspath(thumb_path):
-                shutil.copyfile(src, thumb_path)
-        except Exception:
-            pass
+                # Copy to a temp name and rename, so a copy cut short never
+                # sits at the cache name (FT-084).
+                tmp = f"{thumb_path}.part-{os.getpid()}-{threading.get_ident()}"
+                try:
+                    shutil.copyfile(src, tmp)
+                    os.replace(tmp, thumb_path)
+                finally:
+                    _safe_unlink(tmp)
+            _thumb_failed.pop(os.path.basename(thumb_path), None)
+        except Exception as err:
+            # Was a bare `pass`: a VR / phone thumbnail that failed left no
+            # trace in main.log (FT-084). "WARNING:" first, so python-bridge
+            # logs it at warn (FT-042). One line, the end of the reason.
+            detail = " ".join(str(err).split())[-400:] or type(err).__name__
+            print(f"WARNING: [Thumb] background thumbnail failed for {video_id}: {detail}", flush=True)
+            sig = _video_signature(filepath)
+            if sig is not None:
+                _thumb_failed[os.path.basename(thumb_path)] = (*sig, time.monotonic())
+            # An audio file: its next request gets the logo tile (N-05).
+            _note_if_no_video(filepath)
         finally:
             _thumb_generating.discard(video_id)
             _thumb_semaphore.release()

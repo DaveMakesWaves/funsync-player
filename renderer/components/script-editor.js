@@ -11,7 +11,7 @@ import {
 import { showToast } from '../js/toast.js';
 import { Modal } from './modal.js';
 import {
-  halfSpeed, doubleSpeed, reverseActions, remapRange, offsetTime, removePauses, generatePattern,
+  halfSpeed, doubleSpeed, reverseActions, remapRange, offsetTime, removePauses, rangeExtend, generatePattern,
 } from '../js/script-modifiers.js';
 import { detectGaps, fillGaps } from '../js/gap-filler.js';
 import {
@@ -22,13 +22,30 @@ import { extractVAD, getCachedVAD } from '../js/vad.js';
 import { detectBeats, beatsToActions, getCachedBeats, clearBeatCacheFor } from '../js/beat-detector.js';
 import { dataService } from '../js/data-service.js';
 import { openKeyboardHelp, getEditorShortcutGroups } from '../js/keyboard-help.js';
-import { t, translatePage } from '../js/i18n.js';
+import { t, translatePage, getCurrentLocale } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
-import { buildResolverMap, lookupBinding } from '../js/position-key-resolver.js';
+import { buildResolverMap, resolvePositionKey } from '../js/position-key-resolver.js';
+import { layoutKey, digitKey } from '../js/keyboard-layout.js';
+import { invertRawScriptContent } from '../js/device-transform-stack.js';
+import { applyPopoutEdit } from '../js/editor-popout-dispatch.js';
+import {
+  PatternFillDrawer, fillDrawerKeyVerdict, normalisePatternFillOptions, windowSignature,
+  rangeFromBand, fillRangeKey, fillLanding,
+} from './pattern-fill-drawer.js';
+import { FILL_RESULT } from '../js/editor-popout-protocol.js';
+import { openContextMenu, closeContextMenu } from '../js/editor-context-menu.js';
+import { describePattern } from '../js/pattern-library.js';
+
+/** Ctrl+<digit> → the Select… command it runs (CB-06: matched on the key, digitKey). */
+const THIRD_BY_DIGIT = { 1: 'topThird', 2: 'middleThird', 3: 'bottomThird' };
 
 export class ScriptEditor {
-  constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyHdspSync, handyManager, settings }) {
+  constructor({ videoPlayer, funscriptEngine, progressBar, syncEngine, handyHdspSync, handyManager, settings, engineHeldByRemote }) {
     this.videoPlayer = videoPlayer;
+    // True while the shared engine holds a script the phone or a VR headset
+    // loaded, not this window's video's (R3-20): the editor then never takes
+    // the engine's points, and a save never pushes into it.
+    this.engineHeldByRemote = typeof engineHeldByRemote === 'function' ? engineHeldByRemote : () => false;
     this.funscriptEngine = funscriptEngine;
     this.progressBar = progressBar;
     this.syncEngine = syncEngine;
@@ -37,6 +54,8 @@ export class ScriptEditor {
     this.settings = settings;
 
     this.editableScript = new EditableScript();
+    // Main asks before a close / quit / reload while this says dirty (R3-19).
+    this._watchDirtyState();
     this.graph = null;
 
     this._open = false;
@@ -81,6 +100,27 @@ export class ScriptEditor {
     this._popoutUnsubscribe = null;
     this._btnPopout = null;
 
+    // Fill with pattern drawer (pattern library, Round 2): built on first use.
+    this._fillDrawer = null;
+    // A time range marked for a fill: a rubber band over 0 or 1 points
+    // leaves its span here ({ startMs, endMs, key }), shaded on the graph.
+    // It lasts while the selection, the script and the load stay as they
+    // were (key), and goes on Esc and on any left click on the timeline.
+    this._fillRange = null;
+    // Set by app.js (D-01). While the player window owns playback the inline
+    // <video> only holds the file, paused: `getPlaybackClock()` returns the
+    // clock that plays then (the window's proxy), else null, and
+    // `routePlayback(command, arg)` sends the pop-out's seeks and frame steps
+    // there (true = taken). Without them the pop-out followed the paused
+    // inline element and its arrows stepped a video nobody sees.
+    this.getPlaybackClock = null;
+    this.routePlayback = null;
+    // Set by app.js (E-07): the pop-out closed with the editor open, so it
+    // docked into the player view. With the player in its own window the
+    // main window shows the Library, and the docked editor was on screen
+    // nowhere.
+    this.onPopoutDocked = null;
+
     // Load token — bumps on every _onScriptSelectChange. Guards the
     // async readFunscript so a slow disk read for an earlier-selected
     // script can't overwrite the canvas after a newer selection has
@@ -93,8 +133,18 @@ export class ScriptEditor {
     this.onFunscriptCreated = null;
 
     // Multi-script editing
-    this._availableScripts = []; // [{ label, path }] — populated by app.js
+    this._availableScripts = []; // [{ label, path, embeddedAxis? }] — populated by app.js
     this._scriptSelect = null;
+
+    // Axes embedded in the main script (#376, V42) are listed with an
+    // `embeddedAxis` suffix and a virtual path: there is no file to load.
+    // Picking one calls `onEditEmbeddedAxis(suffix)` (app.js extracts it to
+    // a companion file, then opens that); the stacked view previews it
+    // read-only from `getEmbeddedAxisActions(suffix)`.
+    /** @type {((suffix: string) => Promise<void>|void)|null} */
+    this.onEditEmbeddedAxis = null;
+    /** @type {((suffix: string) => Array<{at:number,pos:number}>|null)|null} */
+    this.getEmbeddedAxisActions = null;
 
     // Undo stack cache per path (survives script switching)
     this._undoCache = new Map(); // path → { actions, undoStack, redoStack, selectedIndices, bookmarks }
@@ -127,10 +177,15 @@ export class ScriptEditor {
     // toolbar string is tagged with data-i18n / data-i18n-title /
     // data-i18n-aria-label, so translatePage() walks the panel and
     // refreshes them in one call. Dynamic strings (autosave status,
-    // beat-detection progress, status line counts) are set fresh via
-    // t() each time they're written and don't need handling here.
+    // beat-detection progress) are set fresh via t() each time they're
+    // written. The status line ("44 actions") is written only when the
+    // script changes, so it kept the old language until the next edit: it
+    // is written again here (R3 fix-up, real-app verifier 1).
     this._unsubscribeLanguage = eventBus.on('language:changed', () => {
       if (this._panel) translatePage(this._panel);
+      this._updateStatus();
+      // The editor pop-out follows the switch (FT-103): it kept English.
+      this._broadcastLocale();
     });
 
     // Mirror external rate changes (player-controls speed button,
@@ -146,11 +201,20 @@ export class ScriptEditor {
     // Rebuild the custom position-key resolver when the user adds /
     // removes / edits bindings in Settings. Keeps the runtime map in
     // lockstep with persisted state without requiring an editor reopen.
-    this._unsubscribeSettings = eventBus.on('settings:changed', (key) => {
-      if (key === 'editor.customPositionKeys' || key === '*') {
-        this._customPositionKeyMap = buildResolverMap(
-          this.settings?.get?.('editor.customPositionKeys') || [],
-        );
+    //
+    // DataService emits `{ path, value }`. This compared the whole payload
+    // with the key, so it never matched and a binding added in Settings
+    // reached the editor only after a restart (found with FT-032). A bare
+    // string is still accepted.
+    this._unsubscribeSettings = eventBus.on('settings:changed', (payload) => {
+      const key = typeof payload === 'string' ? payload : payload?.path;
+      if (key === 'editor.customPositionKeys' || key === 'editor' || key === '*') {
+        this._customPositionKeyMap = buildResolverMap(this._customPositionKeys());
+        // The pop-out resolves its keys itself, from this list (FT-032).
+        this._broadcastSettings();
+      } else if (key === 'editor.fastStepFrames') {
+        // The pop-out's Ctrl+Left/Right step (D-02).
+        this._broadcastSettings();
       }
     });
   }
@@ -160,6 +224,13 @@ export class ScriptEditor {
   _buildPanel() {
     this._panel = document.createElement('div');
     this._panel.className = 'script-editor';
+    // Closed until show(): inert, so Tab cannot reach its buttons or canvas.
+    // editor.css only slides it off screen (translateY + opacity), and Tab
+    // from the player landed on the hidden Delete Selected, Zoom Out and
+    // canvas: Enter or a digit edited the script unseen, and the focus
+    // scrolled the page 250 px, taking the top bar with it (round 2, also
+    // in v0.9.2). show() / hide() switch it.
+    this._panel.setAttribute('inert', '');
 
     // Toolbar — role="toolbar" + arrow-key navigation between buttons
     // (Nielsen #4 standards). Pressing ← / → moves focus between
@@ -200,6 +271,43 @@ export class ScriptEditor {
     const btnCut = this._makeBtn(Scissors, 'editor.btn.cut', () => this._cutSelected());
     const sep1b = this._makeSeparator();
 
+    // Select dropdown, just left of Modify. OFS's Select-menu order
+    // (OpenFunscripter.cpp L2401-2453). Every item runs the SAME code as its
+    // key (_runSelectCommand), and the labels name their keys: today the
+    // only other place to discover them is the `?` overlay (belgriffinite
+    // #261, "Maybe there is a way and I just don't know how"). Selection
+    // only: nothing here pushes an undo step or sets the unsaved flag.
+    this._selectMenu = document.createElement('select');
+    this._selectMenu.className = 'editor__speed-select editor__select-menu';
+    this._selectMenu.title = t('editor.select.title');
+    this._selectMenu.setAttribute('data-i18n-title', 'editor.select.title');
+    const selectOpts = [
+      { value: '', key: 'editor.select.placeholder' },
+      { value: 'all', key: 'editor.select.all' },
+      { value: 'beforePlayhead', key: 'editor.select.beforePlayhead' },
+      { value: 'afterPlayhead', key: 'editor.select.afterPlayhead' },
+      { value: 'topThird', key: 'editor.select.topThird' },
+      { value: 'middleThird', key: 'editor.select.middleThird' },
+      { value: 'bottomThird', key: 'editor.select.bottomThird' },
+      null,
+      { value: 'everyNth', key: 'editor.select.everyNth' },
+      { value: 'created', key: 'editor.select.created' },
+      null,
+      { value: 'none', key: 'editor.select.none' },
+    ];
+    for (const o of selectOpts) {
+      // null = separator. Chromium draws an <hr> in a <select> as a divider.
+      if (!o) { this._selectMenu.appendChild(document.createElement('hr')); continue; }
+      const opt = document.createElement('option');
+      opt.value = o.value;
+      opt.textContent = t(o.key);
+      opt.setAttribute('data-i18n', o.key);
+      if (o.value === '') opt.disabled = true;
+      this._selectMenu.appendChild(opt);
+    }
+    this._selectMenu.selectedIndex = 0;
+    this._selectMenu.addEventListener('change', () => this._onSelectMenuChange());
+
     // Modify dropdown
     this._modifySelect = document.createElement('select');
     this._modifySelect.className = 'editor__speed-select';
@@ -215,6 +323,7 @@ export class ScriptEditor {
       { value: 'removePauses', key: 'editor.modify.removePauses' },
       { value: 'rangeExtend', key: 'editor.modify.rangeExtend' },
       { value: 'generatePattern', key: 'editor.modify.generatePattern' },
+      { value: 'fillPattern', key: 'editor.modify.fillPattern' }, // the drawer (pattern library)
       { value: 'exportHeatmap', key: 'editor.modify.exportHeatmap' },
     ];
     for (const o of modOpts) {
@@ -377,14 +486,20 @@ export class ScriptEditor {
     this._recordingIndicator.hidden = true;
     this._recordingIndicator.style.cssText = 'color:#ff4444;font-weight:700;font-size:11px;margin-left:6px;animation:blink 1s step-end infinite';
 
+    // The speed label and its select wrap as one: in a wrapped toolbar the
+    // label could end one row and its select start the next (R3 fix-up).
+    const speedGroup = document.createElement('span');
+    speedGroup.className = 'editor__speed-group';
+    speedGroup.append(speedLabel, this._speedSelect);
+
     toolbar.append(
       this._scriptSelect, this._btnStacked, sepScript,
       this._btnUndo, this._btnRedo, sep1,
       btnDelete, btnCut, btnInvert, btnSimplify, sep1b,
-      this._modifySelect, sep1c,
+      this._selectMenu, this._modifySelect, sep1c,
       btnMetadata, btnBookmark, btnFillGaps, this._btnWaveform, btnBeats, sep1d,
       btnZoomIn, btnZoomOut, btnFitAll, sep2,
-      speedLabel, this._speedSelect, sep3,
+      speedGroup, sep3,
       btnSave, this._btnPopout, autosaveGroup, snapLabel, splineLabel, this._recordingIndicator, this._statusEl,
     );
 
@@ -419,6 +534,7 @@ export class ScriptEditor {
     const playerContainer = document.getElementById('player-container');
     if (playerContainer) {
       playerContainer.appendChild(this._panel);
+      this._watchToolbarRows(toolbar, playerContainer);
     }
 
     // Create graph renderer
@@ -487,6 +603,51 @@ export class ScriptEditor {
     return sep;
   }
 
+  /**
+   * The toolbar wraps onto more rows in a narrow window or a longer language
+   * (R3-23): every control stays reachable. editor.css grows the panel by the
+   * rows past the first, and moves the video and the player controls up by
+   * the same amount, so the canvas keeps its height. The extra goes on
+   * `container` as --editor-toolbar-extra, measured whenever the toolbar's
+   * size changes (a resize, a language switch, a control shown or hidden).
+   */
+  _watchToolbarRows(toolbar, container) {
+    if (typeof ResizeObserver === 'undefined') return;
+    let last = null;
+    let frame = 0;
+    // Written in the next frame, not inside the observer's callback: the
+    // write grows the panel, which resized the canvas container (observed
+    // too, `_resizeObserver`) inside the same delivery, and Chromium reported
+    // "ResizeObserver loop completed with undelivered notifications" as a
+    // window error, logged as [error] in the log users send (R3 fix-up, real-
+    // app verifier 2; seen only since R3-23 added this observer).
+    const write = (extra) => {
+      if (typeof requestAnimationFrame !== 'function') {
+        container.style.setProperty('--editor-toolbar-extra', `${extra}px`);
+        return;
+      }
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        container.style.setProperty('--editor-toolbar-extra', `${extra}px`);
+      });
+    };
+    const measure = () => {
+      const kids = [...toolbar.children].filter((el) => el.offsetHeight > 0);
+      if (!kids.length) return; // hidden (the pop-out holds the editor): keep the last value
+      const cs = getComputedStyle(toolbar);
+      const px = (v) => parseFloat(v) || 0;
+      const chrome = px(cs.paddingTop) + px(cs.paddingBottom) + px(cs.borderTopWidth) + px(cs.borderBottomWidth);
+      const oneRow = Math.max(px(cs.minHeight), Math.max(...kids.map((el) => el.offsetHeight)) + chrome);
+      const extra = Math.max(0, Math.round(toolbar.offsetHeight - oneRow));
+      if (extra === last) return;
+      last = extra;
+      write(extra);
+    };
+    this._toolbarRowsObserver = new ResizeObserver(measure);
+    this._toolbarRowsObserver.observe(toolbar);
+  }
+
   // --- Events ---
 
   _bindEvents() {
@@ -497,6 +658,10 @@ export class ScriptEditor {
     this._canvas.addEventListener('mouseleave', () => this._onMouseLeave());
     this._canvas.addEventListener('dblclick', (e) => this._onDoubleClick(e));
     this._canvas.addEventListener('wheel', (e) => this._onWheel(e), { passive: false });
+    // Right-click: the timeline's small menu (Fill with pattern…). The press
+    // itself (mousedown, button 2) still does nothing, so no selection or
+    // drag changes; only the menu opens.
+    this._canvas.addEventListener('contextmenu', (e) => this._onCanvasContextMenu(e));
 
     // Canvas keyboard events (stopPropagation prevents global shortcuts)
     this._canvas.addEventListener('keydown', (e) => this._onCanvasKeyDown(e));
@@ -553,6 +718,13 @@ export class ScriptEditor {
     }
 
     if (e.button !== 0) return;
+    // A left press anywhere on the timeline ends a marked fill range (a new
+    // band marks a new one on release). Right-click keeps it: its menu fills it.
+    if (this._fillRange) this._setFillRange(null);
+    // While Fill with pattern previews, clicks still select (the preview
+    // follows), but the two mouse EDITS wait: Alt+click insert and the
+    // Shift+drag move (design §f: editing pauses until Apply or Cancel).
+    const previewing = this._fillDrawer?.isOpen === true;
 
     if (hitIdx >= 0) {
       // Clicked on an action dot
@@ -567,7 +739,7 @@ export class ScriptEditor {
       this._lastSelectedIndex = hitIdx;
 
       // Shift+click on dot → start move drag (OFS: shift+drag to move)
-      if (e.shiftKey) {
+      if (e.shiftKey && !previewing) {
         this._dragMode = 'move';
         this._dragStartX = x;
         this._dragStartY = y;
@@ -578,7 +750,9 @@ export class ScriptEditor {
       }
     } else {
       // Clicked on empty area
-      if (e.altKey) {
+      if (e.altKey && previewing) {
+        return;
+      } else if (e.altKey) {
         // Alt+click on empty = insert action at this position (OFS style)
         const timeMs = this.snapTime(this.graph.xToTime(x));
         const pos = Math.round(this.graph.yToPos(y));
@@ -688,6 +862,11 @@ export class ScriptEditor {
         } else {
           this.editableScript._selectedIndices = indices;
           this.editableScript._emit();
+          // Fewer than two points caught: the band's time span is kept as a
+          // range to fill (shaded), when it holds at most one point.
+          if (indices.size < 2) {
+            this._setFillRange(rangeFromBand(this.editableScript.actions, this.graph.xToTime(rect.x1), this.graph.xToTime(rect.x2)));
+          }
         }
       }
       this.graph.clearRubberBand();
@@ -702,7 +881,23 @@ export class ScriptEditor {
 
   _onMouseLeave() {
     this.graph.clearHover();
-    this.editableScript.endBatch(); // safety: end any active drag batch
+    if (this._dragMode === 'move') {
+      // A point drag that leaves the canvas carries on until the button comes
+      // up, wherever that is (OFS keeps the mouse for a drag), so its batch
+      // stays open: ending it here sent the moves after the pointer came back
+      // outside any batch, where every point a moved one landed on along the
+      // way was removed (CB-02 review). The canvas's own mouseup never sees a
+      // release outside it, so the document's does.
+      if (!this._dragReleaseListener) {
+        this._dragReleaseListener = (e) => {
+          this._dragReleaseListener = null;
+          if (this._dragMode === 'move') this._onMouseUp(e);
+        };
+        document.addEventListener('mouseup', this._dragReleaseListener, { once: true });
+      }
+    } else {
+      this.editableScript.endBatch(); // safety: end any active drag batch
+    }
     if (!this.graph._animating) this.graph.draw();
   }
 
@@ -740,62 +935,61 @@ export class ScriptEditor {
   // --- Canvas Keyboard (OFS style) ---
 
   _onCanvasKeyDown(e) {
+    // A closed editor takes no keys, even if its canvas still had focus.
+    if (this._panel?.hasAttribute?.('inert')) return;
     this.graph.markInteraction();
+
+    // Fill with pattern is open: Esc closes it (before it would clear the
+    // selection), P goes back into it, the edit keys wait until Apply or
+    // Cancel, and the rest (play, steps, selection, zoom, help) work on.
+    if (this._fillDrawer?.isOpen) {
+      const verdict = fillDrawerKeyVerdict(e, {
+        isPositionKey: resolvePositionKey(e, this._customPositionKeyMap) !== null,
+      });
+      if (verdict !== 'allow') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (verdict === 'close') this._fillDrawer.close('cancel');
+        else if (verdict === 'focus') this._fillDrawer.focus();
+        return;
+      }
+    }
+
     // Let Space propagate for play/pause
     if (e.key === ' ') return;
 
     const ctrl = e.ctrlKey || e.metaKey;
 
-    // Custom position-key bindings win over defaults — user explicitly
-    // configured them in Settings → Editor → Position keys. Resolution
-    // order per SCOPE-editor-custom-position-keys.md §2 decision #2:
-    //   1. user's custom map
-    //   2. default position-key map (this block below)
-    //   3. editor command switch-case (further down)
-    const customPos = lookupBinding(this._customPositionKeyMap, {
-      code: e.code,
-      mods: { shift: !!e.shiftKey, ctrl: !!ctrl, alt: !!e.altKey },
-    });
-    if (customPos !== null) {
+    // Position keys: the user's custom map (Settings → Editor → Position
+    // keys) first, then 0-9 → 0-90 (OFS's round 10s) and Shift+0 / - /
+    // Numpad- → 100. ONE resolver, shared with the pop-out
+    // (resolvePositionKey, FT-032), so both editors place the same point for
+    // the same key. Default scheme stays increments of 10 per Dave
+    // 2026-05-30; finer bindings are the custom map
+    // (notes/features/SCOPE-editor-custom-position-keys.md).
+    const placePos = resolvePositionKey(e, this._customPositionKeyMap);
+    if (placePos !== null) {
       e.preventDefault();
       e.stopPropagation();
-      this._placeOrTweakAt(customPos);
+      this._placeOrTweakAt(placePos);
       return;
     }
 
-    // 0-9 keys: place action at current video time with fixed position
-    // Works with both regular number row and numpad. OFS parity: round
-    // 10s, not 11s (key 9 = 90). The top of the range (100) wasn't
-    // reachable in the original map — a community report flagged this.
-    // Three bindings cover it now:
-    //   - Shift+0 (modifier promotes the 0-floor to the 100-ceiling —
-    //     Photoshop opacity convention)
-    //   - `-` (Minus, number-row neighbor of 0 — single-handed reach)
-    //   - Numpad- (NumpadSubtract, same role for numpad workflows)
-    // Default scheme stays increments of 10 per Dave 2026-05-30; users
-    // who want every-point binding granularity use the custom-key UI
-    // wired above (notes/features/SCOPE-editor-custom-position-keys.md).
-    const TOP_KEYS = new Set(['Minus', 'NumpadSubtract']);
-    const isShiftZero = e.shiftKey && (e.code === 'Digit0' || e.code === 'Numpad0');
-    const numpadMap = {
-      'Digit0': 0, 'Digit1': 10, 'Digit2': 20, 'Digit3': 30, 'Digit4': 40,
-      'Digit5': 50, 'Digit6': 60, 'Digit7': 70, 'Digit8': 80, 'Digit9': 90,
-      'Numpad0': 0, 'Numpad1': 10, 'Numpad2': 20, 'Numpad3': 30, 'Numpad4': 40,
-      'Numpad5': 50, 'Numpad6': 60, 'Numpad7': 70, 'Numpad8': 80, 'Numpad9': 90,
-    };
-    // Resolve the position from whichever binding fired. Shift+0 wins
-    // over the plain 0→0 mapping (the shifted variant never matches
-    // the unshifted entry in `numpadMap` because we early-return).
-    const topKeyMatch = TOP_KEYS.has(e.code) && !ctrl && !e.altKey;
-    if (isShiftZero || topKeyMatch || (e.code in numpadMap && !e.shiftKey && !ctrl && !e.altKey)) {
+    // Ctrl+1/2/3: select by position range (top / middle / bottom third), on
+    // the number-row KEY (digitKey): AZERTY types & é " there unshifted, so
+    // the old `case '1'` on e.key never fired on it (CB-06).
+    const third = ctrl && !e.shiftKey && !e.altKey ? THIRD_BY_DIGIT[digitKey(e)] : undefined;
+    if (third) {
       e.preventDefault();
       e.stopPropagation();
-      const pos = (isShiftZero || topKeyMatch) ? 100 : numpadMap[e.code];
-      this._placeOrTweakAt(pos);
+      this._runSelectCommand(third);
       return;
     }
 
-    switch (e.key) {
+    // layoutKey: the Latin letter on the key when the layout types another
+    // alphabet (Russian т on N, Korean ㅜ), so the letter cases below work
+    // there too (FT-035). Every other key is e.key unchanged.
+    switch (layoutKey(e)) {
       case 'Delete':
       case 'Backspace':
         e.preventDefault();
@@ -817,7 +1011,7 @@ export class ScriptEditor {
         e.stopPropagation();
         if (ctrl && e.altKey) {
           // Ctrl+Alt+Left → select everything before the playhead
-          this._selectLeftOfCursor();
+          this._runSelectCommand('beforePlayhead');
         } else if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
           const frames = ctrl ? this._fastStepFrames() : 1;
           const deltaMs = -frames * this._frameDurationMs();
@@ -834,7 +1028,7 @@ export class ScriptEditor {
         e.stopPropagation();
         if (ctrl && e.altKey) {
           // Ctrl+Alt+Right → select everything after the playhead
-          this._selectRightOfCursor();
+          this._runSelectCommand('afterPlayhead');
         } else if (e.shiftKey && this.editableScript.selectedIndices.size > 0) {
           const frames = ctrl ? this._fastStepFrames() : 1;
           const deltaMs = frames * this._frameDurationMs();
@@ -910,6 +1104,10 @@ export class ScriptEditor {
         }
         break;
 
+      // ONE case for v/V (and b/B below). Each used to appear twice in this
+      // switch; JavaScript runs the first matching label, so the second
+      // copy was dead: bare V never reached the VAD toggle, Ctrl+B did
+      // nothing and Shift+B added a bookmark instead of jumping.
       case 'v':
       case 'V':
         if (ctrl && e.shiftKey) {
@@ -922,38 +1120,54 @@ export class ScriptEditor {
           e.stopPropagation();
           const timeMs = this.videoPlayer.currentTime * 1000;
           this.editableScript.paste(timeMs);
+        } else {
+          // Bare V → voice-activity toggle. Shift+V has no editor action
+          // but is stopped too: the player's V / Shift+V cycle the script
+          // variant with no editor gate (keyboard.js), which would swap the
+          // script out from under the editing session.
+          e.preventDefault();
+          e.stopPropagation();
+          if (!e.shiftKey) this._toggleVADTrack();
         }
         break;
 
+      // The selection keys go through _runSelectCommand, the Select…
+      // menu's own path, so a key and its menu item cannot drift apart.
       case 'a':
       case 'A':
         if (ctrl) {
           e.preventDefault();
           e.stopPropagation();
-          this.editableScript.selectAll();
+          this._runSelectCommand('all');
         }
         break;
 
-      // Ctrl+1/2/3: Select by position range (top/mid/bottom third)
-      case '1':
-        if (ctrl) {
+      // Ctrl+1/2/3 (select a third) are handled above the switch, on the key.
+
+      // N: New points only — the points the last modifier or generator
+      // created (belgriffinite #261, Dave Q2). Bare N only. Stopped so it
+      // never reaches the player's N (next video; editor-gated there too).
+      // A custom position key bound to N before this existed still wins: the
+      // custom map is checked above, before this switch.
+      case 'n':
+      case 'N':
+        if (!ctrl && !e.shiftKey && !e.altKey) {
           e.preventDefault();
           e.stopPropagation();
-          this.editableScript.selectByPositionRange(67, 100); // top third
+          this._runSelectCommand('created');
         }
         break;
-      case '2':
-        if (ctrl) {
+
+      // P: Fill with pattern (pattern library, design §f). Bare P only;
+      // stopped so it never reaches the player's P (previous video, already
+      // editor-gated there). A custom position key bound to P still wins:
+      // the custom map is checked above, before this switch.
+      case 'p':
+      case 'P':
+        if (!ctrl && !e.shiftKey && !e.altKey) {
           e.preventDefault();
           e.stopPropagation();
-          this.editableScript.selectByPositionRange(34, 66); // middle third
-        }
-        break;
-      case '3':
-        if (ctrl) {
-          e.preventDefault();
-          e.stopPropagation();
-          this.editableScript.selectByPositionRange(0, 33); // bottom third
+          this._openPatternFill();
         }
         break;
 
@@ -987,7 +1201,19 @@ export class ScriptEditor {
 
       case 'b':
       case 'B':
-        if (!ctrl) {
+        // Shift+B / Ctrl+B = previous / next bookmark, the PLAYER's
+        // direction (keyboard.js, help rows "Previous / Next bookmark"), so
+        // the chord means the same thing whether or not the editor is open
+        // (Dave, 2026-11-04). The editor's old dead branch had it reversed.
+        if (e.shiftKey && !ctrl) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._jumpToBookmark(-1);
+        } else if (ctrl && !e.shiftKey) {
+          e.preventDefault();
+          e.stopPropagation();
+          this._jumpToBookmark(1);
+        } else if (!ctrl && !e.shiftKey) {
           e.preventDefault();
           e.stopPropagation();
           this._addBookmarkAtCursor();
@@ -1013,18 +1239,6 @@ export class ScriptEditor {
           // Shift+W → multi-band; bare W → single-band waveform
           if (e.shiftKey) this._toggleMultiBandWaveform();
           else this._toggleWaveform();
-        }
-        break;
-
-      case 'v':
-      case 'V':
-        // Bare V → voice-activity toggle. Ctrl+V (paste) is handled
-        // earlier in the switch and never reaches here. Shift+V is
-        // reserved for variant cycling at the player level.
-        if (!ctrl && !e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          this._toggleVADTrack();
         }
         break;
 
@@ -1062,20 +1276,6 @@ export class ScriptEditor {
         }
         break;
 
-      case 'b':
-      case 'B':
-        if (e.shiftKey && !ctrl) {
-          e.preventDefault();
-          e.stopPropagation();
-          this._jumpToBookmark(1);
-        } else if (ctrl && !e.shiftKey) {
-          e.preventDefault();
-          e.stopPropagation();
-          this._jumpToBookmark(-1);
-        }
-        // Bare B is handled by `_addBookmarkAtCursor` elsewhere.
-        break;
-
       case '[':
         if (!ctrl) {
           e.preventDefault();
@@ -1095,8 +1295,12 @@ export class ScriptEditor {
       case 'Escape':
         e.preventDefault();
         e.stopPropagation();
-        if (this.editableScript.selectedIndices.size > 0) {
-          this.editableScript.clearSelection();
+        if (this._currentFillRange()) {
+          // A marked fill range goes (with its one point, if selected).
+          this._setFillRange(null);
+          if (this.editableScript.selectedIndices.size > 0) this._runSelectCommand('none');
+        } else if (this.editableScript.selectedIndices.size > 0) {
+          this._runSelectCommand('none');
         } else {
           this.hide();
         }
@@ -1386,8 +1590,124 @@ export class ScriptEditor {
    * the dropdown.
    */
   _setSpeed(rate) {
-    this.videoPlayer.setPlaybackRate(rate);
+    // While the player window owns playback, its video takes the rate (E-06).
+    if (!this.routePlayback?.('setRate', rate)) this.videoPlayer.setPlaybackRate(rate);
     this._broadcastSettings();
+  }
+
+  // --- Select Dropdown ---
+
+  async _onSelectMenuChange() {
+    const value = this._selectMenu.value;
+    this._selectMenu.selectedIndex = 0; // reset to placeholder
+    // Hand the keys back to the canvas FIRST (the Every Nth dialog restores
+    // focus to whatever had it on close). A focused <select> owns the arrow
+    // keys: Shift+Up after "New points only" would pick another menu item
+    // instead of nudging the points.
+    this._canvas?.focus?.({ preventScroll: true });
+    await this._runSelectCommand(value);
+  }
+
+  /**
+   * The ONE path for every selection command: the Select… menu, its keys
+   * (Ctrl+A, Ctrl+Alt+Left/Right, Ctrl+1/2/3, N, Esc's clear) and nothing
+   * else, so an item and its key cannot drift apart. Selection only (Dave,
+   * Q4): no undo step, the unsaved flag untouched.
+   * @param {string} command — a Select… menu value
+   */
+  _runSelectCommand(command) {
+    const es = this.editableScript;
+    switch (command) {
+      case 'all': es.selectAll(); break;                           // Ctrl+A
+      case 'beforePlayhead': this._selectLeftOfCursor(); break;    // Ctrl+Alt+Left
+      case 'afterPlayhead': this._selectRightOfCursor(); break;    // Ctrl+Alt+Right
+      case 'topThird': es.selectByPositionRange(67, 100); break;   // Ctrl+1
+      case 'middleThird': es.selectByPositionRange(34, 66); break; // Ctrl+2
+      case 'bottomThird': es.selectByPositionRange(0, 33); break;  // Ctrl+3
+      case 'everyNth': return this._openEveryNthModal();           // no key (Q3)
+      case 'created': this._selectCreatedPoints(); break;          // N
+      case 'none': es.clearSelection(); break;                     // Esc with a selection; the item only ever clears
+    }
+    return undefined;
+  }
+
+  /** New points only (N, the Select… item, the pop-out's N). `notify` is
+   *  where the toast goes: this window, or the pop-out (_popoutNotifier). */
+  _selectCreatedPoints(notify = showToast) {
+    const count = this.editableScript.selectCreated();
+    if (count > 0) notify(t('editor.toast.newPointsSelected', { count }), 'info');
+    else notify(t('editor.toast.newPointsNone'), 'info');
+    return count;
+  }
+
+  /** Every Nth point with chosen values (the dialog's Select, the pop-out op). */
+  _selectEveryNth(n, start, notify = showToast) {
+    const result = this.editableScript.selectEveryNth(n, start);
+    if (result.count > 0) {
+      notify(t('editor.toast.everyNthSelected', { count: result.count, total: result.scope }), 'info');
+    } else {
+      notify(t('editor.toast.everyNthNone'), 'info');
+    }
+    return result;
+  }
+
+  /**
+   * Every Nth point… : Every (default 2) and Start at point (default 1),
+   * remembered for this session only (in memory; persisting would need a
+   * default in electron/store.js). The live lines come from the PURE
+   * countEveryNth, so the selection never changes while the dialog is open
+   * (OFS and ofs-se both reset a tool when the selection changes under it).
+   * Select recomputes from the LIVE selection: the pop-out can change it
+   * while this is open, so the toast reports what actually happened.
+   */
+  async _openEveryNthModal() {
+    const editor = this;
+    const last = this._everyNthLast || { n: 2, start: 1 };
+    const result = await Modal.open({
+      title: t('editor.everyNthTitle'),
+      onRender(body, close) {
+        body.innerHTML = `
+          <div class="modal-form">
+            <label class="modal-label">${_esc(t('editor.everyNthEvery'))}<input type="number" id="nth-every" min="2" step="1" value="${Number(last.n)}" class="modal-input"></label>
+            <label class="modal-label">${_esc(t('editor.everyNthStart'))}<input type="number" id="nth-start" min="1" step="1" value="${Number(last.start)}" class="modal-input"></label>
+            <div class="modal-hint" id="nth-scope"></div>
+            <div class="modal-hint" id="nth-result" aria-live="polite"></div>
+          </div>
+          <div class="modal-actions">
+            <button class="modal-btn modal-btn--secondary" id="nth-cancel">${_esc(t('common.cancel'))}</button>
+            <button class="modal-btn modal-btn--primary" id="nth-ok">${_esc(t('editor.everyNthSelect'))}</button>
+          </div>`;
+        const everyInput = body.querySelector('#nth-every');
+        const startInput = body.querySelector('#nth-start');
+        const scopeEl = body.querySelector('#nth-scope');
+        const resultEl = body.querySelector('#nth-result');
+        const update = () => {
+          const es = editor.editableScript;
+          const r = es.countEveryNth(everyInput.value, startInput.value);
+          scopeEl.textContent = es.selectedIndices.size > 0
+            ? t('editor.everyNthScopeSelected', { count: r.scope })
+            : t('editor.everyNthScopeAll', { count: r.scope });
+          resultEl.textContent = r.count > 0
+            ? t('editor.everyNthResult', { count: r.count })
+            : t('editor.everyNthTooFew');
+        };
+        everyInput.addEventListener('input', update);
+        startInput.addEventListener('input', update);
+        update();
+        body.querySelector('#nth-cancel').addEventListener('click', () => close(null));
+        body.querySelector('#nth-ok').addEventListener('click', () => {
+          close({ n: everyInput.value, start: startInput.value });
+        });
+      },
+    });
+    if (!result) return;
+    const n = parseInt(result.n, 10);
+    const start = parseInt(result.start, 10);
+    this._everyNthLast = {
+      n: Number.isNaN(n) ? last.n : Math.max(2, n),
+      start: Number.isNaN(start) ? last.start : Math.max(1, start),
+    };
+    this._selectEveryNth(result.n, result.start);
   }
 
   // --- Modify Dropdown ---
@@ -1395,19 +1715,25 @@ export class ScriptEditor {
   async _onModifyChange() {
     const value = this._modifySelect.value;
     this._modifySelect.selectedIndex = 0; // reset to placeholder
+    // Same as the Select… menu: hand the keys back to the canvas FIRST (the
+    // dialogs restore focus to whatever had it on close). A focused <select>
+    // owns the arrow keys, so a plain Down after Double Speed used to pick
+    // and RUN the next item (Half Speed) instead of moving to the next point,
+    // and N did nothing (found in the 2026-11-04 live check).
+    this._canvas?.focus?.({ preventScroll: true });
 
     switch (value) {
       case 'halfSpeed':
-        this.editableScript.applyModifier(halfSpeed);
-        showToast(t('editor.toast.appliedHalfSpeed'), 'info');
+        this._reportModifierResult(this.editableScript.applyModifier(halfSpeed),
+          'halfSpeed', t('editor.toast.appliedHalfSpeed'));
         break;
       case 'doubleSpeed':
-        this.editableScript.applyModifier(doubleSpeed);
-        showToast(t('editor.toast.appliedDoubleSpeed'), 'info');
+        this._reportModifierResult(this.editableScript.applyModifier(doubleSpeed),
+          'doubleSpeed', t('editor.toast.appliedDoubleSpeed'));
         break;
       case 'reverse':
-        this.editableScript.applyModifier(reverseActions);
-        showToast(t('editor.toast.appliedReverse'), 'info');
+        this._reportModifierResult(this.editableScript.applyModifier(reverseActions),
+          'reverse', t('editor.toast.appliedReverse'));
         break;
       case 'remapRange':
         await this._openRemapRangeModal();
@@ -1424,15 +1750,247 @@ export class ScriptEditor {
       case 'generatePattern':
         await this._openPatternModal();
         break;
+      case 'fillPattern':
+        this._openPatternFill();
+        break;
       case 'exportHeatmap':
         await this._exportHeatmapPng();
         break;
     }
   }
 
+  // --- Fill with pattern (pattern library, Round 2) ---
+
+  /**
+   * Open the Fill with pattern drawer on the selection (P, the right-click
+   * menu, Modify > Fill with Pattern…). Two selected points at least: the
+   * first and the last are the anchors the fill joins (design §f, Q3). With
+   * fewer, a marked time range (a rubber band over 0 or 1 points; Dave
+   * 2026-11-17) is filled instead. Without either the action is off and the
+   * toast says what to do.
+   * @returns {boolean} true when the drawer is open
+   */
+  _openPatternFill() {
+    if (this._panel?.hasAttribute?.('inert')) return false;
+    if (this.editableScript.selectedIndices.size < 2 && !this._currentFillRange()) {
+      showToast(t('editor.patternFill.needSelection'), 'info');
+      return false;
+    }
+    closeContextMenu();
+    this._ensureFillDrawer().open();
+    return true;
+  }
+
+  _ensureFillDrawer() {
+    if (this._fillDrawer) return this._fillDrawer;
+    this._fillDrawer = new PatternFillDrawer({
+      container: this._panel,
+      graph: this.graph,
+      placement: 'above',
+      getActions: () => this.editableScript.actions,
+      getSelectedIndices: () => this.editableScript.selectedIndices,
+      loadOptions: () => this.settings?.get?.('editor.patternFill'),
+      onApply: (fill) => this._applyPatternFill(fill),
+      onClose: () => {
+        // Back to the timeline, where the user was (unless the editor closed).
+        if (this._open && !this._panel?.hasAttribute?.('inert')) this._canvas?.focus?.({ preventScroll: true });
+      },
+      // Another load (a script switch, Don't save, a reload) is another
+      // script: the drawer closes, and its preview never lands (review-2).
+      getScriptKey: () => this.editableScript.loadId,
+      notify: (text, level) => showToast(text, level),
+      getFillRange: () => this._currentFillRange(),
+    });
+    return this._fillDrawer;
+  }
+
+  /** What a marked fill range belongs to: the selection, the load and the script's state. */
+  _fillRangeKey() {
+    const es = this.editableScript;
+    return fillRangeKey(es.selectedIndices, `${es.loadId}|${es.revision}`);
+  }
+
+  /**
+   * Mark (or, with null, end) the time range a fill uses while fewer than two
+   * points are selected. The graph shades it for as long as it holds; an
+   * open drawer previews it.
+   * @param {{startMs:number,endMs:number}|null} range
+   */
+  _setFillRange(range) {
+    this._fillRange = range ? { startMs: range.startMs, endMs: range.endMs, key: this._fillRangeKey() } : null;
+    this.graph?.setTimeRange?.(range ? { from: range.startMs, to: range.endMs } : null, () => !!this._currentFillRange());
+    if (this.graph && !this.graph._animating) this.graph.draw();
+    this._fillDrawer?.refresh();
+  }
+
+  /** The marked fill range while it still holds (the same selection, script and load), else null (and it is gone). */
+  _currentFillRange() {
+    const r = this._fillRange;
+    if (!r) return null;
+    if (r.key === this._fillRangeKey()) return r;
+    this._fillRange = null;
+    this.graph?.setTimeRange?.(null);
+    return null;
+  }
+
+  /**
+   * The drawer's Apply in this window: ONE undo step (replaceRange), the new
+   * points selected and recorded as created (N), and an ordinary edit after
+   * that (dirty, autosave, the engine reload and Handy re-upload after a save).
+   * @returns {boolean} false when nothing landed (the drawer stays open)
+   */
+  _applyPatternFill(fill, notify = showToast) {
+    // A marked time range lands as an insert; a fill between anchors as before (fillLanding).
+    const at = fillLanding(fill);
+    const r = this.editableScript.replaceRange(at.t0, at.t1, fill.points, at.mode);
+    if (!r.changed) {
+      notify(t('editor.toast.nothingChanged'), 'info');
+      return false;
+    }
+    this._rememberPatternFill(fill.options);
+    const name = fill.name || this._patternName(fill.patternId);
+    notify(t('editor.patternFill.applied', { name, count: r.created }), 'info');
+    return true;
+  }
+
+  /**
+   * The pop-out drawer's Apply (OP_FILL_RANGE, already checked by
+   * validFillRange). Its preview was drawn on the pop-out's copy of this
+   * script. It lands only on the script it was built on: the same path, no
+   * script switch or Don't save reload under way (the path moves before the
+   * file is read), and the same points in its window and beside it (the
+   * signature the pop-out sent, pattern-fill-drawer.js windowSignature).
+   * Multi-axis scripts share their times, so "both anchors still exist" was
+   * also true on another axis (review-2 blocker). Else nothing lands and the
+   * pop-out says so ('changed'). A fill of a marked time range has no anchors
+   * to look for; the path and the signature still have to match.
+   */
+  _applyPopoutFill(fill, notify = this._popoutNotifier()) {
+    const actions = this.editableScript.actions;
+    const has = (at) => actions.some((a) => a.at === at);
+    const same = !this._scriptLoads
+      && (fill.path ?? null) === (this._funscriptPath || null)
+      && (fill.range === true || (has(fill.t0) && has(fill.t1)))
+      && fill.sig === windowSignature(actions, fill.t0, fill.t1);
+    if (!same) {
+      notify(t('editor.patternFill.changed'), 'warn');
+      return false;
+    }
+    return this._applyPatternFill(fill, notify);
+  }
+
+  /** Tell the pop-out's drawer how its Apply ended (it waits open until then, review-2 minor 7). */
+  _answerPopoutFill(requestId, ok) {
+    if (!this._popoutOpen || requestId === undefined || requestId === null) return;
+    this._relayToPopout({ type: FILL_RESULT, requestId, ok: ok === true });
+  }
+
+  /** editor.patternFill: the drawer's last-used pattern, end fit, mode, join and variation (design §h). */
+  _rememberPatternFill(options) {
+    if (!options || typeof options !== 'object') return;
+    const next = normalisePatternFillOptions(options);
+    try { this.settings?.set?.('editor.patternFill', next); } catch (err) { console.warn('[Editor] remember fill options failed:', err); }
+    this._broadcastSettings();
+  }
+
+  _patternName(id) {
+    const key = describePattern(id)?.nameKey;
+    const name = key ? t(key) : '';
+    return name && name !== key ? name : String(id || '');
+  }
+
+  /**
+   * The timeline's right-click menu. A right-click anywhere on the canvas
+   * opens it; it changes no selection. "Fill with pattern…" is off with fewer
+   * than two selected points and no marked time range, and says why. The
+   * Menu key and Shift+F10 fire this event too (from the keyboard, at the canvas).
+   */
+  _onCanvasContextMenu(e) {
+    e.preventDefault();
+    if (this._panel?.hasAttribute?.('inert')) return;
+    // At the pointer; a menu the keyboard opened (no position) sits on the canvas.
+    const pointed = e.clientX !== 0 || e.clientY !== 0;
+    this._openCanvasMenu(pointed ? e.clientX : null, pointed ? e.clientY : null);
+  }
+
+  _openCanvasMenu(x = null, y = null) {
+    if (x === null || y === null) {
+      const rect = this._canvas.getBoundingClientRect();
+      x = rect.left + rect.width / 2;
+      y = rect.top + rect.height / 3;
+    }
+    const enough = this.editableScript.selectedIndices.size >= 2 || !!this._currentFillRange();
+    openContextMenu({
+      x, y,
+      ariaLabel: t('editor.patternFill.contextMenu'),
+      returnFocus: this._canvas,
+      items: [{
+        label: t('editor.patternFill.menu'),
+        disabled: !enough,
+        hint: enough ? '' : t('editor.patternFill.needSelection'),
+        onSelect: () => this._openPatternFill(),
+      }],
+    });
+  }
+
+  /**
+   * Toast the outcome of an `applyModifier` run. A refused or no-op run
+   * says why nothing happened and never claims "Applied …" (it used to,
+   * unconditionally). `appliedText` is omitted where the route never had
+   * an "Applied" toast (the pop-out). Returns true when the script changed.
+   * @param {{changed: boolean, refused: boolean}} status
+   * @param {string} modifier — the Modify menu value ('doubleSpeed', …)
+   * @param {string} [appliedText]
+   * @param {Function} [notify] — where the toast goes (the pop-out's route
+   *   passes _popoutNotifier); this window by default
+   */
+  _reportModifierResult(status, modifier, appliedText, notify = showToast) {
+    if (status?.refused) {
+      notify(t('editor.toast.needsContinuous', { name: this._modifierLabel(modifier) }), 'warn');
+      return false;
+    }
+    if (!status?.changed) {
+      notify(t('editor.toast.nothingChanged'), 'info');
+      return false;
+    }
+    if (appliedText) notify(appliedText, 'info');
+    return true;
+  }
+
+  /** The Modify menu's label for `modifier`, minus the "…" of a dialog item. */
+  _modifierLabel(modifier) {
+    return t(`editor.modify.${modifier}`).replace(/\s*…$/, '');
+  }
+
+  /**
+   * Refuse a sequence modifier BEFORE its dialog opens, so nobody fills in
+   * a dialog only to be told no. applyModifier still guards on its own;
+   * this is only the early answer. Returns true when refused.
+   */
+  _refuseBeforeDialog(fn, modifier) {
+    if (!this.editableScript.refusesModifier(fn)) return false;
+    this._reportModifierResult({ changed: false, refused: true, created: 0 }, modifier);
+    return true;
+  }
+
+  /**
+   * True, with a toast, when the selection is no longer the one a dialog
+   * opened with (`signature` from EditableScript.selectionSignature()). The
+   * pop-out can clear or change it while Remap, Offset, Remove Pauses or
+   * Range Extend is open in this window; applying then would hit other
+   * points, or with nothing selected the WHOLE script (FT-031). Refuses
+   * only, so nothing is at risk.
+   */
+  _selectionChangedSince(signature) {
+    if (this.editableScript.selectionSignature() === signature) return false;
+    showToast(t('editor.toast.selectionChanged'), 'warn');
+    return true;
+  }
+
   // --- Modal dialogs for parameterized modifiers ---
 
   async _openRemapRangeModal() {
+    const selection = this.editableScript.selectionSignature();
     const result = await Modal.open({
       title: t('editor.remapTitle'),
       onRender(body, close) {
@@ -1454,13 +2012,14 @@ export class ScriptEditor {
         });
       },
     });
-    if (result) {
-      this.editableScript.applyModifier(remapRange, result.min, result.max);
-      showToast(t('editor.toast.remapped', { min: result.min, max: result.max }), 'info');
+    if (result && !this._selectionChangedSince(selection)) {
+      this._reportModifierResult(this.editableScript.applyModifier(remapRange, result.min, result.max),
+        'remapRange', t('editor.toast.remapped', { min: result.min, max: result.max }));
     }
   }
 
   async _openOffsetTimeModal() {
+    const selection = this.editableScript.selectionSignature();
     const result = await Modal.open({
       title: t('editor.offsetTitle'),
       onRender(body, close) {
@@ -1479,13 +2038,15 @@ export class ScriptEditor {
         });
       },
     });
-    if (result && result.deltaMs !== 0) {
-      this.editableScript.applyModifier(offsetTime, result.deltaMs);
-      showToast(t('editor.toast.offsetBy', { ms: result.deltaMs }), 'info');
+    if (result && result.deltaMs !== 0 && !this._selectionChangedSince(selection)) {
+      this._reportModifierResult(this.editableScript.applyModifier(offsetTime, result.deltaMs),
+        'offsetTime', t('editor.toast.offsetBy', { ms: result.deltaMs }));
     }
   }
 
   async _openRemovePausesModal() {
+    if (this._refuseBeforeDialog(removePauses, 'removePauses')) return;
+    const selection = this.editableScript.selectionSignature();
     const result = await Modal.open({
       title: t('editor.pausesTitle'),
       onRender(body, close) {
@@ -1504,18 +2065,19 @@ export class ScriptEditor {
         });
       },
     });
-    if (result) {
-      this.editableScript.applyModifier(removePauses, result.maxGapMs);
-      showToast(t('editor.toast.pausesRemoved'), 'info');
+    if (result && !this._selectionChangedSince(selection)) {
+      this._reportModifierResult(this.editableScript.applyModifier(removePauses, result.maxGapMs),
+        'removePauses', t('editor.toast.pausesRemoved'));
     }
   }
 
   async _openRangeExtendModal() {
-    const sel = this.editableScript.selectedIndices;
-    if (sel.size < 2) {
+    if (this.editableScript.selectedIndices.size < 2) {
       showToast(t('editor.toast.selectToExtend'), 'warn');
       return;
     }
+    if (this._refuseBeforeDialog(rangeExtend, 'rangeExtend')) return;
+    const selection = this.editableScript.selectionSignature();
     const result = await Modal.open({
       title: t('editor.extendTitle'),
       onRender(body, close) {
@@ -1535,18 +2097,17 @@ export class ScriptEditor {
       },
     });
     if (result && result.factor !== 1) {
-      const sorted = [...sel].sort((a, b) => a - b);
-      const actions = this.editableScript.actions;
-      const anchorTime = actions[sorted[0]].at;
-      this.editableScript.beginBatch();
-      // Scale timestamps relative to first selected action
-      for (const i of sorted) {
-        const offset = actions[i].at - anchorTime;
-        const newAt = Math.round(anchorTime + offset * result.factor);
-        this.editableScript.updateAction(i, { at: newAt });
-      }
-      this.editableScript.endBatch();
-      showToast(t('editor.toast.timeScaled', { factor: result.factor }), 'info');
+      // A pure modifier through applyModifier: one undo step, the
+      // contiguity guard, the created record, and every new time computed
+      // from the original one. The old per-index updateAction loop re-sorted
+      // under its own feet (4 points ×2 gave 0, 200, 300, 800).
+      // Re-checked here because the pop-out can change the selection while
+      // the dialog is open, and with none left this would scale the whole
+      // script. Any change refuses, as in Remap, Offset and Remove Pauses
+      // (FT-031); it used to check only for fewer than 2 points.
+      if (this._selectionChangedSince(selection)) return;
+      this._reportModifierResult(this.editableScript.applyModifier(rangeExtend, result.factor),
+        'rangeExtend', t('editor.toast.timeScaled', { factor: result.factor }));
     }
   }
 
@@ -1971,24 +2532,29 @@ export class ScriptEditor {
 
   // --- Save / Autosave ---
 
-  async _save() {
-    const json = this.editableScript.toFunscriptJSON();
-
-    // If we have a known path, write directly (autosave-style)
+  /**
+   * Ctrl+S. `syncEngine: false` writes the same file without reloading the
+   * engine or re-uploading to the Handy: only for the unsaved-changes
+   * question asked by a route that loads another script next (CB-01 review).
+   * Its re-upload of the OLD script raced the new one's, with no guard, and
+   * could finish last, leaving the device on the old script.
+   */
+  async _save({ syncEngine = true } = {}) {
+    // If we have a known path, write directly (autosave-style), in turn with
+    // the autosaves (E-02): a Ctrl+S while an autosave's write was on its way
+    // started a second write, and the two could land in either order, so the
+    // file could end on the older state. It now waits for the write in flight
+    // and writes the state as it is at its turn; an autosave fired meanwhile
+    // waits for it the same way.
     if (this._funscriptPath) {
-      try {
-        const savedPath = await window.funsync.writeFunscript(json, this._funscriptPath);
-        if (savedPath) {
-          this.editableScript.markSaved();
-          this._updateStatus();
-          showToast(t('editor.toast.saved'), 'info');
-          this._reloadIntoEngineAndSync();
-        }
-      } catch (err) {
-        showToast(t('editor.toast.saveFailed', { error: err.message }), 'error');
-      }
-      return;
+      const path = this._funscriptPath;
+      return this._writeInTurn(() => this._saveToKnownPath(path, { syncEngine }));
     }
+
+    // The state being written: an edit made while the write is on its way
+    // stays unsaved (R4-18).
+    const revision = this.editableScript.revision;
+    const json = this.editableScript.toFunscriptJSON();
 
     // No known path — use Save As dialog
     let suggestedName = 'script.funscript';
@@ -2001,14 +2567,65 @@ export class ScriptEditor {
       const savedPath = await window.funsync.saveFunscript(json, suggestedName);
       if (savedPath) {
         this._funscriptPath = savedPath;
-        this.editableScript.markSaved();
+        this.editableScript.markSaved(revision);
         this._updateStatus();
         showToast(t('editor.toast.saved'), 'info');
-        this._reloadIntoEngineAndSync();
+        if (syncEngine) this._reloadIntoEngineAndSync();
+        this._announceSaved(savedPath);
       }
     } catch (err) {
       showToast(t('editor.toast.saveFailed', { error: err.message }), 'error');
     }
+  }
+
+  /**
+   * Ctrl+S's write to the script's own file, when its turn comes (E-02).
+   * `path` is the file the user saved: if the editor holds another script by
+   * then (its replace route flushed the first one), nothing is written, so
+   * a state is never written under a file it was not saved for.
+   */
+  async _saveToKnownPath(path, { syncEngine = true } = {}) {
+    if (this._funscriptPath !== path) return;
+    // The state being written: an edit made while the write is on its way
+    // stays unsaved (R4-18).
+    const revision = this.editableScript.revision;
+    const json = this.editableScript.toFunscriptJSON();
+    try {
+      const savedPath = await window.funsync.writeFunscript(json, path);
+      if (savedPath) {
+        this.editableScript.markSaved(revision);
+        this._updateStatus();
+        showToast(t('editor.toast.saved'), 'info');
+        if (syncEngine) this._reloadIntoEngineAndSync();
+        this._announceSaved(savedPath);
+      }
+    } catch (err) {
+      showToast(t('editor.toast.saveFailed', { error: err.message }), 'error');
+    }
+  }
+
+  /**
+   * Run one write to the script's file after the write on its way, if any
+   * (C-12 for autosaves, E-02 for Ctrl+S): one at a time, so the last to
+   * land is the newest state. With nothing in flight it starts at once, as
+   * before (same timing for every caller).
+   */
+  _writeInTurn(write) {
+    const before = this._autosaveInFlight || null;
+    const run = before ? before.catch(() => {}).then(write) : write();
+    this._autosaveInFlight = run;
+    const done = () => { if (this._autosaveInFlight === run) this._autosaveInFlight = null; };
+    run.then(done, done);
+    return run;
+  }
+
+  /**
+   * The script at `path` changed on disk. The library paints a script it
+   * already read this session from that read, so it has to hear about this
+   * to show (and sort by) the edited speeds and heatmap (V81 review).
+   */
+  _announceSaved(path) {
+    if (typeof path === 'string' && path) eventBus.emit('funscript:saved', { path });
   }
 
   /** Debounced autosave — called after every script mutation. */
@@ -2019,7 +2636,23 @@ export class ScriptEditor {
     this._autosaveTimer = setTimeout(() => this._autosave(), this._autosaveDelay);
   }
 
-  async _autosave() {
+  /**
+   * The debounced write. `syncEngine` as for `_save()`.
+   *
+   * One write at a time (C-12, found by reading in R4-18): an autosave that
+   * fired while the previous one's write was still on its way started a
+   * second write of the newer state, and the two could finish in either
+   * order, leaving the file on the OLDER state until the next edit. Each
+   * autosave now waits for the one in flight, then writes the state as it is
+   * when its turn comes, so the last write to land is the newest state.
+   */
+  async _autosave(opts = {}) {
+    // Ctrl+S's writes take their turn in the same chain (E-02).
+    return this._writeInTurn(() => this._autosaveNow(opts));
+  }
+
+  /** One autosave write (see `_autosave`, which runs these one at a time). */
+  async _autosaveNow({ syncEngine = true } = {}) {
     if (!this._funscriptPath || !this.editableScript.dirty) return;
 
     if (this._autosaveStatusEl) {
@@ -2027,14 +2660,18 @@ export class ScriptEditor {
       this._autosaveStatusEl.classList.add('editor__autosave-status--saving');
     }
 
+    const revision = this.editableScript.revision;
     const json = this.editableScript.toFunscriptJSON();
 
     try {
       const savedPath = await window.funsync.writeFunscript(json, this._funscriptPath);
       if (savedPath) {
-        this.editableScript.markSaved();
+        // An edit made during the write stays unsaved, so its own autosave
+        // still writes it (it found the script clean and skipped) (R4-18).
+        this.editableScript.markSaved(revision);
         this._updateStatus();
-        this._reloadIntoEngineAndSync();
+        if (syncEngine) this._reloadIntoEngineAndSync();
+        this._announceSaved(savedPath);
 
         if (this._autosaveStatusEl) {
           const now = new Date();
@@ -2052,10 +2689,217 @@ export class ScriptEditor {
     }
   }
 
+  // --- Unsaved changes (CB-01) ---
+
+  /** True while the script in the editor holds edits that are not on disk. */
+  hasUnsavedChanges() {
+    return !!this.editableScript?.dirty;
+  }
+
+  /**
+   * Tell main each time the script turns dirty or clean (R3-19). Main holds a
+   * window close, a quit, a reload, an update install and Import / Restore's
+   * relaunch for the unsaved-edits question only while this last said dirty
+   * (electron/unsaved-edits-guard.js), so a change it never hears of would
+   * let one of those drop the edits again. Every write of EditableScript's
+   * `_dirty` comes through this accessor: each edit, undo and redo, every
+   * load, markSaved, and the per-script cache putting a state back. The
+   * pop-out applies its edits here too (it has no script of its own on disk).
+   */
+  _watchDirtyState() {
+    const script = this.editableScript;
+    let dirty = !!script._dirty;
+    Object.defineProperty(script, '_dirty', {
+      configurable: true,
+      enumerable: true,
+      get: () => dirty,
+      set: (value) => {
+        const next = !!value;
+        if (next === dirty) return;
+        dirty = next;
+        try { window.funsync?.editorDirtyChanged?.(next); } catch { /* reporting only */ }
+        // The pop-out's status line shows the same unsaved marker (R4 fix-up,
+        // real-app verifier 2, also in v0.9.2: it never showed one). A save
+        // or an undo back to the saved point changes this with no onChange
+        // broadcast, so it is sent here, once the change has finished.
+        if (this._popoutOpen) Promise.resolve().then(() => this._broadcastActionsChanged());
+      },
+    });
+  }
+
+  /**
+   * What app.js asks first on every route that replaces the script in the
+   * editor: library / playlist / category clicks, Up Next, the queue panel
+   * and prev/next (`_playFromLibrary`), Play All and its advances
+   * (`_playAll`, `_playQueueItem`), DragDrop / Browse / O and a dropped
+   * funscript (`_dragDropOptions`), Load from URL, an EroScripts download,
+   * and a variant switch from the desktop or the phone (`_switchVariant`).
+   * `true` synchronously when nothing is unsaved, so a clean editor changes
+   * no caller's timing; otherwise `confirmUnsavedChanges()`'s promise.
+   *
+   * Every one of these routes loads another script into the engine (and the
+   * Handy) next, so a Save here writes without reloading the engine or
+   * re-uploading the script being left (`syncEngine: false`, CB-01 review).
+   * @returns {true|Promise<boolean>}
+   */
+  confirmBeforeReplace() {
+    return this.hasUnsavedChanges() ? this.confirmUnsavedChanges({ syncEngine: false }) : true;
+  }
+
+  /**
+   * Asked by every route that would replace the script in the editor (another
+   * video by any route, a variant, a dropped or downloaded script, the
+   * editor's own script list). With autosave off those routes used to drop
+   * unsaved edits without a word (CB-01, also in v0.9.2). OFS's convention:
+   * "Save changes to <script>?" with Save / Don't save / Cancel; Escape, the
+   * X and a click outside are Cancel. With autosave on the pending write is
+   * flushed instead, and the question only comes up if that write fails.
+   *
+   * One question at a time: a second route asking while the dialog is open
+   * gets `false` (it does not load), so the route the user is answering is
+   * the one that goes on.
+   *
+   * @param {{syncEngine?: boolean}} [opts] — false when the caller loads
+   *   another script into the engine next (see confirmBeforeReplace): the
+   *   write is the same, the engine reload and Handy re-upload are skipped.
+   * @returns {Promise<boolean>} true when the caller may go on: nothing was
+   *   unsaved, Save wrote the file (exactly as Ctrl+S), or Don't save (the
+   *   editor goes back to the file on disk). False on Cancel, a failed save
+   *   or a cancelled Save As: the caller keeps the current video and edits.
+   */
+  async confirmUnsavedChanges({ syncEngine = true } = {}) {
+    if (!this.hasUnsavedChanges()) return true;
+    if (this._unsavedPrompt) return false;
+    if (this._autosaveEnabled && this._funscriptPath) {
+      if (this._autosaveTimer) {
+        clearTimeout(this._autosaveTimer);
+        this._autosaveTimer = null;
+      }
+      await this._autosave({ syncEngine });
+      if (!this.hasUnsavedChanges()) return true;
+      if (this._unsavedPrompt) return false;
+    }
+    let choice = null;
+    // The question opens in this, the main, window. Asked for from the
+    // detached player (its N / P, Up Next) or the editor pop-out (its script
+    // list), or with this window minimised or behind another, it waited
+    // where the user could not see it: bring this window to the front first
+    // (R3-21). Modal.open then focuses its first button, Save.
+    if (typeof document !== 'undefined' && document.hasFocus?.() === false) {
+      try { window.funsync?.bringMainWindowForward?.(); } catch { /* the question still opens */ }
+    }
+    this._unsavedPrompt = this._askSaveChanges();
+    try {
+      choice = await this._unsavedPrompt;
+    } finally {
+      this._unsavedPrompt = null;
+      this._closeUnsavedQuestion = null; // withdrawUnsavedQuestion: nothing open now
+    }
+    if (choice === 'save') {
+      await this._save({ syncEngine });
+      return !this.hasUnsavedChanges();
+    }
+    if (choice === 'discard') {
+      await this._discardUnsavedChanges();
+      return true;
+    }
+    return false;
+  }
+
+  /**
+   * Close the open Save / Don't save / Cancel question as Cancel: nothing is
+   * saved or thrown away. For main's question before a close, quit or
+   * import that went ahead without this page's answer (R4 fix-up).
+   */
+  withdrawUnsavedQuestion() {
+    const close = this._closeUnsavedQuestion;
+    this._closeUnsavedQuestion = null;
+    if (typeof close === 'function') close(null);
+  }
+
+  /** The Save / Don't save / Cancel dialog. Resolves 'save', 'discard' or null (Cancel). */
+  _askSaveChanges() {
+    const videoName = this._getVideoName();
+    const name = this._funscriptPath?.split(/[\\/]/).pop()
+      || (videoName ? videoName.replace(/\.[^/.]+$/, '') + '.funscript' : 'script.funscript');
+    const editor = this;
+    const asked = Modal.open({
+      title: t('editor.unsaved.title', { name }),
+      onRender(body, close) {
+        editor._closeUnsavedQuestion = close; // withdrawUnsavedQuestion
+        const msg = document.createElement('div');
+        msg.className = 'modal-message';
+        msg.textContent = t('editor.unsaved.message');
+        body.appendChild(msg);
+
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
+        // Windows order, Save first: Modal.open focuses the first button,
+        // so Enter saves and nothing is lost by a reflex keypress.
+        const button = (label, cls, value) => {
+          const btn = document.createElement('button');
+          btn.className = `modal-btn ${cls}`;
+          btn.textContent = label;
+          btn.dataset.choice = value || 'cancel';
+          btn.addEventListener('click', () => close(value));
+          actions.appendChild(btn);
+          return btn;
+        };
+        button(t('common.save'), 'modal-btn--primary', 'save');
+        button(t('editor.unsaved.dontSave'), 'modal-btn--secondary', 'discard');
+        button(t('common.cancel'), 'modal-btn--secondary', null);
+        body.appendChild(actions);
+      },
+    });
+    return asked;
+  }
+
+  /**
+   * Don't save: the editor goes back to the file on disk (or to an empty
+   * script when there is no readable file, with no path, so nothing can
+   * later write another script's points over it). The per-path undo cache
+   * entry goes too: its history leads into the discarded edits.
+   */
+  async _discardUnsavedChanges() {
+    const path = this._funscriptPath;
+    let data = null;
+    if (path) {
+      // A pop-out fill arriving during the read would be thrown away by the
+      // reload below: it is refused instead (_applyPopoutFill, review-2).
+      this._scriptLoads = (this._scriptLoads || 0) + 1;
+      try {
+        const content = await window.funsync?.readFunscript?.(path);
+        if (content) data = JSON.parse(content);
+      } catch {
+        data = null;
+      } finally {
+        this._scriptLoads--;
+      }
+      this._undoCache?.delete(path);
+    }
+    // After the wait: a Fill with pattern drawer opened meanwhile previewed
+    // the edits that are going now (review-2 blocker).
+    this._fillDrawer?.close('cancel');
+    if (data && typeof data === 'object') {
+      this.editableScript.loadFromData(data);
+    } else {
+      this.editableScript.loadEmpty();
+      this._funscriptPath = null;
+    }
+    this._updateStatus?.();
+    this._updateToolbarState?.();
+    this.graph?.draw?.();
+    this._broadcastActionsChanged?.();
+  }
+
   /** Reload actions into the funscript engine and re-upload to Handy. */
   async _reloadIntoEngineAndSync() {
     const actions = this.editableScript.actions;
     if (actions.length === 0) return; // nothing to sync
+    // The phone or a VR headset drives the devices from ITS script in the
+    // engine: this window's edits are saved to their own file, never pushed
+    // into that engine or re-uploaded to the Handy over it (R3-20).
+    if (this.engineHeldByRemote?.() === true) return;
 
     if (!this.funscriptEngine.isLoaded) {
       // Engine wasn't loaded yet (e.g. we auto-created an empty script).
@@ -2082,6 +2926,8 @@ export class ScriptEditor {
   // --- Script Changed Callback ---
 
   _onScriptChanged() {
+    // A marked fill range ends with any other selection or edit (its key).
+    this._currentFillRange();
     this._updateStatus();
     this._updateToolbarState();
     if (this.graph && !this.graph._animating) {
@@ -2093,6 +2939,8 @@ export class ScriptEditor {
     // Broadcast to pop-out if one is open so its read-only graph stays
     // in sync with parent edits.
     this._broadcastActionsChanged();
+    // An open Fill with pattern drawer previews the new script / selection.
+    this._fillDrawer?.refresh();
   }
 
   _refreshHeatmap() {
@@ -2107,9 +2955,19 @@ export class ScriptEditor {
 
     try {
       this.syncEngine.stop();
+      // The app's own upload path when wired (app.js sets it): the same
+      // extend → fill → invert → clamp chain as a video load, and it records
+      // the cloud URL the Orgasm Switch restore and the invert re-arm use.
+      // A raw upload here used to drop the output limits and gap filler.
+      if (typeof this.onReuploadHandy === 'function') {
+        await this.onReuploadHandy();
+        return;
+      }
       const rawContent = this.funscriptEngine.getRawContent();
       if (rawContent) {
-        const ok = await this.handyManager.uploadAndSetScript(rawContent);
+        const ok = await this.handyManager.uploadAndSetScript(
+          invertRawScriptContent(rawContent, this.settings?.get?.('handy.inverted') === true),
+        );
         if (ok) {
           this.syncEngine._scriptReady = true;
           this.syncEngine.start();
@@ -2148,6 +3006,30 @@ export class ScriptEditor {
    */
   setFunscriptPath(path) {
     this._funscriptPath = path || null;
+    // A video load (null) or a script load: the next open sets up afresh.
+    this._ensuredFor = null;
+  }
+
+  /**
+   * A video is loading in this window (app.js `loadVideo`, after its route's
+   * unsaved-changes question was answered): what the editor holds is the
+   * outgoing video's script, so it starts empty with no path. A script load
+   * for the new video fills it right after (`loadScript`); a video with no
+   * script stays empty until `_ensureFunscript()` sets it up on the first open.
+   *
+   * Only the path used to be cleared, and `_ensureFunscript()` emptied the
+   * stale points on the next open, unless the engine was loaded: with a phone
+   * or a VR session holding the engine, the editor opened on a scriptless
+   * video still showed the PREVIOUS video's points, with no path, and Save As
+   * wrote them as this video's script (R3-20 fix-up, real-app verifier 1).
+   */
+  clearForVideoLoad() {
+    this._fillDrawer?.close('cancel');
+    this.setFunscriptPath(null);
+    this.editableScript.loadEmpty();
+    this._updateStatus();
+    this._updateToolbarState();
+    this._broadcastActionsChanged();
   }
 
   /**
@@ -2155,6 +3037,8 @@ export class ScriptEditor {
    * Called by app.js after a funscript is loaded or when opening editor without a funscript.
    */
   loadScript() {
+    // Another script: a fill previewed on the old one is gone (nothing landed).
+    this._fillDrawer?.close('cancel');
     this._clearWaveform();
     this._clearBeatMarkers();
 
@@ -2178,6 +3062,10 @@ export class ScriptEditor {
     this._updateStatus();
     this._updateToolbarState();
     this._updateScrubber();
+    // An open pop-out shows what was loaded. A video load empties the editor
+    // (`clearForVideoLoad`, which tells the pop-out), and without this the
+    // pop-out then stayed empty over the new video's script (R3 fix-up).
+    this._broadcastActionsChanged();
   }
 
   toggle() {
@@ -2206,9 +3094,13 @@ export class ScriptEditor {
     // Auto-create funscript if none loaded and we have a video path
     this._ensureFunscript();
 
-    // Ensure script data is loaded
+    // Ensure script data is loaded. Not from an engine the phone or a VR
+    // headset loaded (R3-20, also in v0.9.2): that is another video's
+    // script, and under this video's path the next save wrote it over this
+    // video's script. The editor stays on this window's video.
     if (this.editableScript.actionCount === 0 && !this.editableScript.dirty) {
-      this.loadScript();
+      if (this.engineHeldByRemote?.() !== true) this.loadScript();
+      else if (this.funscriptEngine.isLoaded) showToast(t('editor.toast.remoteScriptNotShown'), 'info', 6000);
     }
 
     // Update video duration if available
@@ -2217,8 +3109,15 @@ export class ScriptEditor {
       this.graph.setVideoDuration(duration * 1000);
     }
 
+    // Before the focus() below: an inert canvas cannot take focus.
+    this._panel.removeAttribute('inert');
     this._panel.classList.add('script-editor--open');
-    document.getElementById('player-container')?.classList.add('player-container--editor-open');
+    // While the pop-out window holds the editor the docked panel stays
+    // hidden, so the video keeps its full height (R3-22): the pop-out's
+    // 'closed' puts the layout back.
+    if (!this._popoutOpen) {
+      document.getElementById('player-container')?.classList.add('player-container--editor-open');
+    }
 
     // Resize canvas after layout settles
     requestAnimationFrame(() => {
@@ -2247,6 +3146,12 @@ export class ScriptEditor {
     // for stale paths).
     if (this._stackedView) this._setStackedView(false);
 
+    // Closing the editor cancels an open Fill with pattern: the script is
+    // left as it was and the preview goes (and a marked range with it).
+    this._fillDrawer?.close('cancel');
+    if (this._fillRange) this._setFillRange(null);
+    closeContextMenu();
+
     // Flush pending autosave before closing (only if autosave is enabled)
     if (this._autosaveTimer) {
       clearTimeout(this._autosaveTimer);
@@ -2257,6 +3162,9 @@ export class ScriptEditor {
     }
 
     this._panel.classList.remove('script-editor--open');
+    // Not focusable or clickable while closed (see _buildPanel); a control
+    // that had focus loses it here.
+    this._panel.setAttribute('inert', '');
     document.getElementById('player-container')?.classList.remove('player-container--editor-open');
 
     this.graph.stopAnimation();
@@ -2272,8 +3180,21 @@ export class ScriptEditor {
   }
 
   /**
-   * Auto-create a funscript file if the video has no associated funscript.
-   * Creates an empty .funscript at the same path as the video file.
+   * Opening the editor on a video with no script loaded: an empty script for
+   * it at `<videoBase>.funscript`, created on disk when no file is there.
+   *
+   * Once per loaded video (`_ensuredFor`; `setFunscriptPath()`, which every
+   * video load and script load calls, starts it over). The engine only loads
+   * on the first save, so until then the editor holds the only copy of the
+   * new points, and running again on every open wrote an empty file and
+   * emptied the editor: closing and reopening the editor lost every unsaved
+   * point with no question (CB-01 review, also in v0.9.2).
+   *
+   * A file that is already there (one the library had not paired yet, such
+   * as a script saved earlier this session) is opened, never overwritten:
+   * the empty script written over it lost the saved one. Only a definite
+   * "absent" creates the file. Unknown (unreadable, timed out) writes
+   * nothing and leaves the editor empty with no path, so a save asks where.
    */
   async _ensureFunscript() {
     if (this.funscriptEngine.isLoaded) return;
@@ -2281,12 +3202,35 @@ export class ScriptEditor {
     // Need a video path to derive the funscript path
     const videoPath = this._getVideoPath();
     if (!videoPath) return;
+    if (this._ensuredFor === videoPath) return; // set up by an earlier open
+    this._ensuredFor = videoPath;
+    const current = () => this._ensuredFor === videoPath; // no other video since
 
     // Build funscript path: same directory, same base name, .funscript extension
     const funscriptPath = videoPath.replace(/\.[^/.]+$/, '') + '.funscript';
-    this._funscriptPath = funscriptPath;
+    // What the editor still holds is the previous video's script (a video
+    // load clears only the path), so this one starts empty, before any await.
+    // Don't load into funscript engine — it rejects empty action arrays.
+    // The engine will be loaded on first save (when actions exist).
+    this._funscriptPath = null;
+    this._fillDrawer?.close('cancel'); // another script (review-2)
+    this.editableScript.loadEmpty();
+    this._updateStatus();
 
-    // Create minimal funscript JSON (with a placeholder action so the engine accepts it)
+    let present = null;
+    try {
+      present = (await window.funsync.filesExist([funscriptPath]))?.[0] ?? null;
+    } catch (err) {
+      console.warn('[Editor] Could not check for', funscriptPath, err?.message || err);
+    }
+    if (!current()) return;
+    if (present === true) {
+      await this._openUnpairedScript(funscriptPath, current);
+      return;
+    }
+    if (present !== false) return; // unknown: not proof it is missing
+
+    // Create minimal funscript JSON
     const emptyScript = JSON.stringify({
       version: '1.0',
       inverted: false,
@@ -2296,12 +3240,9 @@ export class ScriptEditor {
 
     try {
       // Write to disk
-      await window.funsync.writeFunscript(emptyScript, funscriptPath);
-
-      // Don't load into funscript engine — it rejects empty action arrays.
-      // Instead, just set up the editor with an empty script.
-      // The engine will be loaded on first autosave (when actions exist).
-      this.editableScript.loadEmpty();
+      const written = await window.funsync.writeFunscript(emptyScript, funscriptPath);
+      if (!written || !current()) return;
+      this._funscriptPath = funscriptPath;
       this._updateStatus();
 
       const name = funscriptPath.split(/[\\/]/).pop();
@@ -2320,6 +3261,33 @@ export class ScriptEditor {
     } catch (err) {
       console.warn('[Editor] Failed to auto-create funscript:', err.message);
     }
+  }
+
+  /**
+   * `_ensureFunscript()` found a script at the video's own path that nothing
+   * loaded: show what is on disk and edit that file. If it cannot be read or
+   * parsed, or points were added while it was read, the editor keeps no path,
+   * so nothing is written over the file without a Save As.
+   */
+  async _openUnpairedScript(path, current) {
+    let data = null;
+    try {
+      const content = await window.funsync.readFunscript(path);
+      data = content ? JSON.parse(content) : null;
+    } catch (err) {
+      console.warn('[Editor] Could not open', path, err?.message || err);
+      data = null;
+    }
+    if (!current() || this.editableScript.dirty) return;
+    if (!data || typeof data !== 'object' || !Array.isArray(data.actions)) return;
+    this._fillDrawer?.close('cancel'); // another script (review-2)
+    this.editableScript.loadFromData(data);
+    this._funscriptPath = path;
+    this._updateStatus();
+    this._updateToolbarState?.();
+    this.graph?.fitAll?.();
+    this.graph?.draw?.();
+    this._broadcastActionsChanged?.();
   }
 
   _getVideoPath() {
@@ -2370,9 +3338,61 @@ export class ScriptEditor {
     }
   }
 
+  /** Switch the editor to one of `_availableScripts`, as picking it would. */
+  async selectScript(path) {
+    if (!this._scriptSelect || !path) return;
+    this._scriptSelect.value = path;
+    await this._onScriptSelectChange();
+  }
+
+  /**
+   * The script list's pick (also a lane click and the pop-out's own list).
+   * While the switch runs (the unsaved question, the autosave flush, the disk
+   * read, the lane rebuild) a pop-out Fill with pattern is refused: the path
+   * moves before the file is read, and the new script is in place before the
+   * pop-out hears of it (review-2 blocker; _applyPopoutFill).
+   */
   async _onScriptSelectChange() {
+    this._scriptLoads = (this._scriptLoads || 0) + 1;
+    try {
+      return await this._switchToSelectedScript();
+    } finally {
+      this._scriptLoads--;
+    }
+  }
+
+  async _switchToSelectedScript() {
     const newPath = this._scriptSelect.value;
     if (!newPath || newPath === this._funscriptPath) return;
+    // Another script: a Fill with pattern preview of this one goes.
+    this._fillDrawer?.close('cancel');
+
+    // An embedded axis has no file to open: put the selector back on the
+    // script being edited and hand the pick to app.js, which extracts the
+    // axes to companion files and then selects the chosen one (V42).
+    const picked = this._availableScripts.find((s) => s.path === newPath);
+    if (picked?.embeddedAxis) {
+      if (this._funscriptPath) this._scriptSelect.value = this._funscriptPath;
+      await this.onEditEmbeddedAxis?.(picked.embeddedAxis);
+      return;
+    }
+
+    // Unsaved edits to this script are asked about first (CB-01). The switch
+    // used to cache only the stacks and reload the file on the way back, so
+    // the last unsaved state was gone (TODO Q12's dropdown half). Cancel puts
+    // the list back on the script being edited.
+    if (this.hasUnsavedChanges()) {
+      const go = await this.confirmUnsavedChanges();
+      if (!go) {
+        if (this._funscriptPath) this._scriptSelect.value = this._funscriptPath;
+        // The pick may have come from the pop-out's own list: it goes back
+        // too, or it kept naming the new pick over the old script's points
+        // (and picking it again fired no change). R3 fix-up, verifier 1.
+        this._broadcastScriptsChanged();
+        return;
+      }
+      this._scriptSelect.value = newPath;
+    }
 
     // Bug B1 (community report 2026-05-23): two rapid changes raced —
     // the later-completing disk read won the canvas regardless of
@@ -2407,6 +3427,9 @@ export class ScriptEditor {
 
       if (content) {
         const parsed = JSON.parse(content);
+        // After the waits: a drawer opened meanwhile (the old script was
+        // still on screen) previewed THAT script (review-2 blocker).
+        this._fillDrawer?.close('cancel');
         this.editableScript.loadFromData(parsed);
 
         // Restore undo/redo stacks if we have a cache (but keep fresh actions from disk)
@@ -2419,6 +3442,8 @@ export class ScriptEditor {
           this.editableScript._undoStack = deserializeStack(JSON.parse(JSON.stringify(cached.undoStack)));
           this.editableScript._redoStack = deserializeStack(JSON.parse(JSON.stringify(cached.redoStack)));
           this.editableScript._selectedIndices = new Set(cached.selectedIndices);
+          // The cached entries keep their revision ids (R4-18). The state on
+          // screen is the file just read: a fresh id, and the saved one.
           this.editableScript._dirty = cached.dirty;
         }
 
@@ -2526,8 +3551,10 @@ export class ScriptEditor {
     if (!this.handyManager?.connected) return;
     // Only send HDSP when sync is NOT active (would break HSSP)
     if (this.syncEngine?._active) return;
+    // Preview where the device will really go: honour the Handy invert.
+    const target = this.settings?.get?.('handy.inverted') === true ? 100 - position : position;
     try {
-      this.handyManager.hdspMove(position, 150);
+      this.handyManager.hdspMove(target, 150);
     } catch { /* ignore */ }
   }
 
@@ -2541,7 +3568,7 @@ export class ScriptEditor {
    */
   async _togglePopoutWindow() {
     if (!window.funsync?.editorPopoutOpen) {
-      showToast('Pop-out unavailable — Electron bridge missing', 'error');
+      showToast(t('editor.toast.popoutUnavailable'), 'error');
       return;
     }
     if (this._popoutOpen) {
@@ -2549,6 +3576,22 @@ export class ScriptEditor {
     } else {
       await window.funsync.editorPopoutOpen();
     }
+  }
+
+  /**
+   * The pop-out button's tooltip and accessible name, in the user's language
+   * and kept there by the panel's language walk (data-i18n-*). Both were set
+   * to English literals on every pop-out / dock, so after one cycle they
+   * stayed English in every language (E-08, also in v0.9.2).
+   */
+  _labelPopoutButton(key) {
+    const btn = this._btnPopout;
+    if (!btn) return;
+    const text = t(key);
+    btn.title = text;
+    btn.setAttribute('aria-label', text);
+    btn.setAttribute('data-i18n-title', key);
+    btn.setAttribute('data-i18n-aria-label', key);
   }
 
   /**
@@ -2563,10 +3606,7 @@ export class ScriptEditor {
       if (event.type === 'opened') {
         this._popoutOpen = true;
         this._setToggleState(this._btnPopout, true);
-        if (this._btnPopout) {
-          this._btnPopout.title = 'Dock editor back to main window';
-          this._btnPopout.setAttribute('aria-label', 'Dock editor back to main window');
-        }
+        this._labelPopoutButton('editor.btn.dock');
         // Hide the docked editor panel AND let the video reclaim the
         // 250px slot. Without removing the `--editor-open` class on
         // the player container, the CSS rule
@@ -2574,6 +3614,9 @@ export class ScriptEditor {
         // keeps the video compressed even though the editor is gone.
         // Per locked decision §4.3 α, pop-out takes full ownership —
         // main window shows only the video.
+        // A Fill with pattern open here is cancelled (the pop-out has its own).
+        this._fillDrawer?.close('cancel');
+        closeContextMenu();
         if (this._panel) this._panel.hidden = true;
         document
           .getElementById('player-container')
@@ -2582,13 +3625,15 @@ export class ScriptEditor {
       } else if (event.type === 'closed') {
         this._popoutOpen = false;
         this._setToggleState(this._btnPopout, false);
-        if (this._btnPopout) {
-          this._btnPopout.title = 'Pop out editor to a separate window';
-          this._btnPopout.setAttribute('aria-label', 'Pop out editor to a separate window');
-        }
+        this._labelPopoutButton('editor.btn.popout');
         this._stopPopoutBroadcast();
+        // Always: the docked panel was hidden for the pop-out, whatever
+        // happened meanwhile. An editor hidden while popped out (a new
+        // video's load) kept `hidden` for good, so it never showed again
+        // (R3-22). Closed, it stays out of sight through its own rules
+        // (no --open class, inert).
+        if (this._panel) this._panel.hidden = false;
         if (this._panel && this._open) {
-          this._panel.hidden = false;
           // Restore the editor-open layout class so the video
           // compresses again and the editor panel slides back into
           // its slot.
@@ -2607,6 +3652,11 @@ export class ScriptEditor {
             this.graph.draw();
             this._updateScrubber?.();
           });
+        }
+        // Docked into the player view, which the main window may not be
+        // showing: app.js brings it up (onPopoutDocked, E-07).
+        if (this._open) {
+          try { this.onPopoutDocked?.(); } catch (err) { console.warn('[Editor] onPopoutDocked failed:', err); }
         }
       } else if (event.type === 'message') {
         this._handlePopoutMessage(event.payload);
@@ -2660,20 +3710,44 @@ export class ScriptEditor {
       case 'ready':
         this._broadcastInitialState();
         break;
+      // Seeks and steps go to the video that plays: the player window's
+      // while it owns playback (routePlayback, D-01), else the inline one.
       case 'video-seek':
         // payload.time is seconds (matches HTMLVideoElement.currentTime)
-        if (this.videoPlayer?.video && typeof payload.time === 'number') {
-          this.videoPlayer.video.currentTime = payload.time;
-        }
+        if (typeof payload.time !== 'number') break;
+        if (this.routePlayback?.('seekTo', payload.time)) break;
+        if (this.videoPlayer?.video) this.videoPlayer.video.currentTime = payload.time;
         break;
+      // The pop-out's Space (verify-1, 2026-11-07: it had none). Play or
+      // pause, as asked, whichever video plays; togglePlay keeps the inline
+      // player's own rules (an ended video replays).
+      case 'video-play':
+      case 'video-pause': {
+        const play = payload.type === 'video-play';
+        if (this.routePlayback?.(play ? 'play' : 'pause')) break;
+        const v = this.videoPlayer?.video;
+        if (v && (play ? (v.paused || v.ended) : !v.paused)) this.videoPlayer.togglePlay?.();
+        break;
+      }
       case 'video-step-frame':
+        if (this.routePlayback?.('stepFrames', payload.direction || 1)) break;
         this.videoPlayer?.stepFrame?.(payload.direction || 1);
         break;
       case 'video-step-frames':
+        if (!payload.frames) break;
+        if (this.routePlayback?.('stepFrames', payload.frames)) break;
         this.videoPlayer?.stepFrames?.(payload.frames || 0);
         break;
+      // The pop-out's Speed list: the video that plays, as the seeks above
+      // (E-06, also in v0.9.2: it set the hidden inline element's rate while
+      // the player window played on at the old one).
       case 'video-set-rate':
-        if (typeof payload.rate === 'number' && this.videoPlayer?.setPlaybackRate) {
+        if (typeof payload.rate !== 'number') break;
+        if (this.routePlayback?.('setRate', payload.rate)) {
+          if (this._speedSelect) this._speedSelect.value = String(payload.rate);
+          break;
+        }
+        if (this.videoPlayer?.setPlaybackRate) {
           this.videoPlayer.setPlaybackRate(payload.rate);
           if (this._speedSelect) this._speedSelect.value = String(payload.rate);
         }
@@ -2733,6 +3807,11 @@ export class ScriptEditor {
       case 'request-waveform-toggle':
         this._toggleWaveform?.();
         break;
+      case 'request-select-every-nth':
+        // The pop-out's Select… → Every Nth point… : the dialog opens here,
+        // like Remap; its Select applies to this EditableScript.
+        this._openEveryNthModal();
+        break;
 
       // Pop-out's snap / spline / recording toggles + speed dropdown.
       // Apply locally to the docked editor's state, then echo back via
@@ -2766,140 +3845,63 @@ export class ScriptEditor {
    * `_onScriptChanged` hook fires `_broadcastActionsChanged` after
    * every mutation so the pop-out's local view re-syncs.
    *
-   * Each branch maps one protocol op-name to the corresponding
-   * EditableScript / ScriptEditor method. Unknown ops log + no-op
-   * (defensive against protocol additions on the pop-out side that
-   * the parent hasn't been updated for yet).
+   * The switch itself lives in `editor-popout-dispatch.js`, which the
+   * routing test imports too: it used to test a COPY of this switch, and
+   * the copy drifted (the dead pop-out Ctrl+Shift+V). What needs this
+   * editor (toasts) is handed in as hooks.
    */
   _applyPopoutEdit(payload) {
-    const es = this.editableScript;
-    if (!es) return;
-    const op = payload.op;
-    try {
-      switch (op) {
-        case 'insert':
-          es.insertAction(payload.at, payload.pos);
-          break;
-        case 'delete':
-          if (Array.isArray(payload.indices)) {
-            es.deleteActions(new Set(payload.indices));
-          } else {
-            es.deleteActions(es.selectedIndices);
-          }
-          break;
-        case 'update':
-          if (typeof payload.idx === 'number') {
-            es.updateAction(payload.idx, payload.fields || {});
-          }
-          break;
-        case 'select':
-          if (Array.isArray(payload.indices)) {
-            es._selectedIndices = new Set(payload.indices);
-            es._emit?.();
-          }
-          break;
-        case 'selectAll':
-          es.selectAll();
-          break;
-        case 'clearSelection':
-          es.clearSelection();
-          break;
-        case 'invert':
-          es.invertSelection();
-          break;
-        case 'undo':
-          es.undo();
-          break;
-        case 'redo':
-          es.redo();
-          break;
-        case 'cut':
-          es.cut?.();
-          break;
-        case 'paste':
-          es.paste?.(payload.at);
-          break;
-        case 'pasteOriginal':
-          es.pasteOriginal?.();
-          break;
-        case 'equalize':
-          es.equalizeSelected?.();
-          break;
-        case 'selectLeftOf':
-          es.selectLeftOfCursor?.(payload.time);
-          break;
-        case 'selectRightOf':
-          es.selectRightOfCursor?.(payload.time);
-          break;
-        case 'insertAlternating':
-          es.insertAlternating?.(payload.at);
-          break;
-        case 'repeatLastStroke':
-          es.repeatLastStroke?.(payload.at);
-          break;
-        case 'moveSelectedToTime':
-          es.moveSelectedToTime?.(payload.time);
-          break;
-        case 'addBookmark':
-          es.addBookmark?.(payload.at, payload.name);
-          break;
-        case 'removeBookmark':
-          // EditableScript.removeBookmark keys by `at` (timeMs), not by id.
-          es.removeBookmark?.(payload.at);
-          break;
-        case 'beginBatch':
-          // Wraps a drag-style edit stream so the entire drag is one
-          // undo step. Throttled OP_UPDATEs inside this window collapse.
-          es.beginBatch?.();
-          break;
-        case 'endBatch':
-          es.endBatch?.();
-          break;
-        case 'copy':
-          es.copy?.();
-          break;
-        case 'selectByPositionRange':
-          es.selectByPositionRange?.(payload.minPos, payload.maxPos);
-          break;
-        case 'moveActions':
-          // {indices?, deltaAt?, deltaPos?} — indices defaults to current
-          // selection, mirroring docked editor's nudge / move semantics.
-          es.moveActions?.(
-            Array.isArray(payload.indices) ? new Set(payload.indices) : es.selectedIndices,
-            payload.deltaAt || 0,
-            payload.deltaPos || 0,
-          );
-          break;
-        case 'applyModifier': {
-          // Direct (param-less) modifiers — halfSpeed / doubleSpeed /
-          // reverse. The script-modifiers module exports pure functions;
-          // resolve by name. Keys must match the protocol values the
-          // pop-out dispatches (`'halfSpeed'` / `'doubleSpeed'` /
-          // `'reverse'`), NOT the JS export names.
-          const name = payload.name;
-          const mods = { halfSpeed, doubleSpeed, reverse: reverseActions };
-          if (mods[name]) es.applyModifier?.(mods[name]);
-          break;
-        }
-        default:
-          console.debug('[Editor] unknown popout edit-op:', op);
+    const notify = this._popoutNotifier();
+    applyPopoutEdit(this.editableScript, payload, {
+      reportModifierResult: (status, name) => this._reportModifierResult(status, name, undefined, notify),
+      selectCreated: () => this._selectCreatedPoints(notify),
+      selectEveryNth: (n, start) => this._selectEveryNth(n, start, notify),
+      placeAt: (pos, at) => this._placeOrTweakAt(pos, at),
+      fillRange: (fill) => this._answerPopoutFill(fill.requestId, this._applyPopoutFill(fill, notify)),
+      // Not a valid fill: said in the pop-out too, which keeps its drawer open.
+      fillRefused: (raw) => {
+        notify(t('editor.patternFill.failed'), 'warn');
+        this._answerPopoutFill(raw?.requestId, false);
+      },
+    });
+  }
+
+  /**
+   * Where a toast for a command the POP-OUT sent goes: into the pop-out, the
+   * window the user is working in (FT-029; Every Nth, N, a refused or no-op
+   * Modify item). The same translated text this window would show (the
+   * command ran here; the pop-out is in the same language since FT-103).
+   * This window while no pop-out is open.
+   * @returns {(text: string, type?: string, duration?: number) => void}
+   */
+  _popoutNotifier() {
+    return (text, type = 'info', duration) => {
+      if (!this._popoutOpen) {
+        showToast(text, type, duration);
+        return;
       }
-    } catch (err) {
-      console.warn('[Editor] popout edit-op failed:', op, err);
-    }
+      this._relayToPopout({
+        type: 'toast',
+        text: String(text),
+        level: type,
+        ...(typeof duration === 'number' ? { duration } : {}),
+        dismissLabel: t('toast.dismissAria'),
+      });
+    };
   }
 
   _broadcastInitialState() {
     if (!this._popoutOpen) return;
     const v = this.videoPlayer;
+    const clock = this._popoutClock();
     const payload = {
       type: 'initial-state',
       scripts: this._availableScripts || [],
       activePath: this._funscriptPath || null,
       videoSrc: v?.video?.src || '',
-      videoDuration: v?.duration || 0,
-      videoTime: v?.currentTime || 0,
-      videoPaused: v?.video ? !!v.video.paused : true,
+      videoDuration: v?.duration || clock?.duration || 0,
+      videoTime: clock?.currentTime || 0,
+      videoPaused: clock ? clock.paused : true,
       videoRate: v?.video?.playbackRate || 1,
       splineMode: !!this._splineMode,
       snapToFrame: !!this._snapToFrame,
@@ -2907,6 +3909,7 @@ export class ScriptEditor {
       actions: this.editableScript?.actions || [],
       selectedIndices: [...(this.editableScript?.selectedIndices || [])],
       bookmarks: this.editableScript?.getBookmarks?.() || [],
+      dirty: this.editableScript?.dirty === true, // the pop-out's "*" (R4 fix-up)
       // Pop-out applies this as `<html data-theme="...">` so the same
       // design tokens render at the same paint values. Without this
       // the pop-out is hardcoded dark, which regresses light-theme
@@ -2916,8 +3919,22 @@ export class ScriptEditor {
       // Frame duration for the pop-out's snap-to-frame logic. Matches
       // `_frameDurationMs()` in the docked editor — 30 fps standard.
       frameDurationMs: this._frameDurationMs?.() || (1000 / 30),
+      // Its Ctrl+Left/Right step, this editor's (D-02).
+      fastStepFrames: this._fastStepFrames(),
+      // So the pop-out's position keys resolve as this editor's (FT-032).
+      customPositionKeys: this._customPositionKeys(),
+      // The Fill with pattern drawer's remembered options (editor.patternFill).
+      patternFill: this.settings?.get?.('editor.patternFill') ?? null,
+      // The pop-out speaks this window's language (FT-103).
+      locale: getCurrentLocale(),
     };
     this._relayToPopout(payload);
+  }
+
+  /** A language switch here, while the pop-out is open (FT-103). */
+  _broadcastLocale() {
+    if (!this._popoutOpen) return;
+    this._relayToPopout({ type: 'locale', locale: getCurrentLocale() });
   }
 
   /** Push a theme update to the pop-out when the user changes
@@ -2943,17 +3960,44 @@ export class ScriptEditor {
       splineMode: !!this._splineMode,
       recordingMode: !!this._recordingMode,
       playbackRate: this.videoPlayer?.video?.playbackRate || 1,
+      customPositionKeys: this._customPositionKeys(),
+      fastStepFrames: this._fastStepFrames(),
+      patternFill: this.settings?.get?.('editor.patternFill') ?? null,
     });
+  }
+
+  /** The raw `editor.customPositionKeys` setting, always an array. */
+  _customPositionKeys() {
+    const v = this.settings?.get?.('editor.customPositionKeys');
+    return Array.isArray(v) ? v : [];
+  }
+
+  /**
+   * The clock the pop-out follows (D-01): the player window's while it owns
+   * playback (`getPlaybackClock`, set by app.js), else the inline video. The
+   * inline element is paused and hidden then, so every tick said "paused at
+   * the time the window took over" and the pop-out never moved.
+   * @returns {{currentTime: number, paused: boolean, duration: number}|null}
+   */
+  _popoutClock() {
+    let ext = null;
+    try { ext = this.getPlaybackClock?.() || null; } catch { ext = null; }
+    if (ext) {
+      return { currentTime: Number(ext.currentTime) || 0, paused: !!ext.paused, duration: Number(ext.duration) || 0 };
+    }
+    const v = this.videoPlayer;
+    if (!v?.video) return null;
+    return { currentTime: v.currentTime, paused: !!v.video.paused, duration: v.duration };
   }
 
   _broadcastTimeTick() {
     if (!this._popoutOpen) return;
-    const v = this.videoPlayer;
-    if (!v?.video) return;
+    const clock = this._popoutClock();
+    if (!clock) return;
     this._relayToPopout({
       type: 'time-tick',
-      time: v.currentTime,
-      paused: !!v.video.paused,
+      time: clock.currentTime,
+      paused: clock.paused,
     });
   }
 
@@ -2977,6 +4021,7 @@ export class ScriptEditor {
       actions: this.editableScript?.actions || [],
       selectedIndices: [...(this.editableScript?.selectedIndices || [])],
       bookmarks: this.editableScript?.getBookmarks?.() || [],
+      dirty: this.editableScript?.dirty === true, // the pop-out's "*" (R4 fix-up)
     });
   }
 
@@ -3093,7 +4138,12 @@ export class ScriptEditor {
     // Prefer the in-memory undo cache (preserves unsaved edits when
     // toggling stacked view) over a fresh disk read.
     const cached = this._undoCache.get(script.path);
-    if (cached) {
+    if (script.embeddedAxis) {
+      // Embedded in the main script: no file, preview the parsed copy (V42).
+      const actions = this.getEmbeddedAxisActions?.(script.embeddedAxis);
+      if (!Array.isArray(actions) || actions.length === 0) return null;
+      editable._actions = actions.map((a) => ({ at: a.at, pos: a.pos }));
+    } else if (cached) {
       editable._actions = JSON.parse(JSON.stringify(cached.actions));
     } else {
       try {
@@ -3145,12 +4195,12 @@ export class ScriptEditor {
 
   _equalizeSelected() {
     if (this.editableScript.selectedIndices.size < 3) {
-      showToast('Select 3+ actions to equalize', 'info');
+      showToast(t('editor.toast.selectToEqualize'), 'info');
       return;
     }
     const count = this.editableScript.selectedIndices.size;
     this.editableScript.equalizeSelected();
-    showToast(`Equalized ${count} actions`, 'info');
+    showToast(t('editor.toast.equalized', { count }), 'info');
   }
 
   _moveSelectedToPlayhead() {
@@ -3188,19 +4238,22 @@ export class ScriptEditor {
    * Disambiguation: every successful insertion auto-selects the new
    * action, so the second numpad press always hit the modify branch
    * if we used `sel.size === 1` alone. The same-frame check fixes that
-   * — same frame → tweak; different frame → insert new.
+   * — same frame → tweak; different frame → insert new. An insert on a time
+   * that already holds a point (selected or not) edits that point instead:
+   * EditableScript.insertAction is add-or-edit, OFS's rule (CB-02).
    *
    * @param {number} pos — 0-100
+   * @param {number} [atMs] — where; the playhead when omitted. The pop-out
+   *   sends the time its own playhead showed (OP_PLACE_AT, FT-032).
    */
-  _placeOrTweakAt(pos) {
+  _placeOrTweakAt(pos, atMs) {
+    const timeMs = this.snapTime(Number.isFinite(atMs) ? atMs : this.videoPlayer.currentTime * 1000);
     if (this._recordingMode) {
-      const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
       this.editableScript.insertAction(timeMs, pos);
       this._sendLivePreview(pos);
       return;
     }
     const sel = this.editableScript.selectedIndices;
-    const timeMs = this.snapTime(this.videoPlayer.currentTime * 1000);
     let modifyIdx = -1;
     if (sel.size === 1) {
       const idx = [...sel][0];

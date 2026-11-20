@@ -49,13 +49,21 @@ describe('message-type constants', () => {
       'INITIAL_STATE', 'VIEWER_ADDED', 'VIEWER_REMOVED', 'VIEWER_STATUS', 'VIEWER_OFFSET',
       'HIDE_KEYS_CHANGED', 'THEME',
       'READY', 'ADD_VIEWER', 'REMOVE_VIEWER', 'SET_OFFSET', 'SET_MUTED',
-      'TEST_BUZZ', 'TEST_BUZZ_ALL', 'SET_HIDE_KEYS', 'END_ROOM',
+      'TEST_BUZZ', 'TEST_BUZZ_ALL', 'RESEND', 'SET_HIDE_KEYS', 'END_ROOM',
       'OP_BEGIN_BATCH', 'OP_END_BATCH',
     ];
     for (const name of expected) {
       expect(typeof P[name]).toBe('string');
       expect(P[name].length).toBeGreaterThan(0);
     }
+  });
+
+  it('every constant is in ALL_MESSAGE_TYPES (RESEND included, FT-121)', () => {
+    const constants = Object.entries(P)
+      .filter(([name, v]) => /^[A-Z_]+$/.test(name) && typeof v === 'string')
+      .map(([, v]) => v);
+    expect([...P.ALL_MESSAGE_TYPES].sort()).toEqual([...constants].sort());
+    expect(P.ALL_MESSAGE_TYPES).toContain(P.RESEND);
   });
 
   it('constants are unique (no two names share the same wire value)', () => {

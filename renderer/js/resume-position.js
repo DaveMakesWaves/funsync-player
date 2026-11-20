@@ -139,11 +139,19 @@ export function formatResumeTime(seconds) {
  * Deliberately carries NO watched mark. Recording a position means the
  * video is in progress, which is the opposite of finished — see
  * `isFinished` for why the two are mutually exclusive.
+ *
+ * To a tenth of a second, the position rounded DOWN and the duration UP
+ * (E2-07), so the stored pair is never further through the video than the
+ * one `shouldRecordPosition` accepted, and `shouldOfferResume` offers what
+ * was recorded. Rounded to nearest, a pause just under the end threshold was
+ * stored ON it: Long Two (100 s, threshold 70) paused at 69.96 s was saved
+ * as 70.0, drew a 70% bar and was Continue's target, and then opened at 0:00
+ * with no prompt.
  */
 export function makeResumeEntry(position, duration, now) {
   return {
-    position: Math.max(0, Math.round(position * 10) / 10),
-    duration: Math.round(duration * 10) / 10,
+    position: Math.max(0, Math.floor(position * 10) / 10),
+    duration: Math.ceil(duration * 10) / 10,
     updatedAt: now,
   };
 }

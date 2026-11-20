@@ -117,11 +117,11 @@ const SECTIONS = sectionsOf(HELP_SRC);
 // Chords that legitimately appear twice in one context because the handler
 // disambiguates them at runtime by state, not by chord. Each needs a reason.
 const ALLOWED_DUPLICATES = {
-  player: {
-    // Esc is layered: it clears an A-B loop if one is set, otherwise it
-    // leaves the player. Both are documented so the user can find either.
-    Esc: 2,
-  },
+  // Esc used to be allowed twice here: "clear loop" AND "back to library".
+  // Escape has never left the player, so the second row was false and the
+  // two contradicted each other (V46). It is one row now, and a second Esc
+  // row is a clash like any other.
+  player: {},
   editor: {},
 };
 
@@ -170,16 +170,28 @@ describe('chords shared between player and editor', () => {
     expect(shared).toEqual([
       '?',            // help in both — different content, same idea
       'B',            // loop point B  /  add bookmark
+      // Ctrl+B / Shift+B: next / previous bookmark in both. Until 2026-11-04
+      // the docked editor had a duplicate `case 'b'` that shadowed its own
+      // jump (Shift+B added a bookmark, Ctrl+B did nothing) and the pop-out
+      // ran the opposite direction. Both now match the player (Dave).
       'Ctrl+B',       // next bookmark in both
       'E',            // toggle editor  /  equalize selection
       'End',          // jump to end  /  move action to playhead
-      'Esc',          // clear loop or leave  /  clear selection or close
+      'Esc',          // clear loop, close panels  /  clear selection or close
       'Home',         // jump to start  /  repeat last stroke
+      // N (2026-11-04, belgriffinite #261): the player's N is gated by
+      // `scriptEditor?.isOpen` (keyboard.js), and the editor canvas stops N
+      // before it bubbles, so neither can fire the other's action.
+      'N',            // next video  /  New points only (select what the last modifier created)
+      // P (2026-11-17, pattern library): the player's P is gated by
+      // `scriptEditor?.isOpen` (keyboard.js) and the editor canvas stops P
+      // before it bubbles, as N.
+      'P',            // previous video  /  Fill with pattern (the drawer)
       'R',            // cycle aspect  /  toggle recording
       'Shift+B',      // previous bookmark in both
       'Shift+Left',   // seek one frame  /  move selection one frame
       'Shift+Right',
-      'V',            // next variant  /  toggle VAD
+      'V',            // next variant  /  toggle VAD (the editor canvas stops V and Shift+V)
     ]);
   });
 });

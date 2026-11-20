@@ -14,6 +14,7 @@ import {
   lookupBinding,
   isReservedKey,
   detectConflict,
+  resolvePositionKey,
   RESERVED_EDITOR_KEYS,
   DEFAULT_POSITION_KEYS,
 } from '../../renderer/js/position-key-resolver.js';
@@ -179,6 +180,20 @@ describe('isReservedKey', () => {
     expect(isReservedKey('KeyZ', { shift: true }).reserved).toBe(false);
   });
 
+  it('reserves bare KeyN (New points only) but allows Shift+N / Ctrl+N / Alt+N', () => {
+    expect(isReservedKey('KeyN', {})).toEqual({ reserved: true, reason: 'editor-command' });
+    expect(isReservedKey('KeyN', { shift: true }).reserved).toBe(false);
+    expect(isReservedKey('KeyN', { ctrl: true }).reserved).toBe(false);
+    expect(isReservedKey('KeyN', { alt: true }).reserved).toBe(false);
+  });
+
+  it('a custom N binding saved BEFORE N was reserved still resolves (Dave Q2: no migration)', () => {
+    // Settings refuses new bare-N bindings; an old one keeps loading and
+    // keeps winning in the editor, because buildResolverMap never filters.
+    const map = buildResolverMap([{ code: 'KeyN', mods: {}, position: 35 }]);
+    expect(lookupBinding(map, { code: 'KeyN', mods: {} })).toBe(35);
+  });
+
   it('does not reserve random letter keys', () => {
     expect(isReservedKey('KeyA', {}).reserved).toBe(false);
     expect(isReservedKey('KeyJ', {}).reserved).toBe(false);
@@ -287,5 +302,60 @@ describe('RESERVED_EDITOR_KEYS + DEFAULT_POSITION_KEYS exports', () => {
     expect(map.get('Shift:Numpad0')).toBe(100);
     expect(map.get('Minus')).toBe(100);
     expect(map.get('NumpadSubtract')).toBe(100);
+  });
+});
+
+// FT-032: the ONE resolver both editors call (docked canvas, pop-out window).
+describe('resolvePositionKey', () => {
+  const ev = (code, mods = {}) => ({
+    code, shiftKey: !!mods.shift, ctrlKey: !!mods.ctrl, metaKey: !!mods.meta, altKey: !!mods.alt,
+  });
+
+  it('the number row and the numpad: 0-9 → 0-90, bare only', () => {
+    for (let d = 0; d <= 9; d++) {
+      expect(resolvePositionKey(ev(`Digit${d}`))).toBe(d * 10);
+      expect(resolvePositionKey(ev(`Numpad${d}`))).toBe(d * 10);
+    }
+  });
+
+  it('100: Shift+0 (number row or numpad), - and Numpad-', () => {
+    expect(resolvePositionKey(ev('Digit0', { shift: true }))).toBe(100);
+    expect(resolvePositionKey(ev('Numpad0', { shift: true }))).toBe(100);
+    expect(resolvePositionKey(ev('Minus'))).toBe(100);
+    expect(resolvePositionKey(ev('NumpadSubtract'))).toBe(100);
+  });
+
+  it('Shift+1..9 place nothing; nor Ctrl or Alt with a digit (Ctrl+1/2/3 select thirds); nor Ctrl+- (zoom out)', () => {
+    for (let d = 1; d <= 9; d++) expect(resolvePositionKey(ev(`Digit${d}`, { shift: true }))).toBeNull();
+    expect(resolvePositionKey(ev('Digit1', { ctrl: true }))).toBeNull();
+    expect(resolvePositionKey(ev('Digit1', { meta: true }))).toBeNull();
+    expect(resolvePositionKey(ev('Numpad3', { alt: true }))).toBeNull();
+    expect(resolvePositionKey(ev('Minus', { ctrl: true }))).toBeNull();
+    expect(resolvePositionKey(ev('NumpadSubtract', { alt: true }))).toBeNull();
+  });
+
+  it('as the docked editor always read it: Shift+0 with Ctrl still places 100', () => {
+    expect(resolvePositionKey(ev('Digit0', { shift: true, ctrl: true }))).toBe(100);
+  });
+
+  it('the custom map wins over a default and binds keys the defaults leave alone', () => {
+    const map = buildResolverMap([
+      { code: 'KeyJ', mods: {}, position: 35 },
+      { code: 'KeyJ', mods: { shift: true }, position: 65 },
+      { code: 'Digit5', mods: {}, position: 75 },
+      { code: 'KeyK', mods: { ctrl: true }, position: 5 },
+    ]);
+    expect(resolvePositionKey(ev('KeyJ'), map)).toBe(35);
+    expect(resolvePositionKey(ev('KeyJ', { shift: true }), map)).toBe(65);
+    expect(resolvePositionKey(ev('Digit5'), map)).toBe(75);
+    expect(resolvePositionKey(ev('KeyK', { meta: true }), map)).toBe(5); // Meta counts as Ctrl
+    expect(resolvePositionKey(ev('Digit4'), map)).toBe(40);
+  });
+
+  it('anything else is not a position key (the command switch gets it)', () => {
+    expect(resolvePositionKey(ev('KeyN'))).toBeNull();
+    expect(resolvePositionKey(ev('KeyJ'), new Map())).toBeNull();
+    expect(resolvePositionKey({ key: '5' })).toBeNull(); // no code
+    expect(resolvePositionKey(undefined)).toBeNull();
   });
 });

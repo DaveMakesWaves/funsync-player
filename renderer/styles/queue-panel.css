@@ -105,6 +105,16 @@
   .player__queue-toggle { transition: background var(--transition-fast), color var(--transition-fast); }
 }
 
+/* Playlists / Categories header toggle (V27): the Library header's toggle
+   (`.library__queue-toggle`, styled in player.css), pushed to the far right
+   for location parity with the Library header and the player's top bar.
+   Their grid headers have no spacer, so without this it sat beside the
+   grid/list switch. */
+.playlists__header > [data-queue-toggle],
+.categories__header > [data-queue-toggle] {
+  margin-left: auto;
+}
+
 /* === Queue panel ======================================================== */
 
 .queue-panel {
@@ -134,13 +144,15 @@
   transform: translateX(0);
 }
 
-/* Library view: start below the filter/sort bar so those controls stay
-   usable while the panel is open, and run to the bottom of the window
-   (no playback-controls bar to clear here). `--queue-lib-top` is measured
-   in app.js (`_positionQueuePanelForLibrary`) since the header height isn't
-   fixed. Player view keeps the default top:0 / bottom:100px above the
-   controls bar. */
-#app[data-view="library"] .queue-panel {
+/* Browse views (library, playlists, categories): start below the view's
+   header so its controls (and the nav bar above it) stay usable while the
+   panel is open, and run to the bottom of the window (no playback-controls
+   bar to clear here). `--queue-lib-top` is measured in app.js
+   (`_positionQueuePanelForView`) since the header height isn't fixed.
+   Player view keeps the default top:0 / bottom:100px above the controls
+   bar. Was library-only: Shift+Q in Playlists or Categories put the panel
+   over the nav bar, 100px short of the bottom (V27). */
+#app:not([data-view="player"]) .queue-panel {
   top: var(--queue-lib-top, 106px);
   bottom: 0;
 }
@@ -153,7 +165,15 @@
    (see queue-panel.js), where there is no caption strip to clear, so this
    rule stops matching and the panel correctly returns to the top edge. */
 html.has-wco #app[data-view="player"] > .queue-panel {
-  top: calc(env(titlebar-area-height, 48px) + 4px);
+  top: calc(var(--backend-banner-h, 0px) + env(titlebar-area-height, 48px) + 4px);
+}
+
+/* The backend banner is the player view's top row while it shows, and the
+   player starts under it; so does the panel (V80). In the library views
+   --queue-lib-top is measured below the header, which the banner pushes
+   down. --backend-banner-h is only set while the banner is visible. */
+#app[data-view="player"] > .queue-panel {
+  top: var(--backend-banner-h, 0px);
 }
 
 @media (prefers-reduced-motion: reduce) {

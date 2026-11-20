@@ -29,7 +29,11 @@ describe('Edge Hold — keyboard binding', () => {
 
   it('releases on keyup even without focus (mirrors the X release rule)', () => {
     const keyUp = KEYBOARD.slice(KEYBOARD.indexOf('_onKeyUp(e) {'), KEYBOARD.indexOf('_onKeyDown(e) {'));
-    expect(keyUp).toContain("e.key === 'z'");
+    // The key through layoutKey, as on keydown (FT-035): a Russian layout
+    // types я on Z. The release itself is tested on real events in
+    // keyboard.test.js ("a hold started on Russian ч").
+    expect(keyUp).toContain('layoutKey(e)');
+    expect(keyUp).toContain("(key === 'z'");
     expect(keyUp).toContain('onEdgeHold(false)');
   });
 });
@@ -61,7 +65,7 @@ describe('Edge Hold — app orchestration', () => {
   });
 
   it('X forcibly releases an active Edge hold before arming the finisher', () => {
-    const orgasm = APP.slice(APP.indexOf('_onOrgasmHold(active) {'), APP.indexOf('_onOrgasmHold(active) {') + 1500);
+    const orgasm = APP.slice(APP.indexOf('_onOrgasmHold(active,'), APP.indexOf('_onOrgasmHold(active,') + 1500);
     expect(orgasm, 'else the finisher records no stopped engines and release strands them')
       .toContain('_onEdgeHold(false');
     expect(orgasm, 'the Handy resume must be skipped — the finisher takes the Handy over')
@@ -94,7 +98,7 @@ describe('Edge Hold — press-to-toggle mode', () => {
     // above and the engines Z stopped would never restart.
     expect(body).toContain('force = false');
     expect(body).toMatch(/mode === 'toggle' && !force/);
-    const orgasm = APP.slice(APP.indexOf('_onOrgasmHold(active) {'), APP.indexOf('_onOrgasmHold(active) {') + 1500);
+    const orgasm = APP.slice(APP.indexOf('_onOrgasmHold(active,'), APP.indexOf('_onOrgasmHold(active,') + 1500);
     expect(orgasm).toMatch(/_onEdgeHold\(false, \{[^}]*force: true/);
   });
 

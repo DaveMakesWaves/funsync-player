@@ -293,4 +293,191 @@ describe('Modal', () => {
       expect(fsEl.querySelector('video').hasAttribute('inert')).toBe(false);
     });
   });
+
+  // The video options dialog (notes/features/DESIGN-video-options.md (f)):
+  // two optional Modal.open options. initialFocus starts the dialog on its
+  // active rail item instead of Play, its first button; onEscape lets it
+  // close a chip menu or the tag suggestions first, since Modal takes Escape
+  // in a document capture listener before any control in the dialog sees it.
+  // Without either option a dialog behaves exactly as before.
+  describe('initialFocus and onEscape (video options dialog)', () => {
+    let opener, warn;
+    // A real frame: Modal's own first-focus frame was asked for first, so it
+    // has run by the time this one does.
+    const nextFrame = () => new Promise((r) => requestAnimationFrame(() => r()));
+    const flush = () => new Promise((r) => setTimeout(r, 0));
+    const track = (promise) => {
+      const state = { settled: false, value: undefined };
+      promise.then((v) => { state.settled = true; state.value = v; });
+      return state;
+    };
+    const escape = (target) => {
+      const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      target.dispatchEvent(e);
+      return e;
+    };
+    // The dialog's shape: Play first, then a rail whose active item is not
+    // the first control.
+    const BODY = '<button class="vo-play">Play</button>'
+      + '<div role="tablist"><button role="tab" class="vo-organise">Organise</button>'
+      + '<button role="tab" class="vo-tags" aria-selected="true">Tags</button></div>';
+    const openDialog = (extra = {}) => {
+      opener.focus();
+      const answer = track(Modal.open({ title: 'Video.mp4', body: BODY, ...extra }));
+      const overlay = document.querySelector('.modal-overlay');
+      return {
+        answer,
+        overlay,
+        play: overlay.querySelector('.vo-play'),
+        tags: overlay.querySelector('.vo-tags'),
+        closeBtn: overlay.querySelector('.modal-close-btn'),
+      };
+    };
+
+    beforeEach(() => {
+      document.body.innerHTML = '<button id="opener">⋮</button><button id="outside">Behind</button>';
+      opener = document.getElementById('opener');
+      warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    });
+    afterEach(() => {
+      warn.mockRestore();
+    });
+
+    it('without either option the first input or button has the focus after the frame, else the X (as before)', async () => {
+      const d = openDialog();
+      await nextFrame();
+      expect(document.activeElement).toBe(d.play);
+      d.closeBtn.click();
+      await flush();
+      expect(d.answer).toEqual({ settled: true, value: null });
+
+      opener.focus();
+      const empty = track(Modal.open({ title: 'Nothing to press', body: '<p>Text only</p>' }));
+      await nextFrame();
+      expect(document.activeElement).toBe(document.querySelector('.modal-close-btn'));
+      escape(document.activeElement);
+      await flush();
+      expect(empty).toEqual({ settled: true, value: null });
+      expect(document.activeElement).toBe(opener);
+    });
+
+    it('initialFocus given: the control it returns has the focus after the frame, not the first button', async () => {
+      const initialFocus = vi.fn((body) => body.querySelector('[aria-selected="true"]'));
+      const d = openDialog({ initialFocus });
+      await nextFrame();
+      expect(document.activeElement).toBe(d.tags);
+      expect(initialFocus).toHaveBeenCalledTimes(1);
+      expect(initialFocus.mock.calls[0][0]).toBe(d.overlay.querySelector('.modal-body'));
+      d.closeBtn.click();
+      await flush();
+      expect(document.activeElement).toBe(opener);
+    });
+
+    it('initialFocus returns null: the first input or button has the focus, as without it', async () => {
+      const d = openDialog({ initialFocus: () => null });
+      await nextFrame();
+      expect(document.activeElement).toBe(d.play);
+      d.closeBtn.click();
+      await flush();
+    });
+
+    it('initialFocus that throws, names a control outside the dialog or one that refuses the focus: the usual rule', async () => {
+      const outside = document.getElementById('outside');
+      const cases = [
+        () => { throw new Error('no rail yet'); },
+        () => outside,
+        (body) => { const b = body.querySelector('.vo-tags'); b.disabled = true; return b; },
+        () => ({ focus() {} }),
+      ];
+      for (const initialFocus of cases) {
+        const d = openDialog({ initialFocus });
+        await nextFrame();
+        expect(document.activeElement).toBe(d.play);
+        expect(document.activeElement).not.toBe(outside);
+        d.closeBtn.click();
+        await flush();
+        expect(d.answer.settled).toBe(true);
+      }
+    });
+
+    it('initialFocus is not asked once the dialog closed before its first frame, and the focus stays on the opener', async () => {
+      const initialFocus = vi.fn((body) => body.querySelector('.vo-tags'));
+      const d = openDialog({ initialFocus });
+      d.closeBtn.click();
+      await nextFrame();
+      expect(d.answer).toEqual({ settled: true, value: null });
+      expect(initialFocus).not.toHaveBeenCalled();
+      expect(document.activeElement).toBe(opener);
+    });
+
+    it('onEscape returns true: the dialog stays, its promise unanswered, and the press reaches nothing else', async () => {
+      let handled = true;
+      const onEscape = vi.fn(() => handled);
+      const d = openDialog({ onEscape });
+      await nextFrame();
+      const inner = vi.fn();
+      d.play.addEventListener('keydown', inner);
+      const later = vi.fn();
+      document.addEventListener('keydown', later, true);
+      try {
+        escape(d.play);
+        await flush();
+        expect(onEscape).toHaveBeenCalledTimes(1);
+        expect(onEscape.mock.calls[0][0].key).toBe('Escape');
+        expect(d.overlay.isConnected).toBe(true);
+        expect(d.answer.settled).toBe(false);
+        expect(document.activeElement).toBe(d.play);
+        expect(inner).not.toHaveBeenCalled();
+        expect(later).not.toHaveBeenCalled();
+
+        // Nothing left to close inside: the next Escape closes the dialog.
+        handled = false;
+        escape(d.play);
+        await flush();
+        expect(onEscape).toHaveBeenCalledTimes(2);
+        expect(d.answer).toEqual({ settled: true, value: null });
+        expect(d.overlay.isConnected).toBe(false);
+        expect(document.activeElement).toBe(opener);
+      } finally {
+        document.removeEventListener('keydown', later, true);
+      }
+    });
+
+    it('onEscape returns false, anything but exactly true, or throws: Escape closes the dialog as always', async () => {
+      const cases = [
+        () => false,
+        () => undefined,
+        () => 'yes',
+        async () => true, // a Promise is not "handled"
+        () => { throw new Error('menu gone'); },
+      ];
+      for (const onEscape of cases) {
+        const d = openDialog({ onEscape });
+        await nextFrame();
+        escape(d.play);
+        await flush();
+        expect(d.answer).toEqual({ settled: true, value: null });
+        expect(d.overlay.isConnected).toBe(false);
+        expect(document.activeElement).toBe(opener);
+      }
+    });
+
+    it('onEscape is asked about Escape only: Tab, Enter, the X and the backdrop never ask it', async () => {
+      const onEscape = vi.fn(() => true);
+      const d = openDialog({ onEscape });
+      await nextFrame();
+      for (const k of ['Tab', 'Enter', 'Esc']) {
+        d.play.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+      }
+      d.closeBtn.click();
+      await flush();
+      expect(d.answer).toEqual({ settled: true, value: null });
+
+      const d2 = openDialog({ onEscape });
+      d2.overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await flush();
+      expect(d2.answer).toEqual({ settled: true, value: null });
+      expect(onEscape).not.toHaveBeenCalled();
+    });
+  });
 });

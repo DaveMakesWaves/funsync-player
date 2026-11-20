@@ -1,18 +1,22 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check, Unplug } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check, Unplug, ArrowDownAZ, ArrowDownZA, Link, ListVideo } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
-import { computeSpeedStats } from '../js/library-search.js';
-import { computeBins, renderBins } from '../js/heatmap-strip.js';
+import { computeSpeedStats, compareNames } from '../js/library-search.js';
+import { computeBins, queueRenderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
 import { pathToFileURL } from '../js/path-utils.js';
-import { thumbRequestOpts, customThumbImagePath } from './library.js';
+import { thumbRequestOpts, customThumbImagePath, dockedEditorOnScreen } from './library.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
+import { noticeUnreadableScript } from '../js/script-access-notice.js';
 import { applyResumeBar, createResumeBar } from './resume-bar.js';
+import { createQueueToggleButton } from './queue-panel.js';
 import { isFinished } from '../js/resume-position.js';
+import { openPlayOptionsModal } from './play-options-modal.js';
+import { rangeBetween, nextAnchor } from '../js/selection-range.js';
 import {
   pickContinueTarget,
   summarisePlaylistProgress,
@@ -24,18 +28,161 @@ import {
   partitionByAvailability,
   groupByVolume,
 } from '../js/playlist-availability.js';
+import { stashData, onStashChanged, isStashSettingPath } from '../js/stash-store.js';
+import { stashGroupPlaylists, isStashGroupPlaylistId } from '../js/stash-groups.js';
+import { anyLibraryPlayOption, readLibraryPlayOptions, setLibraryPlayOption } from '../js/library-play-options.js';
+
+/** The name a playlist card shows for a path: the file name without its extension. */
+const shownName = (videoPath) => String(videoPath).split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+
+/**
+ * `paths` ordered by the name each card shows, A-Z (`'asc'`) or Z-A
+ * (`'desc'`), with the library's natural collator ("Clip 2" before
+ * "Clip 10", case ignored; never bare localeCompare). Ties fall back to the
+ * full file name, then the full path, so the result never depends on the
+ * order it started in, and Z-A is exactly A-Z reversed. EroScripts #370 (V78).
+ */
+export function sortPlaylistPathsByName(paths, dir = 'asc') {
+  const sign = dir === 'desc' ? -1 : 1;
+  const codepoint = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  return (paths || [])
+    .map((p) => ({ p, name: shownName(p), file: String(p).split(/[\\/]/).pop() }))
+    .sort((a, b) => sign * (compareNames(a.name, b.name)
+      || compareNames(a.file, b.file)
+      || compareNames(a.p, b.p)
+      || codepoint(a.p, b.p)))
+    .map((x) => x.p);
+}
+
+/**
+ * The order an Undo puts back. With the same videos as when the order was
+ * saved this is `previous` exactly; a video removed since is left out and one
+ * added since keeps its place at the end, so the result is always a pure
+ * reorder of `current` (store.js refuses anything else, and the renderer's
+ * cache would then disagree with config.json).
+ */
+export function restorePlaylistOrder(previous, current) {
+  const now = new Set(current || []);
+  const before = new Set(previous || []);
+  return [
+    ...(previous || []).filter((p) => now.has(p)),
+    ...(current || []).filter((p) => !before.has(p)),
+  ];
+}
+
+const sameOrder = (a, b) => a.length === b.length && a.every((p, i) => p === b[i]);
+
+// Select mode's moves (GuthixUnsigned, EroScripts #370: "select multiple
+// videos to move around the playlist at once"; FT-104). Each takes the
+// playlist's order and the selected paths (a Set) and returns an order of
+// exactly the same paths, so store.js takes it as a pure reorder. The
+// selected videos keep their order among themselves.
+
+/** The selection as one block at the top (`'top'`) or the bottom (`'bottom'`). */
+export function moveSelectedToEdge(order, selected, edge) {
+  const list = order || [];
+  const sel = list.filter((p) => selected.has(p));
+  const rest = list.filter((p) => !selected.has(p));
+  return edge === 'bottom' ? [...rest, ...sel] : [...sel, ...rest];
+}
+
+/**
+ * Every selected video one place up (`dir` < 0) or down. A selected video
+ * already at that end, or right behind another selected one that cannot
+ * move, stays put, so a block moves as a block and never overtakes itself.
+ */
+export function moveSelectedByOne(order, selected, dir) {
+  const out = (order || []).slice();
+  const swap = (i, j) => { [out[i], out[j]] = [out[j], out[i]]; };
+  if (dir < 0) {
+    for (let i = 1; i < out.length; i++) {
+      if (selected.has(out[i]) && !selected.has(out[i - 1])) swap(i, i - 1);
+    }
+  } else {
+    for (let i = out.length - 2; i >= 0; i--) {
+      if (selected.has(out[i]) && !selected.has(out[i + 1])) swap(i, i + 1);
+    }
+  }
+  return out;
+}
+
+/**
+ * The selection as one block, dropped into the gap before the video at
+ * `dropIndex` in the current order (`order.length` is the end). Selected
+ * videos before the gap do not count, so the block lands where it was aimed.
+ */
+export function moveSelectedTo(order, selected, dropIndex) {
+  const list = order || [];
+  const at = Math.max(0, Math.min(list.length, dropIndex));
+  const sel = list.filter((p) => selected.has(p));
+  const rest = list.filter((p) => !selected.has(p));
+  const before = list.slice(0, at).filter((p) => !selected.has(p)).length;
+  return [...rest.slice(0, before), ...sel, ...rest.slice(before)];
+}
+
+/**
+ * What an Undo of Remove puts back: the playlist as it is now, with each
+ * removed video back right after the video it followed before (first, when
+ * none of those is still there). A reorder made since is kept, and a video
+ * already back in the playlist is not added twice.
+ */
+export function reinsertRemoved(before, current, removed) {
+  const out = (current || []).slice();
+  const have = new Set(out);
+  const prev = before || [];
+  prev.forEach((p, i) => {
+    if (!removed.has(p) || have.has(p)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      if (have.has(prev[j])) { at = out.indexOf(prev[j]) + 1; break; }
+    }
+    out.splice(at, 0, p);
+    have.add(p);
+  });
+  return out;
+}
+
+/**
+ * What a render of the Stash group playlists showed: each group's id, name
+ * and scenes in order with the video each plays (or the title of a missing
+ * one). The same string again means nothing on screen would change.
+ */
+export function stashGroupSignature(groups) {
+  return JSON.stringify((groups || []).map((g) => [
+    g.id, g.name, g.entries.map((e) => (e.path ? [e.sceneId, e.path] : [e.sceneId, null, e.title])),
+  ]));
+}
 
 export class Playlists {
-  constructor({ settings, onPlayVideo, onPlayAll, library }) {
+  /**
+   * `onAddPathsToQueue(paths)`: puts several videos on the end of the user's
+   * queue in one go and returns how many it added (a Stash group's Add to
+   * queue; app.js `addPathsToUserQueue`). Without it that button is not shown.
+   */
+  constructor({ settings, onPlayVideo, onPlayAll, library, onToggleQueue, isQueueOpen, onAddPathsToQueue }) {
     this._settings = settings;
     this._onPlayVideo = onPlayVideo;
     this._onPlayAll = onPlayAll;
+    this._onToggleQueue = onToggleQueue || null;
+    this._isQueueOpen = isQueueOpen || null;
+    this._onAddPathsToQueue = typeof onAddPathsToQueue === 'function' ? onAddPathsToQueue : null;
     this._library = library || null;
     this._container = null;
     this._view = 'grid'; // 'grid' or 'detail'
     this._detailPlaylistId = null;
     this._viewMode = 'grid'; // 'grid' or 'list'
     this._binsByPath = new Map();
+    // The last Sort by name and the order its Undo puts back (V78).
+    this._sortUndo = null;
+    // Select mode in a playlist's detail (FT-104, #370): the selected paths,
+    // the Shift+click anchor and the playlist they belong to. Leaving the
+    // detail (Back, another playlist, another view) ends it.
+    this._selectMode = false;
+    this._selectedPaths = new Set();
+    this._selectionAnchor = null;
+    this._selectPlaylistId = null;
+    this._detailGrid = null;
+    this._selectionBar = null;
   }
 
   show(containerEl) {
@@ -54,6 +201,25 @@ export class Playlists {
       });
       this._languageListenerAttached = true;
     }
+    // Esc leaves Select mode and Ctrl+A selects every video (FT-104). In
+    // the capture phase: the player's own handler takes every Esc.
+    if (!this._selectKeysAttached) {
+      this._onSelectKey = (e) => this._onSelectKeyDown(e);
+      document.addEventListener('keydown', this._onSelectKey, true);
+      this._selectKeysAttached = true;
+    }
+    // The Stash group playlists follow the Stash data: main's change report
+    // after a sync, a link or Remove (stash-store notify), Stash turned on or
+    // off, and a library scan (which videos the library holds).
+    if (!this._stashListenersAttached) {
+      onStashChanged(() => this._onStashGroupsChanged());
+      eventBus.on('settings:changed', ({ path } = {}) => {
+        if (isStashSettingPath(path)) this._onStashGroupsChanged();
+      });
+      eventBus.on('library:filtered', () => this._onStashGroupsChanged());
+      this._stashListenersAttached = true;
+    }
+    this._shown = true;
     if (this._view === 'detail' && this._detailPlaylistId) {
       this._renderDetail(this._detailPlaylistId);
     } else {
@@ -63,9 +229,25 @@ export class Playlists {
   }
 
   hide() {
+    this._shown = false;
+    this._supersedeRender();
+    this._clearSelectState();
+    this._detailGrid = null;
     if (this._container) {
       this._container.innerHTML = '';
     }
+  }
+
+  /**
+   * Start a render pass and return its number; any detail render still
+   * waiting on its availability probe drops its grid (FT-034). The detail
+   * empties the container, awaits the probe, then appends, so two calls in
+   * that gap (Back to <playlist> after Play All rendered from both show()
+   * and app.js) each appended a grid: the videos showed twice.
+   */
+  _supersedeRender() {
+    this._renderGen = (this._renderGen || 0) + 1;
+    return this._renderGen;
   }
 
   /** Returns true if handled internally (detail → grid), false if app should pop nav stack. */
@@ -80,6 +262,9 @@ export class Playlists {
   }
 
   _renderGrid() {
+    this._supersedeRender();
+    this._clearSelectState();
+    this._detailGrid = null;
     const playlists = this._settings.getPlaylists();
     // Fresh memo per render pass: durations can change when a scan
     // completes, and a stale memo would pin an old "time left".
@@ -89,6 +274,10 @@ export class Playlists {
     // first paint); when the answer lands we re-render so counts settle. Doing
     // it inline would make the whole grid wait on a possibly-spun-down drive.
     this._refreshGridAvailability(playlists);
+    // Stash's groups, read-only, in their own section under the user's own
+    // playlists (derived now from the Stash data; none while Stash is off).
+    const stashGroups = this._stashGroupPlaylists();
+    this._stashGroupSig = stashGroupSignature(stashGroups);
     this._container.innerHTML = '';
 
     const header = document.createElement('div');
@@ -96,6 +285,7 @@ export class Playlists {
     header.innerHTML = `<span class="playlists__title">${t('playlists.title')}</span>`;
 
     this._addViewToggle(header);
+    this._addQueueToggle(header);
     this._container.appendChild(header);
 
     const wrapper = document.createElement('div');
@@ -113,6 +303,7 @@ export class Playlists {
         .appendChild(icon(Play, { width: 48, height: 48 }));
       wrapper.querySelector('.playlists__empty-cta')
         .addEventListener('click', () => this._createPlaylist());
+      if (stashGroups.length > 0) wrapper.appendChild(this._createStashGroupSection(stashGroups));
       this._container.appendChild(wrapper);
       return;
     }
@@ -140,6 +331,7 @@ export class Playlists {
     grid.appendChild(createCard);
 
     wrapper.appendChild(grid);
+    if (stashGroups.length > 0) wrapper.appendChild(this._createStashGroupSection(stashGroups));
     this._container.appendChild(wrapper);
   }
 
@@ -278,12 +470,26 @@ export class Playlists {
   }
 
   async _renderDetail(playlistId) {
+    const renderGen = this._supersedeRender();
+    // A Stash group's playlist: its own read-only detail (never a user playlist).
+    if (isStashGroupPlaylistId(playlistId)) return this._renderStashGroupDetail(playlistId, renderGen);
     const pl = this._settings.getPlaylist(playlistId);
     if (!pl) {
       this._view = 'grid';
       this._renderGrid();
       return;
     }
+
+    // Select mode belongs to one playlist; a selected video that left the
+    // playlist (the X on its card) leaves the selection.
+    if (this._selectPlaylistId !== null && this._selectPlaylistId !== playlistId) this._clearSelectState();
+    if (pl.videoPaths.length === 0) this._clearSelectState();
+    if (this._selectMode) {
+      const have = new Set(pl.videoPaths);
+      for (const p of [...this._selectedPaths]) if (!have.has(p)) this._selectedPaths.delete(p);
+    }
+    this._detailGrid = null;
+    this._selectionBar = null;
 
     this._container.innerHTML = '';
 
@@ -392,8 +598,9 @@ export class Playlists {
       // modifiers; users expect them adjacent). Per-playlist preference,
       // same persist + aria-pressed + .is-on pattern as Loop. Active state
       // must be obvious (Nielsen #1) — accent fill via .is-on + tooltip
-      // naming the state. Shuffle order is decided at Play All time (bag
-      // model: shuffle once, reshuffle on loop wrap) — see app._playAll.
+      // naming the state. Shuffle order is decided when playback starts,
+      // from Play All, a video card or Continue (bag model: shuffle once,
+      // reshuffle on loop wrap) — see app._playAllOrder.
       const shuffleBtn = document.createElement('button');
       shuffleBtn.type = 'button';
       shuffleBtn.className = 'playlists__loop-btn playlists__shuffle-btn';
@@ -429,10 +636,47 @@ export class Playlists {
       advancedBtn.setAttribute('aria-label', advancedBtn.title);
       advancedBtn.addEventListener('click', () => this._openAdvancedSettings(pl));
       header.appendChild(advancedBtn);
+
+      // Sort by name (GuthixUnsigned, EroScripts #370; V78). One button that
+      // says what it will do: A-Z, or Z-A once the list already reads A-Z,
+      // so both directions cost no menu. It replaces the hand-made order,
+      // so the toast it raises carries an Undo that puts that order back.
+      if (pl.videoPaths.length > 1) {
+        const az = sameOrder(pl.videoPaths, sortPlaylistPathsByName(pl.videoPaths, 'asc'));
+        const dir = az ? 'desc' : 'asc';
+        const sortBtn = document.createElement('button');
+        sortBtn.type = 'button';
+        sortBtn.className = 'playlists__loop-btn playlists__sort-btn';
+        sortBtn.dataset.sortDir = dir;
+        sortBtn.appendChild(icon(dir === 'asc' ? ArrowDownAZ : ArrowDownZA, { width: 14, height: 14 }));
+        sortBtn.title = t(dir === 'asc' ? 'playlists.sortAzTitle' : 'playlists.sortZaTitle');
+        sortBtn.setAttribute('aria-label', sortBtn.title);
+        // The direction is read at the click: a move reorders the cards in
+        // place and updates the button (`_syncSortButton`) without a render.
+        sortBtn.addEventListener('click', () => this._sortByName(pl.id, sortBtn.dataset.sortDir === 'desc' ? 'desc' : 'asc'));
+        header.appendChild(sortBtn);
+      }
+
+      // Select (FT-104, #370): pick several videos, then move or remove them
+      // together. The Library's word for its own multi-select.
+      const selectBtn = document.createElement('button');
+      selectBtn.type = 'button';
+      selectBtn.className = 'playlists__select-btn';
+      selectBtn.textContent = t('library.selectModeEnter');
+      selectBtn.title = t('playlists.selectModeTitle');
+      selectBtn.setAttribute('aria-pressed', String(this._selectMode));
+      selectBtn.classList.toggle('is-on', this._selectMode);
+      selectBtn.addEventListener('click', () => {
+        if (this._selectMode) this._exitSelectMode();
+        else this._enterSelectMode();
+      });
+      header.appendChild(selectBtn);
     }
 
     this._addViewToggle(header);
+    this._addQueueToggle(header);
     this._container.appendChild(header);
+    if (pl.videoPaths.length > 0) this._container.appendChild(this._createSelectionBar());
 
     // Video grid
     const wrapper = document.createElement('div');
@@ -450,6 +694,7 @@ export class Playlists {
     // Unreachable ones render greyed out and are skipped by anything that
     // would play them. Re-probed on each render, so a reconnect just works.
     const availableSet = await probeAvailability(pl.videoPaths);
+    if (renderGen !== this._renderGen) return; // a newer render owns the container
     const isAvailable = availabilityPredicate(availableSet);
     this._availablePaths = availableSet;
     const validPaths = pl.videoPaths.slice();
@@ -489,14 +734,20 @@ export class Playlists {
         // instead of dead-ending on it.
         unavailablePaths: unavailable.slice(),
       };
+      // An offline entry reads nothing from disk or the backend (FT-071, as
+      // categories.js since V01): the card used to request its thumbnail
+      // and read its script BEFORE it was marked unavailable.
+      const available = isAvailable(videoPath);
       const el = this._viewMode === 'list'
-        ? this._createVideoListItem(videoPath, pl, playContext)
-        : this._createVideoCard(videoPath, pl, playContext);
-      if (!isAvailable(videoPath)) this._markUnavailable(el, videoPath);
+        ? this._createVideoListItem(videoPath, pl, playContext, available)
+        : this._createVideoCard(videoPath, pl, playContext, available);
+      if (!available) this._markUnavailable(el, videoPath);
       grid.appendChild(el);
     }
 
     wrapper.appendChild(grid);
+    this._detailGrid = grid;
+    this._paintSelection();
 
     // Visually-hidden polite live region — announces reorder moves to screen
     // readers (native HTML5 DnD is silent to them). SCOPE §7 / WCAG.
@@ -596,6 +847,7 @@ export class Playlists {
       .map((r) => r.dataset.videoPath)
       .filter(Boolean);
     if (order.length) this._settings.setPlaylistVideoPaths(playlistId, order);
+    this._syncSortButton(this._settings.getPlaylist(playlistId));
   }
 
   /**
@@ -620,7 +872,472 @@ export class Playlists {
     this._announceReorder(name, pos, grid.children.length);
   }
 
-  _createVideoCard(videoPath, playlist, playContext) {
+  /**
+   * Sort a playlist by name (V78) through the same write as a drag or Move:
+   * DataService.setPlaylistVideoPaths, which store.js accepts only as a pure
+   * reorder. Resume positions, watched marks and the Last watched marker are
+   * keyed by path, not position, so they move with their videos. A session
+   * already playing keeps the order it started with, as after a drag.
+   *
+   * The toast carries an Undo. A second sort while that toast is still up
+   * (A-Z, then Z-A) shares its Undo, which goes back to the order before the
+   * FIRST sort: the hand-made order is the one worth getting back.
+   */
+  async _sortByName(playlistId, dir) {
+    const pl = this._settings.getPlaylist(playlistId);
+    if (!pl || !Array.isArray(pl.videoPaths) || pl.videoPaths.length < 2) return;
+    const before = pl.videoPaths.slice();
+    const sorted = sortPlaylistPathsByName(before, dir);
+    if (sameOrder(before, sorted)) return;
+
+    const undo = this._takeOrderUndo(playlistId, before);
+    this._settings.setPlaylistVideoPaths(playlistId, sorted);
+    if (this._container && this._view === 'detail' && this._detailPlaylistId === playlistId) {
+      this._renderDetail(playlistId);
+    }
+    await this._offerOrderUndo(undo,
+      t(dir === 'desc' ? 'playlists.sortedZa' : 'playlists.sortedAz', { name: pl.name }));
+  }
+
+  /**
+   * The Undo for an order change about to be made: a Sort by name, or a
+   * Select-mode move or drag (FT-104). While the toast of the last one for
+   * this playlist is still up, the new change shares its Undo, which goes
+   * back to the order before the FIRST change: the hand-made order is the
+   * one worth getting back, and pressing Move up five times is one Undo.
+   */
+  _takeOrderUndo(playlistId, before) {
+    const pending = this._sortUndo;
+    const pendingUp = pending && !pending.done && pending.playlistId === playlistId
+      && (!pending.toast || (pending.toast.el?.isConnected && !pending.toast.el.classList.contains('toast--out')));
+    const undo = { playlistId, order: pendingUp ? pending.order : before, toast: null, done: false };
+    if (pendingUp) {
+      pending.done = true;
+      pending.toast?.dismiss();
+    }
+    this._sortUndo = undo;
+    return undo;
+  }
+
+  /** The toast saying what changed, with the Undo `_takeOrderUndo` made. */
+  async _offerOrderUndo(undo, message) {
+    const { showToast } = await import('../js/toast.js');
+    if (undo.done) return; // undone or superseded while the module loaded
+    const body = document.createElement('div');
+    body.className = 'update-toast';
+    const text = document.createElement('span');
+    text.textContent = message;
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'update-toast__btn playlists__sort-undo';
+    undoBtn.textContent = t('toast.undo');
+    // The click goes on to the toast body, which dismisses the toast.
+    undoBtn.addEventListener('click', () => this._undoSortByName(undo));
+    body.append(text, undoBtn);
+    undo.toast = showToast(body, 'info', 8000) || null;
+  }
+
+  /** Put back the order a Sort by name or a move replaced (the toast's Undo). */
+  _undoSortByName(undo) {
+    if (!undo || undo.done) return;
+    undo.done = true;
+    if (this._sortUndo === undo) this._sortUndo = null;
+    const pl = this._settings.getPlaylist(undo.playlistId);
+    if (!pl) return; // deleted since
+    const restored = restorePlaylistOrder(undo.order, pl.videoPaths);
+    if (!sameOrder(pl.videoPaths, restored)) {
+      this._settings.setPlaylistVideoPaths(undo.playlistId, restored);
+    }
+    this._showOrder(undo.playlistId);
+  }
+
+  /**
+   * Show the playlist's current order in the open detail view. The cards
+   * are put in that order where they are, so the scroll position, the
+   * focus and every loaded thumbnail and heatmap stay; a card set that no
+   * longer matches the playlist (a video added or removed since) renders
+   * again instead.
+   */
+  _showOrder(playlistId) {
+    if (!this._container || this._view !== 'detail' || this._detailPlaylistId !== playlistId) return;
+    const pl = this._settings.getPlaylist(playlistId);
+    const grid = this._detailGrid;
+    const order = pl?.videoPaths || [];
+    const els = grid?.isConnected ? [...grid.children].filter((el) => el.dataset.videoPath) : [];
+    const byPath = new Map(els.map((el) => [el.dataset.videoPath, el]));
+    if (!grid?.isConnected || byPath.size !== els.length || order.length !== els.length
+        || !order.every((p) => byPath.has(p))) {
+      this._renderDetail(playlistId);
+      return;
+    }
+    const focused = document.activeElement;
+    const keep = focused && grid.contains(focused) ? focused : null;
+    for (const p of order) grid.appendChild(byPath.get(p));
+    if (keep && document.activeElement !== keep) keep.focus?.();
+    this._syncSortButton(pl);
+  }
+
+  /** The Sort button offers Z-A once the list reads A-Z, after any reorder. */
+  _syncSortButton(pl) {
+    const btn = this._container?.querySelector('.playlists__sort-btn');
+    if (!btn || !pl || !Array.isArray(pl.videoPaths)) return;
+    const az = sameOrder(pl.videoPaths, sortPlaylistPathsByName(pl.videoPaths, 'asc'));
+    const dir = az ? 'desc' : 'asc';
+    if (btn.dataset.sortDir === dir) return;
+    btn.dataset.sortDir = dir;
+    btn.replaceChildren(icon(dir === 'asc' ? ArrowDownAZ : ArrowDownZA, { width: 14, height: 14 }));
+    btn.title = t(dir === 'asc' ? 'playlists.sortAzTitle' : 'playlists.sortZaTitle');
+    btn.setAttribute('aria-label', btn.title);
+  }
+
+  // --- Select mode (FT-104, GuthixUnsigned #370) ---------------------------
+  //
+  // The Library's multi-select, in a playlist's detail: a click (or
+  // Ctrl+click) toggles a video, Shift+click adds the range from the last
+  // click, Ctrl+A / Select all / Deselect all, Esc or Done leaves. The bar
+  // moves the selection to the top or bottom, one place up or down, or
+  // removes it from the playlist (never a file); a selected card dragged
+  // takes the whole selection with it. Every order change is one write
+  // through setPlaylistVideoPaths, the same as Move ↑/↓ and Sort, so the
+  // saved playlist, Play All and the phone follow, and its toast carries
+  // the shared Undo.
+
+  /** The open playlist's order, which is also the order on screen. */
+  _currentOrder() {
+    return this._settings.getPlaylist(this._detailPlaylistId)?.videoPaths || [];
+  }
+
+  _clearSelectState() {
+    this._selectMode = false;
+    this._selectPlaylistId = null;
+    this._selectedPaths = new Set();
+    this._selectionAnchor = null;
+  }
+
+  _enterSelectMode() {
+    if (this._selectMode) return;
+    this._selectMode = true;
+    this._selectPlaylistId = this._detailPlaylistId;
+    this._selectedPaths = new Set();
+    this._selectionAnchor = null;
+    this._paintSelection();
+  }
+
+  /** Leave Select mode. Focus on a control that hides goes to Select. */
+  _exitSelectMode() {
+    const focused = document.activeElement;
+    const losesFocus = !!focused && (!!this._selectionBar?.contains(focused)
+      || !!focused.classList?.contains('playlists__select-check'));
+    this._clearSelectState();
+    this._paintSelection();
+    if (losesFocus) this._container?.querySelector('.playlists__select-btn')?.focus();
+  }
+
+  /**
+   * A click on a card or row while selecting, or a Shift / Ctrl+click from
+   * browsing, which starts Select mode as the Library's Shift+click does.
+   * Shift adds the range from the anchor (the anchor stays, so the range
+   * can be re-extended); a plain or Ctrl+click toggles and moves the anchor.
+   */
+  _onSelectClick(videoPath, e) {
+    if (!this._selectMode) {
+      this._selectMode = true;
+      this._selectPlaylistId = this._detailPlaylistId;
+      this._selectedPaths = new Set();
+      this._selectionAnchor = null;
+    }
+    if (e?.shiftKey) {
+      const items = this._currentOrder().map((path) => ({ path }));
+      for (const p of rangeBetween(items, this._selectionAnchor, videoPath)) this._selectedPaths.add(p);
+      this._selectionAnchor = nextAnchor(this._selectionAnchor, videoPath, true);
+    } else {
+      if (this._selectedPaths.has(videoPath)) this._selectedPaths.delete(videoPath);
+      else this._selectedPaths.add(videoPath);
+      this._selectionAnchor = nextAnchor(this._selectionAnchor, videoPath, false);
+    }
+    this._paintSelection();
+  }
+
+  _selectAll() {
+    if (!this._selectMode) this._enterSelectMode();
+    this._selectedPaths = new Set(this._currentOrder());
+    this._paintSelection();
+  }
+
+  _selectNone() {
+    this._selectedPaths = new Set();
+    this._selectionAnchor = null;
+    this._paintSelection();
+  }
+
+  /**
+   * Push the selection state onto the header button, the bar and every card
+   * or row: one place, so a card rebuilt for any reason cannot disagree
+   * (the Library's `_applySelectionState` lesson).
+   */
+  _paintSelection() {
+    const on = this._selectMode;
+    const n = on ? this._selectedPaths.size : 0;
+    const toggle = this._container?.querySelector('.playlists__select-btn');
+    if (toggle) {
+      toggle.classList.toggle('is-on', on);
+      toggle.setAttribute('aria-pressed', String(on));
+    }
+    const bar = this._selectionBar;
+    if (bar) {
+      bar.hidden = !on;
+      const count = bar.querySelector('.playlists__selection-count');
+      if (count) count.textContent = t('library.selectionCount', { count: n });
+      bar.querySelectorAll('[data-needs-selection]').forEach((b) => { b.disabled = n === 0; });
+    }
+    const grid = this._detailGrid;
+    if (!grid) return;
+    grid.classList.toggle('playlists__grid--selecting', on);
+    for (const el of grid.children) {
+      const p = el.dataset.videoPath;
+      if (!p) continue;
+      const selected = on && this._selectedPaths.has(p);
+      el.classList.toggle('playlists__item--selected', selected);
+      const cb = el.querySelector('.playlists__select-check');
+      if (cb) {
+        cb.hidden = !on;
+        cb.setAttribute('aria-checked', String(selected));
+      }
+      // Grid tiles drag only while selecting; list rows always could.
+      if (el.classList.contains('playlists__video-card')) el.draggable = on;
+      // A tile's or row's own X removes that video at once, with no question
+      // and no Undo. Next to the tick, a missed click lost a playlist entry,
+      // and Tab reached the X before each tick (block E2 verify-1). Out of
+      // the way while selecting: the bar's Remove asks and can be undone.
+      for (const x of el.querySelectorAll('.playlists__remove-one')) x.hidden = on;
+    }
+  }
+
+  /** A card's or row's tick: a real button, so Tab reaches it (WCAG 2.1.1). */
+  _createSelectCheck(videoPath, name) {
+    const cb = document.createElement('button');
+    cb.type = 'button';
+    cb.className = 'playlists__select-check';
+    cb.setAttribute('role', 'checkbox');
+    cb.setAttribute('aria-checked', 'false');
+    cb.setAttribute('aria-label', t('playlists.selectVideoNamed', { name }));
+    cb.hidden = !this._selectMode;
+    // Space / Enter toggle it, Shift with either adds the range. Taken here,
+    // so Space does not also play / pause the player under the playlist.
+    // A mouse click goes on to the card, which toggles it.
+    cb.addEventListener('keydown', (e) => {
+      if (e.key !== ' ' && e.key !== 'Enter') return;
+      e.preventDefault();
+      this._onSelectClick(videoPath, e);
+    });
+    return cb;
+  }
+
+  /** The bar under the header while selecting: the count and what to do with it. */
+  _createSelectionBar() {
+    const bar = document.createElement('div');
+    bar.className = 'playlists__selection-bar';
+    bar.setAttribute('role', 'group');
+    const count = document.createElement('span');
+    count.className = 'playlists__selection-count';
+    count.id = `playlists-selection-count-${Math.random().toString(36).slice(2, 9)}`;
+    count.setAttribute('aria-live', 'polite');
+    bar.setAttribute('aria-labelledby', count.id);
+    bar.appendChild(count);
+
+    const add = (action, label, run, { needsSelection = false, variant = '' } = {}) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = `playlists__selection-action${variant ? ` playlists__selection-action--${variant}` : ''}`;
+      b.dataset.action = action;
+      if (needsSelection) b.dataset.needsSelection = '';
+      b.textContent = t(label);
+      b.addEventListener('click', run);
+      bar.appendChild(b);
+      return b;
+    };
+    add('select-all', 'collectionModal.selectAll', () => this._selectAll(), { variant: 'quiet' });
+    add('select-none', 'collectionModal.deselectAll', () => this._selectNone(), { variant: 'quiet' });
+    add('move-top', 'playlists.moveToTop', () => this._moveSelection('top'), { needsSelection: true });
+    add('move-up', 'playlists.moveUp', () => this._moveSelection('up'), { needsSelection: true });
+    add('move-down', 'playlists.moveDown', () => this._moveSelection('down'), { needsSelection: true });
+    add('move-bottom', 'playlists.moveToBottom', () => this._moveSelection('bottom'), { needsSelection: true });
+    add('remove', 'playlists.removeFromPlaylist', () => this._removeSelected(), { needsSelection: true, variant: 'danger' });
+    add('done', 'common.done', () => this._exitSelectMode(), { variant: 'quiet' });
+    bar.hidden = !this._selectMode;
+    this._selectionBar = bar;
+    return bar;
+  }
+
+  /** Move to top / up / down / bottom on the bar. */
+  _moveSelection(kind) {
+    const pl = this._settings.getPlaylist(this._detailPlaylistId);
+    if (!pl || !this._selectMode || this._selectedPaths.size === 0) return;
+    const before = pl.videoPaths.slice();
+    const next = (kind === 'top' || kind === 'bottom')
+      ? moveSelectedToEdge(before, this._selectedPaths, kind)
+      : moveSelectedByOne(before, this._selectedPaths, kind === 'up' ? -1 : 1);
+    this._applyMove(pl, before, next, before.filter((p) => this._selectedPaths.has(p)).length);
+  }
+
+  /**
+   * Write a move, show it in place and offer its Undo. Nothing is written
+   * or toasted when the order would not change (Move up at the top).
+   */
+  _applyMove(pl, before, next, count) {
+    if (sameOrder(before, next)) return false;
+    const undo = this._takeOrderUndo(pl.id, before);
+    this._settings.setPlaylistVideoPaths(pl.id, next);
+    this._showOrder(pl.id);
+    this._offerOrderUndo(undo, t('playlists.movedSelection', { count, name: pl.name }));
+    return true;
+  }
+
+  /** What a drag that starts on `videoPath` carries: the selection if it is in it. */
+  _dragSet(videoPath) {
+    return this._selectMode && this._selectedPaths.has(videoPath)
+      ? new Set(this._currentOrder().filter((p) => this._selectedPaths.has(p)))
+      : new Set([videoPath]);
+  }
+
+  /** Drop past the middle of a row (down) or a tile (across) means after it. */
+  _dropAfter(el, e) {
+    const rect = el.getBoundingClientRect();
+    return el.classList.contains('playlists__list-item')
+      ? e.clientY > rect.top + rect.height / 2
+      : e.clientX > rect.left + rect.width / 2;
+  }
+
+  /** Drop `paths` as one block before or after `targetPath`. */
+  _dropMove(paths, targetPath, after, playlistId) {
+    const pl = this._settings.getPlaylist(playlistId);
+    if (!pl) return;
+    const before = pl.videoPaths.slice();
+    const at = before.indexOf(targetPath);
+    if (at < 0) return;
+    this._applyMove(pl, before, moveSelectedTo(before, paths, at + (after ? 1 : 0)), paths.size);
+  }
+
+  /** Mark (or unmark) everything a drag carries, so the whole block reads as moving. */
+  _markDragging(paths, on) {
+    for (const el of this._detailGrid?.children || []) {
+      if (paths.has(el.dataset.videoPath)) el.classList.toggle('playlists__item--dragging', on);
+    }
+  }
+
+  _clearDropMarks() {
+    this._detailGrid?.querySelectorAll('.playlists__item--drop-before, .playlists__item--drop-after')
+      .forEach((el) => el.classList.remove('playlists__item--drop-before', 'playlists__item--drop-after'));
+  }
+
+  /**
+   * Remove the selected videos from this playlist: the playlist entries
+   * only, never a file, and resume positions and watched marks stay with
+   * their paths. Two or more ask first: Select all and Remove would
+   * otherwise empty a hand-made playlist in one click (block E2 review). One
+   * asks nothing, as the X on one card asks nothing. All of them go in one
+   * write, and the toast's Undo puts them back where they were.
+   */
+  async _removeSelected() {
+    const pl = this._settings.getPlaylist(this._detailPlaylistId);
+    if (!pl || !this._selectMode) return;
+    const count = pl.videoPaths.filter((p) => this._selectedPaths.has(p)).length;
+    if (count === 0) return;
+    if (count > 1) {
+      const ok = await Modal.confirm(
+        t('playlists.removeFromPlaylist'),
+        t('playlists.confirmRemoveSelection', { count, name: pl.name }),
+        { confirmText: t('common.remove') },
+      );
+      if (!ok || !this._selectMode || this._detailPlaylistId !== pl.id) return;
+    }
+    const before = (this._settings.getPlaylist(pl.id)?.videoPaths || []).slice();
+    const removed = before.filter((p) => this._selectedPaths.has(p));
+    if (removed.length === 0) return;
+    this._settings.removeVideosFromPlaylist(pl.id, removed);
+    this._clearSelectState();
+    const undo = { playlistId: pl.id, before, removed, done: false, toast: null };
+    await this._renderDetail(pl.id);
+    (this._container?.querySelector('.playlists__select-btn')
+      || this._container?.querySelector('.playlists__back-btn'))?.focus();
+
+    const { showToast } = await import('../js/toast.js');
+    if (undo.done) return;
+    const body = document.createElement('div');
+    body.className = 'update-toast';
+    const text = document.createElement('span');
+    text.textContent = t('playlists.removedSelection', { count: removed.length, name: pl.name });
+    const undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.className = 'update-toast__btn playlists__remove-undo';
+    undoBtn.textContent = t('toast.undo');
+    undoBtn.addEventListener('click', () => this._undoRemoveSelected(undo));
+    body.append(text, undoBtn);
+    undo.toast = showToast(body, 'info', 8000) || null;
+  }
+
+  /** The Remove toast's Undo: the videos go back after the ones they followed. */
+  _undoRemoveSelected(undo) {
+    if (!undo || undo.done) return;
+    undo.done = true;
+    const pl = this._settings.getPlaylist(undo.playlistId);
+    if (!pl) return; // deleted since
+    const missing = new Set(undo.removed.filter((p) => !pl.videoPaths.includes(p)));
+    if (missing.size === 0) return;
+    const restored = reinsertRemoved(undo.before, pl.videoPaths, missing);
+    // Added back in one write (at the end, as store.js adds), then put in
+    // place by one pure reorder of what the playlist then holds.
+    this._settings.addVideosToPlaylist(undo.playlistId, restored.filter((p) => missing.has(p)));
+    this._settings.setPlaylistVideoPaths(undo.playlistId, restored);
+    if (this._container && this._view === 'detail' && this._detailPlaylistId === undo.playlistId) {
+      this._renderDetail(undo.playlistId);
+    }
+  }
+
+  /**
+   * Esc leaves Select mode; Ctrl+A selects every video in the open playlist
+   * (entering Select mode), as Ctrl+A does in the Library. A dialog, the
+   * Devices / EroScripts panel, the queue panel (Esc closes it first), a
+   * text field and the editor keep their keys.
+   */
+  _onSelectKeyDown(e) {
+    const esc = e.key === 'Escape';
+    const selectAll = (e.key === 'a' || e.key === 'A') && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+    if (!esc && !selectAll) return;
+    if (esc && !this._selectMode) return;
+    if (e.defaultPrevented || this._view !== 'detail' || !this._detailGrid?.isConnected) return;
+    const el = document.activeElement;
+    const tag = el?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+    if ([...document.querySelectorAll('[aria-modal="true"]')].some((d) => !d.closest('[hidden]'))) return;
+    // An OPEN docked editor: the closed one's panel is always in the DOM, and
+    // `.script-editor:not([hidden])` matched it, so neither key ever worked
+    // in the real app (block E2 verify-1).
+    if (document.querySelector('.modal-overlay') || dockedEditorOnScreen()) return;
+    if (this._isQueueOpen?.()) return;
+    e.preventDefault();
+    if (esc) this._exitSelectMode();
+    else this._selectAll();
+  }
+
+  /**
+   * The play context a click starts with, from the playlist's order NOW. A
+   * move, a drag or an Undo reorders the cards in place, and the context
+   * captured when they rendered then sent Next, Previous and Up Next through
+   * the old order (also after Move ↑/↓ and a list drag, since 2026-06-09).
+   */
+  _playContextNow(playContext, videoPath) {
+    const id = playContext?.sourceContext?.playlistId;
+    const list = id ? this._playlistFor(id)?.videoPaths : null;
+    if (!Array.isArray(list) || !list.includes(videoPath)) return playContext;
+    return { ...playContext, list: list.slice(), index: list.indexOf(videoPath) };
+  }
+
+  /**
+   * @param {boolean} [available=true] false when the probe says this video's
+   *   drive is offline. Such a tile reads NOTHING from disk (FT-071).
+   */
+  _createVideoCard(videoPath, playlist, playContext, available = true) {
     const card = document.createElement('div');
     card.className = 'playlists__video-card';
 
@@ -641,9 +1358,13 @@ export class Playlists {
     overlay.appendChild(playIconEl);
     thumbnail.appendChild(overlay);
 
+    // A Stash group's playlist is read-only: no Remove, no Select, no drag
+    // (its videos and order are Stash's; the detail says so).
+    const readOnly = playlist?.readOnly === true;
+
     // Remove button
     const removeBtn = document.createElement('button');
-    removeBtn.className = 'playlists__video-remove-btn';
+    removeBtn.className = 'playlists__video-remove-btn playlists__remove-one';
     removeBtn.appendChild(icon(X, { width: 12, height: 12 }));
     removeBtn.title = t('playlists.removeFromPlaylist');
     removeBtn.addEventListener('click', (e) => {
@@ -651,7 +1372,7 @@ export class Playlists {
       this._settings.removeVideoFromPlaylist(playlist.id, videoPath);
       this._renderDetail(playlist.id);
     });
-    thumbnail.appendChild(removeBtn);
+    if (!readOnly) thumbnail.appendChild(removeBtn);
 
     // Resume progress along the bottom of the thumbnail (see resume-bar.js).
     if (this._showResumeProgress()) {
@@ -687,6 +1408,12 @@ export class Playlists {
     const info = document.createElement('div');
     info.className = 'playlists__video-info';
     const name = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+    // Identity for Select mode and an in-place reorder, as the list rows have.
+    card.dataset.videoPath = videoPath;
+    card.dataset.videoName = name;
+    // The Select-mode tick sits in the title row, clear of the thumbnail's
+    // four claimed corners (V67).
+    if (!readOnly) info.appendChild(this._createSelectCheck(videoPath, name));
     const titleEl = document.createElement('div');
     titleEl.className = 'playlists__video-title';
     titleEl.textContent = name;
@@ -694,21 +1421,76 @@ export class Playlists {
     info.appendChild(titleEl);
     card.appendChild(info);
 
-    // Lazy-load thumbnail
-    this._loadVideoThumbnail(card, thumbnail, videoPath);
+    if (available) {
+      // Lazy-load thumbnail
+      this._loadVideoThumbnail(card, thumbnail, videoPath);
 
-    // Check for funscript and show badge
-    this._checkFunscriptBadge(card, thumbnail, videoPath);
+      // Check for funscript and show badge
+      this._checkFunscriptBadge(card, thumbnail, videoPath);
+    } else {
+      // Offline: the thumbnail CACHE only, no disk or backend I/O. Every
+      // request here fails (a backend thumbnail, a hidden-<video> fallback,
+      // a read-funscript per tile), and the failed thumbnails count towards
+      // main's "thumbnail generation is broken" error, which is false. A
+      // click re-probes and re-renders, so a reconnected drive loads then.
+      this._showCachedThumbnail(thumbnail, videoPath);
+    }
 
-    card.addEventListener('click', () => {
-      if (card.classList.contains('playlists__video-card--broken')) return;
+    card.addEventListener('click', (e) => {
+      // Selecting: a click picks the video instead of playing it, an offline
+      // or broken one included (removing a dead entry is a reason to select).
+      if (!readOnly && (this._selectMode || e.shiftKey || e.ctrlKey || e.metaKey)) {
+        this._onSelectClick(videoPath, e);
+        return;
+      }
       // Unreachable right now (drive unplugged). Explain instead of opening a
       // player that will fail — the entry is intact, just not loadable.
+      // Checked before --broken, as categories.js does.
       if (card.dataset.unavailable === 'true') {
         this._notifyUnavailable(videoPath);
         return;
       }
-      this._playVideoByPath(videoPath, playContext);
+      if (card.classList.contains('playlists__video-card--broken')) return;
+      this._playVideoByPath(videoPath, this._playContextNow(playContext, videoPath));
+    });
+
+    // Drag while selecting (tiles are draggable only then, `_paintSelection`):
+    // a selected tile takes the whole selection, another tile only itself.
+    // Across, so past a tile's middle means after it.
+    card.addEventListener('dragstart', (e) => {
+      if (!this._selectMode || readOnly) return; // e.g. the thumbnail <img>'s own drag
+      const paths = this._dragSet(videoPath);
+      this._dragMove = { paths, from: card };
+      this._markDragging(paths, true);
+      if (e.dataTransfer) {
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', videoPath);
+      }
+    });
+    card.addEventListener('dragover', (e) => {
+      const drag = this._dragMove;
+      if (!drag || drag.from === card) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+      const after = this._dropAfter(card, e);
+      card.classList.toggle('playlists__item--drop-after', after);
+      card.classList.toggle('playlists__item--drop-before', !after);
+    });
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('playlists__item--drop-before', 'playlists__item--drop-after');
+    });
+    card.addEventListener('drop', (e) => {
+      const drag = this._dragMove;
+      if (!drag) return; // not ours: a file from the desktop goes on to DragDrop
+      e.preventDefault();
+      this._clearDropMarks();
+      if (drag.from === card) return;
+      this._dropMove(drag.paths, videoPath, this._dropAfter(card, e), playlist.id);
+    });
+    card.addEventListener('dragend', () => {
+      if (this._dragMove) this._markDragging(this._dragMove.paths, false);
+      this._dragMove = null;
+      this._clearDropMarks();
     });
 
     return card;
@@ -730,10 +1512,20 @@ export class Playlists {
     showToast(t('toast.videoUnavailable'), 'warn');
   }
 
-  async _playVideoByPath(videoPath, playContext) {
+  /**
+   * `autoPlay`: start playing once loaded, for an unattended advance into the
+   * user's queue with "Auto-play the next video" on (app.js, CB-11). A click
+   * leaves it off and opens as any click does.
+   */
+  async _playVideoByPath(videoPath, playContext, { autoPlay = false } = {}) {
     const fileName = videoPath.split(/[\\/]/).pop();
     const fileData = { name: fileName, path: videoPath, _isPathBased: true };
-    if (playContext) fileData._playContext = playContext;
+    if (autoPlay) fileData._autoPlayOnLoad = true;
+    if (playContext) {
+      fileData._playContext = this._withPlaylistLoop(playContext);
+      const shuffle = this._shuffleRequest(playContext);
+      if (shuffle) fileData._shuffle = shuffle;
+    }
 
     // Prefer the library's full video record when available — that's
     // where `_multiAxis` and `_customRouting` live for videos with
@@ -747,59 +1539,148 @@ export class Playlists {
 
     const isExplicit = this._hasExplicitAssociation(videoPath);
     let funscriptData = null;
+    let subtitleData = null;
+    let variants;
     let readFailed = false;
-    try {
-      const content = await window.funsync.readFunscript(fsPath);
-      if (content) {
-        funscriptData = { name: fsPath.split(/[\\/]/).pop(), textContent: content };
-        if (libVideo?._multiAxis) funscriptData._multiAxis = libVideo._multiAxis;
-        if (libVideo?._customRouting) funscriptData._customRouting = libVideo._customRouting;
-      } else if (isExplicit) {
-        readFailed = true;
+    if (libVideo && typeof this._library.resolvePlayData === 'function') {
+      // What a click on the library card loads (FT-070): the script with
+      // its companions and routing, the subtitle and the variants. This
+      // route passed only the script, so a playlist click had no subtitle
+      // and an empty variant picker.
+      let triedSidecar = null;
+      ({ funscriptData, subtitleData, variants, triedSidecar } =
+        await this._library.resolvePlayData(libVideo));
+      // The record has no script: the playlist's own pick (an association,
+      // else `<name>.funscript`) quietly, unless that is the file just tried.
+      if (!(libVideo.hasFunscript && libVideo.funscriptPath) && fsPath && fsPath !== triedSidecar
+          && !funscriptData?.textContent && !funscriptData?._customRouting) {
+        let content = null;
+        try { content = await window.funsync.readFunscript(fsPath); } catch { /* quiet */ }
+        if (content) {
+          funscriptData = {
+            ...funscriptData, // keeps a vib-only `_multiAxis`
+            name: fsPath.split(/[\\/]/).pop(),
+            textContent: content,
+            _funscriptPath: fsPath,
+          };
+        }
       }
-    } catch {
-      if (isExplicit) readFailed = true;
-    }
-    // Vib-only / no-main fallthrough — mirrors library._playVideo so
-    // multi-axis and custom-routing setups work even when the main file
-    // can't be read.
-    if (!funscriptData && libVideo?._multiAxis) {
-      funscriptData = { name: '', textContent: null, _multiAxis: libVideo._multiAxis };
-    }
-    if (!funscriptData && libVideo?._customRouting) {
-      funscriptData = { name: '', textContent: null, _customRouting: libVideo._customRouting };
+      if (isExplicit && !funscriptData?.textContent) readFailed = true;
+    } else {
+      // Not in the library (its source was removed since the entry was
+      // added): path-only, as before.
+      try {
+        const content = await window.funsync.readFunscript(fsPath);
+        if (content) {
+          // `_funscriptPath` as library.resolvePlayData sets it: the file this
+          // copy came from, so app.js can read it again if the unsaved-changes
+          // question saves it first (CB-01 review) and keys its embedded axes.
+          funscriptData = { name: fsPath.split(/[\\/]/).pop(), textContent: content, _funscriptPath: fsPath };
+        } else if (isExplicit) {
+          readFailed = true;
+        }
+      } catch {
+        if (isExplicit) readFailed = true;
+      }
     }
     if (readFailed) {
       const { showToast } = await import('../js/toast.js');
       showToast(t('toast.funscriptUnreadable', { name: fileName }), 'warn', 4000);
     }
-    this._onPlayVideo(fileData, funscriptData);
+    this._onPlayVideo(fileData, funscriptData, subtitleData, variants);
+    // No association (that one has its own toast above), but a script there
+    // that cannot be reached (a locked folder): say so once (R3-18).
+    if (!isExplicit && !funscriptData?.textContent) noticeUnreadableScript(fsPath);
+  }
+
+  /**
+   * The play context with the playlist's Loop flag, read NOW. Up Next wraps
+   * to item 1 only when the context says `loop`, and only Play All used to
+   * pass it, so Continue and a card click ended on "End of list" with Loop
+   * on (V29). Read at click time rather than when the cards rendered: the
+   * Loop toggle sits in the same header and flips without a re-render.
+   *
+   * Shuffle travels separately, as `_shuffleRequest`.
+   */
+  _withPlaylistLoop(playContext) {
+    const id = playContext?.sourceContext?.playlistId;
+    const pl = id ? this._playlistFor(id) : null;
+    if (!pl) return playContext;
+    return { ...playContext, loop: !!pl.loop };
+  }
+
+  /**
+   * The playlist's Shuffle, for a card click or Continue: what Play All
+   * would get (the reachable entries as queue items, balance by script,
+   * unwatched first, the watched lookup), or null with Shuffle off. Read at
+   * click time, like Loop. app.js `_withShuffledStart` turns it into the
+   * context's order: the chosen video first, then a shuffled rest (V29).
+   * Until then both played the list in order after the chosen video.
+   */
+  _shuffleRequest(playContext) {
+    const id = playContext?.sourceContext?.playlistId;
+    const pl = id ? this._playlistFor(id) : null;
+    if (!pl?.shuffle) return null;
+    const unreachable = new Set(playContext.unavailablePaths || []);
+    const paths = (playContext.list || []).filter((p) => !unreachable.has(p));
+    return {
+      videoList: this._queueItems(paths),
+      balanceByScript: !!pl.balanceByScript,
+      preferUnwatched: !!pl.preferUnwatched,
+      isWatched: (path) => isFinished(this._resumeEntryFor(path)),
+    };
+  }
+
+  /** Playlist entries as the queue items Play All hands app.js. */
+  _queueItems(paths) {
+    return paths.map((p) => {
+      const name = p.split(/[\\/]/).pop();
+      const funscriptPath = this._getFunscriptPath(p);
+      // A scanned pairing or an association is expected; `<name>.funscript`
+      // is only a guess, and Play All must not warn when it is not there
+      // (app.js `_loadQueueItemContent`, CB-12).
+      return { name, path: p, funscriptPath, scriptExpected: this._hasExplicitAssociation(p) };
+    });
   }
 
   async _loadVideoThumbnail(cardEl, thumbnailEl, videoPath) {
     try {
       const result = await this._captureFrame(videoPath);
-      const dataUrl = result?.dataUrl || result;
-      if (!dataUrl) {
+      if (!this._applyThumbnail(thumbnailEl, result)) {
         this._showBrokenLink(cardEl, thumbnailEl, videoPath);
-        return;
-      }
-      const img = document.createElement('img');
-      img.alt = '';
-      img.src = dataUrl;
-      img.addEventListener('load', () => {
-        const ph = thumbnailEl.querySelector('.playlists__video-placeholder');
-        if (ph) ph.remove();
-      });
-      thumbnailEl.insertBefore(img, thumbnailEl.firstChild);
-
-      // Duration badge
-      if (result?.duration) {
-        this._addDurationBadge(thumbnailEl, result.duration);
       }
     } catch {
       this._showBrokenLink(cardEl, thumbnailEl, videoPath);
     }
+  }
+
+  /**
+   * An offline tile: draw it from the shared thumbnail cache if the library
+   * or another view already fetched it this session, otherwise keep the
+   * placeholder. Never requests anything (FT-071).
+   */
+  _showCachedThumbnail(thumbnailEl, videoPath) {
+    this._applyThumbnail(thumbnailEl, thumbCache.getEntry(videoPath, 0));
+  }
+
+  /** Put a capture result on the tile. False when there is no image. */
+  _applyThumbnail(thumbnailEl, result) {
+    const dataUrl = result?.dataUrl || result;
+    if (!dataUrl) return false;
+    const img = document.createElement('img');
+    img.alt = '';
+    img.src = dataUrl;
+    img.addEventListener('load', () => {
+      const ph = thumbnailEl.querySelector('.playlists__video-placeholder');
+      if (ph) ph.remove();
+    });
+    thumbnailEl.insertBefore(img, thumbnailEl.firstChild);
+
+    // Duration badge
+    if (result?.duration) {
+      this._addDurationBadge(thumbnailEl, result.duration);
+    }
+    return true;
   }
 
   _showBrokenLink(cardEl, thumbnailEl, videoPath) {
@@ -942,7 +1823,7 @@ export class Playlists {
   }
 
   async _deletePlaylist(pl) {
-    const confirmed = await Modal.confirm(t('playlists.deletePlaylist'), t('playlists.confirmDelete'));
+    const confirmed = await Modal.confirm(t('playlists.deletePlaylist'), t('playlists.confirmDelete'), { confirmText: t('common.delete') });
     if (!confirmed) return;
     this._settings.deletePlaylist(pl.id);
     this._renderGrid();
@@ -1058,11 +1939,7 @@ export class Playlists {
       showToast(t('toast.playlistSkippedUnavailable', { count: unavailable.length }), 'info');
     }
 
-    const videoList = validPaths.map((p) => {
-      const name = p.split(/[\\/]/).pop();
-      const funscriptPath = this._getFunscriptPath(p);
-      return { name, path: p, funscriptPath };
-    });
+    const videoList = this._queueItems(validPaths);
     this._onPlayAll(videoList, {
       sourceLabel: pl.name,
       sourceContext: { kind: 'playlist', id: pl.id },
@@ -1088,88 +1965,20 @@ export class Playlists {
    * toggle that silently does nothing is worse than one you can't press.
    */
   _openAdvancedSettings(pl) {
-    Modal.open({
+    // The rows live in play-options-modal.js, shared with the Library /
+    // Categories play options (#381) so both dialogs read the same.
+    openPlayOptionsModal({
       title: t('playlists.advanced.title'),
-      onRender: (body, close) => {
-        const shuffleOn = !!pl.shuffle;
-
-        const section = document.createElement('div');
-        section.className = 'playlists__advanced-option';
-
-        // --- Balance by script ---
-        const row = document.createElement('label');
-        row.className = 'playlists__advanced-row';
-        const check = document.createElement('input');
-        check.type = 'checkbox';
-        check.checked = !!pl.balanceByScript;
-        check.disabled = !shuffleOn;
-        const label = document.createElement('span');
-        label.className = 'playlists__advanced-label';
-        label.textContent = t('playlists.advanced.balanceLabel');
-        row.appendChild(check);
-        row.appendChild(label);
-        section.appendChild(row);
-
-        // Plain-language explanation. Two short paragraphs: what goes wrong
-        // without it, then what it does about it.
-        const why = document.createElement('p');
-        why.className = 'playlists__advanced-desc';
-        why.textContent = t('playlists.advanced.balanceWhy');
-        section.appendChild(why);
-
-        const how = document.createElement('p');
-        how.className = 'playlists__advanced-desc';
-        how.textContent = t('playlists.advanced.balanceHow');
-        section.appendChild(how);
-
-        const note = document.createElement('p');
-        note.className = 'playlists__advanced-note';
-        note.textContent = shuffleOn
-          ? t('playlists.advanced.balanceNeedsShuffleOn')
-          : t('playlists.advanced.balanceNeedsShuffleOff');
-        section.appendChild(note);
-
-        check.addEventListener('change', () => {
-          pl.balanceByScript = check.checked;
-          this._settings.setPlaylistBalance(pl.id, check.checked);
-        });
-
-        // --- Prefer unwatched ---
-        // Same shuffle-only gating as balance above, for the same reason:
-        // it has no meaning on a fixed order.
-        const unwatchedRow = document.createElement('label');
-        unwatchedRow.className = 'playlists__advanced-row';
-        unwatchedRow.style.marginTop = '14px';
-        const unwatchedCheck = document.createElement('input');
-        unwatchedCheck.type = 'checkbox';
-        unwatchedCheck.checked = !!pl.preferUnwatched;
-        unwatchedCheck.disabled = !shuffleOn;
-        const unwatchedLabel = document.createElement('span');
-        unwatchedLabel.className = 'playlists__advanced-label';
-        unwatchedLabel.textContent = t('playlists.advanced.unwatchedLabel');
-        unwatchedRow.appendChild(unwatchedCheck);
-        unwatchedRow.appendChild(unwatchedLabel);
-        section.appendChild(unwatchedRow);
-
-        const unwatchedWhy = document.createElement('p');
-        unwatchedWhy.className = 'playlists__advanced-desc';
-        unwatchedWhy.textContent = t('playlists.advanced.unwatchedWhy');
-        section.appendChild(unwatchedWhy);
-
-        unwatchedCheck.addEventListener('change', () => {
-          pl.preferUnwatched = unwatchedCheck.checked;
-          this._settings.setPlaylistPreferUnwatched(pl.id, unwatchedCheck.checked);
-        });
-
-        body.appendChild(section);
-
-        const done = document.createElement('button');
-        done.type = 'button';
-        done.className = 'library__assoc-save-btn';
-        done.style.marginTop = '12px';
-        done.textContent = t('common.close');
-        done.addEventListener('click', () => close(null));
-        body.appendChild(done);
+      values: pl,
+      shuffleOn: !!pl.shuffle,
+      onChange: (key, on) => {
+        if (key === 'balanceByScript') {
+          pl.balanceByScript = on;
+          this._settings.setPlaylistBalance(pl.id, on);
+        } else if (key === 'preferUnwatched') {
+          pl.preferUnwatched = on;
+          this._settings.setPlaylistPreferUnwatched(pl.id, on);
+        }
       },
     });
   }
@@ -1194,6 +2003,19 @@ export class Playlists {
 
     group.append(btnGrid, btnList);
     header.appendChild(group);
+  }
+
+  /**
+   * Queue panel toggle, far right like the Library header's. Without it the
+   * only way into the queue from Playlists was the undocumented Shift+Q
+   * (forum #381, app test V27). Skipped when the app wired no handler.
+   */
+  _addQueueToggle(header) {
+    if (!this._onToggleQueue) return;
+    header.appendChild(createQueueToggleButton({
+      onToggle: this._onToggleQueue,
+      open: !!this._isQueueOpen?.(),
+    }));
   }
 
   _setViewMode(mode) {
@@ -1402,7 +2224,8 @@ export class Playlists {
     eventBus.emit('playlist:progressReset', { playlistId: pl.id, videoPaths: (pl.videoPaths || []).slice() });
   }
 
-  _createVideoListItem(videoPath, playlist, playContext) {
+  /** @param {boolean} [available=true] see `_createVideoCard`. */
+  _createVideoListItem(videoPath, playlist, playContext, available = true) {
     const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
     const displayName = fileName.replace(/\.[^/.]+$/, '');
     const row = document.createElement('div');
@@ -1410,6 +2233,9 @@ export class Playlists {
     // Identity for reorder: derive order from the DOM, key by path.
     row.dataset.videoPath = videoPath;
     row.dataset.videoName = displayName;
+    // A Stash group's playlist is read-only: no handle, Move, drag, Select or
+    // Remove (as the grid tile).
+    const readOnly = playlist?.readOnly === true;
 
     // --- Reorder controls (list view only — natural for an ordered list) ---
     // Drag handle = visual signifier (decorative; keyboard uses the buttons).
@@ -1440,10 +2266,16 @@ export class Playlists {
     // Native HTML5 drag-and-drop on the row (mouse power-user layer). A drag
     // suppresses the row's click, so click-to-play still works. Insertion is
     // decided by whether the pointer is past the target row's centre (NN/g).
-    row.draggable = true;
+    row.draggable = !readOnly;
     row.addEventListener('dragstart', (e) => {
+      if (readOnly) return;
       this._dragRow = row;
       row.classList.add('playlists__list-item--dragging');
+      // A selected row takes the whole selection with it (FT-104).
+      this._dragMove = this._selectMode && this._selectedPaths.has(videoPath)
+        ? { paths: this._dragSet(videoPath), from: row }
+        : null;
+      if (this._dragMove) this._markDragging(this._dragMove.paths, true);
       if (e.dataTransfer) {
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', videoPath); // Firefox needs data set
@@ -1469,6 +2301,10 @@ export class Playlists {
       const grid = row.parentElement;
       const rect = row.getBoundingClientRect();
       const after = e.clientY > rect.top + rect.height / 2;
+      if (this._dragMove) {
+        this._dropMove(this._dragMove.paths, videoPath, after, playlist.id);
+        return;
+      }
       grid.insertBefore(dragged, after ? row.nextElementSibling : row);
       this._persistOrderFromDom(grid, playlist.id);
       const pos = [...grid.children].indexOf(dragged) + 1;
@@ -1477,6 +2313,8 @@ export class Playlists {
     row.addEventListener('dragend', () => {
       this._dragRow?.classList.remove('playlists__list-item--dragging');
       this._dragRow = null;
+      if (this._dragMove) this._markDragging(this._dragMove.paths, false);
+      this._dragMove = null;
       row.parentElement?.querySelectorAll('.playlists__list-item--drop-before, .playlists__list-item--drop-after')
         .forEach((r) => r.classList.remove('playlists__list-item--drop-before', 'playlists__list-item--drop-after'));
     });
@@ -1499,7 +2337,7 @@ export class Playlists {
     badges.appendChild(fsBadge);
 
     const removeBtn = document.createElement('button');
-    removeBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger';
+    removeBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger playlists__remove-one';
     removeBtn.appendChild(icon(X, { width: 14, height: 14 }));
     removeBtn.title = t('playlists.removeFromPlaylist');
     removeBtn.addEventListener('click', (e) => {
@@ -1539,19 +2377,41 @@ export class Playlists {
       badges.appendChild(marker);
     }
 
-    row.append(handle, title, heatmap, ...(resumeBar ? [resumeBar] : []), badges, moveGroup, removeBtn);
+    if (readOnly) {
+      row.append(title, heatmap, ...(resumeBar ? [resumeBar] : []), badges);
+    } else {
+      row.append(this._createSelectCheck(videoPath, displayName), handle, title, heatmap,
+        ...(resumeBar ? [resumeBar] : []), badges, moveGroup, removeBtn);
+    }
 
-    row.addEventListener('click', () => {
+    row.addEventListener('click', (e) => {
+      // Selecting: the grid tile's rule (FT-104).
+      if (!readOnly && (this._selectMode || e.shiftKey || e.ctrlKey || e.metaKey)) {
+        this._onSelectClick(videoPath, e);
+        return;
+      }
       // Same rule as the grid tile: unreachable explains, it doesn't open.
       if (row.dataset.unavailable === 'true') {
         this._notifyUnavailable(videoPath);
         return;
       }
-      this._playVideoByPath(videoPath, playContext);
+      this._playVideoByPath(videoPath, this._playContextNow(playContext, videoPath));
     });
 
-    const funscriptPath = this._getFunscriptPath(videoPath);
-    this._loadListStats(videoPath, funscriptPath, fsBadge, badges, heatmap, row);
+    if (available) {
+      const funscriptPath = this._getFunscriptPath(videoPath);
+      this._loadListStats(videoPath, funscriptPath, fsBadge, badges, heatmap, row);
+    } else {
+      // Offline: cached heatmap bins only, no read-funscript for a path the
+      // probe already says is unreachable (FT-071, as categories.js).
+      const cachedBins = this._binsByPath.get(videoPath);
+      if (cachedBins) {
+        queueRenderBins(heatmap, cachedBins);
+      } else {
+        row.classList.add('playlists__list-item--no-heatmap');
+        heatmap.remove();
+      }
+    }
 
     return row;
   }
@@ -1559,7 +2419,7 @@ export class Playlists {
   async _loadListStats(videoPath, funscriptPath, fsBadgeEl, badgesEl, heatmapEl, rowEl) {
     const cachedBins = this._binsByPath.get(videoPath);
     if (cachedBins && heatmapEl) {
-      requestAnimationFrame(() => renderBins(heatmapEl, cachedBins));
+      queueRenderBins(heatmapEl, cachedBins);
     }
     try {
       const content = await window.funsync.readFunscript(funscriptPath);
@@ -1583,11 +2443,434 @@ export class Playlists {
       if (heatmapEl) {
         const bins = cachedBins || computeBins(actions);
         if (!cachedBins) this._binsByPath.set(videoPath, bins);
-        renderBins(heatmapEl, bins);
+        queueRenderBins(heatmapEl, bins);
       }
     } catch {
       if (rowEl) rowEl.classList.add('playlists__list-item--no-heatmap');
       if (heatmapEl) heatmapEl.remove();
     }
+  }
+
+  // --- Stash groups: read-only playlists (Stash "next" lot #6, 2026-11-19) ---
+  //
+  // Each Stash group the user's linked videos belong to shows as a read-only
+  // "Stash: <group>" playlist in Stash's order (stash-groups.js), derived
+  // from the Stash data on every render: never one of the user's playlists,
+  // never in config.json or a backup. Stash off or Remove Stash data hides
+  // them. Play All, Shuffle all, Continue, Add to queue and Copy to my
+  // playlists work; Rename, Delete, Remove, Move, Sort, Select and drag are
+  // not offered (Stash owns the group; the detail's note says so).
+
+  /** Is Stash on? Its group playlists show only then. */
+  _stashOn() {
+    return this._settings.get?.('stash.enabled') === true;
+  }
+
+  /** The Stash group playlists now, from the Stash data and the library's videos. */
+  _stashGroupPlaylists() {
+    if (!this._stashOn()) return [];
+    const videos = this._library?._videos;
+    return stashGroupPlaylists(stashData(), {
+      enabled: true,
+      videos: Array.isArray(videos) && videos.length > 0 ? videos : null,
+    });
+  }
+
+  _stashGroupPlaylist(id) {
+    if (!isStashGroupPlaylistId(id)) return null;
+    return this._stashGroupPlaylists().find((g) => g.id === id) || null;
+  }
+
+  /**
+   * A group's playlist as the play paths read a playlist: its shown name, and
+   * the Library's play options (Loop, equal turns, prefer unwatched), since
+   * it has no record of its own to keep them on. No Shuffle toggle: Shuffle
+   * all is its button.
+   */
+  _stashGroupView(pl) {
+    const options = readLibraryPlayOptions(this._settings);
+    return {
+      ...pl,
+      name: this._stashGroupName(pl),
+      videoPaths: pl.videoPaths.slice(),
+      loop: options.loop,
+      shuffle: false,
+      balanceByScript: options.balanceByScript,
+      preferUnwatched: options.preferUnwatched,
+    };
+  }
+
+  /** A playlist by id: one of the user's, or a Stash group's (`_stashGroupView`). */
+  _playlistFor(id) {
+    if (!id) return null;
+    if (!isStashGroupPlaylistId(id)) return this._settings.getPlaylist?.(id) || null;
+    const pl = this._stashGroupPlaylist(id);
+    return pl ? this._stashGroupView(pl) : null;
+  }
+
+  /** The name a playlist is shown by, a Stash group's ("Stash: <group>") included; null for none. */
+  playlistName(id) {
+    return this._playlistFor(id)?.name || null;
+  }
+
+  _stashGroupName(pl) {
+    return t('playlists.stashGroups.name', { name: pl.name || t('playlists.stashGroups.unnamed') });
+  }
+
+  /**
+   * The Stash data, Stash on / off or the library's videos changed: the grid
+   * or the open group is drawn again when what it shows changed. A user
+   * playlist's detail shows no group and is left alone (its Select mode too).
+   */
+  _onStashGroupsChanged() {
+    if (!this._shown || !this._container) return;
+    const onGroup = this._view === 'detail' && isStashGroupPlaylistId(this._detailPlaylistId);
+    if (this._view !== 'grid' && !onGroup) return;
+    if (stashGroupSignature(this._stashGroupPlaylists()) === this._stashGroupSig) return;
+    if (onGroup) this._renderDetail(this._detailPlaylistId);
+    else this._renderGrid();
+  }
+
+  /** "From Stash": the group playlists, under the user's own. */
+  _createStashGroupSection(groups) {
+    const section = document.createElement('section');
+    section.className = 'playlists__stash-section';
+    section.setAttribute('aria-labelledby', 'playlists-stash-heading');
+    const heading = document.createElement('h2');
+    heading.id = 'playlists-stash-heading';
+    heading.className = 'playlists__section-title';
+    heading.textContent = t('playlists.stashGroups.sectionTitle');
+    const hint = document.createElement('p');
+    hint.className = 'playlists__section-hint';
+    hint.textContent = t('playlists.stashGroups.sectionHint');
+    const grid = document.createElement('div');
+    grid.className = 'playlists__grid playlists__grid--stash';
+    grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
+    for (const pl of groups) {
+      grid.appendChild(this._viewMode === 'list' ? this._createStashGroupListItem(pl) : this._createStashGroupCard(pl));
+    }
+    section.append(heading, hint, grid);
+    return section;
+  }
+
+  /** The read-only mark; its tooltip says why (Stash owns the group). */
+  _createReadOnlyBadge() {
+    const badge = document.createElement('span');
+    badge.className = 'playlists__stash-badge';
+    badge.appendChild(icon(Link, { width: 12, height: 12 }));
+    const label = document.createElement('span');
+    label.textContent = t('playlists.stashGroups.readOnly');
+    badge.appendChild(label);
+    badge.title = t('playlists.stashGroups.readOnlyReason');
+    return badge;
+  }
+
+  _stashGroupCountText(pl) {
+    const parts = [t('playlists.videoCount', { count: pl.videoPaths.length })];
+    if (pl.missing > 0) parts.push(t('playlists.stashGroups.missingCount', { count: pl.missing }));
+    return parts.join(' · ');
+  }
+
+  /** Click, Enter or Space opens the group's detail. */
+  _makeStashGroupOpenable(el, pl) {
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    const open = () => {
+      this._view = 'detail';
+      this._detailPlaylistId = pl.id;
+      this._renderDetail(pl.id);
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      open();
+    });
+  }
+
+  /** A group's tile: name, count, the read-only mark. No Rename or Delete. */
+  _createStashGroupCard(pl) {
+    const card = document.createElement('div');
+    card.className = 'playlists__card playlists__card--stash';
+    card.dataset.playlistId = pl.id;
+    const body = document.createElement('div');
+    body.className = 'playlists__card-body';
+    const name = document.createElement('div');
+    name.className = 'playlists__card-name';
+    name.textContent = this._stashGroupName(pl);
+    name.title = name.textContent;
+    const count = document.createElement('div');
+    count.className = 'playlists__card-count';
+    count.textContent = this._stashGroupCountText(pl);
+    body.append(name, count, this._createReadOnlyBadge());
+    card.appendChild(body);
+    this._makeStashGroupOpenable(card, pl);
+    return card;
+  }
+
+  /** A group's row in list view, as the tile. */
+  _createStashGroupListItem(pl) {
+    const row = document.createElement('div');
+    row.className = 'playlists__list-item playlists__list-item--stash';
+    row.dataset.playlistId = pl.id;
+    const name = document.createElement('span');
+    name.className = 'playlists__list-name';
+    name.textContent = this._stashGroupName(pl);
+    const count = document.createElement('span');
+    count.className = 'playlists__list-count';
+    count.textContent = this._stashGroupCountText(pl);
+    row.append(name, count, this._createReadOnlyBadge());
+    this._makeStashGroupOpenable(row, pl);
+    return row;
+  }
+
+  /**
+   * A group's detail: its linked videos in Stash's order, each scene with no
+   * linked video in the library shown as missing, and Play All, Shuffle all,
+   * the play options, Continue, Add to queue and Copy to my playlists. Gone
+   * (Stash off, Remove Stash data, a complete sync without it): the grid.
+   */
+  async _renderStashGroupDetail(playlistId, renderGen) {
+    const groups = this._stashGroupPlaylists();
+    const pl = groups.find((g) => g.id === playlistId) || null;
+    if (!pl) {
+      this._view = 'grid';
+      this._detailPlaylistId = null;
+      this._renderGrid();
+      return;
+    }
+    this._stashGroupSig = stashGroupSignature(groups);
+    this._clearSelectState();
+    this._detailGrid = null;
+    this._selectionBar = null;
+    this._container.innerHTML = '';
+    const view = this._stashGroupView(pl);
+
+    const header = document.createElement('div');
+    header.className = 'playlists__header';
+
+    const backBtn = document.createElement('button');
+    backBtn.className = 'playlists__back-btn';
+    backBtn.appendChild(icon(ArrowLeft, { width: 20, height: 20 }));
+    backBtn.title = t('playlists.backToPlaylists');
+    backBtn.addEventListener('click', () => this.navigateBack());
+
+    const title = document.createElement('span');
+    title.className = 'playlists__title';
+    title.textContent = view.name;
+
+    const countSpan = document.createElement('span');
+    countSpan.className = 'playlists__detail-count';
+    countSpan.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
+
+    header.append(backBtn, title, countSpan, this._createReadOnlyBadge());
+
+    // Each button reads the group as it is at the click.
+    const now = () => this._playlistFor(playlistId);
+
+    const playAllBtn = document.createElement('button');
+    playAllBtn.type = 'button';
+    playAllBtn.className = 'playlists__play-all-btn';
+    playAllBtn.appendChild(icon(Play, { width: 14, height: 14 }));
+    playAllBtn.appendChild(document.createTextNode(' ' + t('playlists.playAll')));
+    playAllBtn.addEventListener('click', () => { const g = now(); if (g) this._playAll(g); });
+    header.appendChild(playAllBtn);
+
+    const continueTarget = this._playlistHasProgress(view)
+      ? pickContinueTarget(view.videoPaths, this._playlistProgress(view.id)?.lastVideoPath || null, (p) => this._resumeEntryFor(p))
+      : null;
+    if (continueTarget) {
+      const continueBtn = document.createElement('button');
+      continueBtn.type = 'button';
+      continueBtn.className = 'playlists__continue-btn';
+      continueBtn.appendChild(icon(History, { width: 14, height: 14 }));
+      continueBtn.appendChild(document.createTextNode(' ' + t('playlists.continueWatching')));
+      continueBtn.title = t('playlists.continueWatchingNamed', { name: shownName(continueTarget.path) });
+      continueBtn.setAttribute('aria-label', continueBtn.title);
+      continueBtn.addEventListener('click', () => { const g = now(); if (g) this._continueFromLastWatched(g); });
+      header.appendChild(continueBtn);
+    }
+
+    const shuffleBtn = document.createElement('button');
+    shuffleBtn.type = 'button';
+    shuffleBtn.className = 'playlists__loop-btn playlists__stash-shuffle-btn';
+    shuffleBtn.title = t('library.shuffleAllTitle');
+    shuffleBtn.appendChild(icon(Shuffle, { width: 14, height: 14 }));
+    shuffleBtn.appendChild(document.createTextNode(' ' + t('library.shuffleAll')));
+    shuffleBtn.addEventListener('click', () => { const g = now(); if (g) this._playAll({ ...g, shuffle: true }); });
+    header.appendChild(shuffleBtn);
+
+    // The Library's play options (Loop, equal turns, prefer unwatched), shared
+    // with its Shuffle All and the categories: a group has no record to hold
+    // its own.
+    const optionsBtn = document.createElement('button');
+    optionsBtn.type = 'button';
+    optionsBtn.className = 'playlists__loop-btn playlists__advanced-btn';
+    optionsBtn.title = t('library.playOptions.openTitle');
+    optionsBtn.setAttribute('aria-label', optionsBtn.title);
+    optionsBtn.setAttribute('aria-haspopup', 'dialog');
+    optionsBtn.appendChild(icon(SlidersHorizontal, { width: 14, height: 14 }));
+    const paintOptions = () => optionsBtn.classList.toggle('is-on', anyLibraryPlayOption(this._settings));
+    paintOptions();
+    optionsBtn.addEventListener('click', () => openPlayOptionsModal({
+      title: t('library.playOptions.title'),
+      values: readLibraryPlayOptions(this._settings),
+      includeLoop: true,
+      shuffleOn: true,
+      note: t('playlists.stashGroups.playOptionsNote'),
+      onChange: (key, on) => { setLibraryPlayOption(this._settings, key, on); paintOptions(); },
+    }));
+    header.appendChild(optionsBtn);
+
+    if (this._onAddPathsToQueue) {
+      const queueBtn = document.createElement('button');
+      queueBtn.type = 'button';
+      queueBtn.className = 'playlists__loop-btn playlists__stash-queue-btn';
+      queueBtn.title = t('playlists.stashGroups.addToQueueTitle');
+      queueBtn.appendChild(icon(ListVideo, { width: 14, height: 14 }));
+      queueBtn.appendChild(document.createTextNode(' ' + t('playlists.stashGroups.addToQueue')));
+      queueBtn.addEventListener('click', () => this._addStashGroupToQueue(playlistId));
+      header.appendChild(queueBtn);
+    }
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'playlists__loop-btn playlists__stash-copy-btn';
+    copyBtn.title = t('playlists.stashGroups.copyTitle');
+    copyBtn.appendChild(icon(Plus, { width: 14, height: 14 }));
+    copyBtn.appendChild(document.createTextNode(' ' + t('playlists.stashGroups.copy')));
+    copyBtn.addEventListener('click', () => this._copyStashGroup(playlistId));
+    header.appendChild(copyBtn);
+
+    this._addViewToggle(header);
+    this._addQueueToggle(header);
+    this._container.appendChild(header);
+
+    // Why there is no Rename, Remove, Move, Sort or Select here.
+    const note = document.createElement('p');
+    note.className = 'playlists__stash-note';
+    note.setAttribute('role', 'note');
+    note.textContent = t('playlists.stashGroups.readOnlyReason');
+    this._container.appendChild(note);
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'playlists__grid-wrapper';
+
+    // Reachability as for any playlist: an offline video stays, greyed.
+    const availableSet = await probeAvailability(pl.videoPaths.slice());
+    if (renderGen !== this._renderGen) return; // a newer render owns the container
+    const isAvailable = availabilityPredicate(availableSet);
+    this._availablePaths = availableSet;
+    const { unavailable } = partitionByAvailability(pl.videoPaths, isAvailable);
+    if (unavailable.length > 0) wrapper.appendChild(this._createUnavailableNotice(unavailable));
+
+    const grid = document.createElement('div');
+    grid.className = 'playlists__grid';
+    grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
+    const list = pl.videoPaths.slice();
+    for (const entry of pl.entries) {
+      if (!entry.path) {
+        grid.appendChild(this._createMissingSceneItem(entry));
+        continue;
+      }
+      const playContext = {
+        source: 'playlist',
+        sourceLabel: `playlist "${view.name}"`,
+        sourceContext: { playlistId: pl.id },
+        list: list.slice(),
+        index: list.indexOf(entry.path),
+        unavailablePaths: unavailable.slice(),
+      };
+      const available = isAvailable(entry.path);
+      const el = this._viewMode === 'list'
+        ? this._createVideoListItem(entry.path, view, playContext, available)
+        : this._createVideoCard(entry.path, view, playContext, available);
+      if (!available) this._markUnavailable(el, entry.path);
+      grid.appendChild(el);
+    }
+    wrapper.appendChild(grid);
+    this._container.appendChild(wrapper);
+  }
+
+  /** A scene of the group with no linked video in the library: listed, never played or guessed. */
+  _createMissingSceneItem(entry) {
+    const name = entry.title || t('playlists.stashGroups.untitledScene');
+    const asRow = this._viewMode === 'list';
+    const el = document.createElement('div');
+    el.className = asRow ? 'playlists__list-item playlists__stash-missing' : 'playlists__video-card playlists__stash-missing';
+    el.dataset.stashSceneId = entry.sceneId;
+    el.setAttribute('aria-disabled', 'true');
+    el.title = t('playlists.stashGroups.missingSceneTooltip');
+    const titleEl = document.createElement(asRow ? 'span' : 'div');
+    titleEl.className = asRow ? 'playlists__list-name' : 'playlists__video-title';
+    titleEl.textContent = name;
+    const noteEl = document.createElement('span');
+    noteEl.className = 'playlists__stash-missing-note';
+    noteEl.textContent = t('playlists.stashGroups.missingScene');
+    if (asRow) {
+      const mark = icon(FileX, { width: 14, height: 14 });
+      mark.setAttribute('aria-hidden', 'true');
+      el.append(mark, titleEl, noteEl);
+      return el;
+    }
+    const thumbnail = document.createElement('div');
+    thumbnail.className = 'playlists__video-thumbnail';
+    const placeholder = document.createElement('div');
+    placeholder.className = 'playlists__video-placeholder playlists__video-placeholder--broken';
+    placeholder.appendChild(icon(FileX, { width: 32, height: 32 }));
+    thumbnail.appendChild(placeholder);
+    const info = document.createElement('div');
+    info.className = 'playlists__video-info';
+    info.append(titleEl, noteEl);
+    el.append(thumbnail, info);
+    return el;
+  }
+
+  /**
+   * Add to queue: the group's reachable videos, in Stash's order, onto the
+   * end of the user's queue in one go (app.js skips those already queued).
+   */
+  async _addStashGroupToQueue(playlistId) {
+    const pl = this._stashGroupPlaylist(playlistId);
+    if (!pl || !this._onAddPathsToQueue) return;
+    const isAvailable = availabilityPredicate(await probeAvailability(pl.videoPaths.slice()));
+    const { available, unavailable } = partitionByAvailability(pl.videoPaths, isAvailable);
+    const { showToast } = await import('../js/toast.js');
+    if (available.length === 0) {
+      showToast(t('toast.playlistAllUnavailable'), 'warn');
+      return;
+    }
+    const added = Number(this._onAddPathsToQueue(available.slice())) || 0;
+    if (unavailable.length > 0) showToast(t('toast.playlistSkippedUnavailable', { count: unavailable.length }), 'info');
+    showToast(added > 0
+      ? t('playlists.stashGroups.addedToQueue', { count: added })
+      : t('queuePanel.toastAlreadyQueued'), 'info');
+  }
+
+  /**
+   * Copy to my playlists: a new playlist of the user's own (named as they
+   * choose, the group's name offered), with the group's linked videos in
+   * Stash's order. It is an ordinary playlist from then on: editable, and
+   * it does not follow Stash. The group is untouched.
+   */
+  async _copyStashGroup(playlistId) {
+    const pl = this._stashGroupPlaylist(playlistId);
+    if (!pl) return;
+    const name = await Modal.prompt(t('playlists.stashGroups.copy'), t('playlists.playlistNamePlaceholder'), pl.name || this._stashGroupName(pl));
+    if (!name) return;
+    const paths = (this._stashGroupPlaylist(playlistId) || pl).videoPaths.slice();
+    let created = null;
+    try {
+      created = await this._settings.addPlaylist(name);
+    } catch (err) {
+      console.warn('[Playlists] could not copy the Stash group', err?.message || err);
+    }
+    const { showToast } = await import('../js/toast.js');
+    if (!created?.id) {
+      showToast(t('playlists.stashGroups.copyFailed'), 'error');
+      return;
+    }
+    if (paths.length > 0) this._settings.addVideosToPlaylist(created.id, paths);
+    showToast(t('playlists.stashGroups.copied', { name }), 'info');
   }
 }

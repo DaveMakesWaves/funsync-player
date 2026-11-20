@@ -20,7 +20,54 @@ import { VRPlaybackProxy } from './vr-playback-proxy.js';
 // disconnects on network blips.
 const LIVENESS_TIMEOUT_MS = 8000;
 
+// While the headset is PAUSED (the last packet said so) on a link that has
+// received, a longer silence is allowed before teardown (FT-053, 2026-11-06;
+// also in v0.9.2). Nothing is driven while paused (the devices are stopped),
+// and whether HereSphere keeps sending while paused is not known, so 8 s
+// dropped the link on any longer pause (a likely cause of #343's drops). A
+// dead socket still shows as a close or a keep-alive write error. The first
+// packet's window and a playing link keep LIVENESS_TIMEOUT_MS.
+const PAUSED_LIVENESS_TIMEOUT_MS = 60000;
+
 import { t } from './i18n.js';
+
+// FunSync's own content server names a video by its registry id, never by
+// file: the stream URL `/api/media/stream/{id}` and the scene URLs
+// `/heresphere/{id}`, `/deovr/{id}`, where id = md5(path)[:12]
+// (backend/routes/media.py `_path_to_id`). When a headset streaming from
+// FunSync reports one of those as the playing path, its last segment is the
+// id, which no file name matches (V63). Followed by `/`, `?`, `#` or the end,
+// so a real file called `<12 hex>.mp4` in a folder named `deovr` is not one.
+const FUNSYNC_VIDEO_URL_RE = /\/(?:api\/media\/stream|heresphere|deovr)\/([0-9a-f]{12})(?=[/?#]|$)/i;
+
+/**
+ * The registry id in a FunSync stream / scene URL, or null for anything else
+ * (a file path, an XBVR or DLNA URL).
+ * @param {string} rawPath
+ * @returns {string|null}
+ */
+export function funsyncVideoIdFromVRPath(rawPath) {
+  const m = FUNSYNC_VIDEO_URL_RE.exec(String(rawPath || ''));
+  return m ? m[1].toLowerCase() : null;
+}
+
+/**
+ * The name to SHOW for a headset-reported path: its file name, URL-decoded,
+ * query dropped. Never the normalised match key `onVideoChanged` passes
+ * first ("vr tagged 180 lr"), which the VR modal used to display (V66).
+ * @param {string} rawPath
+ * @param {string} [fallback]
+ * @returns {string}
+ */
+export function vrDisplayName(rawPath, fallback = '') {
+  let s = String(rawPath || '');
+  if (s.includes('://')) {
+    try { s = new URL(s).pathname; } catch { /* keep as-is */ }
+  }
+  let base = s.split(/[\\/]/).pop() || '';
+  try { base = decodeURIComponent(base); } catch { /* keep as-is */ }
+  return base || fallback || '';
+}
 
 export class VRBridge {
   constructor() {
@@ -46,10 +93,19 @@ export class VRBridge {
     this._intentionalDisconnect = false;
     this._cleanupStateListener = null;
     this._cleanupDisconnectListener = null;
+    // Whether THIS link (since the last successful connect) has had a state
+    // packet (FT-054). A TCP connect alone proves only that something
+    // accepted on the port; app.js treats the first packet as the working
+    // link (backoff reset, toast, saved host) and a teardown of a link that
+    // never received as a failed attempt. Kept after a teardown, so
+    // onDisconnect can read what the ended link did; reset on the next
+    // successful connect.
+    this._received = false;
 
     // Callbacks
     this.onConnect = null;
     this.onDisconnect = null;
+    this.onFirstPacket = null;    // () => {} — once per link, on its first state packet
     this.onVideoChanged = null;   // (normalizedPath, rawPath) => {}
     this.onError = null;
   }
@@ -65,19 +121,41 @@ export class VRBridge {
     // activity poll could fire a connect() while a previous attempt
     // is still in flight — visible in user logs as double-error
     // entries landing within 1 ms of each other.
-    if (this._connecting) return false;
-    if (this._connected) await this.disconnect();
+    //
+    // A coalesced caller gets the in-flight attempt's real outcome. It
+    // used to get `false`, which every caller reads as a failed dial: the
+    // activity poll counted it toward the 8 s backoff, and a Connect click
+    // during a background dial said "failed" without dialing (V24).
+    const target = { host: host || '127.0.0.1', port: port || 23554 };
+    if (this._connecting) {
+      const inFlight = this._connectPromise;
+      const t0 = this._connectTarget;
+      if (t0.host === target.host && t0.port === target.port) return inFlight;
+      // A different host (the user typed one while a background dial was
+      // running): let that attempt finish, then make this one.
+      await inFlight;
+      if (this._connected && this._host === target.host && this._port === target.port) return true;
+      return this.connect(playerType, host, port);
+    }
+    this._connecting = true; // before any await, so a second call coalesces
+    this._connectTarget = target;
+    this._connectPromise = this._connect(playerType, host, port);
+    return this._connectPromise;
+  }
 
-    this._playerType = playerType || 'deovr';
-    this._host = host || '127.0.0.1';
-    this._port = port || 23554;
-    this._intentionalDisconnect = false;
-    this._connecting = true;
-
+  async _connect(playerType, host, port) {
     try {
+      if (this._connected) await this.disconnect();
+
+      this._playerType = playerType || 'deovr';
+      this._host = host || '127.0.0.1';
+      this._port = port || 23554;
+      this._intentionalDisconnect = false;
+
       const result = await window.funsync.vrConnect(this._host, this._port);
       if (result.success) {
         this._connected = true;
+        this._received = false; // a new link: nothing from it yet (FT-054)
         // Seed `_lastArrivalMs` to "now" so the liveness watchdog has
         // a sensible first-packet window: if nothing arrives within
         // LIVENESS_TIMEOUT_MS, we tear down (silent-failure recovery).
@@ -125,6 +203,13 @@ export class VRBridge {
   }
 
   get connected() { return this._connected; }
+  /**
+   * The current link (or, once torn down, the last one) has had a state
+   * packet. False from a successful connect until its first packet.
+   */
+  get received() { return this._received; }
+  /** A connect() is in flight. */
+  get connecting() { return this._connecting; }
   get playerType() { return this._playerType; }
   get currentVideoPath() { return this._currentVideoPath; }
   get host() { return this._host; }
@@ -139,6 +224,11 @@ export class VRBridge {
    */
   get linkState() {
     if (!this._connected) return 'disconnected';
+    // Nothing from this link yet: waiting, not receiving. connect() seeds
+    // `_lastArrivalMs` to now for the watchdog only, so a link that had sent
+    // nothing read "receiving timestamps" for its first 5 s, retries to a
+    // quiet headset included (block C verifier 2; also in v0.9.2).
+    if (!this._received) return 'waiting';
     const sinceLastPacket = Date.now() - this._lastArrivalMs;
     return sinceLastPacket < 5000 ? 'receiving' : 'waiting';
   }
@@ -146,6 +236,10 @@ export class VRBridge {
   // --- Internal ---
 
   _bindListeners() {
+    // Never stack a second pair: each on*() call adds an ipcRenderer
+    // listener, and overwriting the cleanup handles orphans the old one,
+    // which then keeps handling packets after an intentional Disconnect (V20).
+    this._unbindListeners();
     this._cleanupStateListener = window.funsync.onVrState((data) => {
       this._handleStateUpdate(data);
     });
@@ -170,6 +264,10 @@ export class VRBridge {
     this._connected = false;
     this._currentVideoPath = null;
     this._stopLivenessWatchdog();
+    // This link is over: release its IPC listeners. connect() only calls
+    // disconnect() (the other place that unbinds) while still connected,
+    // so a close or a watchdog teardown used to leave them bound (V20).
+    this._unbindListeners();
     this.proxy.pause();
     if (this.onDisconnect) this.onDisconnect();
   }
@@ -194,6 +292,11 @@ export class VRBridge {
     }
     if (data._arrivalMs) this._lastArrivalMs = data._arrivalMs;
 
+    // The first packet of this link: it is a working link now (FT-054).
+    // app.js hears of it once the packet has been handled (below).
+    const firstPacket = this._connected && !this._received;
+    if (firstPacket) this._received = true;
+
     // Detect video change
     const rawPath = data.path || '';
     if (rawPath && rawPath !== this._currentVideoPath) {
@@ -209,6 +312,10 @@ export class VRBridge {
       playerState: data.playerState ?? 1,
       playbackSpeed: data.playbackSpeed || 1,
     });
+
+    if (firstPacket && this.onFirstPacket) {
+      try { this.onFirstPacket(); } catch (err) { console.warn('[VR] first-packet handler failed:', err?.message || err); }
+    }
   }
 
   /**
@@ -257,9 +364,10 @@ export class VRBridge {
   /**
    * Liveness watchdog. Started on connect, stopped on disconnect.
    * Polls every second; when the time since `_lastArrivalMs` exceeds
-   * LIVENESS_TIMEOUT_MS we treat the connection as silently dead and
-   * synthesise a disconnect. The activity poll then decides when to
-   * try again.
+   * LIVENESS_TIMEOUT_MS (PAUSED_LIVENESS_TIMEOUT_MS while the headset is
+   * paused on a link that has received) we treat the connection as
+   * silently dead and synthesise a disconnect. The activity poll then
+   * decides when to try again.
    *
    * This catches the silent-failure mode where the TCP socket is open
    * but HereSphere isn't pushing state packets (timestamp-server toggle
@@ -274,8 +382,12 @@ export class VRBridge {
         return;
       }
       const sinceLastPacket = Date.now() - this._lastArrivalMs;
-      if (sinceLastPacket > LIVENESS_TIMEOUT_MS) {
-        console.warn(`[VR] Liveness timeout — no packet in ${sinceLastPacket}ms; tearing down`);
+      // Paused on a link that has received: the longer window (FT-053).
+      // Before the first packet the proxy reads paused too (its initial
+      // state), so `_received` keeps the first-packet window at 8 s.
+      const limit = this._received && this.proxy.paused ? PAUSED_LIVENESS_TIMEOUT_MS : LIVENESS_TIMEOUT_MS;
+      if (sinceLastPacket > limit) {
+        console.warn(`[VR] Liveness timeout — no packet in ${sinceLastPacket}ms${limit === PAUSED_LIVENESS_TIMEOUT_MS ? ' (paused)' : ''}; tearing down`);
         // Mirror the cleanup the IPC vrDisconnect would do, so the next
         // activity-poll tick sees `_connected === false` and can attempt
         // a fresh connection.

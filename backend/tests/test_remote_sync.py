@@ -242,3 +242,34 @@ def test_cycle_phone_observer_phone(client):
             msg = obs.receive_json()
             assert msg["type"] == "phone-connected"
             assert msg["videoId"] == "b"
+
+
+# --- Hold buttons (Orgasm Switch F2, Edge Hold next major) ---------------
+
+def test_phone_hold_buttons_reach_the_observer(client):
+    """The phone's Orgasm and Edge buttons travel to the desktop unchanged.
+
+    The relay passes every phone message through (no list of types). This
+    pins the two hold messages, so a future allow-list cannot drop the Edge
+    button's press or, worse, its release.
+    """
+    with client.websocket_connect("/api/remote/sync/observe") as obs:
+        with client.websocket_connect("/api/remote/sync?videoId=x") as phone:
+            _ = obs.receive_json()  # consume phone-connected
+            for msg_type in ("orgasm-hold", "edge-hold"):
+                for active in (True, False):
+                    phone.send_json({"type": msg_type, "active": active})
+                    msg = obs.receive_json()
+                    assert msg["type"] == msg_type
+                    assert msg["active"] is active
+                    assert msg["from"] == "phone"
+
+
+def test_observer_edge_state_reaches_the_phone(client):
+    """The desktop's Edge Hold state keeps the phone's Edge button truthful."""
+    with client.websocket_connect("/api/remote/sync?videoId=x") as phone:
+        with client.websocket_connect("/api/remote/sync/observe") as obs:
+            _ = obs.receive_json()  # catch-up phone-connected
+            obs.send_json({"type": "edge-state", "active": True, "mode": "toggle"})
+            msg = phone.receive_json()
+            assert msg == {"type": "edge-state", "active": True, "mode": "toggle"}

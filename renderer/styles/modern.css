@@ -439,6 +439,7 @@
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.28);
 }
 :root[data-style="modern"] .audience-room__card-buzz-btn,
+:root[data-style="modern"] .audience-room__card-resend-btn,
 :root[data-style="modern"] .audience-room__card-mute-btn,
 :root[data-style="modern"] .audience-room__card-remove-btn,
 :root[data-style="modern"] .audience-room__card-offset-reset,
@@ -450,6 +451,7 @@
               border-color var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
 }
 :root[data-style="modern"] .audience-room__card-buzz-btn:focus-visible,
+:root[data-style="modern"] .audience-room__card-resend-btn:focus-visible,
 :root[data-style="modern"] .audience-room__card-mute-btn:focus-visible,
 :root[data-style="modern"] .audience-room__card-remove-btn:focus-visible,
 :root[data-style="modern"] .audience-room__hide-keys-btn:focus-visible,
@@ -459,6 +461,7 @@
   box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.35);
 }
 :root[data-style="modern"] .audience-room__card-buzz-btn:active,
+:root[data-style="modern"] .audience-room__card-resend-btn:active,
 :root[data-style="modern"] .audience-room__card-mute-btn:active,
 :root[data-style="modern"] .audience-room__card-remove-btn:active,
 :root[data-style="modern"] .audience-room__card-offset-reset:active,
@@ -469,6 +472,7 @@
 }
 @media (prefers-reduced-motion: reduce) {
   :root[data-style="modern"] .audience-room__card-buzz-btn,
+  :root[data-style="modern"] .audience-room__card-resend-btn,
   :root[data-style="modern"] .audience-room__card-mute-btn,
   :root[data-style="modern"] .audience-room__card-remove-btn,
   :root[data-style="modern"] .audience-room__card-offset-reset,
@@ -478,6 +482,7 @@
     transition: none;
   }
   :root[data-style="modern"] .audience-room__card-buzz-btn:active,
+  :root[data-style="modern"] .audience-room__card-resend-btn:active,
   :root[data-style="modern"] .audience-room__card-mute-btn:active,
   :root[data-style="modern"] .audience-room__card-remove-btn:active,
   :root[data-style="modern"] .audience-room__card-offset-reset:active,

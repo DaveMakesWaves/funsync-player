@@ -420,6 +420,61 @@ describe('UpNextEngine', () => {
       expect(onPlayNext).toHaveBeenCalledWith('next.mp4');
       expect(engine.visible).toBe(false);
     });
+
+    // verify-1 2026-11-07: a seek forward inside the window left the label on
+    // the wall clock: "in 9 s" with 6.5 s of video left, and the next video
+    // started at the end while the card still counted.
+    it('a seek forward inside the window: the count follows the video left, and runs out with it', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance', 'Date'] });
+      const onTick = vi.fn();
+      const onPlayNext = vi.fn();
+      const player = mockVideoPlayer({ currentTime: 100, duration: 110 });
+      engine = makeEngine({ player });
+      engine.onTick = onTick;
+      engine.onPlayNext = onPlayNext;
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['cur.mp4', 'next.mp4'], index: 0 }));
+      engine.check();
+      expect(engine.visible).toBe(true);
+
+      const playFor = (ms) => {
+        for (let t = 0; t < ms; t += 100) {
+          player._state.ct = Math.min(110, player._state.ct + 0.1);
+          vi.advanceTimersByTime(100);
+        }
+      };
+      playFor(1000);
+      expect(onTick.mock.calls.at(-1)[0]).toBe(9);
+
+      player._state.ct = 103.5; // seek: 6.5 s of video left
+      vi.advanceTimersByTime(TICK_INTERVAL_MS);
+      expect(onTick.mock.calls.at(-1)[0]).toBe(7);
+      playFor(3000);
+      expect(onTick.mock.calls.at(-1)[0]).toBeLessThanOrEqual(4);
+      expect(onPlayNext).not.toHaveBeenCalled();
+      // The count reaches 0 as the video does (at 6.5 s), once.
+      playFor(3600);
+      expect(onPlayNext).toHaveBeenCalledTimes(1);
+      expect(onPlayNext).toHaveBeenCalledWith('next.mp4');
+      expect(engine.visible).toBe(false);
+    });
+
+    it('the count never lengthens: a seek back inside the window leaves it running down', () => {
+      vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'performance', 'Date'] });
+      const onTick = vi.fn();
+      const player = mockVideoPlayer({ currentTime: 100, duration: 110 });
+      engine = makeEngine({ player });
+      engine.onTick = onTick;
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(makeContext({ list: ['cur.mp4', 'next.mp4'], index: 0 }));
+      engine.check();
+      player._state.ct = 104;
+      vi.advanceTimersByTime(1000);
+      expect(onTick.mock.calls.at(-1)[0]).toBe(6);
+      player._state.ct = 101; // back, still inside the window
+      vi.advanceTimersByTime(TICK_INTERVAL_MS);
+      expect(onTick.mock.calls.at(-1)[0]).toBeLessThanOrEqual(6);
+    });
   });
 
   describe('hover pause / resume', () => {

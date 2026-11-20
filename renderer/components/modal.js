@@ -2,6 +2,47 @@
 
 import { icon, X } from '../js/icons.js';
 import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
+
+// The dialogs open right now, bottom first (FT-048). Each open dialog has its
+// own document-level keydown, mousedown and focusin listeners, and the lower
+// dialog's run first. Without a stack, one Escape closed every stacked dialog
+// (stopPropagation does not stop other listeners on the same node), and Tab
+// in the top dialog was dead: the lower dialog saw focus outside its own
+// panel, cancelled the Tab and pulled focus back to a control under the
+// backdrop. Real stacks: Settings + Rename / Remove source, the Restore list
+// + its confirm, Devices + the Safety Cap confirm. Also in v0.9.2.
+const openStack = [];
+
+/**
+ * The dialog on top, or null. A dialog whose overlay left the page without
+ * close() (a test teardown, a view rebuilt under it) is no longer on screen,
+ * so it is dropped here and never takes a key again.
+ */
+function topDialog() {
+  for (let i = openStack.length - 1; i >= 0; i--) {
+    if (!openStack[i].overlay.isConnected) openStack.splice(i, 1);
+  }
+  return openStack[openStack.length - 1] || null;
+}
+
+// Is a dialog's backdrop on screen? Said once when the first dialog opens and
+// once when the last one closes, as 'modal:backdrop' {dimmed}, so app.js can
+// dim the Windows caption buttons with the page: the OS draws them above the
+// page, out of the backdrop's reach (FT-100, also in v0.9.2).
+let backdropShown = false;
+function setBackdrop(shown) {
+  if (shown === backdropShown) return;
+  backdropShown = shown;
+  try { eventBus.emit('modal:backdrop', { dimmed: shown }); } catch { /* cosmetic only */ }
+}
+
+/** True when `overlay` belongs to a dialog stacked above `entry`. */
+function isAbove(overlay, entry) {
+  const at = openStack.indexOf(entry);
+  if (at === -1) return false;
+  return openStack.some((other, i) => i > at && other.overlay === overlay);
+}
 
 export class Modal {
   /**
@@ -10,6 +51,18 @@ export class Modal {
    * @param {string} opts.title
    * @param {string} [opts.body] — HTML string for the modal body
    * @param {Function} [opts.onRender] — called with (bodyEl, resolve, reject) for custom wiring
+   * @param {string} [opts.panelClass] — extra class(es) on `.modal-panel`
+   * @param {(body: HTMLElement) => (Element|null)} [opts.initialFocus] — the
+   *   control to start on, asked after the first frame (the video options
+   *   dialog: its active rail item, not Play). A control inside this dialog
+   *   that takes the focus gets it; null, anything outside the dialog, a
+   *   throw or a control that refuses the focus leaves the usual rule (the
+   *   first input or button, else the X)
+   * @param {(event: KeyboardEvent) => boolean} [opts.onEscape] — asked when
+   *   Escape reaches this dialog on top of the stack, before it closes.
+   *   Exactly `true` means "handled, stay open" (the dialog closed a menu of
+   *   its own); anything else, or a throw, closes the dialog as usual. A
+   *   dialog under another one is never asked
    * @returns {Promise<*>} resolves with a value when closed, or null on cancel
    */
   static open(opts) {
@@ -27,6 +80,11 @@ export class Modal {
       // (Nielsen #4 standards; a11y).
       const panel = document.createElement('div');
       panel.className = 'modal-panel';
+      // A dialog with its own layout (Settings: FT-039) styles the panel
+      // through one extra class instead of overriding every dialog.
+      if (typeof opts.panelClass === 'string' && opts.panelClass.trim()) {
+        panel.classList.add(...opts.panelClass.trim().split(/\s+/));
+      }
       panel.setAttribute('role', 'dialog');
       panel.setAttribute('aria-modal', 'true');
       const titleId = `modal-title-${Math.random().toString(36).slice(2, 9)}`;
@@ -77,25 +135,53 @@ export class Modal {
       // up to <body> instead, inerting siblings at each level and leaving
       // the ancestor chain itself alone. Stash only what we actually set,
       // so a host page that intentionally inerted something keeps it.
+      //
+      // Toasts are left live (V70). They paint above every backdrop
+      // (z-index 2000 against 1000), but the browser skips an inert element
+      // when it works out what the pointer is over, so a press on a toast's
+      // X landed on the backdrop underneath and closed the dialog, and
+      // hovering a toast did not pause it. They still never take focus from
+      // the dialog: see onToastMouseDown and onToastFocusIn below.
+      //
+      // What this dialog set carries its own value, INERT_MARK, and close
+      // takes off only an inert that still has it (R3-22). A sibling the page
+      // inerts itself while the dialog is open is the page's from then on:
+      // in fullscreen the dialog mounts beside the docked editor, and an
+      // editor hidden meanwhile (a video load after Save) writes its own
+      // inert="", which close used to remove, so Tab reached the closed
+      // editor's controls again.
+      const INERT_EXEMPT = '#toast-container';
+      const INERT_MARK = 'modal';
       const inertedSiblings = [];
+      // This dialog's place in the open stack (FT-048).
+      const entry = { overlay };
       const applyInert = () => {
         for (let node = overlay; node && node !== document.body; node = node.parentElement) {
           const parent = node.parentElement;
           if (!parent) break;
           for (const sib of [...parent.children]) {
-            if (sib === node || sib.hasAttribute('inert')) continue;
-            sib.setAttribute('inert', '');
+            if (sib === node || sib.hasAttribute('inert') || sib.matches(INERT_EXEMPT)) continue;
+            // Never a dialog stacked on top of this one: a fullscreen change
+            // re-homes the lower dialog first, and inerting the top one then
+            // left it on screen but dead (FT-048).
+            if (isAbove(sib, entry)) continue;
+            sib.setAttribute('inert', INERT_MARK);
             inertedSiblings.push(sib);
           }
         }
       };
       const clearInert = () => {
-        for (const sib of inertedSiblings) sib.removeAttribute('inert');
+        for (const sib of inertedSiblings) {
+          if (sib.getAttribute('inert') === INERT_MARK) sib.removeAttribute('inert');
+        }
         inertedSiblings.length = 0;
       };
 
       mountTarget().appendChild(overlay);
+      openStack.push(entry);
+      setBackdrop(true);
       applyInert();
+      const isTop = () => topDialog() === entry;
 
       // Entering or leaving fullscreen with a modal open moves the top
       // layer out from under it. Re-home the overlay and redo the inert
@@ -116,12 +202,19 @@ export class Modal {
       document.addEventListener('fullscreenchange', onFullscreenChange);
 
       const close = (value = null) => {
+        const at = openStack.indexOf(entry);
+        if (at !== -1) openStack.splice(at, 1);
         document.removeEventListener('keydown', onKeydown, true);
+        document.removeEventListener('mousedown', onToastMouseDown, true);
+        document.removeEventListener('focusin', onToastFocusIn, true);
         document.removeEventListener('fullscreenchange', onFullscreenChange);
         // Restore inert state of siblings before removal so focus can
         // legitimately land on the previously-focused element.
         clearInert();
         overlay.remove();
+        // The last dialog on the page closed: the backdrop is gone (FT-100).
+        // topDialog() also drops any dialog that left the page without close().
+        setBackdrop(topDialog() !== null);
         if (previouslyFocused && document.contains(previouslyFocused)) {
           try { previouslyFocused.focus({ preventScroll: true }); }
           catch { /* ignore — element may be unfocusable now */ }
@@ -143,14 +236,40 @@ export class Modal {
         'input:not([disabled]):not([type="hidden"]), select:not([disabled]), ' +
         '[tabindex]:not([tabindex="-1"])'
       );
+      // opts.onEscape: the dialog may use an Escape itself first (a chip menu
+      // or a suggestion list inside it closes; the dialog stays). This
+      // listener runs in the capture phase on document, so a control inside
+      // the panel never sees the Escape before the dialog closes: hence the
+      // hook. Only exactly `true` keeps the dialog open, so a slip (a
+      // Promise from an async handler, a throw) can never make a dialog
+      // that Escape does not close.
+      const onEscape = typeof opts.onEscape === 'function' ? opts.onEscape : null;
+      const escapeHandled = (e) => {
+        try { return onEscape(e) === true; }
+        catch (err) {
+          console.warn('[Modal] onEscape threw; closing the dialog', err);
+          return false;
+        }
+      };
       const onKeydown = (e) => {
+        // Only the dialog on top answers a key (FT-048). A lower one stays
+        // open, its promise pending, until the dialog above it closes.
+        if (!isTop()) return;
         if (e.key === 'Escape') {
+          // Immediate: no other document listener (another dialog, a panel
+          // under the dialogs) acts on the same press.
+          e.stopImmediatePropagation();
           e.stopPropagation();
+          if (onEscape && escapeHandled(e)) return;
           close(null);
           return;
         }
         if (e.key !== 'Tab') return;
-        const items = panel.querySelectorAll(FOCUSABLE_SELECTOR);
+        // A control under a [hidden] ancestor (or hidden itself) cannot take
+        // the focus in Chromium: as "first" or "last" it made the wrap a dead
+        // key. The video options dialog's hidden Undo button and the buttons
+        // of its hidden sections came last (review-a RA-3).
+        const items = [...panel.querySelectorAll(FOCUSABLE_SELECTOR)].filter((n) => !n.closest('[hidden]'));
         if (items.length === 0) return;
         const first = items[0];
         const last = items[items.length - 1];
@@ -170,16 +289,63 @@ export class Modal {
       };
       document.addEventListener('keydown', onKeydown, true);
 
+      // A press on a toast keeps focus where it is in the dialog; the click
+      // itself still lands, so the X closes the toast. Without this the
+      // browser focuses the pressed X, and once the toast has gone focus is
+      // on <body>, outside the dialog, where Space plays the video behind it.
+      const inToast = (el) => !!(el && typeof el.closest === 'function' && el.closest(INERT_EXEMPT));
+      const onToastMouseDown = (e) => {
+        if (!isTop()) return; // the top dialog guards the toasts (FT-048)
+        if (inToast(e.target)) e.preventDefault();
+      };
+      // Focus that reaches a toast anyway goes back into the dialog. The
+      // toast container sits before the overlay in the document, so a Tab
+      // past a control the trap above does not list wraps round to it.
+      const onToastFocusIn = (e) => {
+        // The top dialog takes the focus back, never one under it (FT-048).
+        if (!isTop() || !inToast(e.target)) return;
+        // Stop this focusin here (FT-037). Moving focus below fires the
+        // toast's focusout at once, while its timer is still running, so
+        // that resume does nothing; then this event went on to the toast,
+        // whose focusin paused the timer, and nothing ever resumed it.
+        e.stopPropagation();
+        const first = panel.querySelector(FOCUSABLE_SELECTOR) || closeBtn;
+        first.focus({ preventScroll: true });
+      };
+      document.addEventListener('mousedown', onToastMouseDown, true);
+      document.addEventListener('focusin', onToastFocusIn, true);
+
       // Allow custom wiring
       if (opts.onRender) {
         opts.onRender(body, close);
       }
 
-      // Focus first input or close button
+      // Focus first input or close button. preventScroll: a dialog opens at
+      // its top. When the first focusable sits below the fold, a plain
+      // focus() scrolls the (overflow: auto) body down to it — the `?`
+      // shortcut list's only button is "Got it" at the very end, so the
+      // list opened scrolled past Navigation and Playback (V46).
+      // opts.initialFocus goes first: only a control inside this dialog that
+      // really takes the focus counts, anything else leaves the rule below.
+      // Not asked once the dialog has closed.
+      const focusInitial = () => {
+        if (typeof opts.initialFocus !== 'function' || !overlay.isConnected) return false;
+        let el;
+        try { el = opts.initialFocus(body); }
+        catch (err) {
+          console.warn('[Modal] initialFocus threw; focusing the first control', err);
+          return false;
+        }
+        if (!el || el.nodeType !== 1 || typeof el.focus !== 'function' || !panel.contains(el)) return false;
+        try { el.focus({ preventScroll: true }); }
+        catch { return false; }
+        return document.activeElement === el;
+      };
       requestAnimationFrame(() => {
+        if (focusInitial()) return;
         const firstInput = body.querySelector('input, button');
-        if (firstInput) firstInput.focus();
-        else closeBtn.focus();
+        if (firstInput) firstInput.focus({ preventScroll: true });
+        else closeBtn.focus({ preventScroll: true });
       });
     });
   }
@@ -236,9 +402,16 @@ export class Modal {
    * Confirmation dialog.
    * @param {string} title
    * @param {string} message
+   * @param {{confirmText?: string}} [opts] the action label. Pass the verb
+   *   the dialog asks about: `t('common.delete')` for a deletion, "Restore",
+   *   "Remove", "Move to Recycle Bin" and so on otherwise. The fallback is a
+   *   neutral "Confirm". It used to be "Delete", and every caller that was
+   *   not a deletion and forgot the option showed Delete: the Safety Cap
+   *   warning, Restore From Backup, removing a source (which deletes no
+   *   files), even the "All Assigned" notice (V74, EroScripts #359).
    * @returns {Promise<boolean>}
    */
-  static confirm(title, message) {
+  static confirm(title, message, opts = {}) {
     return Modal.open({
       title,
       onRender(body, close) {
@@ -257,11 +430,40 @@ export class Modal {
 
         const confirmBtn = document.createElement('button');
         confirmBtn.className = 'modal-btn modal-btn--danger';
-        confirmBtn.textContent = t('common.delete');
+        confirmBtn.textContent = opts.confirmText || t('common.confirm');
         confirmBtn.addEventListener('click', () => close(true));
 
         actions.appendChild(cancelBtn);
         actions.appendChild(confirmBtn);
+        body.appendChild(actions);
+      },
+    });
+  }
+
+  /**
+   * An information notice: one OK button in the primary style, no Cancel and
+   * nothing red, for a message that asks nothing. "All Assigned" was a
+   * Modal.confirm, so it showed Cancel next to a red, danger-style OK for
+   * what is only information (block C verifier 1; also in v0.9.2).
+   * Resolves true on OK, null on Escape, the X or the backdrop; either way
+   * it only closes.
+   */
+  static alert(title, message, opts = {}) {
+    return Modal.open({
+      title,
+      onRender(body, close) {
+        const msg = document.createElement('div');
+        msg.className = 'modal-message';
+        msg.textContent = message;
+        body.appendChild(msg);
+
+        const actions = document.createElement('div');
+        actions.className = 'modal-actions';
+        const okBtn = document.createElement('button');
+        okBtn.className = 'modal-btn modal-btn--primary';
+        okBtn.textContent = opts.okText || t('common.ok');
+        okBtn.addEventListener('click', () => close(true));
+        actions.appendChild(okBtn);
         body.appendChild(actions);
       },
     });

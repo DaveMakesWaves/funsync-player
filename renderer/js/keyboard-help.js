@@ -20,8 +20,67 @@
 
 import { Modal } from '../components/modal.js';
 import { t } from './i18n.js';
-import { formatBindingLabel } from '../components/key-capture.js';
+import { formatBindingLabel, numpadKeyName } from '../components/key-capture.js';
 import { dataService } from './data-service.js';
+import { readPatternChoice } from './pattern-choice.js';
+
+// Z plays a pattern only in 'pattern' mode AND once one is chosen: with none
+// (the default since 2026-11-17), Z stops the devices, as app.js does. The
+// choice is the shared one (pattern-choice.js: player.edgePatternChoice, else
+// the old player.edgePattern), 2026-11-19.
+const edgePlaysPattern = () => dataService?.get?.('player.edgeHoldAction') === 'pattern'
+  && readPatternChoice('edge', {
+    edgePatternChoice: dataService?.get?.('player.edgePatternChoice'),
+    edgePattern: dataService?.get?.('player.edgePattern'),
+  }).id !== null;
+
+// The chord column in the active language (CB-08). The rows below keep their
+// chords in canonical English, the form keyboard-shortcut-clash.test.js
+// parses; the overlay renders each word through the `keys.*` names FT-014
+// gave Settings (formatBindingLabel's), so a German list reads Strg /
+// Umschalt / Entf like its own custom-key rows instead of mixing in Ctrl.
+// Letters, digits, punctuation and F-keys are the same in every language and
+// pass through; the numpad's name goes through `keys.numpad` like the custom
+// rows' (R3-25: "Numpad 0 – 9" read English in every locale). With no bundle
+// loaded a word stays as written here (the editor pop-out had none until
+// FT-103).
+const CHORD_MODIFIERS = { Ctrl: 'ctrl', Alt: 'alt', Shift: 'shift' };
+const CHORD_WORDS = {
+  Space: 'space', Esc: 'escape', Home: 'home', End: 'end',
+  Del: 'delete', Backspace: 'backspace', Enter: 'enter', Tab: 'tab',
+  Left: 'arrowLeft', Right: 'arrowRight', Up: 'arrowUp', Down: 'arrowDown',
+  // Not keys, but in the same column: the mouse half of a chord.
+  Arrows: 'arrows', Scroll: 'scroll', Click: 'click', 'Drag dot': 'dragPoint',
+};
+
+function chordWord(id, fallback) {
+  const k = `keys.${id}`;
+  const s = t(k);
+  return typeof s === 'string' && s && s !== k ? s : fallback;
+}
+
+/**
+ * One alternative of a chord ("Ctrl+Shift+Left", "Del", "Shift+Drag dot")
+ * in the active language: each leading modifier and a named base word
+ * through `keys.*`; anything else unchanged. Exported for its test.
+ * @param {string} part
+ * @returns {string}
+ */
+export function localizeChordPart(part) {
+  const s = String(part ?? '');
+  const mods = [];
+  let rest = s;
+  for (;;) {
+    const m = /^(Ctrl|Alt|Shift)\+(?=.)/.exec(rest);
+    if (!m) break;
+    mods.push(chordWord(CHORD_MODIFIERS[m[1]], m[1]));
+    rest = rest.slice(m[0].length);
+  }
+  const base = Object.hasOwn(CHORD_WORDS, rest) ? chordWord(CHORD_WORDS[rest], rest)
+    : /^Numpad(?=.)/.test(rest) ? numpadKeyName(rest.slice('Numpad'.length))
+      : rest;
+  return [...mods, base].join('+');
+}
 
 /**
  * Open the keyboard-help overlay with the given groups.
@@ -52,7 +111,7 @@ export function openKeyboardHelp(title, groups) {
           for (const part of keys.split(/\s*\/\s*/)) {
             if (dt.children.length) dt.appendChild(document.createTextNode(' / '));
             const kbd = document.createElement('kbd');
-            kbd.textContent = part;
+            kbd.textContent = localizeChordPart(part);
             dt.appendChild(kbd);
           }
           const dd = document.createElement('dd');
@@ -84,9 +143,9 @@ export function openKeyboardHelp(title, groups) {
  * binding (in app.js, video-player.js) updates this list too.
  */
 // Group sets are exported as builder functions so each `t()` call resolves
-// against the active locale at modal-open time. Keyboard combos stay literal
-// (they're the same in every language); only the row descriptions and group
-// titles route through i18n.
+// against the active locale at modal-open time. Keyboard combos are written
+// in canonical English here (the clash test parses them) and translated
+// when the overlay renders them (localizeChordPart, CB-08).
 export function getPlayerShortcutGroups() {
   return [
     {
@@ -155,8 +214,12 @@ export function getPlayerShortcutGroups() {
         // worse than no label at all.
         ['X',             dataService?.get?.('player.orgasmSwitchMode') === 'toggle'
                             ? t('kbd.orgasmSwitchToggle') : t('kbd.orgasmSwitch')],
-        ['Z',             dataService?.get?.('player.edgeHoldMode') === 'toggle'
-                            ? t('kbd.edgeHoldToggle') : t('kbd.edgeHold')],
+        // ...and Z can play a pattern instead of stopping the devices.
+        ['Z',             edgePlaysPattern()
+                            ? (dataService?.get?.('player.edgeHoldMode') === 'toggle'
+                              ? t('kbd.edgeHoldPatternToggle') : t('kbd.edgeHoldPattern'))
+                            : (dataService?.get?.('player.edgeHoldMode') === 'toggle'
+                              ? t('kbd.edgeHoldToggle') : t('kbd.edgeHold'))],
       ],
     },
     {
@@ -179,8 +242,14 @@ export function getPlayerShortcutGroups() {
     {
       title: t('kbd.libraryGroup'),
       rows: [
+        // No "Esc — back to library" row: Escape has never left the player
+        // (it dismisses Up Next, closes the queue, clears the A-B loop and
+        // closes panels — the Esc row above), and that row contradicted it
+        // since May 2026 (V46). The Back button and Alt+1/2/3 leave.
         ['O',             t('kbd.openFile')],
-        ['Esc',           t('kbd.backToLibrary')],
+        // On a focused card's ⋮ (its Tab stop): the video options dialog,
+        // as Windows' "Properties" key and the context-menu key (design (b)).
+        ['Alt+Enter / Shift+F10', t('kbd.videoOptions')],
       ],
     },
     {
@@ -203,6 +272,7 @@ export function getEditorShortcutGroups() {
         ['Ctrl+Left / Right',   t('kbd.editorFastFrame')],
         ['Ctrl+A',              t('kbd.editorSelectAll')],
         ['Ctrl+1 / 2 / 3',      t('kbd.editorSelectThird')],
+        ['N',                   t('kbd.editorSelectCreated')],
         ['Esc',                 t('kbd.editorClearSelection')],
       ],
     },
@@ -218,12 +288,13 @@ export function getEditorShortcutGroups() {
         ['End',                 t('kbd.editorMoveToPlayhead')],
         ['Del / Backspace',     t('kbd.editorDelete')],
         ['Ctrl+I',              t('kbd.editorInvert')],
+        ['P',                   t('kbd.editorFillPattern')],
       ],
     },
     {
       title: t('kbd.editorPlace'),
       rows: [
-        ['0 – 9 (or Numpad)',   t('kbd.editorPlaceNumpad')],
+        ['0 – 9 / Numpad 0 – 9', t('kbd.editorPlaceNumpad')],
         ['Shift+0 / - / Numpad-', t('kbd.editorPlaceTop')],
         ['Alt+Click',           t('kbd.editorInsertAtClick')],
         ['Shift+Drag dot',      t('kbd.editorMoveSelected')],
@@ -252,7 +323,8 @@ export function getEditorShortcutGroups() {
     {
       title: t('kbd.view'),
       rows: [
-        ['+ / -',               t('kbd.editorZoom')],
+        // Ctrl+-, not bare -: that places a point at 100 (FT-032, CB-04).
+        ['+ / Ctrl+-',          t('kbd.editorZoom')],
         ['?',                   t('kbd.showHelp')],
       ],
     },

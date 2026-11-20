@@ -212,20 +212,20 @@ describe('DragDrop', () => {
       window.funsync = { getPathForFile: () => '' };
       const f = new File([''], 'clip.mp4');
       dropFiles([f]);
-      expect(onVideo).toHaveBeenCalledWith(f);
+      expect(onVideo).toHaveBeenCalledWith(f, { withScript: false });
     });
 
     it('falls back when the bridge is missing entirely', () => {
       const f = new File([''], 'clip.mp4');
       dropFiles([f]);
-      expect(onVideo).toHaveBeenCalledWith(f);
+      expect(onVideo).toHaveBeenCalledWith(f, { withScript: false });
     });
 
     it('falls back when the resolver throws', () => {
       window.funsync = { getPathForFile: () => { throw new Error('no path'); } };
       const f = new File([''], 'clip.mp4');
       dropFiles([f]);
-      expect(onVideo).toHaveBeenCalledWith(f);
+      expect(onVideo).toHaveBeenCalledWith(f, { withScript: false });
     });
 
     it('resolves each file in a multi-file drop independently', () => {

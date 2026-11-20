@@ -39,7 +39,7 @@ function fakeConfig() {
         durationCache: { '/x/v.mp4': 1234 },           // BLACKLISTED
         thumbnailCache: { '/x/v.mp4': 'data:...' },    // BLACKLISTED
       },
-      handy: { connectionKey: 'eK6Qv3AH' },
+      handy: { connectionKey: 'FAKEKEY1' },
     },
     playlists: [{ id: 'p1' }, { id: 'p2' }],
     categories: [{ id: 'cat1' }],
@@ -117,9 +117,22 @@ describe('computeSummary', () => {
   it('handles empty config', () => {
     const s = dataBackup.computeSummary({});
     expect(s).toEqual({
-      sources: 0, collections: 0, playlists: 0, categories: 0,
+      sources: 0, collections: 0, playlists: 0, categories: 0, categoryAssignments: 0,
       customRoutings: 0, manualAssociations: 0, manualVariants: 0,
+      // Tags (2026-11-18); counted in tag-data-backup.test.js.
+      tagAssignments: 0, eroscriptsLinks: 0,
     });
+  });
+
+  it('counts every video→category link, so losing one changes the summary (V58)', () => {
+    const before = dataBackup.computeSummary({
+      videoCategories: { '/a.mp4': ['c1', 'c2'], '/b.mp4': ['c1'] },
+    });
+    const after = dataBackup.computeSummary({
+      videoCategories: { '/a.mp4': ['c2'], '/b.mp4': ['c1'] },
+    });
+    expect(before.categoryAssignments).toBe(3);
+    expect(after.categoryAssignments).toBe(2);
   });
 });
 
@@ -456,11 +469,50 @@ describe('verifyAndRecover (T2 + T3 + T8)', () => {
     expect(restored.playlists.find(p => p.id === 'tampered')).toBeUndefined();
   });
 
-  it('falls back when no valid snapshot exists', async () => {
-    // No snapshots, no config — fresh-machine scenario.
+  it('reports a first launch as fresh, not as a failed recovery (V06)', async () => {
+    // No config, no backups folder: a brand-new install. This used to
+    // return fellBack:true, and the renderer greeted every new user with a
+    // red "Settings could not be recovered" toast. This test pinned that.
+    const result = await dataBackup.verifyAndRecover({ userDataDir: dir });
+    expect(result.recovered).toBe(false);
+    expect(result.fresh).toBe(true);
+    expect(result.fellBack).toBeFalsy();
+  });
+
+  it('still falls back (and warns) when config is missing but backup history exists', async () => {
+    // The app ran here before: an empty backups folder is enough evidence
+    // that a missing config.json is a loss, not a first launch.
+    const paths = dataBackup.resolvePaths(dir);
+    await fsp.mkdir(paths.snapshotsDir, { recursive: true });
     const result = await dataBackup.verifyAndRecover({ userDataDir: dir });
     expect(result.recovered).toBe(false);
     expect(result.fellBack).toBe(true);
+    expect(result.fresh).toBeFalsy();
+  });
+
+  it('still falls back when the only snapshot is corrupt', async () => {
+    const snap = await dataBackup.takeSnapshot({
+      userDataDir: dir, config: fakeConfig(), trigger: dataBackup.TRIGGER.STARTUP,
+    });
+    const paths = dataBackup.resolvePaths(dir);
+    await fsp.writeFile(path.join(paths.snapshotsDir, snap.filename), '{ not json', 'utf8');
+    try { await fsp.unlink(paths.configPath); } catch { /* ok */ }
+    const result = await dataBackup.verifyAndRecover({ userDataDir: dir });
+    expect(result.fellBack).toBe(true);
+    expect(result.fresh).toBeFalsy();
+  });
+
+  it('still falls back for an empty or unparseable config with no backups at all', async () => {
+    const paths = dataBackup.resolvePaths(dir);
+    await fsp.writeFile(paths.configPath, '', 'utf8');
+    const empty = await dataBackup.verifyAndRecover({ userDataDir: dir });
+    expect(empty.fellBack).toBe(true);
+    expect(empty.fresh).toBeFalsy();
+
+    await fsp.writeFile(paths.configPath, '{ "settings": ', 'utf8');
+    const broken = await dataBackup.verifyAndRecover({ userDataDir: dir });
+    expect(broken.fellBack).toBe(true);
+    expect(broken.fresh).toBeFalsy();
   });
 });
 

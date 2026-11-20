@@ -15,7 +15,9 @@
  * @param {boolean} [o.locked]   forced off and not interactive, with a reason
  * @param {string}  [o.label]    accessible name
  * @param {string}  [o.title]    tooltip; for a locked switch, say WHY
- * @param {(next: boolean) => void} [o.onChange] not called while locked
+ * @param {(next: boolean) => boolean|void} [o.onChange] not called while
+ *        locked. Return `false` to REJECT the change — the switch springs
+ *        back. Any other return (including undefined) accepts it.
  * @param {string}  [o.className] extra class, e.g. the old BEM name
  * @returns {HTMLButtonElement}
  */
@@ -39,7 +41,32 @@ export function createToggleSwitch({
     // and a synthetic click could otherwise flip a locked switch.
     if (el.dataset.locked === 'true') return;
     const next = el.getAttribute('aria-checked') !== 'true';
-    if (onChange) onChange(next);
+
+    // MOVE THE SWITCH. This used to call `onChange` and nothing else, so the
+    // control never changed state on click — it only appeared to work where
+    // the caller happened to rebuild the row afterwards (the sources list
+    // calls renderSources()). Anywhere that did not, the switch sat visually
+    // unchanged while the setting behind it flipped: "hide file names in logs
+    // toggle just doesnt work when clicked" (Dave, 2026-08-25), reported
+    // twice, because the redaction really was saving each time.
+    //
+    // Worse than cosmetic. `next` is derived from `aria-checked`, which never
+    // updated, so every subsequent click recomputed the SAME value and wrote
+    // it again — the switch could be turned on and then never off.
+    //
+    // Optimistic, then reverted if the handler returns false, so a caller that
+    // refuses a change (an unreachable source) still gets the last word.
+    // `locked` is false here by definition — we returned above otherwise.
+    applyToggleState(el, { checked: next, locked: false, label, title });
+
+    let accepted = true;
+    try {
+      if (onChange) accepted = onChange(next) !== false;
+    } catch (err) {
+      accepted = false;
+      console.error('[toggle-switch] onChange threw, reverting:', err);
+    }
+    if (!accepted) applyToggleState(el, { checked: !next, locked: false, label, title });
   });
 
   return el;

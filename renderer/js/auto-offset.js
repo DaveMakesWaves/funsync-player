@@ -10,7 +10,12 @@
 //      each device's offset value.
 //
 // Sign convention: NEGATIVE offset means fire device commands EARLIER
-// (compensate for downstream latency). Matches the rest of the codebase.
+// (compensate for downstream latency) for the VR proxy (`vr.offset`),
+// Buttplug and T-Code, and for every value computeSuggestedOffset returns.
+// EXCEPT the Handy's and Autoblow's own offsets (`handy.defaultOffset`,
+// `autoblow.offset`): their APIs run the other way, POSITIVE = earlier
+// (Handy measured on Dave's device 2026-11-05; Autoblow from its vendored
+// API v1). Convert with VIDEO_SYNC_OFFSET_DEVICE_SIGN (video-sync-offset.js).
 
 // =============================================================================
 // PRESETS
@@ -46,14 +51,18 @@ export const VR_OFFSET_PRESETS = {
  */
 export const DEVICE_OFFSET_PRESETS = {
   // Handy via native WiFi API: HSSP latency is mostly absorbed by the
-  // device's clock-sync, but a small early-fire helps in practice.
-  handy:    -50,
+  // device's clock-sync, but a small early-fire helps in practice. In the
+  // Handy's OWN convention: positive fires it earlier (was -50, which
+  // fired it 50 ms late). Not applied anywhere yet (2026-11-05).
+  handy:    50,
   // Buttplug devices over BLE: ~50-80ms BLE round-trip, fire that early.
   buttplug: -80,
   // TCode over USB serial: very low latency, minor adjustment.
   tcode:    -20,
   // Autoblow — already has its own offset model; preset is conservative.
-  autoblow: -50,
+  // Its OWN convention too: positive is earlier (its API adds the offset to
+  // the script time). Not applied anywhere yet (2026-11-05).
+  autoblow: 50,
 };
 
 /**

@@ -7,8 +7,37 @@ contextBridge.exposeInMainWorld('funsync', {
   // Node's `process.platform`: 'win32' | 'linux' | 'darwin' | 'freebsd' | …
   platform: process.platform,
   getBackendPort: () => ipcRenderer.invoke('get-backend-port'),
+
+  // Global hotkeys (Eroto #316). `setGlobalShortcuts` returns a per-action
+  // {ok} so the settings UI can tell the user which binding another
+  // application already owns, rather than showing a key that does nothing.
+  setGlobalShortcuts: (bindings) => ipcRenderer.invoke('set-global-shortcuts', bindings),
+  onGlobalShortcut: (cb) => {
+    const handler = (_e, action) => cb(action);
+    ipcRenderer.on('global-shortcut', handler);
+    return () => ipcRenderer.removeListener('global-shortcut', handler);
+  },
+  // Duplicate finder. `trashVideoFiles` is the app's only destructive file
+  // operation — it moves to the OS Recycle Bin and returns a per-path result,
+  // never a bare boolean, so the UI can report what actually happened.
+  statVideoFiles: (paths) => ipcRenderer.invoke('stat-video-files', paths),
+  // Read-only sampled sha256 per path, for the "Identical" tier (FT-B01).
+  hashVideoFiles: (paths) => ipcRenderer.invoke('hash-video-files', paths),
+  trashVideoFiles: (paths) => ipcRenderer.invoke('trash-video-files', paths),
+
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getPortableInfo: () => ipcRenderer.invoke('get-portable-info'),
+
+  // Interface size (V79). The steps Settings > Appearance offers come from
+  // the module main applies them with, so the two cannot drift. Main sends
+  // `ui-scale-changed` after the View menu's zoom keys saved a new step.
+  uiScaleSteps: [...require('./ui-scale').UI_SCALE_STEPS],
+  uiScaleDefault: require('./ui-scale').DEFAULT_UI_SCALE,
+  onUiScaleChanged: (cb) => {
+    const handler = (_e, scale) => cb(scale);
+    ipcRenderer.on('ui-scale-changed', handler);
+    return () => ipcRenderer.removeListener('ui-scale-changed', handler);
+  },
 
   // Backend health monitoring — used by the disconnected-banner.
   getBackendHealth: () => ipcRenderer.invoke('get-backend-health'),
@@ -71,6 +100,8 @@ contextBridge.exposeInMainWorld('funsync', {
   deletePlaylist: (id) => ipcRenderer.invoke('delete-playlist', id),
   addVideoToPlaylist: (id, videoPath) => ipcRenderer.invoke('add-video-to-playlist', id, videoPath),
   removeVideoFromPlaylist: (id, videoPath) => ipcRenderer.invoke('remove-video-from-playlist', id, videoPath),
+  addVideosToPlaylist: (id, videoPaths) => ipcRenderer.invoke('add-videos-to-playlist', id, videoPaths),
+  removeVideosFromPlaylist: (id, videoPaths) => ipcRenderer.invoke('remove-videos-from-playlist', id, videoPaths),
   setPlaylistVideoPaths: (id, videoPaths) => ipcRenderer.invoke('set-playlist-video-paths', id, videoPaths),
 
   // Categories
@@ -93,7 +124,10 @@ contextBridge.exposeInMainWorld('funsync', {
   // Library
   selectDirectory: () => ipcRenderer.invoke('select-directory'),
   scanDirectory: (dirPath, sourceMap) => ipcRenderer.invoke('scan-directory', dirPath, sourceMap),
-  selectFunscript: () => ipcRenderer.invoke('select-funscript'),
+  // `{ multiple: true }`: several files, answered as a list (N-04).
+  // `{ defaultPath }`: open at that script's folder, or its nearest existing
+  // parent (Locate, 2026-11-18; main validates it).
+  selectFunscript: (opts) => ipcRenderer.invoke('select-funscript', opts),
   readFunscript: (filePath) => ipcRenderer.invoke('read-funscript', filePath),
   selectSubtitle: () => ipcRenderer.invoke('select-subtitle'),
 
@@ -109,7 +143,10 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // File utilities
   fileExists: (filePath, timeoutMs) => ipcRenderer.invoke('file-exists', filePath, timeoutMs),
-  filesExist: (filePaths, timeoutMs) => ipcRenderer.invoke('files-exist', filePaths, timeoutMs),
+  // `opts.why`: each answer is `{ status, why }` instead, telling a timeout
+  // from a denial (R4-14); without it the tri-state array as always.
+  filesExist: (filePaths, timeoutMs, opts) => ipcRenderer.invoke('files-exist', filePaths, timeoutMs, opts),
+  dirsListable: (dirPaths, timeoutMs) => ipcRenderer.invoke('dirs-listable', dirPaths, timeoutMs),
 
   // Data export/import
   exportData: () => ipcRenderer.invoke('export-data'),
@@ -122,6 +159,37 @@ contextBridge.exposeInMainWorld('funsync', {
   backupRestore: (subdir, filename) => ipcRenderer.invoke('backup:restore', { subdir, filename }),
   backupOpenFolder: () => ipcRenderer.invoke('backup:open-folder'),
   backupPreAction: (label) => ipcRenderer.invoke('backup:pre-action', label),
+  // Import and Restore relaunch with app.exit, which skips beforeunload, so
+  // main asks first: stop playback and every device, then answer with the
+  // same token (electron/relaunch-stop.js).
+  onStopForRelaunch: (cb) => {
+    const handler = (_e, token) => cb(token);
+    ipcRenderer.on('app:stop-for-relaunch', handler);
+    return () => ipcRenderer.removeListener('app:stop-for-relaunch', handler);
+  },
+  stoppedForRelaunch: (token) => ipcRenderer.send('app:stopped-for-relaunch', token),
+  // Unsaved script-editor edits on the way out (R3-19): the editor reports
+  // when it turns dirty or clean; while dirty, main asks before a close,
+  // quit, reload, update install or relaunch. The renderer acknowledges at
+  // once, then answers with the user's choice (electron/unsaved-edits-guard.js).
+  editorDirtyChanged: (dirty) => ipcRenderer.send('editor:dirty-state', dirty === true),
+  onConfirmUnsavedBeforeExit: (cb) => {
+    const handler = (_e, token, reason, expiresAt) => cb(token, reason, expiresAt);
+    ipcRenderer.on('app:confirm-unsaved', handler);
+    return () => ipcRenderer.removeListener('app:confirm-unsaved', handler);
+  },
+  // Main went ahead without this page's answer (it was busy past main's
+  // 10 s, or unresponsive): that question is withdrawn (R4 fix-up).
+  onConfirmUnsavedExpired: (cb) => {
+    const handler = (_e, token) => cb(token);
+    ipcRenderer.on('app:confirm-unsaved-expired', handler);
+    return () => ipcRenderer.removeListener('app:confirm-unsaved-expired', handler);
+  },
+  confirmUnsavedAck: (token) => ipcRenderer.send('app:confirm-unsaved-ack', token),
+  confirmUnsavedAnswer: (token, go) => ipcRenderer.send('app:confirm-unsaved-answer', token, go !== false),
+  // The unsaved-edits question is about to open in the main window for an
+  // action from another window: bring the main window forward (R3-21).
+  bringMainWindowForward: () => ipcRenderer.send('main-window:bring-forward'),
 
   // Backend API proxies
   fetchMetadata: (videoPath) => ipcRenderer.invoke('fetch-metadata', videoPath),
@@ -131,6 +199,8 @@ contextBridge.exposeInMainWorld('funsync', {
   resolveRemoteVideo: (pageUrl) => ipcRenderer.invoke('resolve-remote-video', pageUrl),
   getSpeedStats: () => ipcRenderer.invoke('get-speed-stats'),
   getDurations: () => ipcRenderer.invoke('get-durations'),
+  // The funscript metadata harvest (P1 tags): {paths?, since?, cache?} -> answer | null.
+  getScriptMeta: (query) => ipcRenderer.invoke('get-script-meta', query),
   convertFunscript: (content) => ipcRenderer.invoke('convert-funscript', content),
 
   // Shell
@@ -190,10 +260,16 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsRestoreSession: (cookie, username) => ipcRenderer.invoke('eroscripts-restore-session', cookie, username),
   eroscriptsStatus: () => ipcRenderer.invoke('eroscripts-status'),
   eroscriptsValidate: () => ipcRenderer.invoke('eroscripts-validate'),
+  eroscriptsCheckSession: (opts) => ipcRenderer.invoke('eroscripts-check-session', { force: opts?.force === true }),
   eroscriptsSearch: (query, page) => ipcRenderer.invoke('eroscripts-search', query, page),
   eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
+  eroscriptsTopicMeta: (topicId) => ipcRenderer.invoke('eroscripts-topic-meta', topicId),
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
-  eroscriptsDownload: (url, savePath) => ipcRenderer.invoke('eroscripts-download', url, savePath),
+  eroscriptsDownload: (url, savePath, opts) => ipcRenderer.invoke('eroscripts-download', url, savePath, opts),
+  // After a Cancel: main drops the bytes a look fetched for this URL (R4-09).
+  eroscriptsForgetDownload: (url) => ipcRenderer.invoke('eroscripts-forget-download', url),
+  // The Save dialog for a download, and nothing else: writes no file (R3-01).
+  pickDownloadSavePath: (suggestedName) => ipcRenderer.invoke('pick-download-save-path', suggestedName),
 
   // Editor pop-out window
   editorPopoutOpen: () => ipcRenderer.invoke('editor-popout:open'),
@@ -221,11 +297,57 @@ contextBridge.exposeInMainWorld('funsync', {
   playerPopoutOpen: () => ipcRenderer.invoke('player-popout:open'),
   playerPopoutClose: () => ipcRenderer.invoke('player-popout:close'),
   playerPopoutStatus: () => ipcRenderer.invoke('player-popout:status'),
+  playerPopoutReveal: () => ipcRenderer.invoke('player-popout:reveal'),
   playerPopoutRelay: (direction, payload) => ipcRenderer.invoke('player-popout:relay', direction, payload),
   onPlayerPopoutEvent: (callback) => {
     const handler = (_event, evt) => callback(evt);
     ipcRenderer.on('player-popout:event', handler);
     return () => ipcRenderer.removeListener('player-popout:event', handler);
+  },
+
+  // Stash S1 (notes/features/DESIGN-stash-s1.md; main: electron/stash-ipc.js).
+  // Every call returns plain JSON and never the API key. Main is the only
+  // writer of the Stash data and of settings.stash.url / .trustedCert, and
+  // tells the page: onStashChanged({rev}) after every data write (reload with
+  // stashGetData), onStashSettingsChanged(block) after a settings write,
+  // onStashProgress({kind, step, done, total}) during a sync and
+  // ({kind, step: 'finished', result}) at its end.
+  stashStatus: () => ipcRenderer.invoke('stash-status'),
+  stashGetData: () => ipcRenderer.invoke('stash-get-data'),
+  stashTest: (opts) => ipcRenderer.invoke('stash-test', opts),
+  stashLink: (opts) => ipcRenderer.invoke('stash-link', opts),
+  stashSetOptions: (opts) => ipcRenderer.invoke('stash-set-options', opts),
+  stashSaveKey: (apiKey) => ipcRenderer.invoke('stash-save-key', apiKey),
+  stashRemoveKey: () => ipcRenderer.invoke('stash-remove-key'),
+  stashTrustCertificate: (opts) => ipcRenderer.invoke('stash-trust-certificate', opts),
+  stashForgetCertificate: () => ipcRenderer.invoke('stash-forget-certificate'),
+  stashSync: (opts) => ipcRenderer.invoke('stash-sync', opts),
+  stashSyncOnStart: (opts) => ipcRenderer.invoke('stash-sync-on-start', opts),
+  stashSyncVideo: (video) => ipcRenderer.invoke('stash-sync-video', video),
+  stashCancel: () => ipcRenderer.invoke('stash-cancel'),
+  stashSearch: (opts) => ipcRenderer.invoke('stash-search', opts),
+  stashLinkScene: (opts) => ipcRenderer.invoke('stash-link-scene', opts),
+  stashChoose: (opts) => ipcRenderer.invoke('stash-choose', opts),
+  stashRefuse: (opts) => ipcRenderer.invoke('stash-refuse', opts),
+  stashUnlink: (opts) => ipcRenderer.invoke('stash-unlink', opts),
+  stashUndo: (undoId) => ipcRenderer.invoke('stash-undo', undoId),
+  stashRehome: (moves) => ipcRenderer.invoke('stash-rehome', moves),
+  stashRemoveData: () => ipcRenderer.invoke('stash-remove-data'),
+  stashOpenScene: (opts) => ipcRenderer.invoke('stash-open-scene', opts),
+  onStashChanged: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('stash-changed', handler);
+    return () => ipcRenderer.removeListener('stash-changed', handler);
+  },
+  onStashProgress: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('stash-progress', handler);
+    return () => ipcRenderer.removeListener('stash-progress', handler);
+  },
+  onStashSettingsChanged: (cb) => {
+    const handler = (_e, payload) => cb(payload);
+    ipcRenderer.on('stash-settings-changed', handler);
+    return () => ipcRenderer.removeListener('stash-settings-changed', handler);
   },
 
   // Auto-updater

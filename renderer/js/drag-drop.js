@@ -54,7 +54,9 @@ export class DragDrop {
       const files = await window.funsync.openFileDialog();
       if (!files || files.length === 0) return;
 
-      for (const fileData of files) {
+      const ordered = this._videosFirst(files);
+      const withScript = this._hasFunscript(ordered);
+      for (const fileData of ordered) {
         const ext = this._getExtension(fileData.name);
 
         if (VIDEO_EXTENSIONS.includes(ext)) {
@@ -62,7 +64,7 @@ export class DragDrop {
             name: fileData.name,
             path: fileData.path,
             _isPathBased: true,
-          });
+          }, { withScript });
         } else if (FUNSCRIPT_EXTENSIONS.includes(ext)) {
           const blob = new Blob([fileData.textContent], { type: 'application/json' });
           const file = new File([blob], fileData.name);
@@ -207,7 +209,9 @@ export class DragDrop {
 
     let acceptedCount = 0;
     let rejectedNames = [];
-    for (const file of files) {
+    const ordered = this._videosFirst(files);
+    const withScript = this._hasFunscript(ordered);
+    for (const file of ordered) {
       const ext = this._getExtension(file.name);
       const path = this._resolvePath(file);
       if (VIDEO_EXTENSIONS.includes(ext)) {
@@ -217,7 +221,7 @@ export class DragDrop {
         // still plays via a blob URL, just without path-keyed features.
         this.onVideoFile(path
           ? { name: file.name, path, _isPathBased: true }
-          : file);
+          : file, { withScript });
         acceptedCount++;
       } else if (FUNSCRIPT_EXTENSIONS.includes(ext)) {
         // app.js reads `file.path` to set the editor's autosave target.
@@ -241,6 +245,40 @@ export class DragDrop {
           : t('dropZone.unsupportedFiles', { names: rejectedNames.join(', '), supported: supportedList })
       );
     }
+  }
+
+  /**
+   * The files in the order they are handed over: videos first, then
+   * funscripts, then subtitles, then the rest, each kind in the order given
+   * (R3-16, also in v0.9.2). They used to go in the list's own order, which
+   * is whatever the file manager or the dialog hands over, and a funscript
+   * or subtitle listed before its video landed on the OLD video; then the
+   * new video's load replaced the script or cleared the subtitle. Loading
+   * the video first gives what came with it the new video to land on.
+   */
+  _videosFirst(files) {
+    const rank = (f) => {
+      const ext = this._getExtension(f?.name || '');
+      if (VIDEO_EXTENSIONS.includes(ext)) return 0;
+      if (FUNSCRIPT_EXTENSIONS.includes(ext)) return 1;
+      if (SUBTITLE_EXTENSIONS.includes(ext)) return 2;
+      return 3;
+    };
+    return Array.from(files)
+      .map((file, i) => ({ file, i, r: rank(file) }))
+      .sort((a, b) => a.r - b.r || a.i - b.i)
+      .map(({ file }) => file);
+  }
+
+  /**
+   * Does this pick or drop carry a funscript? Told to `onVideoFile` with each
+   * video (`{ withScript }`), before the script is handed over, so the app
+   * can hold the video's autoplay for the script's cloud upload from the
+   * start (the O / drag-and-drop upload gate, block F; the library open's
+   * FT-112 gate) and does not look for a script of its own.
+   */
+  _hasFunscript(files) {
+    return files.some((f) => FUNSCRIPT_EXTENSIONS.includes(this._getExtension(f?.name || '')));
   }
 
   _getExtension(filename) {

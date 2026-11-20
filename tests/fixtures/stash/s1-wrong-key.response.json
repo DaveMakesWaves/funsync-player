@@ -1,0 +1,11 @@
+{
+  "note": "A made-up ApiKey sent to a Stash with NO password: 401, WWW-Authenticate FormBased, empty body. Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by stage s1-1a-client, with the document from electron/stash-queries.js.",
+  "operationName": "FunSyncTest",
+  "documentSha256": "ba21034869d73b82de5715cd7e147a3c328923978dba4ac6a269fd8f73cc4a21",
+  "variables": {},
+  "status": 401,
+  "headers": {
+    "www-authenticate": "FormBased"
+  },
+  "body": ""
+}

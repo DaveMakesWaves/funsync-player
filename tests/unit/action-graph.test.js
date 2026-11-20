@@ -303,4 +303,48 @@ describe('ActionGraph', () => {
       expect(graph.viewEndMs).toBeLessThanOrEqual(30000);
     });
   });
+
+  // verify-1 (2026-11-07): paused, a click on the seek bar left the editor's
+  // view where it was and the playhead off-screen, docked and popped out,
+  // until playback started; the docked editor opened paused at 0:30 showed
+  // 0:00-0:10. Paused, the view now comes to a playhead that lands off it.
+  describe('paused: a seek off the view brings the view to the playhead', () => {
+    beforeEach(() => {
+      graph.setVideoDuration(90000);
+      graph.setViewport(18900, 28900);
+      graph.setCursorTime(20000);
+    });
+    const inView = () => graph._cursorMs >= graph.viewStartMs && graph._cursorMs <= graph.viewEndMs;
+
+    it('a seek to 4.08 s (off the 18.9-28.9 s view) brings the view there, same zoom', () => {
+      graph.setCursorTime(4080);
+      expect(inView()).toBe(true);
+      expect(graph.viewDurationMs).toBeCloseTo(10000, 6);
+      expect(graph.viewStartMs).toBe(0); // centred, held at the start of the video
+    });
+
+    it('a seek to 60 s is centred', () => {
+      graph.setCursorTime(60000);
+      expect((graph.viewStartMs + graph.viewEndMs) / 2).toBeCloseTo(60000, 6);
+    });
+
+    it('opened at 0:30 on a 0-10 s view: the view comes to 0:30', () => {
+      graph.setViewport(0, 10000);
+      graph.setCursorTime(30000);
+      expect(inView()).toBe(true);
+    });
+
+    it('a frame step or a seek inside the view leaves the view alone', () => {
+      graph.setCursorTime(20000 + 1000 / 30);
+      graph.setCursorTime(25000);
+      expect(graph.viewStartMs).toBe(18900);
+      expect(graph.viewEndMs).toBe(28900);
+    });
+
+    it('a tick that does not move the playhead never pulls back a view the user panned away', () => {
+      graph.setViewport(50000, 60000); // the user panned; the playhead (20 s) is off it
+      for (let i = 0; i < 5; i++) graph.setCursorTime(20000); // the pop-out's 33 ms ticks
+      expect(graph.viewStartMs).toBe(50000);
+    });
+  });
 });

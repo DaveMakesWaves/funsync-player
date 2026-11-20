@@ -9,6 +9,16 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { KeyboardHandler } from '../../renderer/js/keyboard.js';
 
+// One live handler at a time. A KeyboardHandler binds to `document` for
+// good, so building one per test used to leave every earlier test's handler
+// listening too. These events are cancelable, and the handler leaves alone
+// a key something else already preventDefault-ed (V43), so a stale handler
+// taking the key first would hide this test's handler. The real app has
+// exactly one.
+class TestKeyboardHandler extends KeyboardHandler { _bindEvents() {} }
+let live = null;
+document.addEventListener('keydown', (e) => live?._onKeyDown(e));
+
 function createMockPlayer() {
   return {
     video: { volume: 0.5, paused: true, currentTime: 0, duration: 300 },
@@ -37,7 +47,7 @@ describe('KeyboardHandler — playback speed shortcuts', () => {
 
   beforeEach(() => {
     player = createMockPlayer();
-    handler = new KeyboardHandler({
+    handler = live = new TestKeyboardHandler({
       videoPlayer: player,
       connectionPanel: null,
       onOpenFile: null,

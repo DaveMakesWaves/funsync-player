@@ -1,0 +1,45 @@
+{
+  "data": {
+    "findGroups": {
+      "count": 2,
+      "groups": [
+        {
+          "id": "1",
+          "name": "Synthetic Series A",
+          "updated_at": "2026-11-19T09:24:26Z",
+          "scene_count": 3,
+          "scenes": [
+            {
+              "id": "1",
+              "title": "Synthetic Scene Small"
+            },
+            {
+              "id": "2",
+              "title": ""
+            },
+            {
+              "id": "3",
+              "title": "Synthetic Scene Mid"
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "name": "Synthetic Series B",
+          "updated_at": "2026-11-19T09:24:26Z",
+          "scene_count": 2,
+          "scenes": [
+            {
+              "id": "1",
+              "title": "Synthetic Scene Small"
+            },
+            {
+              "id": "4",
+              "title": ""
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

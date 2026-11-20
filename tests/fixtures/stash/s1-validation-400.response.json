@@ -1,0 +1,22 @@
+{
+  "note": "A field this Stash does not know: HTTP 400, extensions.code GRAPHQL_VALIDATION_FAILED. How an older Stash answers a newer field (the client: tooOld). Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by the design pass (stage design-stash, 11-invalid-query.json); copied by s1-1a-client.",
+  "document": "{ findScenes { scenes { no_such_field } } }",
+  "status": 400,
+  "body": {
+    "errors": [
+      {
+        "message": "Cannot query field \"no_such_field\" on type \"Scene\".",
+        "locations": [
+          {
+            "line": 1,
+            "column": 25
+          }
+        ],
+        "extensions": {
+          "code": "GRAPHQL_VALIDATION_FAILED"
+        }
+      }
+    ],
+    "data": null
+  }
+}

@@ -39,21 +39,94 @@ describe('EditableScript.loadFromData', () => {
     expect(script.dirty).toBe(false);
   });
 
-  it('loads metadata', () => {
+  // FT-001. These two cases used to assert the INNER metadata shape
+  // (`_metadata.creator`, raw `_bookmarks[0].time`) as correct, which pinned
+  // the on-disk data loss: every save after the script switcher wrote that
+  // inner object out as the whole file. They now assert what the user sees
+  // and what lands on disk.
+  it('the metadata editor sees the file\'s fields after a switcher load', () => {
     script.loadFromData({
       actions: [{ at: 0, pos: 0 }],
       metadata: { creator: 'test', description: 'hello' },
     });
-    expect(script._metadata.creator).toBe('test');
+    // _openMetadataModal reads getMetadata().metadata
+    const md = script.getMetadata().metadata;
+    expect(md.creator).toBe('test');
+    expect(md.description).toBe('hello');
   });
 
-  it('loads bookmarks from metadata', () => {
+  it('loads bookmarks in every time shape the player accepts', () => {
     script.loadFromData({
       actions: [{ at: 0, pos: 0 }],
-      metadata: { bookmarks: [{ time: 5000, label: 'Start' }] },
+      metadata: {
+        bookmarks: [
+          { time: '00:00:05.000', name: 'MFP TimeSpan' },
+          { at: 1000, name: 'ms number' },
+          { at: '2500', name: 'string ms' },
+        ],
+      },
     });
-    expect(script._bookmarks).toHaveLength(1);
-    expect(script._bookmarks[0].time).toBe(5000);
+    expect(script.getBookmarks()).toEqual([
+      { at: 1000, name: 'ms number' },
+      { at: 2500, name: 'string ms' },
+      { at: 5000, name: 'MFP TimeSpan' },
+    ]);
+  });
+
+  it('a save after a switcher load writes the file back with its shape intact', () => {
+    const file = {
+      version: '1.1',
+      inverted: true,
+      range: 90,
+      axes: [{ id: 'R1', actions: [{ at: 0, pos: 50 }, { at: 400, pos: 70 }] }],
+      metadata: {
+        title: 'Variant Clip',
+        creator: 'someone',
+        tags: ['slow', 'tease'],
+        bookmarks: [{ time: '00:00:05.000', name: 'x' }],
+      },
+      actions: [{ at: 0, pos: 0 }, { at: 500, pos: 100 }, { at: 1000, pos: 0 }],
+    };
+    script.loadFromData(JSON.parse(JSON.stringify(file)));
+    // An edit, as the user's nudge (Up/Down on a selected point) would make.
+    script.moveActions([1], 0, -5);
+    expect(script.dirty).toBe(true);
+
+    const out = JSON.parse(script.toFunscriptJSON());
+    expect(out.actions[1]).toEqual({ at: 500, pos: 95 });
+    // Top-level fields stay top-level, untouched.
+    expect(out.version).toBe('1.1');
+    expect(out.inverted).toBe(true);
+    expect(out.range).toBe(90);
+    expect(out.axes).toEqual(file.axes);
+    // Metadata stays under metadata, nothing leaks to the top level.
+    expect(out.metadata.title).toBe('Variant Clip');
+    expect(out.metadata.creator).toBe('someone');
+    expect(out.metadata.tags).toEqual(['slow', 'tease']);
+    expect(out.title).toBeUndefined();
+    expect(out.creator).toBeUndefined();
+    expect(out.tags).toBeUndefined();
+    expect(out.bookmarks).toBeUndefined();
+    // The MFP bookmark keeps its time (5 s), written in the app's own shape.
+    expect(out.metadata.bookmarks).toEqual([{ at: 5000, name: 'x' }]);
+    // Exactly the file's keys, no more and no fewer.
+    expect(Object.keys(out).sort()).toEqual(Object.keys(file).sort());
+  });
+
+  it('writes the same file as the player-load path (loadFromEngine)', () => {
+    const file = {
+      version: '1.1',
+      range: 80,
+      metadata: { title: 'T', bookmarks: [{ at: 2000, name: 'b' }] },
+      actions: [{ at: 0, pos: 10 }, { at: 700, pos: 90 }],
+    };
+    const fromEngine = new EditableScript();
+    fromEngine.loadFromEngine({
+      getActions: () => file.actions,
+      getMetadata: () => { const { actions, ...rest } = JSON.parse(JSON.stringify(file)); return rest; },
+    });
+    script.loadFromData(JSON.parse(JSON.stringify(file)));
+    expect(script.toFunscriptJSON()).toBe(fromEngine.toFunscriptJSON());
   });
 
   it('handles missing actions', () => {

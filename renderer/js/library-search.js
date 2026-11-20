@@ -51,6 +51,49 @@ export function compareNames(a, b) {
 }
 
 /**
+ * Name A-Z's key for a VIDEO (R3-28): the file name WITHOUT its extension,
+ * then the extension as the tie-break, the way Windows Explorer lists
+ * "Alpha Scene.mp4" before "Alpha Scene (copy).mp4". The desktop's `name`
+ * carries the extension and the phone's (/api/remote/videos) does not, so
+ * the extension is read from `path` when there is one: both sides then sort
+ * on the same key, whatever their `name` holds. Mirrored in
+ * backend/web-remote/library-search.js; web-remote-natural-sort.test.js
+ * feeds each side the objects it really sorts.
+ *
+ * @param {{name?: string, path?: string}} video
+ * @returns {{stem: string, ext: string}}
+ */
+export function videoNameKey(video) {
+  const name = String(video?.name ?? '');
+  const file = String(video?.path ?? '').split(/[\\/]/).pop() || name;
+  const dot = file.lastIndexOf('.');
+  const ext = dot > 0 ? file.slice(dot + 1) : '';
+  const stem = ext && name.toLowerCase().endsWith(`.${ext.toLowerCase()}`)
+    ? name.slice(0, name.length - ext.length - 1)
+    : name;
+  return { stem, ext };
+}
+
+/**
+ * Compare two videos by name: name without extension (natural, case
+ * ignored), then the extension, then the path, so the order never depends
+ * on the order the list arrived in (the phone's comes sorted by the
+ * backend, the desktop's in scan order). Use it wherever VIDEOS are ordered
+ * by name; `compareNames` stays the comparator for bare strings.
+ *
+ * @param {{name?: string, path?: string}} a
+ * @param {{name?: string, path?: string}} b
+ * @returns {number}
+ */
+export function compareVideoNames(a, b) {
+  const ka = videoNameKey(a);
+  const kb = videoNameKey(b);
+  return compareNames(ka.stem, kb.stem)
+    || compareNames(ka.ext, kb.ext)
+    || compareNames(a?.path, b?.path);
+}
+
+/**
  * Token-based fuzzy search across video names. The query is split on
  * whitespace; every token must match (in any order). Separators
  * (`.`, `_`, `-`, brackets, etc.) are flattened to spaces so
@@ -63,9 +106,19 @@ export function compareNames(a, b) {
  *    +10  — path-only hit (e.g. typing a studio/folder name)
  *    +20  — context-only hit (collection/category name)
  *
+ * The in-order "fuzzy" fallback applies to the NAME only. Path and context
+ * hits must contain each token as written: a subsequence of a long path
+ * matches nearly any short query ("alpha" found a, l, p, h, a somewhere in
+ * every file's folder chain and returned the whole library, app test V35).
+ * With `pathRoots` (the library's source folders) the path is scored from
+ * the source folder's own name down, so the folders above it
+ * (`C:/Users/<you>/AppData/...`) never match anything.
+ *
+ * Mirrored in backend/web-remote/library-search.js: keep both identical.
+ *
  * @param {VideoEntry[]} videos
  * @param {string} query
- * @param {{ searchPaths?: boolean, contextMap?: Map<string,string[]>|Object<string,string[]> }} [options]
+ * @param {{ searchPaths?: boolean, pathRoots?: string[], contextMap?: Map<string,string[]>|Object<string,string[]> }} [options]
  * @returns {VideoEntry[]} filtered, ranked results
  */
 export function fuzzySearch(videos, query, options = {}) {
@@ -79,6 +132,7 @@ export function fuzzySearch(videos, query, options = {}) {
 
   const searchPaths = options.searchPaths !== false;
   const contextMap = options.contextMap || null;
+  const pathRoots = _prepareRoots(options.pathRoots);
 
   const results = [];
   for (const video of videos) {
@@ -93,9 +147,10 @@ export function fuzzySearch(videos, query, options = {}) {
     if (nameScore >= 0) { results.push({ video, score: nameScore }); continue; }
 
     // Tier 2: path-only hit — user typed studio/folder name.
-    // Penalty keeps name matches above path-only matches.
+    // Penalty keeps name matches above path-only matches. Exact tokens
+    // only, from the source folder down (see the doc comment).
     if (searchPaths && video.path) {
-      const pathScore = _scoreAll(_normalize(video.path), normQuery, tokens);
+      const pathScore = _scoreAll(_normalize(_pathFromRoot(video.path, pathRoots)), normQuery, tokens, false);
       if (pathScore >= 0) { results.push({ video, score: pathScore + 10 }); continue; }
     }
 
@@ -109,7 +164,7 @@ export function fuzzySearch(videos, query, options = {}) {
         for (const s of ctxList) {
           const ns = _normalize(s);
           if (!ns) continue;
-          const cs = _scoreAll(ns, normQuery, tokens);
+          const cs = _scoreAll(ns, normQuery, tokens, false);
           if (cs >= 0 && cs < best) best = cs;
         }
         if (Number.isFinite(best)) results.push({ video, score: best + 20 });
@@ -117,7 +172,7 @@ export function fuzzySearch(videos, query, options = {}) {
     }
   }
 
-  results.sort((a, b) => a.score - b.score || compareNames(a.video.name, b.video.name));
+  results.sort((a, b) => a.score - b.score || compareVideoNames(a.video, b.video));
   return results.map(r => r.video);
 }
 
@@ -139,24 +194,56 @@ function _normalize(s) {
     .trim();
 }
 
-function _scoreAll(name, fullQuery, tokens) {
+// Source roots, canonicalised once per search: forward slashes, no trailing
+// slash, lowercase. Longest first, so a source nested inside another source
+// is cut at its own folder.
+function _prepareRoots(roots) {
+  if (!Array.isArray(roots) || roots.length === 0) return [];
+  const out = [];
+  for (const r of roots) {
+    if (!r) continue;
+    const c = String(r).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+    if (c) out.push(c);
+  }
+  return out.sort((a, b) => b.length - a.length);
+}
+
+// The part of `path` a path search may match: from the source folder's own
+// name down ("library/Studio/clip.mp4" for a source at C:/.../library).
+// A path under no known root is used whole.
+function _pathFromRoot(path, roots) {
+  if (roots.length === 0) return path;
+  const p = String(path).replace(/\\/g, '/').toLowerCase();
+  for (const r of roots) {
+    if (p.startsWith(r + '/')) {
+      const cut = r.lastIndexOf('/');
+      return cut >= 0 ? p.slice(cut + 1) : p;
+    }
+  }
+  return path;
+}
+
+// `fuzzy: false` = every token must appear as written (path and context
+// tiers); the in-order subsequence fallback is for names only.
+function _scoreAll(name, fullQuery, tokens, fuzzy = true) {
   if (name === fullQuery) return 0;
   if (name.includes(fullQuery)) return tokens.length * 0.4;
 
   let total = 0;
   for (const tok of tokens) {
-    const s = _scoreToken(name, tok);
+    const s = _scoreToken(name, tok, fuzzy);
     if (s < 0) return -1;
     total += s;
   }
   return total;
 }
 
-function _scoreToken(name, token) {
+function _scoreToken(name, token, fuzzy = true) {
   if (!token) return 0;
   const idx = name.indexOf(token);
   if (idx === 0) return 0;
   if (idx > 0) return name[idx - 1] === ' ' ? 0.5 : 1;
+  if (!fuzzy) return -1;
 
   let qi = 0;
   let gaps = 0;
@@ -211,12 +298,23 @@ export function computeSpeedStats(actions) {
 /**
  * Sort videos by a given criterion.
  *
+ * Stash's two sorts (Stash "next" lot, 2026-11-19; DESIGN-stash-s1.md (j)
+ * #3, #10), offered only while Stash is on: `stashRating` (Stash's
+ * rating100) and `stashLastPlayed` (Stash's last played). Their values come
+ * in `options.stash`, path -> `{rating100, lastPlayedMs}` (stash-scene-
+ * fields.js stashFieldsIndex: linked videos only). A video with no value
+ * (unrated, never played, not linked) sorts LAST in both directions, and
+ * equal values go A-Z by name in both directions, so a re-render or a
+ * rescan never shuffles them. The phone (backend/web-remote) has no Stash
+ * data and offers neither sort.
+ *
  * @param {VideoEntry[]} videos — list to sort (not mutated)
- * @param {'name'|'duration'|'avgSpeed'|'maxSpeed'|'hasFunscript'} sortBy — sort criterion
+ * @param {'name'|'duration'|'avgSpeed'|'maxSpeed'|'hasFunscript'|'stashRating'|'stashLastPlayed'} sortBy — sort criterion
  * @param {'asc'|'desc'} [order='asc'] — sort direction
+ * @param {{stash?: Map<string, {rating100?: number|null, lastPlayedMs?: number|null}>}} [options]
  * @returns {VideoEntry[]} sorted copy
  */
-export function sortVideos(videos, sortBy, order = 'asc') {
+export function sortVideos(videos, sortBy, order = 'asc', options = {}) {
   if (!videos || videos.length === 0) return [];
 
   const sorted = [...videos];
@@ -224,7 +322,7 @@ export function sortVideos(videos, sortBy, order = 'asc') {
 
   switch (sortBy) {
     case 'name':
-      sorted.sort((a, b) => dir * compareNames(a.name, b.name));
+      sorted.sort((a, b) => dir * compareVideoNames(a, b));
       break;
 
     case 'duration':
@@ -255,9 +353,31 @@ export function sortVideos(videos, sortBy, order = 'asc') {
       sorted.sort((a, b) => {
         const aVal = a.hasFunscript ? 1 : 0;
         const bVal = b.hasFunscript ? 1 : 0;
-        return -dir * (aVal - bVal) || compareNames(a.name, b.name);
+        return -dir * (aVal - bVal) || compareVideoNames(a, b);
       });
       break;
+
+    case 'stashRating':
+    case 'stashLastPlayed': {
+      const field = sortBy === 'stashRating' ? 'rating100' : 'lastPlayedMs';
+      const stash = options?.stash;
+      const keyOf = (v) => {
+        const fields = stash instanceof Map ? stash.get(v?.path) : null;
+        const value = fields ? fields[field] : null;
+        return typeof value === 'number' && Number.isFinite(value) ? value : null;
+      };
+      const keys = new Map(sorted.map((v) => [v, keyOf(v)]));
+      sorted.sort((a, b) => {
+        const ka = keys.get(a);
+        const kb = keys.get(b);
+        if (ka === null || kb === null) {
+          if (ka !== kb) return ka === null ? 1 : -1;
+          return compareVideoNames(a, b);
+        }
+        return dir * (ka - kb) || compareVideoNames(a, b);
+      });
+      break;
+    }
 
     default:
       // No sort — return copy as-is
@@ -325,7 +445,7 @@ export function dedupeByName(videos) {
   }
 
   const keyOf = (v) => {
-    const name = v?.name || String(v?.path || '').split(/[\/]/).pop() || '';
+    const name = v?.name || String(v?.path || '').split(/[\\/]/).pop() || '';
     return name.toLowerCase();
   };
 

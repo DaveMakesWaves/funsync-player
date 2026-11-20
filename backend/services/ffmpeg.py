@@ -13,29 +13,83 @@ from typing import Any
 
 
 def _find_binary(name: str) -> str:
-    """Find ffmpeg/ffprobe binary — bundled alongside the backend exe, or on PATH."""
-    # Check next to the running executable (PyInstaller bundle)
+    """Find ffmpeg/ffprobe binary — bundled with the packaged app, or on PATH.
+
+    The packaged branch used to look for `<exe dir>/<name>` and nothing else,
+    which was wrong twice over, and the app never said so:
+
+      1. Nothing puts ffmpeg next to the backend exe. electron-builder ships
+         the backend to `resources/backend/` via `extraResources`, and ffmpeg
+         to `<install root>/ffmpeg/` via `extraFiles` — two different trees.
+      2. It omitted the `.exe` suffix, so on Windows the probe could not have
+         matched even if the file had been there.
+
+    So every packaged install fell through to a bare `ffmpeg` on PATH, and
+    worked only for users who happen to have ffmpeg installed system-wide.
+    Sylvain-Et-Un does not: 104 videos, 103 thumbnail requests, 103 backend
+    500s, zero successes (log, 2026-08-24). It looked like a portable-mode
+    bug and is not — portable and NSIS share the layout. It survived because
+    the developer machine has ffmpeg on PATH via WinGet, so the fallback
+    quietly did the right thing there, and because the only tests over this
+    function exercised the DEV branch.
+
+    `<exe dir>/../../ffmpeg/` is the shipped layout on both Windows targets
+    and the Linux AppImage, so one rule covers all three without a packaging
+    change. The suffix-less and same-dir probes are kept so a future build
+    that DOES place the binaries beside the exe still resolves.
+    """
+    exe_suffix = ".exe" if os.name == "nt" else ""
+    filename = name + exe_suffix
+
     if getattr(sys, "frozen", False):
-        bundled = os.path.join(os.path.dirname(sys.executable), name)
-        if os.path.exists(bundled):
-            return bundled
+        exe_dir = os.path.dirname(sys.executable)
+        for candidate in (
+            os.path.join(exe_dir, filename),
+            os.path.join(exe_dir, name),                              # legacy, suffix-less
+            os.path.join(exe_dir, "ffmpeg", filename),
+            os.path.join(exe_dir, "..", "..", "ffmpeg", filename),    # <root>/ffmpeg — SHIPPED
+            os.path.join(exe_dir, "..", "..", filename),
+        ):
+            if os.path.exists(candidate):
+                return os.path.abspath(candidate)
+
     # Check sibling dev directories. Windows keeps ffmpeg in `ffmpeg/`;
     # Linux keeps it in `ffmpeg-linux/` (the CI build downloads platform-
     # specific static binaries into each). Probe both so dev runs work on
     # either OS without a reshuffle.
     project_root = os.path.join(os.path.dirname(__file__), "..", "..")
-    exe_suffix = ".exe" if os.name == "nt" else ""
     dev_dirs = ("ffmpeg-linux", "ffmpeg") if os.name != "nt" else ("ffmpeg",)
     for d in dev_dirs:
-        dev_path = os.path.join(project_root, d, name + exe_suffix)
+        dev_path = os.path.join(project_root, d, filename)
         if os.path.exists(dev_path):
             return os.path.abspath(dev_path)
-    # Fall back to PATH
+
+    # Fall back to PATH. This is a real fallback, not a resting state — see
+    # the startup log below, which says so out loud.
     return name
 
 
 FFPROBE = _find_binary("ffprobe")
 FFMPEG = _find_binary("ffmpeg")
+
+
+def describe_binaries() -> dict:
+    """Where ffmpeg/ffprobe were resolved, and whether that was a real find.
+
+    Logged once at startup. The whole reason this bug cost a user their entire
+    thumbnail library in silence is that nothing anywhere recorded which
+    binary was going to be used, so a total outage and a working install
+    produced identical logs.
+    """
+    return {
+        "ffmpeg": FFMPEG,
+        "ffprobe": FFPROBE,
+        # `bundled` means we found a file on disk; otherwise we are trusting
+        # PATH and will only find out when the first thumbnail fails.
+        "ffmpeg_bundled": os.path.isabs(FFMPEG) and os.path.exists(FFMPEG),
+        "ffprobe_bundled": os.path.isabs(FFPROBE) and os.path.exists(FFPROBE),
+        "frozen": bool(getattr(sys, "frozen", False)),
+    }
 
 
 # Suppress the cmd.exe window that Windows creates for every ffmpeg /
@@ -216,7 +270,11 @@ def get_metadata(video_path: str) -> dict[str, Any]:
         result = run_silent(
             [
                 FFPROBE,
-                "-v", "quiet",
+                # "error", not "quiet": stdout is the same JSON either way, and
+                # a failed probe now says WHY. With "quiet" stderr was empty,
+                # so the thumbnail warning read "ffprobe failed:" and nothing
+                # after it (verify-2, 2026-11-07; also in v0.9.2).
+                "-v", "error",
                 "-print_format", "json",
                 "-show_format",
                 "-show_streams",
@@ -237,7 +295,7 @@ def get_metadata(video_path: str) -> dict[str, Any]:
         raise RuntimeError("ffprobe not found. Install ffmpeg to use metadata features.")
 
     if result.returncode != 0:
-        raise RuntimeError(f"ffprobe failed: {result.stderr}")
+        raise RuntimeError(f"ffprobe failed: {_one_line(result.stderr)}")
 
     data = json.loads(result.stdout)
 
@@ -374,7 +432,7 @@ def generate_thumbnails(
         raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
 
     if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg thumbnail generation failed: {result.stderr}")
+        raise RuntimeError(f"ffmpeg thumbnail generation failed: {_one_line(result.stderr, 500)}")
 
     # Collect generated files
     thumbnails = []
@@ -537,10 +595,22 @@ def remux_to_mp4(video_path: str) -> dict[str, Any]:
 
     if result.returncode != 0 or not os.path.exists(out_path) or os.path.getsize(out_path) == 0:
         _safe_unlink(out_path)  # don't leave a half-written file in the cache
-        tail = (result.stderr or "")[-500:]
-        raise RuntimeError(f"ffmpeg remux failed: {tail}")
+        raise RuntimeError(f"ffmpeg remux failed: {_one_line(result.stderr, 500)}")
 
     return {"path": out_path, "cached": False, "vcodec": vcodec, "acodec": acodec}
+
+
+def _one_line(text, keep: int = 0) -> str:
+    """ffmpeg / ffprobe stderr as ONE line, optionally only its last `keep`
+    characters (the cause is printed last) (E-11).
+
+    stderr is several lines ("[mov,...] moov atom not found" then
+    "<file>: Invalid data found when processing input"), and the message goes
+    into a 500's detail that main.js logs as one warning: the second line
+    reached main.log with no timestamp or level, so a grep by [warn] missed it.
+    """
+    flat = " ".join(str(text or "").split())
+    return flat[-keep:] if keep and len(flat) > keep else flat
 
 
 def _safe_unlink(path: str) -> None:
@@ -550,6 +620,35 @@ def _safe_unlink(path: str) -> None:
             os.remove(path)
     except OSError:
         pass
+
+
+def is_complete_jpeg(path: str) -> bool:
+    """True when `path` is a non-empty file that starts with a JPEG SOI
+    (FF D8) and ends with its EOI (FF D9) (FT-084).
+
+    A thumbnail ffmpeg was killed in the middle of (the subprocess timeout)
+    is a cut-off JPEG: it exists, so it used to count as a cache hit and was
+    served for good. Every file this is asked about is the app's own cache
+    output, which ffmpeg ends exactly at the EOI.
+    """
+    try:
+        size = os.path.getsize(path)
+        if size < 4:
+            return False
+        with open(path, "rb") as f:
+            head = f.read(2)
+            f.seek(-2, os.SEEK_END)
+            tail = f.read(2)
+        return head == b"\xff\xd8" and tail == b"\xff\xd9"
+    except OSError:
+        return False
+
+
+def _temp_jpeg_path(output_path: str) -> str:
+    """A sibling temp name for ffmpeg to write first; it ends in `.jpg` so
+    ffmpeg still picks the JPEG muxer from the extension (FT-084)."""
+    base = output_path[:-4] if output_path.lower().endswith(".jpg") else output_path
+    return f"{base}.part-{os.getpid()}-{threading.get_ident()}.jpg"
 
 
 def generate_single_thumbnail(
@@ -628,15 +727,19 @@ def generate_single_thumbnail(
     out_width = metadata.get("width") or width
     out_height = metadata.get("height") or 0
 
-    # Cache hit — bail early.
+    # Cache hit — bail early. Only a whole JPEG counts (FT-084): a file a
+    # killed ffmpeg left behind (written before this wrote to a temp name
+    # first) is removed and generated again.
     if os.path.exists(output_path):
-        return {
-            "path": output_path,
-            "duration": duration,
-            "width": width,
-            "height": (round(width * out_height / out_width)
-                       if out_width and out_height else 0),
-        }
+        if is_complete_jpeg(output_path):
+            return {
+                "path": output_path,
+                "duration": duration,
+                "width": width,
+                "height": (round(width * out_height / out_width)
+                           if out_width and out_height else 0),
+            }
+        _safe_unlink(output_path)
 
     if duration <= 0:
         raise RuntimeError("Video has no duration; cannot grab thumbnail")
@@ -657,89 +760,133 @@ def generate_single_thumbnail(
     else:
         seek_time = max(10.0, duration * seek_pct) if duration > 60 else duration * seek_pct
 
-    try:
-        result = run_silent(
-            [
-                FFMPEG,
-                # `-skip_frame nokey` tells the decoder to discard all
-                # non-keyframe (B/P) data. Combined with `-ss` fast-seek
-                # (which already lands on/near a keyframe), this means
-                # the decoder produces ONE keyframe near our target
-                # instead of decoding forward through expensive B/P
-                # frames. For HEVC at 6K-8K (typical for VR libraries)
-                # this is a 4-12× speedup vs plain software decode and
-                # also beats every hardware-accel variant we benchmarked
-                # (cuda, qsv, d3d11va) — those have per-subprocess GPU
-                # context init overhead that exceeds the savings on
-                # short single-frame jobs, AND they fragment by
-                # platform/GPU. `skip_frame nokey` is portable: pure
-                # software, works without any GPU, identical behaviour
-                # on Windows/Linux/macOS.
-                #
-                # Trade-off: output is the nearest-keyframe to our seek
-                # target, not the exact frame at the seek time. For
-                # thumbnails that's fine — keyframes are 1-3 seconds
-                # apart in typical encoding, the corrected seek formula
-                # above puts us well past studio idents either way.
-                #
-                # Benchmark on a 32-video VR library (mix of H.264 1080p
-                # and HEVC 6K-8K), concurrency 4, NVIDIA + Intel hybrid
-                # laptop:
-                #   skip_frame nokey:  7.6s total  (0.9s avg, 5.7s max)
-                #   hwaccel cuda:     33.6s total  (4.0s avg, 17.6s max)
-                #   plain software:   43.8s total  (5.2s avg, 26.1s max)
-                #   hwaccel auto:     62.5s total  (7.0s avg, 40.2s max)
-                #
-                # See bench/bench_thumbnails.py to re-run on other
-                # hardware. Must come BEFORE -i (decoder option).
-                #
-                # Omitted in exact mode: skipping non-keyframes makes the
-                # output the nearest KEYFRAME to the seek target (fine
-                # for auto thumbs, wrong for a user-picked frame). Without
-                # it, `-ss` before `-i` is frame-accurate in modern ffmpeg
-                # — it seeks to the prior keyframe and decodes forward to
-                # the exact timestamp.
-                *([] if exact else ["-skip_frame", "nokey"]),
-                # -ss BEFORE -i = fast seek (skips ahead via container
-                # index instead of decoding from the start). Order matters.
-                "-ss", str(seek_time),
-                "-i", video_path,
-                "-frames:v", "1",
-                # NOTE: an earlier revision used `thumbnail=N` here to
-                # auto-reject black/fade frames. Reverted because it
-                # forces the decoder to produce N full-resolution frames,
-                # which on 8K HEVC content is ~5-10× slower than software
-                # can sustain — under the renderer's 8-way concurrent
-                # thumbnail queue, the 30s subprocess timeout fired on
-                # every 6K/8K HEVC file in a typical VR library. The
-                # corrected `seek_time` formula above (10s minimum past
-                # the start, past typical studio idents) is the actual
-                # fix for the original black-thumbnail bug; the analysis
-                # filter was overkill. If we ever need cheaper black
-                # detection, do it Python-side after decoding ONE frame
-                # (read JPEG, compute mean luma, retry with deeper seek
-                # if dark). One decode per attempt instead of N.
-                "-vf", f"scale={width}:-2",  # -2 = preserve AR, even-rounded
-                "-q:v", "5",
-                "-y",
-                output_path,
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            # Lowered from 60s so a slow/disconnected drive frees its worker
-            # slot sooner (see THUMBNAIL_TIMEOUT_SEC). Genuine 8K-HEVC decode
-            # finishes well inside this; truly-broken files (corrupt streams,
-            # hung NAS reads, spun-down HDDs) time out ~2.4× faster instead of
-            # holding the queue for a full minute.
-            timeout=THUMBNAIL_TIMEOUT_SEC,
-        )
-    except FileNotFoundError:
-        raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
+    tmp_path = _temp_jpeg_path(output_path)
 
-    if result.returncode != 0 or not os.path.exists(output_path):
-        raise RuntimeError(f"ffmpeg single-thumbnail failed: {result.stderr}")
+    # `-hide_banner -loglevel error` leave stderr holding only the errors.
+    # Without them it opened with the version/build banner, and the banner
+    # was all a failure log line ever showed (app test V32).
+    cmd = [
+        FFMPEG,
+        "-hide_banner", "-loglevel", "error",
+        # `-skip_frame nokey` tells the decoder to discard all
+        # non-keyframe (B/P) data. Combined with `-ss` fast-seek
+        # (which already lands on/near a keyframe), this means
+        # the decoder produces ONE keyframe near our target
+        # instead of decoding forward through expensive B/P
+        # frames. For HEVC at 6K-8K (typical for VR libraries)
+        # this is a 4-12× speedup vs plain software decode and
+        # also beats every hardware-accel variant we benchmarked
+        # (cuda, qsv, d3d11va) — those have per-subprocess GPU
+        # context init overhead that exceeds the savings on
+        # short single-frame jobs, AND they fragment by
+        # platform/GPU. `skip_frame nokey` is portable: pure
+        # software, works without any GPU, identical behaviour
+        # on Windows/Linux/macOS.
+        #
+        # Trade-off: output is the nearest-keyframe to our seek
+        # target, not the exact frame at the seek time. For
+        # thumbnails that's fine — keyframes are 1-3 seconds
+        # apart in typical encoding, the corrected seek formula
+        # above puts us well past studio idents either way.
+        #
+        # Benchmark on a 32-video VR library (mix of H.264 1080p
+        # and HEVC 6K-8K), concurrency 4, NVIDIA + Intel hybrid
+        # laptop:
+        #   skip_frame nokey:  7.6s total  (0.9s avg, 5.7s max)
+        #   hwaccel cuda:     33.6s total  (4.0s avg, 17.6s max)
+        #   plain software:   43.8s total  (5.2s avg, 26.1s max)
+        #   hwaccel auto:     62.5s total  (7.0s avg, 40.2s max)
+        #
+        # See bench/bench_thumbnails.py to re-run on other
+        # hardware. Must come BEFORE -i (decoder option).
+        #
+        # Omitted in exact mode: skipping non-keyframes makes the
+        # output the nearest KEYFRAME to the seek target (fine
+        # for auto thumbs, wrong for a user-picked frame). Without
+        # it, `-ss` before `-i` is frame-accurate in modern ffmpeg
+        # — it seeks to the prior keyframe and decodes forward to
+        # the exact timestamp.
+        *([] if exact else ["-skip_frame", "nokey"]),
+        # -ss BEFORE -i = fast seek (skips ahead via container
+        # index instead of decoding from the start). Order matters.
+        "-ss", str(seek_time),
+        "-i", video_path,
+        "-frames:v", "1",
+        # NOTE: an earlier revision used `thumbnail=N` here to
+        # auto-reject black/fade frames. Reverted because it
+        # forces the decoder to produce N full-resolution frames,
+        # which on 8K HEVC content is ~5-10× slower than software
+        # can sustain — under the renderer's 8-way concurrent
+        # thumbnail queue, the 30s subprocess timeout fired on
+        # every 6K/8K HEVC file in a typical VR library. The
+        # corrected `seek_time` formula above (10s minimum past
+        # the start, past typical studio idents) is the actual
+        # fix for the original black-thumbnail bug; the analysis
+        # filter was overkill. If we ever need cheaper black
+        # detection, do it Python-side after decoding ONE frame
+        # (read JPEG, compute mean luma, retry with deeper seek
+        # if dark). One decode per attempt instead of N.
+        "-vf", f"scale={width}:-2",  # -2 = preserve AR, even-rounded
+        "-q:v", "5",
+        "-y",
+        # A temp name, renamed over `output_path` only once ffmpeg has
+        # finished (FT-084). Written straight to the cache name, a run cut
+        # off by the timeout left a partial JPEG there that every later
+        # request took as a cache hit.
+        tmp_path,
+    ]
+    run_kwargs = dict(
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        # Lowered from 60s so a slow/disconnected drive frees its worker
+        # slot sooner (see THUMBNAIL_TIMEOUT_SEC). Genuine 8K-HEVC decode
+        # finishes well inside this; truly-broken files (corrupt streams,
+        # hung NAS reads, spun-down HDDs) time out ~2.4× faster instead of
+        # holding the queue for a full minute.
+        timeout=THUMBNAIL_TIMEOUT_SEC,
+    )
+    try:
+        result = run_silent(cmd, **run_kwargs)
+        if not exact and (result.returncode != 0 or not os.path.exists(tmp_path)):
+            # No keyframe at or after the seek point means no frame at all:
+            # `-ss` lands on the keyframe BEFORE seek_time and drops frames
+            # before seek_time, and `nokey` drops every other frame. A clip
+            # whose only keyframe precedes the seek (shorter than one GOP,
+            # ~8 s at x264's default keyint 250 / 30 fps) produced nothing,
+            # and every request for it failed again (app test V31). Retry
+            # ONCE the way exact mode runs: still a single output frame,
+            # decoded forward from that keyframe (at most one GOP), and still
+            # no thumbnail/select filter (those break VR libraries).
+            _safe_unlink(tmp_path)
+            retry = list(cmd)
+            i = retry.index("-skip_frame")
+            del retry[i:i + 2]
+            result = run_silent(retry, **run_kwargs)
+    except FileNotFoundError:
+        _safe_unlink(tmp_path)
+        raise RuntimeError("ffmpeg not found. Install ffmpeg to use thumbnail features.")
+    except subprocess.TimeoutExpired:
+        # Killed mid-write: whatever it wrote is a partial JPEG. Only the temp
+        # file is removed; nothing reaches the cache name (FT-084).
+        _safe_unlink(tmp_path)
+        raise RuntimeError(
+            f"ffmpeg single-thumbnail timed out after {THUMBNAIL_TIMEOUT_SEC}s")
+
+    if result.returncode != 0 or not os.path.exists(tmp_path) or os.path.getsize(tmp_path) == 0:
+        _safe_unlink(tmp_path)
+        # ffmpeg prints the cause LAST, so the tail is the diagnosis.
+        raise RuntimeError(f"ffmpeg single-thumbnail failed: {_one_line(result.stderr, 500)}")
+
+    try:
+        os.replace(tmp_path, output_path)
+    except OSError:
+        # The cache name is held open (Windows) or another request finished
+        # the same thumbnail first: use theirs if it is whole.
+        _safe_unlink(tmp_path)
+        if not is_complete_jpeg(output_path):
+            raise RuntimeError("ffmpeg single-thumbnail could not be saved to the cache")
 
     return {
         "path": output_path,

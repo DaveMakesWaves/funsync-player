@@ -159,6 +159,8 @@ globalThis.funsync = {
   deletePlaylist: vi.fn().mockResolvedValue(undefined),
   addVideoToPlaylist: vi.fn().mockResolvedValue(undefined),
   removeVideoFromPlaylist: vi.fn().mockResolvedValue(undefined),
+  addVideosToPlaylist: vi.fn().mockResolvedValue(undefined),
+  removeVideosFromPlaylist: vi.fn().mockResolvedValue(undefined),
   getCategories: vi.fn().mockResolvedValue([]),
   addCategory: vi.fn().mockImplementation((name, color) =>
     Promise.resolve({ id: crypto.randomUUID(), name, color })

@@ -22,6 +22,10 @@
        in editor-popout.js so all the existing editor.css rules apply
        unchanged. CSS handles full-window layout. -->
   <div id="editor-popout-host"></div>
+  <!-- Toasts for commands sent from this window (Every Nth, New points only,
+       a refused Modify item), so they show where the user is looking
+       (FT-029). Same container and styles (player.css) as the main window. -->
+  <div id="toast-container" class="toast-container" aria-live="polite"></div>
   <script src="editor-popout.js" type="module"></script>
 </body>
 </html>

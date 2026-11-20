@@ -1,0 +1,237 @@
+{
+  "_comment": "One tag table for BOTH tag filters: renderer/js/video-tags.js (desktop) and backend/web-remote/tag-filter.js (phone), read by tests/unit/tag-filter-parity.test.js. The desktop merges `sources` with effectiveTags (pinned by `expectedTags`); the phone gets only the merged keys, as the plan's videoTags slice would carry them (PLAN-next-major-2026-11.md 2.6), and both filters must return `expect` for every query. Add a case here, not in one suite. Synthetic names and paths only. Groundwork for the tags phase, 2026-11-17: nothing in the app reads either module yet. Stash S1 (1d, 2026-11-18): videos I to M pin identity keys (`performer:<name>#<identity>`): two Jane Does kept apart by Stash ID (I, J), a Stash studio with an identity (J), a funscript's bare name joined to its one identity through `options.nameIds` (K, L), and a typed and a file-given `#` that become `-`, so they never equal an identity key (M). The identity values are synthetic UUIDs. Stash \"next\" lot (sn-tags, 2026-11-19): `stashTagRules` is main's `tagRules` (the contract shape, electron/stash-tag-rules.js) for the opt-in \"Use Stash's tag aliases and sub-tags\"; the desktop merge compiles it as its alias layer (videos N to Q: an alias from a file, a post, you and a stash-box is the Stash tag, in Stash's spelling, and identity rows I to M are unchanged by it), and `subTags` runs a small library through the desktop's index (buildLibraryTagIndex) and the phone's slice (remote-tag-slice.js): picking a parent finds every level below it on both, cycle-safe, with hides winning.",
+  "stashTagRules": {
+    "aliases": { "outside": "open-air", "alfresco": "open-air", "seaside": "beach-scene" },
+    "children": { "setting": ["open-air", "beach-scene"], "open-air": ["beach-scene"], "loop-a": ["loop-b"], "loop-b": ["loop-a"], "junk-parent": ["pov"] },
+    "names": { "open-air": "Open Air", "beach-scene": "Beach Scene", "setting": "Setting" }
+  },
+  "options": {
+    "aliases": { "bj": "blowjob" },
+    "facetOverrides": { "keon": "device" },
+    "hiddenEverywhere": ["junk-tag"],
+    "nameIds": { "performer:sam-roe": "c0ffee00-0000-4000-8000-00000000beef" }
+  },
+  "hidden": {
+    "C:/Library/Video B.mp4": ["len-40"]
+  },
+  "sources": {
+    "eroscripts": {
+      "C:/Library/Video A.mp4": { "tags": ["the-handy", "non-vr", "len-10-25", "blowjob"], "topicId": 1001, "topicUrl": "https://example.invalid/t/1001", "source": "eroscripts", "savedAt": 1 },
+      "C:/Library/Video B.mp4": { "tags": [{ "id": 101, "name": "thehandy" }, { "id": 102, "name": "cockhero" }, { "id": 103, "name": "len-40" }], "creator": "Scripter Two", "topicId": 1002, "source": "eroscripts", "savedAt": 2, "stale": true },
+      "C:/Library/Video C.mp4": { "tags": ["osr2", "multi-axis"], "topicId": 1003, "scriptPath": "C:/Library/Video C v1.funscript", "source": "eroscripts", "savedAt": 3 },
+      "C:/Library/Video F.mp4": { "tags": [], "topicId": 1006, "source": "eroscripts", "savedAt": 6 },
+      "C:/Library/Video G.mp4": { "tags": ["sr6", "non-vr", "junk-tag"], "topicId": 1007, "source": "eroscripts", "savedAt": 7 },
+      "C:/Library/Video O.mp4": { "tags": ["alfresco"], "topicId": 1015, "source": "eroscripts", "savedAt": 15 }
+    },
+    "funscript": {
+      "C:/Library/Video A.funscript": { "tags": ["POV", "Blowjob"], "topicTags": [], "performers": [], "creator": "scripter-one" },
+      "C:/Library/Video C v2.funscript": { "tags": ["VR", "Futa"], "topicTags": [], "performers": [], "creator": null },
+      "C:/Library/Video G.funscript": { "tags": ["Ünïcode  Tàg"], "topicTags": [], "performers": [], "creator": null },
+      "C:/Library/Video K.funscript": { "tags": [], "topicTags": [], "performers": ["Sam Roe"], "creator": null },
+      "C:/Library/Video M.funscript": { "tags": [], "topicTags": [], "performers": ["Jane Doe#0b5e1c9a-0000-4000-8000-00000000aaaa"], "creator": null },
+      "C:/Library/Video N.funscript": { "tags": ["outside"], "topicTags": [], "performers": [], "creator": null }
+    },
+    "user": {
+      "C:/Library/Video A.mp4": ["favourite"],
+      "C:/Library/Video C.mp4": ["performer:Jane Doe"],
+      "C:/Library/Video F.mp4": ["the handy"],
+      "C:/Library/Video H.mp4": ["BJ", "keon"],
+      "C:/Library/Video M.mp4": ["performer:Jane Doe#0b5e1c9a-0000-4000-8000-000000003f2a"],
+      "C:/Library/Video P.mp4": ["Seaside"]
+    },
+    "stash": {
+      "C:/Library/Video E.mp4": { "tags": [{ "id": "t1", "name": "Blowjob" }, { "id": "t2", "name": "POV" }], "performers": [{ "id": "p1", "name": "Jane Doe" }], "studio": { "id": "s1", "name": "Studio Nine" }, "stale": false },
+      "C:/Library/Video I.mp4": { "tags": [{ "id": "t3", "name": "Outdoor" }], "performers": [{ "id": "p2", "name": "Jane Doe", "identity": "0b5e1c9a-0000-4000-8000-00000000aaaa", "disambiguation": "blonde" }] },
+      "C:/Library/Video J.mp4": { "tags": [], "performers": [{ "id": "p3", "name": "Jane Doe", "identity": "0b5e1c9a-0000-4000-8000-000000003f2a" }], "studio": { "id": "s2", "name": "Studio Nine", "identity": "5d1e0000-0000-4000-8000-00000000c0de" } },
+      "C:/Library/Video L.mp4": { "tags": [], "performers": [{ "id": "p4", "name": "Sam Roe", "identity": "c0ffee00-0000-4000-8000-00000000beef" }] }
+    },
+    "stashbox": {
+      "C:/Library/Video E.mp4": { "tags": [], "performers": ["Jane Doe"], "studio": "Studio Nine" },
+      "C:/Library/Video Q.mp4": { "tags": ["Open Air"], "performers": [] }
+    }
+  },
+  "videos": [
+    { "path": "C:/Library/Video A.mp4", "name": "Video A.mp4", "scriptPath": "C:/Library/Video A.funscript" },
+    { "path": "C:/Library/Video B.mp4", "name": "Video B.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video C.mp4", "name": "Video C.mp4", "scriptPath": "C:/Library/Video C v2.funscript" },
+    { "path": "C:/Library/Sub/Video D.mp4", "name": "Video D.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video E.mp4", "name": "Video E.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video F.mp4", "name": "Video F.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video G.mp4", "name": "Video G.mp4", "scriptPath": "C:/Library/Video G.funscript" },
+    { "path": "C:/Library/Video H.mp4", "name": "Video H.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video I.mp4", "name": "Video I.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video J.mp4", "name": "Video J.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video K.mp4", "name": "Video K.mp4", "scriptPath": "C:/Library/Video K.funscript" },
+    { "path": "C:/Library/Video L.mp4", "name": "Video L.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video M.mp4", "name": "Video M.mp4", "scriptPath": "C:/Library/Video M.funscript" },
+    { "path": "C:/Library/Video N.mp4", "name": "Video N.mp4", "scriptPath": "C:/Library/Video N.funscript" },
+    { "path": "C:/Library/Video O.mp4", "name": "Video O.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video P.mp4", "name": "Video P.mp4", "scriptPath": null },
+    { "path": "C:/Library/Video Q.mp4", "name": "Video Q.mp4", "scriptPath": null }
+  ],
+  "expectedTags": {
+    "C:/Library/Video A.mp4": [
+      { "key": "vr:non-vr", "label": "non vr", "sources": ["eroscripts"] },
+      { "key": "length:10-25", "label": "10-25", "sources": ["eroscripts"] },
+      { "key": "device:the-handy", "label": "the handy", "sources": ["eroscripts"] },
+      { "key": "content:blowjob", "label": "Blowjob", "sources": ["funscript", "eroscripts"] },
+      { "key": "content:favourite", "label": "favourite", "sources": ["user"] },
+      { "key": "content:pov", "label": "POV", "sources": ["funscript"] },
+      { "key": "creator:scripter-one", "label": "scripter-one", "sources": ["funscript"] }
+    ],
+    "C:/Library/Video B.mp4": [
+      { "key": "device:the-handy", "label": "the handy", "sources": ["eroscripts"], "refs": [{ "source": "eroscripts", "id": 101 }] },
+      { "key": "script-type:cock-hero", "label": "cock hero", "sources": ["eroscripts"], "refs": [{ "source": "eroscripts", "id": 102 }] },
+      { "key": "creator:scripter-two", "label": "Scripter Two", "sources": ["eroscripts"] }
+    ],
+    "C:/Library/Video C.mp4": [
+      { "key": "vr:vr", "label": "VR", "sources": ["funscript"] },
+      { "key": "sexuality:futanari", "label": "futanari", "sources": ["funscript"] },
+      { "key": "performer:jane-doe", "label": "Jane Doe", "sources": ["user"] }
+    ],
+    "C:/Library/Sub/Video D.mp4": [],
+    "C:/Library/Video E.mp4": [
+      { "key": "content:blowjob", "label": "Blowjob", "sources": ["stash"], "refs": [{ "source": "stash", "id": "t1" }] },
+      { "key": "content:pov", "label": "POV", "sources": ["stash"], "refs": [{ "source": "stash", "id": "t2" }] },
+      { "key": "performer:jane-doe", "label": "Jane Doe", "sources": ["stash", "stashbox"], "refs": [{ "source": "stash", "id": "p1" }] },
+      { "key": "studio:studio-nine", "label": "Studio Nine", "sources": ["stash", "stashbox"], "refs": [{ "source": "stash", "id": "s1" }] }
+    ],
+    "C:/Library/Video F.mp4": [
+      { "key": "device:the-handy", "label": "the handy", "sources": ["user"] }
+    ],
+    "C:/Library/Video G.mp4": [
+      { "key": "vr:non-vr", "label": "non vr", "sources": ["eroscripts"] },
+      { "key": "device:sr6", "label": "sr6", "sources": ["eroscripts"] },
+      { "key": "content:unicode-tag", "label": "Ünïcode Tàg", "sources": ["funscript"] }
+    ],
+    "C:/Library/Video H.mp4": [
+      { "key": "device:keon", "label": "keon", "sources": ["user"] },
+      { "key": "content:blowjob", "label": "blowjob", "sources": ["user"] }
+    ],
+    "C:/Library/Video I.mp4": [
+      { "key": "content:outdoor", "label": "Outdoor", "sources": ["stash"], "refs": [{ "source": "stash", "id": "t3" }] },
+      { "key": "performer:jane-doe#0b5e1c9a-0000-4000-8000-00000000aaaa", "label": "Jane Doe", "sources": ["stash"], "refs": [{ "source": "stash", "id": "p2" }] }
+    ],
+    "C:/Library/Video J.mp4": [
+      { "key": "performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a", "label": "Jane Doe", "sources": ["stash"], "refs": [{ "source": "stash", "id": "p3" }] },
+      { "key": "studio:studio-nine#5d1e0000-0000-4000-8000-00000000c0de", "label": "Studio Nine", "sources": ["stash"], "refs": [{ "source": "stash", "id": "s2" }] }
+    ],
+    "C:/Library/Video K.mp4": [
+      { "key": "performer:sam-roe#c0ffee00-0000-4000-8000-00000000beef", "label": "Sam Roe", "sources": ["funscript"] }
+    ],
+    "C:/Library/Video L.mp4": [
+      { "key": "performer:sam-roe#c0ffee00-0000-4000-8000-00000000beef", "label": "Sam Roe", "sources": ["stash"], "refs": [{ "source": "stash", "id": "p4" }] }
+    ],
+    "C:/Library/Video M.mp4": [
+      { "key": "performer:jane-doe-0b5e1c9a-0000-4000-8000-00000000aaaa", "label": "Jane Doe#0b5e1c9a-0000-4000-8000-00000000aaaa", "sources": ["funscript"] },
+      { "key": "performer:jane-doe-0b5e1c9a-0000-4000-8000-000000003f2a", "label": "Jane Doe#0b5e1c9a-0000-4000-8000-000000003f2a", "sources": ["user"] }
+    ],
+    "C:/Library/Video N.mp4": [
+      { "key": "content:open-air", "label": "Open Air", "sources": ["funscript"] }
+    ],
+    "C:/Library/Video O.mp4": [
+      { "key": "content:open-air", "label": "Open Air", "sources": ["eroscripts"] }
+    ],
+    "C:/Library/Video P.mp4": [
+      { "key": "content:beach-scene", "label": "Beach Scene", "sources": ["user"] }
+    ],
+    "C:/Library/Video Q.mp4": [
+      { "key": "content:open-air", "label": "Open Air", "sources": ["stashbox"] }
+    ]
+  },
+  "queries": [
+    { "name": "no filter returns every video", "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
+    { "name": "one tag, from three different sources", "include": ["device:the-handy"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video F.mp4"] },
+    { "name": "OR within a facet", "include": ["device:the-handy", "device:sr6"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4"] },
+    { "name": "AND across facets", "include": ["device:the-handy", "vr:non-vr"], "expect": ["C:/Library/Video A.mp4"] },
+    { "name": "mode all needs every key", "include": ["content:blowjob", "content:pov"], "mode": "all", "expect": ["C:/Library/Video A.mp4", "C:/Library/Video E.mp4"] },
+    { "name": "the same keys in the default mode are OR (one facet)", "include": ["content:blowjob", "content:pov"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video E.mp4", "C:/Library/Video H.mp4"] },
+    { "name": "mode any needs one key", "include": ["script-type:cock-hero", "performer:jane-doe"], "mode": "any", "expect": ["C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
+    { "name": "an unknown mode falls back to facets", "include": ["device:the-handy", "vr:non-vr"], "mode": "bogus", "expect": ["C:/Library/Video A.mp4"] },
+    { "name": "exclude only: untagged videos stay", "exclude": ["vr:non-vr"], "expect": ["C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
+    { "name": "include and exclude together", "include": ["content:blowjob"], "exclude": ["studio:studio-nine"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video H.mp4"] },
+    { "name": "include and exclude across facets", "include": ["device:the-handy"], "exclude": ["vr:non-vr"], "expect": ["C:/Library/Video B.mp4", "C:/Library/Video F.mp4"] },
+    { "name": "a bare key matches the value in any facet", "include": ["the-handy"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video F.mp4"] },
+    { "name": "case and whitespace in a key are folded", "include": ["Device:  The Handy "], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video F.mp4"] },
+    { "name": "diacritics in a key are folded", "include": ["content:ÚNICODE tag"], "expect": ["C:/Library/Video G.mp4"] },
+    { "name": "the same key twice counts once", "include": ["device:sr6", "Device:SR6"], "mode": "all", "expect": ["C:/Library/Video G.mp4"] },
+    { "name": "a length bucket", "include": ["length:10-25"], "expect": ["C:/Library/Video A.mp4"] },
+    { "name": "a tag hidden on its video is not there", "include": ["content:len-40"], "expect": [] },
+    { "name": "a tag hidden everywhere is not there", "include": ["content:junk-tag"], "expect": [] },
+    { "name": "a stale record still counts", "include": ["script-type:cock-hero"], "expect": ["C:/Library/Video B.mp4"] },
+    { "name": "a record for a swapped-out script is ignored", "include": ["device:osr2", "axis:multi-axis"], "mode": "any", "expect": [] },
+    { "name": "your alias and your facet override apply", "include": ["device:keon"], "expect": ["C:/Library/Video H.mp4"] },
+    { "name": "a performer from several sources", "include": ["performer:jane-doe"], "expect": ["C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
+    { "name": "a creator from the forum", "include": ["creator:scripter-two"], "expect": ["C:/Library/Video B.mp4"] },
+    { "name": "an unknown facet is part of the value and matches nothing", "include": ["nope:thing"], "expect": [] },
+    { "name": "an exclude that matches nothing keeps everything", "exclude": ["nope:thing"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
+    { "name": "empty and blank keys are no filter", "include": ["", "   ", "-", "device:"], "exclude": [""], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
+    { "name": "Stash S1: an identity key matches only that person (not the other Jane Doe, not a typed or file-given #)", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a"], "expect": ["C:/Library/Video J.mp4"] },
+    { "name": "Stash S1: two same-name performers are two keys: OR within the facet", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-00000000aaaa", "performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a"], "expect": ["C:/Library/Video I.mp4", "C:/Library/Video J.mp4"] },
+    { "name": "Stash S1: an identity key folds case like any key", "include": ["Performer: Jane Doe#0B5E1C9A-0000-4000-8000-000000003F2A"], "expect": ["C:/Library/Video J.mp4"] },
+    { "name": "Stash S1: the bare name matches neither identity", "include": ["performer:jane-doe"], "mode": "any", "expect": ["C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
+    { "name": "Stash S1: a bare value (no facet) is not an identity key", "include": ["jane-doe"], "expect": ["C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
+    { "name": "Stash S1: a typed or file-given # became -", "include": ["performer:jane-doe-0b5e1c9a-0000-4000-8000-000000003f2a", "performer:jane-doe-0b5e1c9a-0000-4000-8000-00000000aaaa"], "mode": "all", "expect": ["C:/Library/Video M.mp4"] },
+    { "name": "Stash S1: a bare name joined to its one identity matches with the Stash video", "include": ["performer:sam-roe#c0ffee00-0000-4000-8000-00000000beef"], "expect": ["C:/Library/Video K.mp4", "C:/Library/Video L.mp4"] },
+    { "name": "Stash S1: exclude one identity keeps the other", "exclude": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-00000000aaaa"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
+    { "name": "Stash S1: a studio with an identity is not the bare studio", "include": ["studio:studio-nine"], "expect": ["C:/Library/Video E.mp4"] },
+    { "name": "Stash aliases: one Stash tag from a file, a post and a stash-box", "include": ["content:open-air"], "expect": ["C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video Q.mp4"] },
+    { "name": "Stash aliases: the alias spelling is no key of its own", "include": ["content:outside", "content:alfresco", "content:seaside"], "mode": "any", "expect": [] },
+    { "name": "Stash aliases: your typed alias is the Stash tag (a bare value)", "include": ["beach-scene"], "expect": ["C:/Library/Video P.mp4"] },
+    { "name": "Stash aliases: exclude the Stash tag", "include": ["content:open-air", "content:beach-scene"], "exclude": ["content:open-air"], "expect": ["C:/Library/Video P.mp4"] },
+    { "name": "Stash S1: AND across facets with identity keys", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a", "studio:studio-nine#5d1e0000-0000-4000-8000-00000000c0de"], "expect": ["C:/Library/Video J.mp4"] }
+  ],
+  "pathless": {
+    "_comment": "Videos with no path (missing, null or ''), with a map that holds tags under the keys 'undefined', 'null' and '' (fix-up 2026-11-17: the phone looked those up, the desktop did not). Neither filter may match them: a video with no path has no tags.",
+    "videos": [
+      { "name": "No path" },
+      { "name": "Null path", "path": null },
+      { "name": "Empty path", "path": "" }
+    ],
+    "keysByPath": { "undefined": ["vr:vr"], "null": ["vr:vr"], "": ["vr:vr"] },
+    "queries": [
+      { "name": "an include matches none of them", "include": ["vr:vr"], "expectNames": [] },
+      { "name": "an exclude drops none of them", "exclude": ["vr:vr"], "expectNames": ["No path", "Null path", "Empty path"] },
+      { "name": "any mode matches none of them", "include": ["vr:vr", "content:x"], "mode": "any", "expectNames": [] }
+    ]
+  },
+  "subTags": {
+    "_comment": "Stash's sub-tags (sn-tags, 2026-11-19), with `stashTagRules` above: this library goes through the desktop's index (library-tag-filter.js buildLibraryTagIndex, its Tags filter applyTagFilter / keySetsFor) and the phone's slice (remote-tag-slice.js remoteTagSliceFromIndex, each video's implied parents after its own tags), and both filters must return `expect`. Setting > Open Air > Beach Scene; loop-a and loop-b are each other's sub-tag (a loop in hand-edited data); junk-parent is hidden on every video, so it is never a parent; Tag U hid Open Air, so Open Air is not implied there.",
+    "input": {
+      "videos": [
+        { "path": "C:/Library/Sub/Tag R.mp4", "funscriptPath": "C:/Library/Sub/Tag R.funscript" },
+        { "path": "C:/Library/Sub/Tag S.mp4", "funscriptPath": null },
+        { "path": "C:/Library/Sub/Tag T.mp4", "funscriptPath": "C:/Library/Sub/Tag T.funscript" },
+        { "path": "C:/Library/Sub/Tag U.mp4", "funscriptPath": null },
+        { "path": "C:/Library/Sub/Tag W.mp4", "funscriptPath": null },
+        { "path": "C:/Library/Sub/Tag X.mp4", "funscriptPath": null },
+        { "path": "C:/Library/Sub/Tag Y.mp4", "funscriptPath": null }
+      ],
+      "scriptMeta": { "C:/Library/Sub/Tag R.funscript": { "tags": ["seaside"], "topicTags": [], "performers": [], "creator": null } },
+      "scriptTags": { "C:/Library/Sub/Tag T.mp4": { "tags": ["Setting"], "topicId": 2001, "source": "eroscripts", "savedAt": 1 } },
+      "userTags": { "C:/Library/Sub/Tag S.mp4": ["outside"], "C:/Library/Sub/Tag U.mp4": ["beach scene", "pov"], "C:/Library/Sub/Tag W.mp4": ["pov"], "C:/Library/Sub/Tag X.mp4": ["loop-a"], "C:/Library/Sub/Tag Y.mp4": ["loop-b"] },
+      "hiddenTags": { "C:/Library/Sub/Tag U.mp4": ["content:open-air"] },
+      "tagSettings": { "hidden": ["junk-parent"] }
+    },
+    "expectImplied": {
+      "C:/Library/Sub/Tag R.mp4": ["content:open-air", "content:setting"],
+      "C:/Library/Sub/Tag S.mp4": ["content:setting"],
+      "C:/Library/Sub/Tag U.mp4": ["content:setting"],
+      "C:/Library/Sub/Tag X.mp4": ["content:loop-b"],
+      "C:/Library/Sub/Tag Y.mp4": ["content:loop-a"]
+    },
+    "expectSubTags": { "content:setting": 2, "content:open-air": 1, "content:loop-a": 1, "content:loop-b": 1 },
+    "queries": [
+      { "name": "a parent finds every level below it", "include": ["content:setting"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag T.mp4", "C:/Library/Sub/Tag U.mp4"] },
+      { "name": "a middle parent finds its own sub-tags, not where you hid it", "include": ["content:open-air"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4"] },
+      { "name": "a tag with no sub-tags finds only itself", "include": ["content:beach-scene"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag U.mp4"] },
+      { "name": "exclude a parent: its sub-tags go too", "exclude": ["content:open-air"], "expect": ["C:/Library/Sub/Tag T.mp4", "C:/Library/Sub/Tag U.mp4", "C:/Library/Sub/Tag W.mp4", "C:/Library/Sub/Tag X.mp4", "C:/Library/Sub/Tag Y.mp4"] },
+      { "name": "mode all with a parent", "include": ["content:setting", "content:pov"], "mode": "all", "expect": ["C:/Library/Sub/Tag U.mp4"] },
+      { "name": "mode any with a parent", "include": ["content:open-air", "content:loop-a"], "mode": "any", "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag X.mp4", "C:/Library/Sub/Tag Y.mp4"] },
+      { "name": "a bare parent value", "include": ["setting"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag T.mp4", "C:/Library/Sub/Tag U.mp4"] },
+      { "name": "a parent and its sub-tag in one facet are OR", "include": ["content:setting", "content:beach-scene"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag T.mp4", "C:/Library/Sub/Tag U.mp4"] },
+      { "name": "a loop in the data ends: each finds both", "include": ["content:loop-a"], "expect": ["C:/Library/Sub/Tag X.mp4", "C:/Library/Sub/Tag Y.mp4"] },
+      { "name": "a tag hidden on every video is never a parent", "include": ["content:junk-parent"], "expect": [] }
+    ]
+  }
+}

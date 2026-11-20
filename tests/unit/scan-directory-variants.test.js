@@ -3,11 +3,12 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-// Pins the funscript variant-classification logic in
-// electron/main.js::scan-directory. The classifier is currently inline
-// in main.js (CJS + Electron deps make direct import hostile); this
-// file mirrors the algorithm 1:1 so behavioural regressions surface
-// here. If you change the classifier in main.js, mirror the change
+// Pins the funscript variant-classification logic of the library scan.
+// This file mirrors the algorithm 1:1; it was written when the classifier
+// was inline in main.js and could not be imported. Since 2026-11-02 the
+// scan lives in electron/library-scan.js (`scanLibrary`), which tests can
+// call directly on real folders: put NEW scan tests in
+// library-scan.test.js. If you change the classifier, mirror the change
 // here AND verify the assertions still hold.
 //
 // Specific regression this pins: dotted filenames like S01.E03.funscript
@@ -18,10 +19,11 @@
 // sibling primary exists with the dot-stripped base.
 
 import { describe, it, expect } from 'vitest';
+import { createRequire } from 'node:module';
 
-const AXIS_SUFFIXES = new Set([
-  'surge', 'sway', 'twist', 'roll', 'pitch', 'vib', 'lube', 'pump', 'suction', 'valve',
-]);
+// The REAL scan's axis set, not a copy: the copy that stood here knew ten
+// names while the player knew twenty-five (FT-047).
+const { AXIS_SUFFIXES } = createRequire(import.meta.url)('../../electron/library-scan.js');
 
 const normalizeName = (name) =>
   name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();

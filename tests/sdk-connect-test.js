@@ -3,7 +3,7 @@ const { app, BrowserWindow } = require('electron');
 const path = require('path');
 
 const CONNECTION_KEY = process.argv.find(a => !a.startsWith('-') && a.length >= 5 && a !== process.argv[0] && a !== process.argv[1] && !a.includes('/') && !a.includes('\\'))
-  || 'eK6Qv3AH';
+  || 'FAKEKEY1';
 
 app.whenReady().then(async () => {
   const win = new BrowserWindow({

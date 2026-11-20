@@ -17,7 +17,7 @@
 
 import { Modal } from './modal.js';
 import { icon, Languages } from '../js/icons.js';
-import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, resolveLocale, translatePage } from '../js/i18n.js';
+import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, resolveLocale } from '../js/i18n.js';
 
 /**
  * Show the language-prompt modal. Resolves once closed.
@@ -84,10 +84,10 @@ export async function openLanguagePromptModal({ settings, systemLocale } = {}) {
         btn.addEventListener('click', async () => {
           chosen = code;
           try {
+            // setLocale re-translates the static data-i18n elements itself,
+            // before the language:changed handlers; a second walk here
+            // would overwrite what they set from state (V69).
             await setLocale(code);
-            // Re-translate any static data-i18n elements in the page so the
-            // rest of the UI flips to the new language without a reload.
-            translatePage(document);
             // Persist BOTH the language and the "user has chosen" flag so
             // the modal does not re-appear next launch.
             settings.set('player.language', code);

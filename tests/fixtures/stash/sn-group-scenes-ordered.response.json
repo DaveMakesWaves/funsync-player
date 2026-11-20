@@ -1,0 +1,79 @@
+{
+  "data": {
+    "a": {
+      "scenes": [
+        {
+          "id": "1",
+          "groups": [
+            {
+              "scene_index": 3,
+              "group": {
+                "id": "1"
+              }
+            },
+            {
+              "scene_index": 2,
+              "group": {
+                "id": "2"
+              }
+            }
+          ]
+        },
+        {
+          "id": "2",
+          "groups": [
+            {
+              "scene_index": 1,
+              "group": {
+                "id": "1"
+              }
+            }
+          ]
+        },
+        {
+          "id": "3",
+          "groups": [
+            {
+              "scene_index": 2,
+              "group": {
+                "id": "1"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "b": {
+      "scenes": [
+        {
+          "id": "1",
+          "groups": [
+            {
+              "scene_index": 3,
+              "group": {
+                "id": "1"
+              }
+            },
+            {
+              "scene_index": 2,
+              "group": {
+                "id": "2"
+              }
+            }
+          ]
+        },
+        {
+          "id": "4",
+          "groups": [
+            {
+              "scene_index": 1,
+              "group": {
+                "id": "2"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

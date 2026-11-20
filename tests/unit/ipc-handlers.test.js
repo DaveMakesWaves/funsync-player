@@ -11,8 +11,10 @@
 // must be mirrored here. Acceptable tradeoff for ~30 lines of glue.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// ---- scan-directory logic (local copy from main.js) ----
-// This is the core logic extracted from the scan-directory handler.
+// ---- scan-directory logic (local copy) ----
+// A hand-made copy of the scan's core pairing logic, from when it was inline
+// in main.js. The real scan is now electron/library-scan.js and is tested
+// directly in library-scan.test.js.
 
 const normalizeName = (name) =>
   name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();

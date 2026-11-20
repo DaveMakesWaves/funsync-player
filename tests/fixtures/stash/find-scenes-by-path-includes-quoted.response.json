@@ -1,0 +1,156 @@
+{
+  "data": {
+    "findScenes": {
+      "count": 1,
+      "scenes": [
+        {
+          "id": "1",
+          "title": "Synthetic Scene Small",
+          "code": "SYN-001",
+          "date": "2026-11-17",
+          "details": "Synthetic test scene.",
+          "director": "Synthetic Director",
+          "urls": [
+            "https://example.invalid/scene/1"
+          ],
+          "rating100": 80,
+          "organized": true,
+          "interactive": true,
+          "interactive_speed": 320,
+          "created_at": "2026-11-17T20:29:54Z",
+          "updated_at": "2026-11-17T20:32:20Z",
+          "files": [
+            {
+              "id": "1",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+              "basename": "Synthetic Clip Small.mp4",
+              "size": 213390,
+              "duration": 6,
+              "width": 320,
+              "height": 240,
+              "frame_rate": 24,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:26:46Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "6b3f3b3ee9e8c31a"
+                },
+                {
+                  "type": "phash",
+                  "value": "8a7da502fa0aeb6a"
+                }
+              ],
+              "oshash": "6b3f3b3ee9e8c31a",
+              "phash": "8a7da502fa0aeb6a"
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/1/screenshot?t=1794947540",
+            "stream": "http://127.0.0.1:9999/scene/1/stream",
+            "funscript": "http://127.0.0.1:9999/scene/1/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/1/interactive_heatmap"
+          },
+          "studio": {
+            "id": "2",
+            "name": "Synthetic Studio",
+            "parent_studio": {
+              "id": "1",
+              "name": "Synthetic Network"
+            },
+            "stash_ids": [
+              {
+                "endpoint": "https://stash-box.invalid/graphql",
+                "stash_id": "00000000-0000-4000-8000-0000000000aa",
+                "updated_at": "2026-11-17T20:32:20.5944581Z"
+              }
+            ]
+          },
+          "performers": [
+            {
+              "id": "1",
+              "name": "Synthetic Performer One",
+              "disambiguation": "test",
+              "alias_list": [
+                "Synth One"
+              ],
+              "gender": "FEMALE",
+              "stash_ids": [
+                {
+                  "endpoint": "https://stash-box.invalid/graphql",
+                  "stash_id": "00000000-0000-4000-8000-000000000001",
+                  "updated_at": "2026-11-17T20:32:20.581996Z"
+                }
+              ]
+            },
+            {
+              "id": "2",
+              "name": "Synthetic Performer Two",
+              "disambiguation": "",
+              "alias_list": [],
+              "gender": null,
+              "stash_ids": []
+            }
+          ],
+          "tags": [
+            {
+              "id": "1",
+              "name": "Synthetic Tag A",
+              "aliases": [
+                "synthetic-a"
+              ],
+              "parents": []
+            },
+            {
+              "id": "2",
+              "name": "Synthetic Tag B",
+              "aliases": [],
+              "parents": [
+                {
+                  "id": "3",
+                  "name": "Synthetic Parent Tag"
+                }
+              ]
+            }
+          ],
+          "scene_markers": [
+            {
+              "id": "1",
+              "title": "Synthetic marker one",
+              "seconds": 1.5,
+              "end_seconds": 3.25,
+              "primary_tag": {
+                "id": "4",
+                "name": "Synthetic Marker Tag"
+              },
+              "tags": [
+                {
+                  "id": "1",
+                  "name": "Synthetic Tag A"
+                }
+              ]
+            },
+            {
+              "id": "2",
+              "title": "",
+              "seconds": 4,
+              "end_seconds": null,
+              "primary_tag": {
+                "id": "2",
+                "name": "Synthetic Tag B"
+              },
+              "tags": []
+            }
+          ],
+          "stash_ids": [
+            {
+              "endpoint": "https://stash-box.invalid/graphql",
+              "stash_id": "00000000-0000-4000-8000-000000000101",
+              "updated_at": "2026-11-17T20:32:20.6029455Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

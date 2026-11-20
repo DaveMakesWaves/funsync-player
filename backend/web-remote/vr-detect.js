@@ -47,6 +47,14 @@ const STRONG_TOKENS = [
   'mkx200','mkx220','rf52','fisheye190','vrca220',
   'fb360','eac360','eac',
   '180x180','360x180',
+  // `180_mono` / `mono_180` / `360_mono` / `mono_360` (any separator): the
+  // mono forms the backend's detect_vr_format serves as a dome / sphere. A
+  // bare `180` is deliberately NOT here, on either side: "Episode 180" is
+  // not VR (V61).
+  `180${SEP}mono`, `mono${SEP}180`, `360${SEP}mono`, `mono${SEP}360`,
+  // `180` + a full-resolution SBS / TB suffix (HereSphere convention). The
+  // backend's 180° patterns accept these too.
+  `180${SEP}(?:lrf|sbsf|fullsbs|tbf|ouf)`,
 ];
 
 const STRONG_RE = new RegExp(

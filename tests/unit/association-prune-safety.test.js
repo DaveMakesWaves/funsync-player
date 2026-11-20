@@ -24,20 +24,32 @@
 //
 // The governing rule, and the thing these tests defend:
 // AN ASSOCIATION IS ONLY EVER REMOVED BY AN EXPLICIT USER ACTION.
+//
+// 2026-11-18 (Dave, "Stop pruning"): taken literally now. Nothing prunes an
+// association, even when its script is provably gone (absence-sibling-
+// guards.test.js and video-options-library.test.js pin the keep).
+// `_safeToPrune` stays the proof of absence: it gates the manual-variant
+// prunes, and for a missing pairing it only picks "Script not found" over
+// "Can't check the script right now". These tests pin that proof.
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { Library } from '../../renderer/components/library.js';
 
-function host({ unavailable = [], failedScans = [], fileExists = null } = {}) {
+function host({ unavailable = [], failedScans = [], fileExists = null, filesExist = null } = {}) {
   const h = {
     _unavailablePaths: new Set(unavailable),
     _failedScanPaths: new Set(failedScans),
     _isUnderUnavailableSource: Library.prototype._isUnderUnavailableSource,
     _safeToPrune: Library.prototype._safeToPrune,
+    _pathStatus: Library.prototype._pathStatus,
   };
   global.window = global.window || {};
   window.funsync = { fileExists: fileExists || vi.fn().mockResolvedValue(true) };
+  if (filesExist) window.funsync.filesExist = filesExist;
   return h;
 }
+
+/** fileExists fake: only the listed paths exist (a folder, typically). */
+const onlyExists = (...present) => vi.fn((p) => Promise.resolve(present.includes(p)));
 
 const SCRIPT_ON_D = 'D:\\funsc\\clip.funscript';
 const VIDEO_ON_C = 'C:\\Users\\dave\\Videos\\clip.mp4';
@@ -84,8 +96,38 @@ describe('hole 3: a missing file is not proof the association is stale', () => {
   });
 
   it('allows pruning only when the directory exists and the file does not', async () => {
-    const fileExists = vi.fn().mockResolvedValue(true); // dir is fine
+    const fileExists = onlyExists('D:\\funsc'); // dir is fine, file is not there
     const h = host({ fileExists });
+    await expect(h._safeToPrune(SCRIPT_ON_D)).resolves.toBe(true);
+  });
+
+  // A failed READ is not absence. `read-funscript` returns null for a locked
+  // file (EBUSY) or a permissions error just as for a missing one, and two
+  // prune paths (`_readFunscriptResilient`, app.js `_readScriptResilient`)
+  // reach this guard on a read failure alone.
+  it('refuses to prune when the file itself is still there', async () => {
+    const filesExist = vi.fn(async (list) => list.map(() => true)); // file AND dir present
+    const h = host({ filesExist });
+    await expect(h._safeToPrune(SCRIPT_ON_D)).resolves.toBe(false);
+  });
+
+  // The singular file-exists IPC folds a timeout into `false`. The batch form
+  // keeps it as `null`, and null is not evidence of anything.
+  it('refuses to prune when the file check timed out (null)', async () => {
+    const filesExist = vi.fn(async (list) => list.map((p) => (p === SCRIPT_ON_D ? null : true)));
+    const h = host({ filesExist });
+    await expect(h._safeToPrune(SCRIPT_ON_D)).resolves.toBe(false);
+  });
+
+  it('refuses to prune when the folder check timed out (null)', async () => {
+    const filesExist = vi.fn(async (list) => list.map((p) => (p === SCRIPT_ON_D ? false : null)));
+    const h = host({ filesExist });
+    await expect(h._safeToPrune(SCRIPT_ON_D)).resolves.toBe(false);
+  });
+
+  it('prunes on an explicit absent file in a folder that answers, via the tri-state check', async () => {
+    const filesExist = vi.fn(async (list) => list.map((p) => p !== SCRIPT_ON_D));
+    const h = host({ filesExist });
     await expect(h._safeToPrune(SCRIPT_ON_D)).resolves.toBe(true);
   });
 
@@ -120,9 +162,11 @@ describe('the incident, replayed end to end', () => {
     expect(decisions).toEqual([false, false, false]);
   });
 
-  it('a genuinely deleted script on a healthy drive is still cleaned up', async () => {
-    // The guard must not be so broad that real cleanup stops working.
-    const fileExists = vi.fn().mockResolvedValue(true); // C: answers
+  it('a genuinely deleted script on a healthy drive is still PROVEN gone', async () => {
+    // The proof must not be so broad that a real deletion never counts: it
+    // is what says "Script not found" (and prunes a manual variant). The
+    // association itself is kept since 2026-11-18 (Dave, "Stop pruning").
+    const fileExists = onlyExists('C:\\videos'); // C: answers, the script is gone
     const h = host({ fileExists });
     await expect(h._safeToPrune('C:\\videos\\gone.funscript')).resolves.toBe(true);
   });
@@ -138,7 +182,7 @@ describe('the same rule must hold for script VARIATIONS', () => {
   });
 
   it('a variant on a healthy drive can still be cleaned up', async () => {
-    const h = host({ fileExists: vi.fn().mockResolvedValue(true) });
+    const h = host({ fileExists: onlyExists('C:\\videos') });
     await expect(h._safeToPrune('C:\\videos\\clip.soft.funscript')).resolves.toBe(true);
   });
 });

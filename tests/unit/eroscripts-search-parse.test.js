@@ -164,6 +164,162 @@ describe('search result parsing (real payload shape)', () => {
   });
 });
 
+// FT-066: "no tags" ([]) and "the response didn't say" (null) are different
+// answers. script-tags.js stores a list as a real answer, so a parser that
+// coerced unknown to [] recorded "this post has no tags" for posts that have
+// them, and could overwrite a good record.
+describe('search result tags: unknown stays null (FT-066)', () => {
+  let api;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    api = new EroScriptsAPI();
+    api.restoreSession('cookie', 'dave');
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  it('posts-only response (topics: []) gives tags null, not []', async () => {
+    // The posts branch runs ONLY when data.topics is empty, so the topic map
+    // it looked tags up in is always empty there.
+    stubJson({ topics: [], posts: REAL_SHAPE.posts, users: [] });
+    const { results } = await api.search('sybian');
+    expect(results).toHaveLength(1);
+    expect(results[0].id).toBe(300701);
+    expect(results[0].tags).toBeNull();
+  });
+
+  it('posts-only response with tags on the post\'s embedded topic uses them', async () => {
+    stubJson({
+      topics: [],
+      posts: [{ ...REAL_SHAPE.posts[0], topic: { title: 'Sybian Aiko', tags: ['the-handy', { name: 'non-vr' }] } }],
+      users: [],
+    });
+    const { results } = await api.search('sybian');
+    expect(results[0].tags).toEqual(['the-handy', 'non-vr']);
+  });
+
+  it('a topic with no tags field gives null; an empty tags list stays []', async () => {
+    const { tags: _drop, ...noTags } = REAL_SHAPE.topics[0];
+    stubJson({ ...REAL_SHAPE, topics: [noTags] });
+    let { results } = await api.search('sybian');
+    expect(results[0].tags).toBeNull();
+
+    stubJson({ ...REAL_SHAPE, topics: [{ ...REAL_SHAPE.topics[0], tags: [] }] });
+    ({ results } = await api.search('sybian'));
+    expect(results[0].tags).toEqual([]);
+  });
+});
+
+// verify-2 (2026-11-07, by reading; also in v0.9.2): the posts-only branch put
+// `post.name` first, which in a Discourse search result is the POSTER's
+// display name, so a result (and the auto-match toast) was titled with the
+// author. The topic's own title wins, then the search headline.
+describe('posts-only search results are titled with the topic, never the poster', () => {
+  let api;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    api = new EroScriptsAPI();
+    api.restoreSession('cookie', 'dave');
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  const post = { ...REAL_SHAPE.posts[0], name: 'Ramie the Scripter' };
+
+  it('the embedded topic title wins over the poster name', async () => {
+    stubJson({ topics: [], posts: [{ ...post, topic: { title: 'Sybian Aiko' } }], users: [] });
+    const { results } = await api.search('sybian');
+    expect(results[0].title).toBe('Sybian Aiko');
+  });
+
+  it('the search headline is used without its highlight marks', async () => {
+    stubJson({
+      topics: [],
+      posts: [{ ...post, topic_title_headline: '<span class="search-highlight">Sybian</span> Aiko &amp; Co' }],
+      users: [],
+    });
+    const { results } = await api.search('sybian');
+    expect(results[0].title).toBe('Sybian Aiko & Co');
+  });
+
+  it('with no topic title at all it names the topic, not the poster', async () => {
+    stubJson({ topics: [], posts: [post], users: [] });
+    const { results } = await api.search('sybian');
+    expect(results[0].title).not.toContain('Ramie');
+    // E-11: the topic number, with no English word around it ("Topic
+    // 300701" was shown in all eight languages; main has no translations).
+    expect(results[0].title).toBe('#300701');
+    expect(results[0].title).not.toMatch(/[A-Za-z]/);
+  });
+});
+
+// verify-2 (2026-11-07; also in v0.9.2): the panel printed main's English
+// error sentences in every language. Each failure now carries a code (and
+// the HTTP status where it matters) for the renderer to translate.
+describe('search and topic failures carry an error code', () => {
+  let api;
+  const realFetch = globalThis.fetch;
+
+  beforeEach(() => {
+    api = new EroScriptsAPI();
+    api.restoreSession('cookie', 'dave');
+  });
+
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    vi.restoreAllMocks();
+  });
+
+  function stubStatus(status, body = '') {
+    globalThis.fetch = vi.fn(async () => ({
+      status,
+      ok: status >= 200 && status < 300,
+      headers: { get: () => 'text/html' },
+      text: async () => body,
+      json: async () => { throw new Error('not json'); },
+      clone() { return this; },
+    }));
+  }
+
+  it.each([
+    [429, { errorCode: 'rateLimited' }],
+    [403, { errorCode: 'accessDenied', authExpired: true }],
+    [401, { errorCode: 'accessDenied', authExpired: true }],
+    [502, { errorCode: 'searchFailed', status: 502 }],
+  ])('search %i', async (status, expected) => {
+    stubStatus(status, '<html>oops</html>');
+    const answer = await api.search('sybian');
+    expect(answer).toMatchObject({ results: [], ...expected });
+    expect(typeof answer.error).toBe('string'); // the English text stays, for the log
+  });
+
+  it.each([
+    [429, { errorCode: 'rateLimited' }],
+    [403, { errorCode: 'accessDenied', authExpired: true }],
+    [500, { errorCode: 'topicFailed', status: 500 }],
+  ])('topic %i', async (status, expected) => {
+    stubStatus(status, '<html>oops</html>');
+    expect(await api.getTopicAttachments(9001)).toMatchObject({ attachments: [], ...expected });
+  });
+
+  it('a topic with no posts, and a request that never got an answer', async () => {
+    stubJson({ post_stream: { posts: [] } });
+    expect(await api.getTopicAttachments(9001)).toMatchObject({ errorCode: 'noPosts' });
+
+    globalThis.fetch = vi.fn(async () => { throw new Error('fetch failed'); });
+    expect(await api.search('sybian')).toMatchObject({ errorCode: 'network', error: 'fetch failed' });
+    expect(await api.getTopicAttachments(9001)).toMatchObject({ errorCode: 'network' });
+  });
+});
+
 describe('attachment name entity decoding', () => {
   // Attachment names come from the link TEXT of Discourse's rendered HTML,
   // so `&` arrives as `&amp;`. Left encoded, the file saves to disk under

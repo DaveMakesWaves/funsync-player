@@ -1,0 +1,70 @@
+{
+  "data": {
+    "findScenes": {
+      "count": 1,
+      "scenes": [
+        {
+          "id": "3",
+          "title": "Synthetic Scene Mid",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": true,
+          "interactive_speed": 320,
+          "created_at": "2026-11-17T20:29:54Z",
+          "updated_at": "2026-11-17T20:32:20Z",
+          "files": [
+            {
+              "id": "3",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_mid.mp4",
+              "basename": "synthetic_mid.mp4",
+              "size": 97200,
+              "duration": 3,
+              "width": 320,
+              "height": 240,
+              "frame_rate": 24,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:27:10Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "69577801585835d2"
+                },
+                {
+                  "type": "phash",
+                  "value": "aa51aa2af70abf0a"
+                }
+              ],
+              "oshash": "69577801585835d2",
+              "phash": "aa51aa2af70abf0a"
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/3/screenshot?t=1794947540",
+            "stream": "http://127.0.0.1:9999/scene/3/stream",
+            "funscript": "http://127.0.0.1:9999/scene/3/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/3/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [
+            {
+              "id": "1",
+              "name": "Synthetic Tag A",
+              "aliases": [
+                "synthetic-a"
+              ],
+              "parents": []
+            }
+          ],
+          "scene_markers": [],
+          "stash_ids": []
+        }
+      ]
+    }
+  }
+}

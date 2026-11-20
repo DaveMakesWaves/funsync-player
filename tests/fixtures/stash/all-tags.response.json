@@ -1,0 +1,57 @@
+{
+  "data": {
+    "findTags": {
+      "count": 4,
+      "tags": [
+        {
+          "id": "4",
+          "name": "Synthetic Marker Tag",
+          "sort_name": "",
+          "aliases": [],
+          "scene_count": 0,
+          "parents": [],
+          "children": []
+        },
+        {
+          "id": "3",
+          "name": "Synthetic Parent Tag",
+          "sort_name": "",
+          "aliases": [],
+          "scene_count": 0,
+          "parents": [],
+          "children": [
+            {
+              "id": "2",
+              "name": "Synthetic Tag B"
+            }
+          ]
+        },
+        {
+          "id": "1",
+          "name": "Synthetic Tag A",
+          "sort_name": "",
+          "aliases": [
+            "synthetic-a"
+          ],
+          "scene_count": 2,
+          "parents": [],
+          "children": []
+        },
+        {
+          "id": "2",
+          "name": "Synthetic Tag B",
+          "sort_name": "",
+          "aliases": [],
+          "scene_count": 1,
+          "parents": [
+            {
+              "id": "3",
+              "name": "Synthetic Parent Tag"
+            }
+          ],
+          "children": []
+        }
+      ]
+    }
+  }
+}

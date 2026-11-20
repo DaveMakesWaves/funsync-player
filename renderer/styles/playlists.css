@@ -74,8 +74,10 @@
   background: var(--bg-hover, rgba(255, 255, 255, 0.12));
 }
 
-/* Watched check — top-right of the thumbnail. Distinct from the resume
-   bar: the bar means "part way through", this means "seen it". */
+/* Watched check — top-right of the thumbnail, where the remove (X) button
+   also appears: see "Thumbnail corners" at the end of this file. Distinct
+   from the resume bar: the bar means "part way through", this means
+   "seen it". */
 .playlists__watched-check {
   position: absolute;
   top: 6px;
@@ -133,7 +135,8 @@
 }
 
 /* "Last watched" pill — top-left of the thumbnail, opposite the duration
-   badge (bottom-right) so the two never collide. */
+   badge (bottom-right) so the two never collide. The unplugged badge
+   claims that corner too: see "Thumbnail corners" at the end of this file. */
 .playlists__last-watched {
   position: absolute;
   top: 6px;
@@ -813,4 +816,326 @@
   height: 18px;
   background: transparent;
   margin-right: 4px;
+}
+
+/* ── Thumbnail corners (V67) ────────────────────────────────────────────────
+ * Four things can claim a grid tile's top corners, and no two may ever sit
+ * on each other:
+ *   top-right  the remove (X) button, on hover or keyboard focus and always
+ *              on an unavailable tile; the watched tick while the X is hidden
+ *   top-left   the unplugged badge, and the "Last watched" pill beside it
+ * The tick used to paint over the X (same spot, appended after it), and the
+ * unplugged badge sat on the pill. tests/unit/playlist-card-corners.test.js
+ * checks every combination against this file.
+ */
+
+/* The X shows for a keyboard user who tabs to it, not only on hover. */
+.playlists__video-card:focus-within .playlists__video-remove-btn {
+  opacity: 1;
+}
+
+.playlists__video-remove-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* While the X shows, the tick steps aside; the dimmed thumbnail still reads
+ * as watched. */
+.playlists__watched-check {
+  transition: opacity var(--transition-fast);
+}
+
+.playlists__video-card:hover .playlists__watched-check,
+.playlists__video-card:focus-within .playlists__watched-check {
+  opacity: 0;
+}
+
+/* An unavailable tile shows its X all the time (the way to clear a dead
+ * entry), so the tick sits to the left of it instead of hiding. */
+.playlists__video--unavailable .playlists__video-thumbnail .playlists__watched-check {
+  right: 34px;
+  opacity: 1;
+}
+
+/* The pill never runs into the right-hand corner, however long the
+ * translation: it stops 4px short of the X (6 + 24px from the edge). */
+.playlists__video-thumbnail .playlists__last-watched {
+  max-width: calc(100% - 40px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Unavailable: the unplugged badge keeps the corner (it explains the
+ * dimming) and the pill moves beside it, clear of the X and the tick. */
+.playlists__video--unavailable .playlists__video-thumbnail .playlists__last-watched {
+  left: 32px;
+  max-width: calc(100% - 88px);
+}
+
+/* ── Select mode (FT-104, GuthixUnsigned #370) ─────────────────────────────
+ * The Library's multi-select, in a playlist's detail: a tick per tile (in
+ * the title row, clear of the four thumbnail corners above) and per row,
+ * the selected look of library.css, and a bar under the header with the
+ * moves. While selecting, a click selects, so the play overlay stays away.
+ */
+.playlists__select-btn {
+  background: var(--bg-elevated, rgba(255, 255, 255, 0.06));
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.12));
+  padding: 6px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.playlists__select-btn:hover {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.12));
+}
+
+.playlists__select-btn.is-on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.playlists__select-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Wraps rather than clips: eight buttons and the count, in every language,
+ * down to the 800 px window. */
+.playlists__selection-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 16px;
+  background: var(--accent-soft, rgba(233, 69, 96, 0.1));
+  border-bottom: 1px solid rgba(233, 69, 96, 0.2);
+  flex-shrink: 0;
+}
+
+.playlists__selection-count {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-right: auto;
+  white-space: nowrap;
+}
+
+.playlists__selection-action {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background var(--transition-fast);
+}
+
+.playlists__selection-action:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.playlists__selection-action--quiet {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.playlists__selection-action--quiet:hover:not(:disabled) {
+  background: var(--surface-overlay-strong);
+}
+
+.playlists__selection-action--danger {
+  background: transparent;
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px rgba(244, 67, 54, 0.7);
+}
+
+.playlists__selection-action--danger:hover:not(:disabled) {
+  background: rgba(244, 67, 54, 0.8);
+  color: #fff;
+}
+
+.playlists__selection-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.playlists__selection-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* The tick: a 28 px button (the list row's height), drawn as the
+ * Library's 20 px chip. */
+.playlists__select-check {
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: -4px 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+}
+
+.playlists__select-check::before {
+  content: '';
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--text-secondary);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.3);
+  box-sizing: border-box;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+
+.playlists__select-check[aria-checked="true"]::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.playlists__select-check[aria-checked="true"]::after {
+  content: '\2713';
+  position: absolute;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.playlists__select-check:focus-visible::before {
+  box-shadow: 0 0 0 2px var(--accent);
+}
+
+.playlists__grid--selecting {
+  user-select: none;
+}
+
+.playlists__grid--selecting .playlists__video-overlay {
+  display: none;
+}
+
+.playlists__item--selected {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.playlists__video-card.playlists__item--selected .playlists__video-info,
+.playlists__list-item.playlists__item--selected {
+  background: var(--accent-soft);
+}
+
+/* An offline tile stays selectable (clearing a dead entry is a reason to
+ * select), so its tick is not greyed with it. */
+.playlists__video--unavailable .playlists__select-check {
+  cursor: pointer;
+}
+
+/* A drag carries the whole selection: every carried tile or row dims, and
+ * the drop side shows as a 2 px accent line (across for tiles). */
+.playlists__item--dragging {
+  opacity: 0.4;
+}
+
+.playlists__video-card.playlists__item--drop-before {
+  box-shadow: inset 3px 0 0 0 var(--accent);
+}
+
+.playlists__video-card.playlists__item--drop-after {
+  box-shadow: inset -3px 0 0 0 var(--accent);
+}
+
+/* The detail header wraps rather than clips, the Library header's FT-099
+ * rule: Play All, Continue, Reset, the four icon buttons, Select and the two
+ * toggles run past an 800 px window in German, French and Russian (with
+ * Continue and Reset shown even before Select was added, as in v0.9.2), and
+ * `.playlists` hides whatever sat past the edge. */
+.playlists__header {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+/* Stash groups as read-only playlists (Stash "next" lot #6, 2026-11-19):
+   their own section under the user's playlists, a read-only mark whose
+   tooltip says why, the note under a group's header, and a scene with no
+   linked video in the library (shown, never played). */
+.playlists__stash-section {
+  margin-top: 28px;
+}
+
+.playlists__section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+}
+
+.playlists__section-hint {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin: 0 0 12px;
+}
+
+.playlists__stash-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.playlists__card--stash:focus-visible,
+.playlists__list-item--stash:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.playlists__stash-note {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 8px 16px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.playlists__stash-missing {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.playlists__stash-missing:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.playlists__stash-missing-note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.playlists__video-card.playlists__stash-missing .playlists__stash-missing-note {
+  display: block;
+  margin-top: 2px;
 }

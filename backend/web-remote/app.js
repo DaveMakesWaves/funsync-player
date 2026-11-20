@@ -4,15 +4,19 @@
 // /api/remote/videos and streams / scripts / thumbnails from the existing
 // /api/media/* endpoints.
 
-import { computeBins, renderBins } from './heatmap.js';
+import { computeBins, renderBins, computeSpeedStats } from './heatmap.js';
 import { RemoteSyncClient } from './remote-sync.js';
-import { fuzzySearch, sortVideos } from './library-search.js';
+import { fuzzySearch, sortVideos, compareNames } from './library-search.js';
 import { buildContextMapFromGroupings } from './search-context.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from './vr-detect.js';
 import { svgIcon } from './icons.js';
 import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
 import { t, initWebRemoteI18n, translatePage } from './i18n.js';
 import { shuffle as shuffleList, balancedShuffle } from './shuffle.js';
+import { chipModel, FILTER_DEFAULTS } from './filter-chips.js';
+// The desktop's tag filter, copied (P1 tags): the same algorithm on both,
+// pinned by tests/fixtures/tag-filter-parity.json.
+import { filterByTags, FACET_IDS, foldForMatch } from './tag-filter.js';
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
@@ -146,6 +150,12 @@ setVRTypeOverrideStore((path) => {
   return hit?.manualVRType || null;
 });
 let sources = null;       // cached list from /api/remote/sources
+// The library / sources load on its way, shared by every caller that asks
+// before it lands (CB-23). Unshared, a search typed during the first load
+// started a second /videos + /sources pair. Dropped with the caches on
+// Refresh, so a Refresh still fetches afresh.
+let _libraryLoad = null;
+let _sourcesLoad = null;
 let folderIndex = null;   // Map<canonicalPath, FolderNode> — built from library+sources
 let collections = null;   // cached list from /api/remote/collections
 let playlists = null;     // cached list from /api/remote/playlists
@@ -200,7 +210,28 @@ let uiState = {
   sortDirs: { ...DEFAULT_SORT_DIRS, ...(storedState.sortDirs || {}) },
   vr: storedState.vr || 'all',             // all | vr | flat
   view: storedState.view || 'grid',        // grid | list
+  // The Tags filter (P1 tags, 2026-11-18): the keys picked in the filter
+  // sheet. OR within a facet, AND across facets (the desktop's
+  // filterByTags). NOT remembered across launches (Dave, 2026-11-17), so
+  // never read from or written to storage (saveFilterState leaves it out).
+  tags: [],
 };
+
+// The desktop's tag slice (/api/remote/tags): `{videoTags: {path: [key]},
+// tags: [{key, facet, label, count}], version}`. The desktop merged every
+// source and removed the tags you hid; the phone only filters. Loaded when
+// the filter sheet first opens, and checked again at each later open: the
+// phone sends the version it holds and the backend answers "unchanged" (a few
+// bytes) or the new slice, so a tag the desktop added, hid or harvested since
+// shows without a Refresh, and nothing polls (r3-fixup R3R-4, 2026-11-18). A
+// Refresh keeps it until the new one lands, so a picked tag never empties the
+// list in between.
+let remoteTags = null;
+let remoteTagsVersion = null;
+let _remoteTagsLoad = null;
+let tagFindQuery = '';
+/** Past this many tags the Tags section gets a find box. */
+const TAG_FIND_MIN = 12;
 
 /** Current sort as `[field, dir]`, tolerant of an old or malformed value. */
 function sortParts() {
@@ -298,9 +329,21 @@ window.addEventListener('load', async () => {
  * If the library arrives with durations still missing (backend is
  * probing them in the background), schedule a silent re-fetch so the
  * user sees durations fill in without needing to hit refresh.
+ *
+ * Callers that ask while the load is on its way share it (CB-23).
  */
-async function loadLibrary() {
-  if (library) return library;
+function loadLibrary() {
+  if (library) return Promise.resolve(library);
+  if (!_libraryLoad) {
+    const load = _fetchLibrary().finally(() => {
+      if (_libraryLoad === load) _libraryLoad = null;
+    });
+    _libraryLoad = load;
+  }
+  return _libraryLoad;
+}
+
+async function _fetchLibrary() {
   // Skeletons are painted by the calling render function (it knows the
   // shape — card grid vs row list vs grouping list). Fall through to a
   // bare loading text only on direct callers that don't paint
@@ -309,11 +352,20 @@ async function loadLibrary() {
       && !mainEl.querySelector('.skeleton')) {
     mainEl.innerHTML = `<div class="loading">${escapeHtml(t('webRemote.empty.loadingLibrary'))}</div>`;
   }
+  // Source roots scope path matches in search (parity with desktop). Fetched
+  // alongside the library and awaited with it: fetched afterwards, a search
+  // typed before they answered matched whole paths, so a word from the folders
+  // ABOVE the sources (`appdata`, the user name) listed every video (FT-022).
+  // If /sources fails, search still works, matching whole paths as before.
+  // `library` is set only once both are in: set earlier, a search typed in
+  // between got the cached list straight back, still without roots.
+  const sourcesReady = sources ? null : loadSources().catch(() => null);
+  let videos;
   try {
     const resp = await fetch('/api/remote/videos');
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const data = await resp.json();
-    library = data.videos || [];
+    videos = data.videos || [];
   } catch (err) {
     mainEl.innerHTML = `
       <div class="empty">
@@ -322,15 +374,28 @@ async function loadLibrary() {
       </div>`;
     throw err;
   }
+  if (sourcesReady) await sourcesReady;
+  library = videos;
   _scheduleDurationRefreshIfNeeded();
   // Kick off the search context build in the background — it needs the
   // three grouping endpoints fetched + inverted, which would otherwise
   // happen on first search keystroke and miss that initial render. If
   // the user already has a search active when context lands, re-render
   // so the freshly-available context affects the score.
+  // Only the list on screen (rerenderCurrent), never render(): render() is a
+  // view change and stops the open sync client, so a context landing after
+  // the player had opened (search still set) cut the device off and rebuilt
+  // the player under the user (R3-29). On the player view this is a no-op.
   ensureSearchContext().then(() => {
-    if (uiState.search) render();
+    if (uiState.search) rerenderCurrent();
   }).catch(() => { /* fall through — search degrades to no-context */ });
+  // /sources failed above: retry once in the background, re-rendering an
+  // active search when the roots land (the list only, as above).
+  if (!sources) {
+    loadSources().then(() => {
+      if (uiState.search) rerenderCurrent();
+    }).catch(() => { /* search matches whole paths until it answers */ });
+  }
   return library;
 }
 
@@ -398,13 +463,22 @@ function _scheduleDurationRefreshIfNeeded() {
  * Fetch + cache the library source folders. Used to seed the folder tree
  * with its source roots (so the walker knows where to stop climbing).
  */
-async function loadSources() {
-  if (sources) return sources;
-  const resp = await fetch('/api/remote/sources');
-  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-  const data = await resp.json();
-  sources = data.sources || [];
-  return sources;
+async function loadSources({ force = false } = {}) {
+  if (sources && !force) return sources;
+  // Shared while on its way (CB-23); a forced re-fetch (after a rescan)
+  // starts its own, since the one on its way may predate the rescan.
+  if (_sourcesLoad && !force) return _sourcesLoad;
+  const load = (async () => {
+    const resp = await fetch('/api/remote/sources');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    sources = data.sources || [];
+    return sources;
+  })().finally(() => {
+    if (_sourcesLoad === load) _sourcesLoad = null;
+  });
+  _sourcesLoad = load;
+  return load;
 }
 
 /**
@@ -470,6 +544,8 @@ async function render() {
   }
 
   const hash = location.hash.slice(1); // strip '#'
+  // Back for every view; a playlist's page hides it again (renderGroupingDetail).
+  sortBtn.hidden = false;
 
   if (hash.startsWith('play/')) {
     currentView = 'player';
@@ -552,9 +628,15 @@ async function renderList() {
   syncControlsUI();
   renderBreadcrumb([{ label: 'Library' }]);
   // Paint shape-matching skeletons before the await so the layout
-  // doesn't reflow when data arrives (§3.4.1a).
-  renderSkeletons(uiState.view === 'grid' ? 'card' : 'row',
-                  uiState.view === 'grid' ? 6 : 8);
+  // doesn't reflow when data arrives (§3.4.1a). Only while the library is
+  // really on its way (CB-23): with it in memory there is nothing to wait
+  // for, and skeletons painted anyway replaced the list on screen for the
+  // 200 ms dwell, a flash on every search keystroke and on the re-render
+  // when the search context landed.
+  if (!library) {
+    renderSkeletons(uiState.view === 'grid' ? 'card' : 'row',
+                    uiState.view === 'grid' ? 6 : 8);
+  }
 
   let videos;
   try {
@@ -603,6 +685,13 @@ function applyFilters(videos) {
     // fuzzySearch silently degrades to name + path matching — same
     // result the user got pre-fix, just without context boost.
     out = fuzzySearch(out, uiState.search, {
+      // The same three options the desktop passes (library.js _applyFilters).
+      searchPaths: true,
+      // Path hits count from each source folder down, never the folders
+      // above it (app test V35). loadLibrary waits for /api/remote/sources,
+      // so the roots are here before the first search; only if that fetch
+      // failed are whole paths matched (exact tokens only).
+      pathRoots: (sources || []).map(s => s?.path),
       contextMap: searchContextMap || undefined,
     });
     // fuzzySearch returns results already ranked by relevance (exact
@@ -630,7 +719,15 @@ function applyMatchedVrFilters(videos) {
   else if (uiState.tab === 'unmatched') out = out.filter(v => !v.hasFunscript);
   if (uiState.vr === 'vr') out = out.filter(v => isVRVideo(v.name));
   else if (uiState.vr === 'flat') out = out.filter(v => !isVRVideo(v.name));
+  // Tags: the desktop's own filter over the desktop's merged keys. A video
+  // the slice has no tags for matches no picked tag.
+  if (uiState.tags.length) out = filterByTags(out, { include: uiState.tags }, remoteTags?.videoTags || {});
   return out;
+}
+
+/** Any of the sheet's filters narrowing the list (match, VR, tags)? */
+function filtersNarrow() {
+  return uiState.tab !== 'all' || uiState.vr !== 'all' || uiState.tags.length > 0;
 }
 
 // --- Grouping list view (collections / playlists / categories) ----------
@@ -796,17 +893,19 @@ async function renderFolderRoot() {
     };
   });
 
-  // Hide empties when filters are active (Matched/Unmatched or VR); leave
-  // always-empty source roots visible when no filter is on so the user
+  // Hide empties when filters are active (Matched/Unmatched, VR or tags);
+  // leave always-empty source roots visible when no filter is on so the user
   // still sees their configured sources.
-  const filtersActive = uiState.tab !== 'all' || uiState.vr !== 'all';
+  const filtersActive = filtersNarrow();
   if (filtersActive) items = items.filter(s => s.videoCount > 0);
 
   if (uiState.search) {
     const q = uiState.search.toLowerCase();
     items = items.filter(s => s.label.toLowerCase().includes(q));
   }
-  items.sort((a, b) => a.label.localeCompare(b.label));
+  // Natural sort, as the desktop's folder view (library.js compareNames;
+  // CB-24): "Set 2" before "Set 10".
+  items.sort((a, b) => compareNames(a.label, b.label));
 
   countEl.textContent = items.length ? `${items.length}` : '';
 
@@ -916,7 +1015,7 @@ async function renderFolderAt(canonicalFolderPath) {
   // Matched/VR filters are active, each subfolder is counted against them
   // and hidden if zero matching descendants remain. Keeps drilled views
   // consistent with the "hide empty sources" root behaviour.
-  const filtersActive = uiState.tab !== 'all' || uiState.vr !== 'all';
+  const filtersActive = filtersNarrow();
   const subfolders = [...node.childFolders]
     .map(p => index.get(p))
     .filter(Boolean)
@@ -931,7 +1030,7 @@ async function renderFolderAt(canonicalFolderPath) {
       };
     })
     .filter(n => !filtersActive || n.videoCount > 0)
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .sort((a, b) => compareNames(a.label, b.label));
 
   // Filter videos at this level — only the ones directly in `node.videos`,
   // NOT descendants. Mirrors desktop behaviour: drilling is explicit.
@@ -1004,6 +1103,8 @@ function createFolderRow(item) {
 async function renderGroupingDetail(kind, id) {
   toolbarEl.classList.remove('toolbar--hidden');
   contentActionsEl.classList.remove('content-actions--hidden');
+  // A playlist is shown in its own order, so it has nothing to sort (below).
+  sortBtn.hidden = kind === 'playlists';
   // Placeholder hint is "Search" inside a grouping (the user is filtering
   // to a single grouping's video set, so a generic placeholder fits).
   searchInput.placeholder = t('webRemote.search.short');
@@ -1047,10 +1148,28 @@ async function renderGroupingDetail(kind, id) {
     { label: item.name || t('webRemote.breadcrumb.unnamed') },
   ]);
 
-  // Filter the library down to this grouping's video IDs
-  const videoSet = new Set(item.videoIds || []);
-  const videos = allVideos.filter(v => videoSet.has(v.id));
-  const filtered = applyFilters(videos);
+  // Filter the library down to this grouping's video IDs. A playlist's
+  // videos come in the PLAYLIST's order, as on the desktop, where the order
+  // is the playlist (Move, drag, Sort and Undo all change it). This page
+  // used to sort them by the phone's sort (Name A-Z by default), so the list
+  // and Play all ran in name order whatever the desktop said; the API's
+  // `videoIds` were in the right order (block E2 verify-1, also in v0.9.2).
+  // So in a playlist the Sort button goes, Matched / VR still filter (in
+  // order), and a search still ranks by relevance. Collections and
+  // categories are sets: they keep the phone's sort.
+  const isPlaylist = kind === 'playlists';
+  let videos;
+  if (isPlaylist) {
+    const byId = new Map(allVideos.map(v => [v.id, v]));
+    const seen = new Set();
+    videos = (item.videoIds || [])
+      .filter(vid => byId.has(vid) && !seen.has(vid) && seen.add(vid))
+      .map(vid => byId.get(vid));
+  } else {
+    const videoSet = new Set(item.videoIds || []);
+    videos = allVideos.filter(v => videoSet.has(v.id));
+  }
+  const filtered = isPlaylist && !uiState.search ? applyMatchedVrFilters(videos) : applyFilters(videos);
   countEl.textContent = filtered.length ? `${filtered.length}` : '';
 
   if (videos.length === 0) {
@@ -1365,7 +1484,19 @@ searchClear.addEventListener('click', () => {
 // multiple filters in one trip (Shneiderman #4 closure: open → choose
 // → close, with the closing being explicit not implicit).
 sortBtn.addEventListener('click', () => openSheet(sortSheetEl));
-filtersBtn.addEventListener('click', () => openSheet(filterSheetEl));
+filtersBtn.addEventListener('click', () => {
+  openSheet(filterSheetEl);
+  // The Tags section fills in once the desktop's tags are here; a later open
+  // asks whether they changed since (one small request per open).
+  const before = remoteTags;
+  loadRemoteTags({ check: true }).then((now) => {
+    renderTagFilterSection();
+    if (now !== before && before) {
+      syncControlsUI();
+      if (uiState.tags.length) rerenderCurrent();
+    }
+  }).catch(() => { /* no tags section, or the old one kept */ });
+});
 
 // ============================================================
 // Scroll-tracked toolbar — moves 1:1 with the user's finger. Scroll
@@ -1594,10 +1725,14 @@ async function _pollForRescanResult(prevIds) {
     const changed = freshIds.size !== prevIds.size
       || [...freshIds].some(id => !prevIds.has(id));
     if (changed) {
+      // Re-fetch the source roots before adopting the list: loadLibrary()
+      // returns early once `library` is set, so it would never fetch them,
+      // and a search with no roots matched whole paths again (FT-022). A
+      // failed fetch keeps the roots the phone already had.
+      try { await loadSources({ force: true }); } catch { /* keep the old roots */ }
       // Adopt the fresh list and drop the derived caches so groupings /
       // folder tree / search context rebuild against it, then re-render.
       library = fresh;
-      sources = null;
       folderIndex = null;
       collections = null;
       playlists = null;
@@ -1618,6 +1753,8 @@ refreshBtn.addEventListener('click', () => {
   // Clear all caches so the next render re-fetches fresh.
   library = null;
   sources = null;
+  _libraryLoad = null;   // a load still on its way is not shared after this
+  _sourcesLoad = null;
   folderIndex = null;
   collections = null;
   playlists = null;
@@ -1641,6 +1778,7 @@ refreshBtn.addEventListener('click', () => {
   // adopts the fresh list once the desktop's rescan lands.
   try { fetch('/api/remote/request-rescan', { method: 'POST' }).catch(() => {}); } catch { /* offline — snapshot refresh still runs */ }
 
+  reloadRemoteTags();
   refreshBtn.classList.add('header__action--spinning');
   rerenderCurrent()
     .then(() => _pollForRescanResult(prevIds))
@@ -1656,11 +1794,14 @@ document.addEventListener('visibilitychange', () => {
       currentView === 'folder-detail') {
     library = null;
     sources = null;
+    _libraryLoad = null;
+    _sourcesLoad = null;
     folderIndex = null;
     collections = null;
     playlists = null;
     categories = null;
     searchContextMap = null;
+    reloadRemoteTags();
     rerenderCurrent();
   }
 });
@@ -1701,28 +1842,17 @@ function closeSheet(sheetEl) {
 // that one filter (Shneiderman #6 reversibility, Nielsen #6 recognition).
 // Re-rendered every syncControlsUI tick. Cheap (max 2 chips).
 // ============================================================
-const FILTER_LABELS = {
-  tab: { matched: 'Matched', unmatched: 'Unmatched' },
-  vr:  { vr: 'VR only', flat: 'Non-VR' },
-};
-const FILTER_DEFAULTS = { tab: 'all', vr: 'all' };
-
+// Labels and aria-labels through t(), from filter-chips.js (FT-063): they
+// were English literals here, in every language.
 function renderFilterChips() {
-  const chips = [];
-  for (const key of ['tab', 'vr']) {
-    const value = uiState[key];
-    if (value && value !== FILTER_DEFAULTS[key]) {
-      const label = FILTER_LABELS[key]?.[value] || value;
-      chips.push({ key, label });
-    }
-  }
+  const chips = chipModel(uiState, t, { tagLabel: tagChipLabel });
   filterChipsEl.replaceChildren();
   filterChipsEl.hidden = chips.length === 0;
   for (const c of chips) {
     const chip = document.createElement('button');
     chip.className = 'filter-chip';
     chip.type = 'button';
-    chip.setAttribute('aria-label', `Remove filter: ${c.label}`);
+    chip.setAttribute('aria-label', c.ariaLabel);
     const text = document.createElement('span');
     text.textContent = c.label;
     chip.appendChild(text);
@@ -1731,8 +1861,13 @@ function renderFilterChips() {
     close.appendChild(svgIcon('x', 12));
     chip.appendChild(close);
     chip.addEventListener('click', () => {
-      uiState[c.key] = FILTER_DEFAULTS[c.key];
-      saveFilterState();
+      if (c.key === 'tag') {
+        uiState.tags = uiState.tags.filter((k) => k !== c.value);
+        renderTagFilterSection();
+      } else {
+        uiState[c.key] = FILTER_DEFAULTS[c.key];
+        saveFilterState();
+      }
       syncControlsUI();
       renderListIfActive();
     });
@@ -1745,6 +1880,8 @@ function updateFiltersBadge() {
   for (const key of ['tab', 'vr']) {
     if (uiState[key] && uiState[key] !== FILTER_DEFAULTS[key]) active++;
   }
+  // Each picked tag is a chip, and counts (as on the desktop).
+  active += uiState.tags.length;
   if (active > 0) {
     filtersBadge.textContent = String(active);
     filtersBadge.hidden = false;
@@ -1752,6 +1889,171 @@ function updateFiltersBadge() {
     filtersBadge.hidden = true;
   }
 }
+
+// ============================================================
+// Tags (P1 tags, 2026-11-18): the filter sheet's Tags section. The same
+// facet groups as the desktop's Filters picker; facet names and the length
+// unit come from the shared locale bundles (tags.facet.*, tags.lengthMinutes),
+// tag values are shown as the desktop shows them. Untrusted text (tag names)
+// only ever goes in through textContent.
+// ============================================================
+const tagGroupEl = document.getElementById('tagFilterGroup');
+const tagFindRowEl = document.getElementById('tagFilterFindRow');
+const tagFindEl = document.getElementById('tagFilterFind');
+const tagFacetsEl = document.getElementById('tagFilterFacets');
+
+/** `tags.facet.*` key names (a dash is not used in locale keys). */
+function tagFacetName(facet) {
+  return t(`tags.facet.${facet === 'script-type' ? 'scriptType' : facet}`);
+}
+
+/** A tag as shown: a length gets its unit ("10-25 min"), anything else as given. */
+function shownTagLabel(tag) {
+  const label = String(tag?.label ?? '');
+  return tag?.facet === 'length' ? t('tags.lengthMinutes', { range: label }) : label;
+}
+
+/** A picked key's tag: from the slice, else read off the key itself. */
+function tagForKey(key) {
+  const known = (remoteTags?.tags || []).find((tag) => tag.key === key);
+  if (known) return known;
+  const colon = key.indexOf(':');
+  const facet = colon > 0 ? key.slice(0, colon) : '';
+  return FACET_IDS.includes(facet)
+    ? { key, facet, label: key.slice(colon + 1) }
+    : { key, facet: 'content', label: key };
+}
+
+/** The chip for a picked tag: "Device: the handy", translated. */
+function tagChipLabel(key) {
+  const tag = tagForKey(key);
+  return t('webRemote.filterChips.tag', { facet: tagFacetName(tag.facet), label: shownTagLabel(tag) });
+}
+
+function isPlainObject(value) {
+  return value != null && typeof value === 'object' && !Array.isArray(value);
+}
+
+/**
+ * Fetch the desktop's tag slice; callers share a load on its way. Held
+ * already: kept as is, unless `force` (fetch it again) or `check` (ask
+ * whether it changed: the version it came with goes along, and an
+ * "unchanged" answer keeps it).
+ */
+function loadRemoteTags({ force = false, check = false } = {}) {
+  if (remoteTags && !force && !check) return Promise.resolve(remoteTags);
+  if (!_remoteTagsLoad) {
+    const known = remoteTags && !force && remoteTagsVersion ? remoteTagsVersion : null;
+    const load = (async () => {
+      const resp = await fetch(known ? `/api/remote/tags?version=${encodeURIComponent(known)}` : '/api/remote/tags');
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      if (known && data?.unchanged === true && data.version === known && remoteTags) return remoteTags;
+      remoteTagsVersion = typeof data?.version === 'string' && data.version ? data.version : null;
+      remoteTags = {
+        videoTags: isPlainObject(data?.videoTags) ? data.videoTags : {},
+        tags: (Array.isArray(data?.tags) ? data.tags : []).filter((tag) => isPlainObject(tag)
+          && typeof tag.key === 'string' && tag.key
+          && FACET_IDS.includes(tag.facet) && (typeof tag.label === 'string' || typeof tag.label === 'number')),
+      };
+      return remoteTags;
+    })().finally(() => {
+      if (_remoteTagsLoad === load) _remoteTagsLoad = null;
+    });
+    _remoteTagsLoad = load;
+  }
+  return _remoteTagsLoad;
+}
+
+/**
+ * Refresh / back to the tab: fetch the slice again IN PLACE (the old one
+ * stays until the new one lands), when it was ever loaded or a tag is
+ * picked. A failed fetch keeps the old one.
+ */
+function reloadRemoteTags() {
+  if (!remoteTags && !uiState.tags.length) return;
+  loadRemoteTags({ force: true }).then(() => {
+    renderTagFilterSection();
+    syncControlsUI();
+    if (uiState.tags.length) rerenderCurrent();
+  }).catch(() => { /* keep what we had */ });
+}
+
+const _tagCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+/** Draw the Tags section from the slice, the picked tags and the find box. */
+function renderTagFilterSection() {
+  if (!tagGroupEl || !tagFacetsEl) return;
+  const tags = remoteTags?.tags || [];
+  tagGroupEl.hidden = tags.length === 0;
+  tagFacetsEl.replaceChildren();
+  if (!tags.length) return;
+  if (tagFindRowEl) tagFindRowEl.hidden = tags.length <= TAG_FIND_MIN;
+  const query = tags.length > TAG_FIND_MIN ? foldForMatch(tagFindQuery) : '';
+  const picked = new Set(uiState.tags);
+  let shown = 0;
+  for (const facet of FACET_IDS) {
+    const inFacet = tags
+      .filter((tag) => tag.facet === facet
+        && (!query || picked.has(tag.key) || foldForMatch(shownTagLabel(tag)).includes(query)))
+      .sort((a, b) => _tagCollator.compare(String(a.label), String(b.label)));
+    if (!inFacet.length) continue;
+    const group = document.createElement('div');
+    group.className = 'sheet__tag-facet';
+    group.setAttribute('role', 'group');
+    const title = document.createElement('h4');
+    title.className = 'sheet__tag-facet-title';
+    title.id = `tagFacet-${facet}`;
+    title.textContent = tagFacetName(facet);
+    group.setAttribute('aria-labelledby', title.id);
+    const options = document.createElement('div');
+    options.className = 'sheet__options';
+    for (const tag of inFacet) {
+      const row = document.createElement('label');
+      row.className = 'sheet__option sheet__option--tag';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.value = tag.key;
+      input.checked = picked.has(tag.key);
+      const count = Number.isFinite(tag.count) ? tag.count : 0;
+      input.setAttribute('aria-label', t('webRemote.filterSheet.tagAria', { label: shownTagLabel(tag), count }));
+      const text = document.createElement('span');
+      text.textContent = shownTagLabel(tag);
+      const counter = document.createElement('span');
+      counter.className = 'sheet__option-count';
+      counter.setAttribute('aria-hidden', 'true');
+      counter.textContent = String(count);
+      row.append(input, text, counter);
+      options.appendChild(row);
+      shown += 1;
+    }
+    group.append(title, options);
+    tagFacetsEl.appendChild(group);
+  }
+  if (!shown) {
+    const empty = document.createElement('p');
+    empty.className = 'sheet__tag-empty';
+    empty.textContent = t('webRemote.filterSheet.tagsNoMatch', { query: tagFindQuery.trim() });
+    tagFacetsEl.appendChild(empty);
+  }
+}
+
+// A tag ticked or unticked: the list follows, the sheet stays open (as the
+// match and VR filters do). Not saved: the tag filter is not remembered.
+tagFacetsEl?.addEventListener('change', (e) => {
+  const input = e.target;
+  if (!(input instanceof HTMLInputElement) || input.type !== 'checkbox') return;
+  const key = input.value;
+  uiState.tags = input.checked
+    ? [...uiState.tags.filter((k) => k !== key), key]
+    : uiState.tags.filter((k) => k !== key);
+  syncControlsUI();
+  renderListIfActive();
+});
+tagFindEl?.addEventListener('input', () => {
+  tagFindQuery = tagFindEl.value;
+  renderTagFilterSection();
+});
 
 // ============================================================
 // Search placeholder — mode-aware (Norman signifier 3.3.2).
@@ -2213,7 +2515,11 @@ async function renderPlayer(id) {
   orgasmBtn.className = 'player__orgasm-btn';
   orgasmBtn.hidden = true;
   orgasmBtn.textContent = t('webRemote.player.orgasmHold');
-  wrap.appendChild(orgasmBtn);
+  // The Edge button (next major) sits next to it, in one row.
+  const holdRow = document.createElement('div');
+  holdRow.className = 'player__hold-row';
+  holdRow.appendChild(orgasmBtn);
+  wrap.appendChild(holdRow);
   let orgasmMode = 'hold';
   let orgasmActive = false;
   let orgasmHeld = false;
@@ -2250,6 +2556,53 @@ async function renderPlayer(id) {
   const onHidden = () => { if (document.visibilityState === 'hidden') orgasmRelease(); };
   document.addEventListener('visibilitychange', onHidden);
   window.addEventListener('pagehide', orgasmRelease);
+
+  // ---- Edge Hold remote button (next major, Dave 2026-11-17) ----
+  // The Orgasm button's twin for the desktop's Z: the same press-and-hold
+  // contract (pointer down = start; up, cancel, leave, a hidden page = let
+  // go; toggle mode acts on a tap), shown when the Orgasm button is, and
+  // kept truthful by the desktop's `edge-state`. The desktop lets go of a
+  // held Edge when the phone disconnects, as it does for the Orgasm hold.
+  const edgeBtn = document.createElement('button');
+  edgeBtn.type = 'button';
+  edgeBtn.className = 'player__edge-btn';
+  edgeBtn.hidden = true;
+  edgeBtn.textContent = t('webRemote.player.edgeHold');
+  holdRow.appendChild(edgeBtn);
+  let edgeMode = 'hold';
+  let edgeActive = false;
+  let edgeHeld = false;
+  const edgeSend = (active) => {
+    if (activeSyncClient?.sendEdgeHold) activeSyncClient.sendEdgeHold(active);
+  };
+  const edgeVisual = () => {
+    edgeBtn.classList.toggle('player__edge-btn--active', edgeActive);
+    edgeBtn.textContent = edgeActive
+      ? (edgeMode === 'toggle' ? t('webRemote.player.edgeResume') : t('webRemote.player.edgeRelease'))
+      : (edgeMode === 'toggle' ? t('webRemote.player.edgeTap') : t('webRemote.player.edgeHold'));
+  };
+  const edgeRelease = () => {
+    if (edgeMode !== 'hold' || !edgeHeld) return;
+    edgeHeld = false;
+    edgeSend(false);
+  };
+  edgeBtn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    if (edgeMode === 'toggle') return; // toggle acts on click
+    edgeHeld = true;
+    edgeSend(true);
+    try { navigator.vibrate?.(30); } catch { /* unsupported */ }
+  });
+  edgeBtn.addEventListener('pointerup', edgeRelease);
+  edgeBtn.addEventListener('pointercancel', edgeRelease);
+  edgeBtn.addEventListener('pointerleave', edgeRelease);
+  edgeBtn.addEventListener('click', () => {
+    if (edgeMode !== 'toggle') return;
+    edgeSend(true); // the desktop's toggle handler flips start / stop itself
+    try { navigator.vibrate?.(30); } catch { /* unsupported */ }
+  });
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') edgeRelease(); });
+  window.addEventListener('pagehide', edgeRelease);
 
   // ---- Queue auto-advance + Up Next (F1) ----
   // Sync the queue's index to this render: navigating to a video outside
@@ -2314,8 +2667,9 @@ async function renderPlayer(id) {
   let pausedForReupload = false;
 
   // Open the device-sync WebSocket when the phone has a funscript to sync to.
-  // No-op for videos without scripts — the pill explains why.
-  if (video.hasFunscript) {
+  // No-op for videos without scripts — the pill explains why. A video whose
+  // only scripts are hand-added variations has scripts too (FN-04).
+  if (hasScripts(video)) {
     activeSyncClient = new RemoteSyncClient({
       video: videoEl,
       videoId: video.id,
@@ -2336,7 +2690,17 @@ async function renderPlayer(id) {
           orgasmActive = !!msg.active;
           if (msg.mode === 'hold' || msg.mode === 'toggle') orgasmMode = msg.mode;
           if (typeof msg.configured === 'boolean') orgasmBtn.hidden = !msg.configured;
+          // The Edge button shows with the Orgasm button (next major).
+          edgeBtn.hidden = orgasmBtn.hidden;
           orgasmVisual();
+          return;
+        }
+        // Edge Hold state from the desktop (next major): active + mode keep
+        // the Edge button truthful when the desktop's Z is used instead.
+        if (msg && msg.type === 'edge-state') {
+          edgeActive = !!msg.active;
+          if (msg.mode === 'hold' || msg.mode === 'toggle') edgeMode = msg.mode;
+          edgeVisual();
           return;
         }
         // `script-loading` / `script-ready` bracket the desktop's
@@ -2352,7 +2716,13 @@ async function renderPlayer(id) {
           renderSyncPill(pill, msg);
           return;
         }
-        if (msg && msg.type === 'script-ready') {
+        // `script-missing` ends the bracket too: the desktop could not read
+        // the script (C-06's failed read sends script-loading, then this).
+        // Only `script-ready` used to hide the overlay, so "Switching
+        // script…" stayed over a paused video under the "couldn't find a
+        // matching script" pill (block C verifier 2; also in v0.9.2). The
+        // video plays on without device sync, as for an unscripted one.
+        if (msg && (msg.type === 'script-ready' || msg.type === 'script-missing')) {
           loadingOverlay.hidden = true;
           if (pausedForReupload) {
             pausedForReupload = false;
@@ -2374,10 +2744,44 @@ async function renderPlayer(id) {
     pill.textContent = t('webRemote.player.noScript');
   }
 
+  // Speed stats row under the heatmap (avg + max in units/s, colour-coded by
+  // the card badge's thresholds). It describes the script the heatmap SHOWS:
+  // it starts on the library's numbers for the video's script, and each
+  // heatmap load (the main script, a variant picked here or on the desktop,
+  // E-09's pinned one) sets it from that script's own actions (E2-02). It
+  // used to be drawn once from the main script, so a pinned "soft" variant
+  // sat under "Avg 300". Built here, appended below the title.
+  const speedRow = document.createElement('div');
+  speedRow.className = 'player__speed';
+  speedRow.hidden = true;
+  const setSpeedStats = (stats) => {
+    const avgSpeed = Number(stats?.avgSpeed) || 0;
+    const maxSpeed = Number(stats?.maxSpeed) || 0;
+    speedRow.innerHTML = '';
+    speedRow.hidden = !(hasScripts(video) && stats && stats.avgSpeed != null && (avgSpeed > 0 || maxSpeed > 0));
+    if (speedRow.hidden) return;
+    const speedBadge = createSpeedBadge({ avgSpeed, maxSpeed }, { withText: false });
+    if (speedBadge) {
+      speedBadge.classList.add('player__speed-badge');
+      speedRow.appendChild(speedBadge);
+    }
+    const avg = document.createElement('span');
+    avg.className = 'player__speed-stat';
+    // Coerced to Number above so a poisoned registry entry (string with
+    // HTML) can't become an XSS sink here. Real speeds are always numeric.
+    avg.innerHTML = `${escapeHtml(t('webRemote.player.avg'))} <strong>${avgSpeed}</strong> <span class="player__speed-unit">${escapeHtml(t('webRemote.player.speedUnit'))}</span>`;
+    speedRow.appendChild(avg);
+    const max = document.createElement('span');
+    max.className = 'player__speed-stat';
+    max.innerHTML = `${escapeHtml(t('webRemote.player.max'))} <strong>${maxSpeed}</strong> <span class="player__speed-unit">${escapeHtml(t('webRemote.player.speedUnit'))}</span>`;
+    speedRow.appendChild(max);
+  };
+  setSpeedStats({ avgSpeed: video.avgSpeed, maxSpeed: video.maxSpeed });
+
   let heatmapCanvas = null;
   let variantChipLabel = null;
   let variantChip = null;
-  if (video.hasFunscript && video.scriptUrl) {
+  if (startScriptUrl(video)) {
     const hm = document.createElement('div');
     hm.className = 'player__heatmap-wrapper';
 
@@ -2402,7 +2806,9 @@ async function renderPlayer(id) {
       variantChip.setAttribute('aria-haspopup', 'listbox');
       variantChipLabel = document.createElement('span');
       variantChipLabel.className = 'player__variant-chip-label';
-      variantChipLabel.textContent = variants[0].label || 'Default';
+      // The name the desktop shows (`text`, FN-03): an unlabelled script by
+      // its file, never the scan's English "Default".
+      variantChipLabel.textContent = variantText(variants[0]);
       // Lucide chevron-down icon to match the rest of the web-remote
       // (Shneiderman #1 — same iconography across the surface). The
       // expanded state rotates the icon 180° via CSS rather than
@@ -2433,7 +2839,7 @@ async function renderPlayer(id) {
       const list = document.createElement('div');
       list.className = 'player__variant-list';
       list.setAttribute('role', 'radiogroup');
-      list.setAttribute('aria-label', 'Funscript variant');
+      list.setAttribute('aria-label', t('webRemote.player.variantListAria')); // was English only (FT-063)
       list.hidden = true;
       let activeLabel = variants[0].label;
       let previewsRendered = false;
@@ -2477,7 +2883,17 @@ async function renderPlayer(id) {
 
         const labelEl = document.createElement('span');
         labelEl.className = 'player__variant-row-label';
-        labelEl.textContent = v.label;
+        const nameEl = document.createElement('span');
+        nameEl.className = 'player__variant-row-name';
+        nameEl.textContent = variantText(v);
+        labelEl.appendChild(nameEl);
+        // The script the video opens on (FN-03), named like the rest.
+        if (v.main) {
+          const mainEl = document.createElement('span');
+          mainEl.className = 'player__variant-row-main';
+          mainEl.textContent = t('variants.mainTag');
+          labelEl.appendChild(mainEl);
+        }
         const preview = document.createElement('canvas');
         preview.className = 'player__variant-row-preview';
 
@@ -2567,7 +2983,7 @@ async function renderPlayer(id) {
         // before iterating rows so we don't double-clear classes.
         clearPending();
         activeLabel = label;
-        if (variantChipLabel) variantChipLabel.textContent = label;
+        if (variantChipLabel) variantChipLabel.textContent = variantText(match);
         for (const r of rows) {
           const isActive = r.label === label;
           r.input.checked = isActive;
@@ -2584,7 +3000,12 @@ async function renderPlayer(id) {
             }
           });
         }
-        if (heatmapCanvas) loadHeatmap(heatmapCanvas, match.scriptUrl || video.scriptUrl);
+        // The stats follow the script shown; one this phone cannot read shows
+        // none rather than the last script's (E2-02).
+        if (heatmapCanvas) {
+          loadHeatmap(heatmapCanvas, match.scriptUrl || video.scriptUrl,
+            (actions) => setSpeedStats(actions ? computeSpeedStats(actions) : null));
+        }
         collapseList();
       };
       // Stash on the wrap element so `renderSyncPill` can find it via
@@ -2598,7 +3019,9 @@ async function renderPlayer(id) {
     wrap.appendChild(hm);
 
     // Fetch + render the main heatmap async — don't block player render.
-    loadHeatmap(heatmapCanvas, video.scriptUrl);
+    // A failed read keeps the library's numbers for this script.
+    loadHeatmap(heatmapCanvas, startScriptUrl(video),
+      (actions) => { if (actions) setSpeedStats(computeSpeedStats(actions)); });
   }
 
   const titleRow = document.createElement('div');
@@ -2620,30 +3043,9 @@ async function renderPlayer(id) {
   }
   wrap.appendChild(meta);
 
-  // Speed stats row — only rendered when the backend has probed this
-  // video's funscript. Shows avg + max in units/s, colour-coded by the
-  // same thresholds the card badge uses (library colouring is consistent
-  // between desktop and mobile).
-  if (video.hasFunscript && video.avgSpeed != null && (video.avgSpeed > 0 || video.maxSpeed > 0)) {
-    const speedRow = document.createElement('div');
-    speedRow.className = 'player__speed';
-    const speedBadge = createSpeedBadge(video, { withText: false });
-    if (speedBadge) {
-      speedBadge.classList.add('player__speed-badge');
-      speedRow.appendChild(speedBadge);
-    }
-    const avg = document.createElement('span');
-    avg.className = 'player__speed-stat';
-    // Coerce to Number so a poisoned registry entry (string with HTML) can't
-    // become an XSS sink here. Real speeds are always numeric; NaN → 0.
-    avg.innerHTML = `${escapeHtml(t('webRemote.player.avg'))} <strong>${Number(video.avgSpeed) || 0}</strong> <span class="player__speed-unit">${escapeHtml(t('webRemote.player.speedUnit'))}</span>`;
-    speedRow.appendChild(avg);
-    const max = document.createElement('span');
-    max.className = 'player__speed-stat';
-    max.innerHTML = `${escapeHtml(t('webRemote.player.max'))} <strong>${Number(video.maxSpeed) || 0}</strong> <span class="player__speed-unit">${escapeHtml(t('webRemote.player.speedUnit'))}</span>`;
-    speedRow.appendChild(max);
-    wrap.appendChild(speedRow);
-  }
+  // Speed stats row (built above with the heatmap, E2-02). Hidden until a
+  // script with movement is known: not yet probed, or no script.
+  wrap.appendChild(speedRow);
 
   mainEl.innerHTML = '';
   mainEl.appendChild(wrap);
@@ -2992,8 +3394,8 @@ function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
   });
 
   // --- chapters (F3): parse the same funscript the heatmap fetches ---
-  if (video.hasFunscript && video.scriptUrl) {
-    fetch(video.scriptUrl)
+  if (startScriptUrl(video)) {
+    fetch(startScriptUrl(video))
       .then((r) => (r.ok ? r.json() : null))
       .then((fs) => {
         if (!fs) return;
@@ -3185,17 +3587,38 @@ function renderDevicePill(pill, devices) {
   };
 }
 
-async function loadHeatmap(canvas, scriptUrl) {
+async function loadHeatmap(canvas, scriptUrl, onActions) {
+  // The latest ask for this canvas wins. At the start of a session the main
+  // script's load and the pinned variant's (E-09's variant-changed) race,
+  // and the earlier one could land last: the main script's heatmap under a
+  // chip naming the variant (verify-2, 2026-11-07).
+  const ask = {};
+  canvas._heatmapAsk = ask;
+  const stale = () => canvas._heatmapAsk !== ask;
+  // `onActions(actions)`: the script that will be drawn, or null when it
+  // could not be read; never for a stale ask, so the speed stats under the
+  // heatmap describe the same script it shows (E2-02).
+  const report = (actions) => {
+    if (typeof onActions !== 'function' || stale()) return;
+    try { onActions(actions); } catch { /* the stats are an extra */ }
+  };
   try {
     const resp = await fetch(scriptUrl);
-    if (!resp.ok) return;
+    if (stale()) return;
+    if (!resp.ok) { report(null); return; }
     const fs = await resp.json();
+    if (stale()) return;
     const actions = fs?.actions;
+    report(Array.isArray(actions) ? actions : null);
     if (!actions || actions.length < 2) return;
     const bins = computeBins(actions);
     // Wait one frame so clientWidth is measured after layout.
-    requestAnimationFrame(() => renderBins(canvas, bins));
-  } catch { /* heatmap is a progressive enhancement — silent fail is fine */ }
+    requestAnimationFrame(() => { if (!stale()) renderBins(canvas, bins); });
+  } catch {
+    // The heatmap is a progressive enhancement — a silent fail is fine. The
+    // stats under it are told the script could not be read.
+    report(null);
+  }
 }
 
 function formatDuration(seconds) {
@@ -3271,6 +3694,42 @@ function formatTotalDuration(seconds) {
   if (h > 0) return m > 0 ? `${h}h ${m}m` : `${h}h`;
   if (m > 0) return `${m}m`;
   return `${s}s`;
+}
+
+/**
+ * The name shown for one script variation (FN-03): the name the desktop
+ * shows (`text`, sent by /api/remote/videos), else its label. The scan's
+ * data word "Default" is never shown: an unlabelled script without a `text`
+ * is named after its file. '' only for an entry with nothing to name.
+ */
+function variantText(v) {
+  const text = String(v?.text ?? '').trim();
+  if (text) return text;
+  const label = String(v?.label ?? '').trim();
+  if (label && label !== 'Default') return label;
+  const file = String(v?.name ?? '').trim() || String(v?.path ?? '').split(/[\\/]/).pop() || '';
+  return file.replace(/\.funscript$/i, '').trim() || label;
+}
+
+/**
+ * Whether a video has a script to sync to: its own, or (FN-04, fix-up after
+ * block F verify-1) the hand-added variations the desktop listed for a video
+ * with no script of its own. Such a video said "No funscript — playing video
+ * only" and showed no list, although /api/remote/videos listed them.
+ */
+function hasScripts(video) {
+  return !!video?.hasFunscript || (Array.isArray(video?.variants) && video.variants.length > 0);
+}
+
+/**
+ * The script a phone session starts on, as the desktop starts it
+ * (app.js _onRemotePhoneConnected): the video's own, else the first listed
+ * variation (a pinned one is announced by the desktop's variant-changed).
+ */
+function startScriptUrl(video) {
+  if (video?.hasFunscript && video.scriptUrl) return video.scriptUrl;
+  const first = Array.isArray(video?.variants) ? video.variants[0] : null;
+  return first?.scriptUrl || null;
 }
 
 function escapeHtml(s) {

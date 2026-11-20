@@ -31,6 +31,43 @@ export function formatTime(seconds) {
   return `${m}:${pad(sec)}`;
 }
 
+/**
+ * How far past a frame's START a frame step lands, in seconds.
+ *
+ * A step used to add n / fps to currentTime and land exactly ON the target
+ * frame's start, or (float sums: 30 + 1/30 + 1/30 = 30.0666...63) a hair
+ * before it, and Chromium then shows the frame BEFORE: from 30.000 s at 30 fps
+ * Right, Right, Left, Left showed frames 901, 901, 900, 900, so half the
+ * presses showed no new frame (D-02 real-app check, verify-1, 2026-11-07;
+ * also in v0.9.2). A container that counts in whole ms (Matroska) puts a
+ * frame's start up to 0.5 ms after n / fps, so the margin is 1 ms: past
+ * either, and with snap-to-frame on (the default) a point placed there
+ * still snaps to the frame's start. Not a frame's middle: at 60 fps the
+ * middle of a 1/30 s step is exactly a 60 fps frame start.
+ */
+export const FRAME_STEP_MARGIN_SEC = 0.001;
+
+/**
+ * Where a step of `frames` frames from `currentTime` lands, in seconds:
+ * the frame on screen (the last frame start at or before currentTime) plus
+ * `frames`, at FRAME_STEP_MARGIN_SEC past that frame's start, clamped to
+ * [0, duration]. The 1e-6 of a frame only absorbs float noise in
+ * currentTime * fps.
+ * @param {number} currentTime  seconds
+ * @param {number} frames       positive = forward, negative = back
+ * @param {number} fps
+ * @param {number} [duration]   seconds; not finite = no upper clamp
+ * @returns {number}
+ */
+export function frameStepTime(currentTime, frames, fps, duration = Infinity) {
+  const rate = fps > 0 && Number.isFinite(fps) ? fps : 30;
+  const now = Number.isFinite(currentTime) ? Math.max(0, currentTime) : 0;
+  const shown = Math.floor(now * rate + 1e-6);
+  const target = Math.max(0, shown + (Number(frames) || 0));
+  const t = target / rate + FRAME_STEP_MARGIN_SEC;
+  return Number.isFinite(duration) && duration > 0 ? Math.min(t, duration) : t;
+}
+
 export class VideoPlayer {
   constructor({ videoElement, controlsElement, containerElement }) {
     this.video = videoElement;
@@ -127,6 +164,16 @@ export class VideoPlayer {
     });
     this.video.addEventListener('pause', () => this._updatePlayButton(false));
     this.video.addEventListener('ended', () => this._onEnded());
+    // A seek back from the end leaves the video paused there, not ended:
+    // Space, K and Play play from the seek, and the button says Play again.
+    // `_ended` was cleared only by play, a load or replay, so they replayed
+    // from 0:00 under a Replay button (R3 fix-up, verifier 2, also in v0.9.2).
+    this.video.addEventListener('seeked', () => {
+      if (this._ended && !this.video.ended) {
+        this._ended = false;
+        this._updatePlayButton(false);
+      }
+    });
 
     // Center play/pause overlay — click to toggle
     this.centerPlayBtn.addEventListener('click', () => this.togglePlay());
@@ -144,10 +191,33 @@ export class VideoPlayer {
     // Volume
     this.btnMute.addEventListener('click', () => this.toggleMute());
     this.volumeSlider.addEventListener('input', (e) => this.setVolume(e.target.value / 100));
+    // A slider set with the mouse gives the focus back when the button comes
+    // up (C-01). Left focused, it kept the arrows (1 % volume steps, no 5 s
+    // seek) while fullscreen hid the bar, so the keys looked dead "until i
+    // click the video". Tab still lands on it, and it keeps its arrows then.
+    // The release can land outside the slider after a drag, so it is watched
+    // on the document; the blur waits a tick so the slider finishes its own
+    // handling of the release first.
+    this.volumeSlider.addEventListener('pointerdown', () => { this._volumeByPointer = true; });
+    const releaseVolume = () => {
+      if (!this._volumeByPointer) return;
+      this._volumeByPointer = false;
+      setTimeout(() => this._blurVolumeSlider(), 0);
+    };
+    document.addEventListener('pointerup', releaseVolume, true);
+    document.addEventListener('pointercancel', releaseVolume, true);
 
     // Fullscreen
     this.btnFullscreen.addEventListener('click', () => this.toggleFullscreen());
-    document.addEventListener('fullscreenchange', () => this._updateFullscreenButton());
+    document.addEventListener('fullscreenchange', () => {
+      this._updateFullscreenButton();
+      this._placeCuesForControls(); // a new video height: the cue line follows (R4-05)
+    });
+    if (typeof window !== 'undefined') {
+      window.addEventListener('resize', () => {
+        if (this._liftedCues?.size) this._placeCuesForControls();
+      });
+    }
 
     // PiP
     this.btnPip.addEventListener('click', () => this.togglePip());
@@ -302,8 +372,13 @@ export class VideoPlayer {
 
     // Show controls briefly so user knows the player is active
     this._showControls();
-    // Show center play button so user knows to click play
-    this._updateCenterPlay(false);
+    // A new source starts paused and not ended (V12). Reset BOTH controls,
+    // not just the centre overlay: `load()` fires no 'pause', so a src swap
+    // on a playing element (Up Next) kept the bar's Pause icon, and a stale
+    // `_ended` from the previous clip kept Replay — and made Space call
+    // replay(), which seeks to 0 and throws away the user's seek.
+    this._ended = false;
+    this._updatePlayButton(false);
   }
 
   togglePlay() {
@@ -360,12 +435,7 @@ export class VideoPlayer {
    * @param {1|-1} direction — 1 = forward, -1 = backward
    */
   stepFrame(direction) {
-    this.video.pause();
-    const fps = this._estimateFps();
-    const newTime = Math.max(0, this.video.currentTime + direction / fps);
-    if (isFinite(newTime)) {
-      this.video.currentTime = Math.min(newTime, this.video.duration || Infinity);
-    }
+    this.stepFrames(direction);
   }
 
   /**
@@ -377,11 +447,9 @@ export class VideoPlayer {
   stepFrames(count) {
     if (!count) return;
     this.video.pause();
-    const fps = this._estimateFps();
-    const newTime = Math.max(0, this.video.currentTime + count / fps);
-    if (isFinite(newTime)) {
-      this.video.currentTime = Math.min(newTime, this.video.duration || Infinity);
-    }
+    // Just past the target frame's start, never on it (frameStepTime).
+    const newTime = frameStepTime(this.video.currentTime, count, this._estimateFps(), this.video.duration);
+    if (isFinite(newTime)) this.video.currentTime = newTime;
   }
 
   /**
@@ -459,6 +527,25 @@ export class VideoPlayer {
     }
   }
 
+  /**
+   * Re-draw the labels this player owns (play / pause / replay, mute /
+   * unmute, fullscreen / exit) from the element's state, in the active
+   * language. For a language switch: the static data-i18n walk resets them
+   * to their boot keys, so a muted video's button said "Mute" (app test
+   * V69). Labels only, unlike `_updatePlayButton`, which also flashes the
+   * centre button.
+   */
+  refreshLabels() {
+    const playing = !this.video.paused && !this.video.ended;
+    const playLabel = this._ended ? t('player.replay') : playing ? t('player.pause') : t('player.play');
+    this.btnPlay.setAttribute('aria-label', playLabel);
+    this.btnPlay.title = this._ended ? t('player.replayTitle')
+      : playing ? t('player.pauseTitle') : t('player.playTitle');
+    this.centerPlayBtn.setAttribute('aria-label', playLabel);
+    this._updateMuteButton();
+    this._updateFullscreenButton();
+  }
+
   // --- Private ---
 
   _onEnded() {
@@ -507,13 +594,30 @@ export class VideoPlayer {
     if (this.iconVolumeLow) this.iconVolumeLow.hidden = !isLow;
     this.iconMuted.hidden = !isMuted;
     this.btnMute.setAttribute('aria-label', isMuted ? t('player.unmute') : t('player.mute'));
+    // The tooltip too, in the active language and for the state (FT-064): it
+    // was the HTML's static English "Mute (M)", muted or not.
+    this.btnMute.title = isMuted ? t('player.unmuteTitle') : t('player.muteTitle');
   }
 
   _updateFullscreenButton() {
     const isFs = !!document.fullscreenElement;
     this.iconExpand.hidden = isFs;
     this.iconCompress.hidden = !isFs;
-    this.btnFullscreen.setAttribute('aria-label', isFs ? t('player.exitFullscreen') : t('player.fullscreen'));
+    // The visible label and the tooltip say it too, not only the icon and
+    // the aria-label: in fullscreen they still read "Fullscreen" (block C
+    // verifier 1; also in v0.9.2). The data-i18n keys move with them, so a
+    // language switch in fullscreen keeps "Exit fullscreen".
+    const key = isFs ? 'player.exitFullscreen' : 'player.fullscreen';
+    const btn = this.btnFullscreen;
+    btn.setAttribute('aria-label', t(key));
+    btn.setAttribute('title', t(key));
+    if (btn.hasAttribute?.('data-i18n-aria-label')) btn.setAttribute('data-i18n-aria-label', key);
+    if (btn.hasAttribute?.('data-i18n-title')) btn.setAttribute('data-i18n-title', key);
+    const label = btn.querySelector?.('.control-btn__label');
+    if (label) {
+      label.textContent = t(key);
+      if (label.hasAttribute?.('data-i18n')) label.setAttribute('data-i18n', key);
+    }
   }
 
   _updateCenterPlay(isPlaying) {
@@ -659,6 +763,12 @@ export class VideoPlayer {
 
   // --- Controls Visibility ---
 
+  /** Drop the focus from the volume slider, if it has it (C-01). */
+  _blurVolumeSlider() {
+    const slider = this.volumeSlider;
+    if (slider && typeof document !== 'undefined' && document.activeElement === slider) slider.blur();
+  }
+
   _showControls() {
     // Fire the callback only on an actual transition. `_showControls` runs on
     // every mousemove, so notifying unconditionally would spam the consumer
@@ -669,7 +779,10 @@ export class VideoPlayer {
     clearTimeout(this._controlsTimeout);
     clearTimeout(this._cursorTimeout);
     this._hideControlsDelayed();
-    if (!wasVisible) this._emitControlsVisibility(true);
+    if (!wasVisible) {
+      this._placeCuesForControls(); // subtitles move above the bar (R4-05)
+      this._emitControlsVisibility(true);
+    }
   }
 
   _hideControlsDelayed() {
@@ -680,9 +793,139 @@ export class VideoPlayer {
         const wasVisible = this.container.classList.contains('controls-visible');
         this.container.classList.remove('controls-visible');
         this.container.style.cursor = 'none';
-        if (wasVisible) this._emitControlsVisibility(false);
+        // A slider nobody can see owns no keys (C-01): a hidden, focused
+        // volume slider kept the arrows in fullscreen.
+        this._blurVolumeSlider();
+        if (wasVisible) {
+          this._placeCuesForControls(); // and back down (R4-05)
+          this._emitControlsVisibility(false);
+        }
       }
     }, 1500);
+  }
+
+  // --- Subtitles clear of the control bar (R4-05) ---
+
+  /**
+   * Keep subtitle text off the control bar while it shows (R4-05, probably
+   * also in v0.9.2). The bar overlays the bottom of the video and the
+   * browser draws a cue at the bottom of the video box, so whenever the
+   * controls were up the text sat over the bar's buttons. `::cue` cannot be
+   * positioned, so the cues on screen get a line just above the bar (and
+   * above the inline heatmap / timeline when they show), and their own
+   * placement back when the bar hides. Only cues the browser places
+   * (`line: auto`, every SRT cue and most VTT ones) move: a cue its file
+   * puts somewhere (the top of the frame, a line number) stays there.
+   * Called on every show / hide of the bar, on `cuechange` (a cue coming up
+   * while the bar shows) and on a resize or fullscreen change.
+   */
+  _placeCuesForControls() {
+    const lifted = this._liftedCues || (this._liftedCues = new Map()); // cue → its own placement
+    const visible = !!this.container?.classList?.contains('controls-visible');
+    const line = visible ? this._cueLineAboveControls() : null;
+    if (line == null) {
+      for (const [cue, own] of lifted) this._putCueBack(cue, own);
+      lifted.clear();
+      return;
+    }
+    const tracks = this.video?.textTracks;
+    for (let i = 0; i < (tracks?.length || 0); i++) {
+      const tt = tracks[i];
+      if (tt?.mode !== 'showing' || !tt.activeCues) continue;
+      for (const cue of Array.from(tt.activeCues)) {
+        if (!lifted.has(cue)) {
+          if (cue.line !== 'auto') continue; // placed by its file: leave it
+          lifted.set(cue, { line: cue.line, snapToLines: cue.snapToLines, lineAlign: cue.lineAlign });
+        }
+      }
+    }
+    for (const cue of lifted.keys()) {
+      try {
+        // Only what changes: a cue change can raise `cuechange`, which runs this.
+        if (cue.snapToLines !== false) cue.snapToLines = false;
+        if (cue.lineAlign !== 'end') cue.lineAlign = 'end'; // the box's bottom at `line` %, where supported
+        if (cue.line !== line) cue.line = line;
+      } catch { /* a cue of a removed track */ }
+    }
+  }
+
+  /**
+   * Something drawn over the bottom of the video appeared or went (the Up
+   * Next card): place the cues on screen again (R4 fix-up). A no-op while the
+   * bar is hidden and nothing is lifted.
+   */
+  refreshCuePlacement() {
+    this._placeCuesForControls();
+  }
+
+  /**
+   * A lifted cue back where the browser puts it. Not by setting `line` back
+   * to 'auto': Chromium's cue layout keeps state, and a cue restored that
+   * way came down about one line short of where it began (measured in a
+   * headless window, R4-05). A fresh copy of the cue, same timing, text
+   * and settings, in its place lands exactly where the original did.
+   */
+  _putCueBack(cue, own) {
+    const track = cue?.track;
+    if (track && typeof VTTCue === 'function') {
+      try {
+        const copy = new VTTCue(cue.startTime, cue.endTime, cue.text);
+        copy.id = cue.id;
+        copy.pauseOnExit = cue.pauseOnExit;
+        for (const key of ['vertical', 'position', 'size', 'align', 'region']) {
+          if (key in cue && cue[key] !== undefined) copy[key] = cue[key];
+        }
+        copy.snapToLines = own.snapToLines;
+        copy.line = own.line;
+        if (own.lineAlign !== undefined) copy.lineAlign = own.lineAlign;
+        track.removeCue(cue);
+        track.addCue(copy);
+        return;
+      } catch { /* fall back to restoring it in place */ }
+    }
+    try {
+      cue.snapToLines = own.snapToLines;
+      cue.line = own.line;
+      if (own.lineAlign !== undefined) cue.lineAlign = own.lineAlign;
+    } catch { /* a cue of a removed track */ }
+  }
+
+  /**
+   * The `line` (in % of the video box) that keeps a lifted cue's box above
+   * the top of the control bar, or of the inline heatmap / timeline when
+   * they show (they sit above the bar). Layout offsets, not on-screen
+   * rectangles: the inline viz slides with a transform. Null while nothing
+   * is laid out (a hidden player).
+   *
+   * Chromium has no `lineAlign` (it is set anyway, for an engine that does):
+   * with `snapToLines` off it anchors the cue box proportionally, the point
+   * `line`% down the box at `line`% down the video, so the box's bottom
+   * lands at line·H + (1 − line)·boxHeight. Solved for a box of about two
+   * cue lines (cue text is 5% of the video height), so one and two line
+   * cues clear the bar and a third line reaches at most into the bar's
+   * transparent top padding. Measured in a headless window (R4-05).
+   */
+  _cueLineAboveControls() {
+    const video = this.video;
+    const height = video?.clientHeight || 0;
+    if (!(height > 0) || !this.controls) return null;
+    let top = this.controls.offsetTop;
+    const viz = this.container?.querySelector?.('.inline-viz');
+    if (viz && !viz.hidden && viz.offsetHeight > 0) top = Math.min(top, viz.offsetTop);
+    // The Up Next card while it shows (bottom right above the bar, left of an
+    // open queue panel since R4-03): a cue lifted to just above the bar lay
+    // in the card's band and was cut off behind it (R4 fix-up, real-app
+    // verifier 1). The app places the cues again when it shows or goes
+    // (`refreshCuePlacement`).
+    const card = this.container?.querySelector?.('.up-next');
+    if (card && !card.hidden && card.offsetHeight > 0) top = Math.min(top, card.offsetTop);
+    const videoTop = (video.offsetParent === this.container ? 0 : (video.offsetParent?.offsetTop || 0)) + video.offsetTop;
+    const GAP_PX = 6;
+    const bottom = top - GAP_PX - videoTop; // where the box's bottom may go, px from the video's top
+    const box = 0.12 * height;              // about two lines of cue text
+    const fraction = (bottom - box) / (height - box);
+    if (!Number.isFinite(fraction)) return null;
+    return Math.max(0, Math.min(100, Math.round(fraction * 10000) / 100));
   }
 
   /** Notify the app that the control chrome appeared/disappeared. */
@@ -1087,6 +1330,7 @@ export class VideoPlayer {
     }
     const badge = document.getElementById('subtitle-badge');
     if (badge) badge.hidden = true;
+    this._liftedCues?.clear(); // their track is gone (R4-05)
   }
 
   async loadSubtitles(file) {
@@ -1121,6 +1365,10 @@ export class VideoPlayer {
     const enableNew = () => { if (track.track) track.track.mode = 'showing'; };
     enableNew();
     track.addEventListener('load', enableNew, { once: true });
+    // Its cues keep off the control bar while it shows (R4-05): the ones
+    // coming up as playback moves, and the first ones once the file loads.
+    track.track?.addEventListener?.('cuechange', () => this._placeCuesForControls());
+    track.addEventListener('load', () => this._placeCuesForControls(), { once: true });
 
     // Show subtitle indicator
     const badge = document.getElementById('subtitle-badge');

@@ -28,6 +28,19 @@
 // 0.9 × expectedAdvance is positive when playing, but we add an
 // explicit `Math.max(0, …)` belt-and-braces so the invariant survives
 // future changes to the slew constants.
+//
+// Stall (FN-02, 2026-11-16): a headset that keeps saying "playing" while its
+// reported time stands still (buffering, a stream that stopped) used to be
+// interpolated straight through: the clock ran on at 0.9x-1.1x of wall time,
+// snapped back with a 'seeked' once 1 s off, and ran on again, so the Handy
+// stroked up to ~2 s ahead and was pulled back every couple of seconds while
+// a vibrator kept its last level. Now a reported time that has not moved for
+// STALL_AFTER_MS while playing is a STALL, reported the way the pop-out's
+// RemotePlaybackProxy reports one (N-01): `paused` reads true, 'pause' fires,
+// `stalled` is true and `sourcePaused` false; the first packet that moves
+// again fires 'playing'. Every engine then needs no headset-specific code.
+
+import { ProgressWatch } from './playback-stall.js';
 
 // Stage A — α = 0.20 EMA blend on packets below the seek threshold.
 // Lower than MultiFunPlayer's 0.33 (their cadence is ~1 Hz; ours is
@@ -52,6 +65,14 @@ const SEEK_THRESHOLD_S = 1.0;
 const SLEW_RATIO_MAX = 1.10;
 const SLEW_RATIO_MIN = 0.90;
 
+// A stall: the headset says playing and its reported time has moved less than
+// 0.1 s for this long. Sampled per PACKET, and two seconds rather than the
+// inline player's one because HereSphere's default update interval is one
+// second: one second would be a single packet. Whether HereSphere / DeoVR
+// keep reporting "playing" through a buffering stall is not confirmed on a
+// headset (the device step for FN-02).
+const STALL_AFTER_MS = 2000;
+
 export class VRPlaybackProxy extends EventTarget {
   constructor() {
     super();
@@ -70,6 +91,11 @@ export class VRPlaybackProxy extends EventTarget {
     // "not primed; next read will adopt the raw smoothed value".
     this._consumerLastValue = 0;
     this._consumerLastReadAt = 0;
+    // FN-02: `_paused` is what the engines see, the headset's paused OR a
+    // stall; these two say which.
+    this._sourcePaused = true;
+    this._stalled = false;
+    this._progress = new ProgressWatch({ frozenAfterMs: STALL_AFTER_MS });
   }
 
   // --- Public interface (matches HTMLVideoElement subset used by sync engines) ---
@@ -157,6 +183,16 @@ export class VRPlaybackProxy extends EventTarget {
   get duration() { return this._duration; }
   get paused() { return this._paused; }
   get playbackRate() { return this._playbackSpeed; }
+  /** The headset's own paused flag, without a stall (FN-02). */
+  get sourcePaused() { return this._sourcePaused; }
+  /** True while the headset says playing but its time stands still (FN-02). */
+  get stalled() { return this._stalled; }
+  /**
+   * How long the picture had stood when this stall was reported: at least
+   * STALL_AFTER_MS, so the engines' grace window (FN-05) is already over and
+   * they hold at once instead of waiting another 500 ms.
+   */
+  get stallAgeMs() { return this._stalled ? STALL_AFTER_MS : 0; }
 
   // Stub methods sync engines may call
   addEventListener(type, listener, options) {
@@ -168,6 +204,8 @@ export class VRPlaybackProxy extends EventTarget {
   }
 
   pause() {
+    this._sourcePaused = true;
+    this._stalled = false;
     if (!this._paused) {
       // Capture the raw un-offset position so subsequent reads while
       // paused (the getter re-applies offset on every read) don't
@@ -183,6 +221,9 @@ export class VRPlaybackProxy extends EventTarget {
   }
 
   play() {
+    this._sourcePaused = false;
+    this._stalled = false;
+    this._progress.reset();
     if (this._paused) {
       this._paused = false;
       this._lastUpdateTime = performance.now();
@@ -215,7 +256,19 @@ export class VRPlaybackProxy extends EventTarget {
     this._playbackSpeed = state.playbackSpeed || 1;
 
     const newTime = state.currentTime || 0;
-    const nowPaused = state.playerState === 1;
+    // FN-02: the headset's paused flag, and a stall on top of it (see the
+    // header). `nowPaused` is what the engines see from here on.
+    const sourcePaused = state.playerState === 1;
+    const frozen = this._progress.sample(newTime, sourcePaused, now);
+    const wasStalled = this._stalled;
+    this._sourcePaused = sourcePaused;
+    this._stalled = !sourcePaused && frozen;
+    const nowPaused = sourcePaused || this._stalled;
+    if (this._stalled && !wasStalled) {
+      console.log(`[VR] headset time stands at ${newTime.toFixed(2)}s while playing — treating it as a stall`);
+    } else if (wasStalled && !this._stalled && !sourcePaused) {
+      console.log(`[VR] headset time moving again at ${newTime.toFixed(2)}s`);
+    }
 
     // Calculate where we EXPECTED the position to be based on
     // interpolation — used both for drift detection (real-seek vs
@@ -292,6 +345,9 @@ export class VRPlaybackProxy extends EventTarget {
     this._playbackSpeed = 1;
     this._lastUpdateTime = 0;
     this._lastReportedTime = 0;
+    this._sourcePaused = true;
+    this._stalled = false;
+    this._progress.reset();
     this._resetConsumerSlew();
   }
 }

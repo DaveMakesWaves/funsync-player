@@ -95,6 +95,8 @@
       "testBuzzAll": "Alle testen",
       "testBuzzAllTitle": "Alle verbundenen Geräte zur Plausibilitätsprüfung kurz vibrieren lassen",
       "testBuzz": "Test-Vibration",
+      "resend": "Erneut senden",
+      "resendTitle": "Das Handy dieses Zuschauers erneut verbinden, falls die Verbindung abgebrochen ist, und danach das aktuelle Script senden",
       "mute": "Stumm",
       "unmute": "Laut",
       "remove": "Zuschauer entfernen",
@@ -111,13 +113,23 @@
       "statusSynced": "Synchronisiert",
       "statusPlaying": "Läuft",
       "statusPlayingWithRtd": "Läuft · {rtd}ms RTD",
+      "statusWaiting": "Warte auf Script",
+      "statusReady": "Bereit",
+      "statusRemoteHeld": "Gestoppt · Zuschauer folgen keinem Smartphone oder Headset",
+      "statusNoScript": "Kein Script für dieses Video",
+      "statusSpeed": "Gestoppt · {rate}× Geschwindigkeit",
+      "statusScriptFailed": "Script konnte nicht geladen werden",
+      "errorStopFailed": "Stoppen fehlgeschlagen. Das Gerät bewegt sich womöglich noch.",
+      "errorSetupFailed": "Das Gerät hat das Script nicht angenommen.",
+      "errorPlayFailed": "Das Gerät hat die Wiedergabe nicht gestartet.",
       "statusPaused": "Pausiert",
       "statusMuted": "Stumm",
       "statusError": "Fehler",
       "statusDisconnected": "Getrennt"
     },
     "toast": {
-      "selfKey": "Das ist dein eigenes Handy — es wird bereits vom Handy-Tab gesteuert."
+      "selfKey": "Das ist dein eigenes Handy — es wird bereits vom Handy-Tab gesteuert.",
+      "uploadFailed": "Das neue Script konnte nicht an deine Zuschauer gesendet werden. Ihre Geräte sind gestoppt."
     },
     "popoutWindowTitle": "Publikumsraum"
   },
@@ -157,7 +169,8 @@
     "sourceDisconnected": "Quelle getrennt",
     "edit": "Bearbeiten",
     "addSourceFolder": "+ Quellordner hinzufügen…",
-    "newCollection": "+ Neue Sammlung…"
+    "newCollection": "+ Neue Sammlung…",
+    "notResponding": "Reagiert nicht"
   },
   "common": {
     "ok": "OK",
@@ -198,6 +211,7 @@
     "scriptEditor": "Skript-Editor (E)",
     "inlineTimeline": "Skript-Zeitleiste",
     "inlineHeatmap": "Heatmap-Leiste",
+    "deviceSimulator": "Gerätesimulator",
     "screenshot": "Screenshot",
     "pictureInPicture": "Bild-in-Bild",
     "miniPlayPause": "Wiedergabe / Pause",
@@ -229,6 +243,8 @@
     "replayTitle": "Wiederholen (K)",
     "playTitle": "Abspielen (K)",
     "pauseTitle": "Pause (K)",
+    "muteTitle": "Stummschalten (M)",
+    "unmuteTitle": "Ton an (M)",
     "infoResolution": "Auflösung",
     "infoDuration": "Dauer",
     "infoCurrent": "Aktuell",
@@ -245,7 +261,13 @@
     "windowWaiting": "Player-Fenster verbunden. Die Videowiedergabe wandert in einem kommenden Update hierher.",
     "popOutUnavailableRemote": "Nicht verfügbar, während ein Handy oder VR-Headset verbunden ist.",
     "popOutUnavailableSrc": "Das Abkoppeln unterstützt derzeit lokale Bibliotheksvideos.",
-    "popOutOpening": "Player-Fenster wird geöffnet…"
+    "popOutOpening": "Player-Fenster wird geöffnet…",
+    "windowCrashed": "Das Player-Fenster ist abgestürzt. Das Video ist wieder in diesem Fenster.",
+    "windowHung": "Das Player-Fenster reagiert nicht. Deine Geräte sind gestoppt. Warte, bis es wieder reagiert, oder schließe es und schau hier weiter.",
+    "windowHungClose": "Player-Fenster schließen",
+    "windowRecovered": "Das Player-Fenster reagiert wieder. Es ist pausiert: Drücke Abspielen, um deine Geräte wieder zu starten.",
+    "stashMarker": "Stash-Marker: {title}",
+    "stashMarkerUntitled": "Stash-Marker"
   },
   "backend": {
     "title": "Backend antwortet nicht",
@@ -291,16 +313,26 @@
     "filterVR": "VR",
     "filterVROnly": "Nur VR",
     "filterNonVR": "Nicht-VR",
-    "kebabResetVRCurrentlyVR": "VR zurücksetzen (aktuell: VR)",
-    "kebabResetVRCurrentlyFlat": "VR zurücksetzen (aktuell: Flach)",
-    "kebabMarkFlat": "Als Flach markieren",
-    "kebabMarkVR": "Als VR markieren",
+    "filterTags": "Tags",
+    "filterTagsFind": "Tag suchen",
+    "filterTagsFindAria": "In Tags und Kategorien suchen",
+    "filterTagsEmpty": "Deine Videos haben noch keine Tags oder Kategorien.",
+    "filterTagsNoMatch": "Nichts passt zu „{query}“.",
+    "filterTagsShowAll": "Alle anzeigen ({count})",
+    "filterTagsShowFewer": "Weniger anzeigen",
+    "filterCategory": "Kategorie",
+    "filterTagSource": "Herkunft der Tags",
+    "filterTagSourceEroscripts": "EroScripts",
+    "filterTagSourceFile": "Skriptdatei",
+    "filterTagSourceUser": "Von dir",
+    "filterTagOptionAria": "{label}, {count, plural, one {# Video} other {# Videos}}",
+    "filterChipFacet": "{facet}: {value}",
+    "filterChipFacetNot": "{facet}: nicht {value}",
+    "cardTagsMore": "+{count}",
     "kebabVRFormat": "VR-Format…",
-    "kebabRemoveFunscript": "Funscript entfernen",
-    "kebabChangeSubtitle": "Untertitel ändern",
+    "kebabRemoveFunscript": "Funscript-Zuordnung aufheben",
     "kebabAssociateSubtitle": "Untertitel zuordnen",
-    "kebabRemoveSubtitle": "Untertitel entfernen",
-    "kebabOptions": "Optionen",
+    "kebabRemoveSubtitle": "Untertitel-Zuordnung aufheben",
     "kebabFolderOptions": "Ordner-Optionen",
     "clearFolderScope": "Ordner-Auswahl aufheben",
     "funscriptManual": "Funscript (manuell)",
@@ -311,6 +343,7 @@
     "subtitlesAuto": "Untertitel (automatisch erkannt)",
     "multiAxis": "Mehrachsig",
     "multiAxisCount": "{count, plural, one {Mehrachsig (# Skript)} other {Mehrachsig (# Skripte)}}",
+    "multiAxisEmbedded": "{count, plural, one {Mehrachsig — # Achse im Skript eingebettet: {axes}} other {Mehrachsig — # Achsen im Skript eingebettet: {axes}}}",
     "vrBadge": "VR",
     "flatBadge": "FLAT",
     "limitToFolder": "Auf diesen Ordner beschränken",
@@ -324,6 +357,8 @@
     "select": "Auswählen",
     "cancelSelect": "Abbrechen",
     "noSourcesEmpty": "Füge einen Quellordner hinzu, um deine Videobibliothek zu durchsuchen",
+    "noVideoTrack": "Keine Videospur",
+    "sourcesAllOff": "Alle deine Quellordner sind ausgeschaltet. Schalte unter {settings} > {tab} einen ein, um ihn zu durchsuchen.",
     "addSourceFolder": "+ Quellordner hinzufügen",
     "gridView": "Rasteransicht",
     "listView": "Listenansicht",
@@ -333,6 +368,13 @@
     "shuffleAll": "Alle mischen",
     "shuffleAllTitle": "Alle angezeigten Videos in zufälliger, wiederholungsfreier Reihenfolge abspielen",
     "shuffleEmpty": "Keine Videos zum Mischen hier",
+    "playOptions": {
+      "openTitle": "Wiedergabeoptionen",
+      "title": "Wiedergabeoptionen für Bibliothek und Kategorien",
+      "loopLabel": "Wiederholen",
+      "loopWhy": "Nach dem letzten Video wieder beim ersten beginnen.",
+      "shuffleNote": "Gleiche Chancen und „Ungesehene bevorzugen“ wirken nur beim Mischen. „Alle abspielen“ in einer Kategorie behält die Reihenfolge. Playlists haben eigene Einstellungen."
+    },
     "selectionCount": "{count} ausgewählt",
     "vrType": "VR-Typ",
     "loading": "Lade…",
@@ -355,10 +397,6 @@
     "variantDefault": "Standard",
     "assignScriptBulk": "Skript zuweisen",
     "bulkScriptAssigned": "{name} wurde {count} Videos zugewiesen",
-    "kebabGroupOrganize": "Organisieren",
-    "kebabGroupScripts": "Skripte & Untertitel",
-    "kebabGroupThumbnail": "Vorschaubild",
-    "kebabGroupVR": "VR",
     "kebabExtractAxes": "Eingebettete Achsen extrahieren ({count})…",
     "kebabExtractAxesTitle": "Speichert {axes} als separate .funscript-Dateien",
     "customThumbTitle": "Vorschaubild-Frame wählen",
@@ -379,7 +417,6 @@
     "resetVRClassification": "Auf Auto zurücksetzen",
     "pinAsCollection": "Als Sammlung anheften",
     "selectAllInFolder": "Alles in diesem Ordner auswählen",
-    "changeFunscriptBtn": "Funscript ändern",
     "associateFunscriptBtn": "Funscript zuordnen",
     "noSourcesToRefresh": "Keine Quellordner zum Aktualisieren",
     "refreshedNoChanges": "Bibliothek aktualisiert — keine Änderungen",
@@ -443,6 +480,7 @@
       "changeTo": "Ändern zu:",
       "selectScript": "Skript auswählen:",
       "noFunscripts": "Keine Funscripts im Verzeichnis gefunden. Nutze Durchsuchen.",
+      "noNameMatch": "Kein Skript hier heißt wie dieses Video. Das sind alle Skripte in seinem Ordner:",
       "browse": "Durchsuchen…",
       "save": "Speichern",
       "variations": "Varianten",
@@ -469,11 +507,24 @@
       "selectScriptBtn": "Auswählen",
       "addRoute": "+ Route hinzufügen",
       "variantSearchTitle": "Skript für Variante auswählen",
+      "routeScriptSearchTitle": "Skript für Route auswählen",
       "searchEroScripts": "EroScripts durchsuchen..."
     },
     "heatmapUnavailable": "Heatmap nicht verfügbar",
     "sortSwitchTo": "Wechseln zu {order}",
-    "selectedAll": "{count, plural, one {# Video ausgewählt} other {# Videos ausgewählt}}"
+    "selectedAll": "{count, plural, one {# Video ausgewählt} other {# Videos ausgewählt}}",
+    "contextAllOptions": "Alle Optionen…",
+    "filterTagIncludesSubTags": "enthält {count, plural, one {# Unter-Tag} other {# Unter-Tags}}",
+    "sortStashRatingDesc": "Stash-Bewertung hoch-niedrig",
+    "sortStashRatingAsc": "Stash-Bewertung niedrig-hoch",
+    "sortStashLastPlayedDesc": "Zuletzt in Stash abgespielt",
+    "sortStashLastPlayedAsc": "Am längsten nicht in Stash abgespielt",
+    "filterStash": "Stash",
+    "filterStashRating": "Stash-Bewertung",
+    "filterStashRatingAny": "Jede Bewertung",
+    "filterStashRatingAtLeast": "{count, plural, one {Mit # Stern oder mehr bewertet} other {Mit # Sternen oder mehr bewertet}}",
+    "filterStashOrganised": "In Stash organisiert",
+    "filterChipStashRating": "{count, plural, one {Stash: # Stern oder mehr} other {Stash: # Sterne oder mehr}}"
   },
   "playlists": {
     "title": "Playlists",
@@ -492,6 +543,8 @@
     "moveDown": "Nach unten",
     "moveUpNamed": "{name} nach oben verschieben",
     "moveDownNamed": "{name} nach unten verschieben",
+    "moveToTop": "Ganz nach oben",
+    "moveToBottom": "Ganz nach unten",
     "reorderAnnounce": "{name} an Position {pos} von {total} verschoben",
     "renamePlaylist": "Playlist umbenennen",
     "deletePlaylist": "Playlist löschen",
@@ -502,7 +555,7 @@
     "gridView": "Rasteransicht",
     "listView": "Listenansicht",
     "detailEmpty": "Keine Videos in dieser Playlist",
-    "detailEmptyHint": "Füge Videos aus der Bibliothek über das Kebab-Menü hinzu",
+    "detailEmptyHint": "Füge Videos aus der Bibliothek hinzu: Öffne die Optionen eines Videos (⋮) und hake diese Playlist unter „Ordnen“ an.",
     "advanced": {
       "openTitle": "Erweiterte Playlist-Einstellungen",
       "title": "Erweiterte Playlist-Einstellungen",
@@ -528,7 +581,36 @@
     "unavailableCount": "{count, plural, one {# Video ist nicht verfügbar} other {# Videos sind nicht verfügbar}}",
     "unavailableOnVolume": "{count, plural, one {# Video auf {volume} ist nicht verfügbar} other {# Videos auf {volume} sind nicht verfügbar}}",
     "unavailableHint": "Laufwerk wieder verbinden, um sie abzuspielen. Sie bleiben in der Playlist.",
-    "unavailableTooltip": "Derzeit nicht verfügbar: {path}"
+    "unavailableTooltip": "Derzeit nicht verfügbar: {path}",
+    "sortAzTitle": "Nach Name sortieren, A-Z",
+    "sortZaTitle": "Nach Name sortieren, Z-A",
+    "sortedAz": "„{name}“ nach Name sortiert, A-Z",
+    "sortedZa": "„{name}“ nach Name sortiert, Z-A",
+    "selectModeTitle": "Videos auswählen, um mehrere auf einmal zu verschieben oder zu entfernen",
+    "selectVideoNamed": "{name} auswählen",
+    "movedSelection": "{count, plural, one {# Video in „{name}“ verschoben} other {# Videos in „{name}“ verschoben}}",
+    "removedSelection": "{count, plural, one {# Video aus „{name}“ entfernt} other {# Videos aus „{name}“ entfernt}}. Deine Videodateien bleiben unangetastet.",
+    "confirmRemoveSelection": "{count, plural, one {# Video aus „{name}“ entfernen?} other {# Videos aus „{name}“ entfernen?}} Deine Videodateien bleiben unangetastet.",
+    "stashGroups": {
+      "sectionTitle": "Aus Stash",
+      "sectionHint": "Gruppen aus deinem Stash, aktuell gehalten bei jeder Synchronisierung von FunSync mit Stash. Um eine zu ändern, ändere sie in Stash.",
+      "name": "Stash: {name}",
+      "unnamed": "Gruppe ohne Namen",
+      "readOnly": "Schreibgeschützt",
+      "readOnlyReason": "Wird mit dieser Gruppe in deinem Stash synchron gehalten. FunSync kann ihre Videos und deren Reihenfolge nicht ändern: Ändere die Gruppe in Stash und synchronisiere dann.",
+      "missingCount": "{count, plural, one {# Szene nicht in deiner Bibliothek} other {# Szenen nicht in deiner Bibliothek}}",
+      "missingScene": "Nicht in deiner FunSync-Bibliothek",
+      "missingSceneTooltip": "Diese Stash-Szene hat kein verknüpftes Video in deiner FunSync-Bibliothek und wird beim Abspielen der Gruppe übersprungen.",
+      "untitledScene": "Stash-Szene ohne Titel",
+      "playOptionsNote": "Diese Optionen gelten auch für die Bibliothek und die Kategorien. Gleiche Chancen und „Ungesehene bevorzugen“ wirken nur beim Mischen; „Alle abspielen“ behält die Reihenfolge von Stash.",
+      "addToQueue": "Zur Warteschlange",
+      "addToQueueTitle": "Die Videos dieser Gruppe ans Ende deiner Warteschlange stellen",
+      "addedToQueue": "{count, plural, one {# Video zur Warteschlange hinzugefügt} other {# Videos zur Warteschlange hinzugefügt}}",
+      "copy": "In meine Playlists kopieren",
+      "copyTitle": "Eine eigene Playlist mit diesen Videos anlegen. Du kannst sie bearbeiten, und sie folgt Stash nicht.",
+      "copied": "„{name}“ zu deinen Playlists hinzugefügt",
+      "copyFailed": "Die Playlist konnte nicht angelegt werden. Bitte versuch es noch einmal."
+    }
   },
   "categories": {
     "title": "Kategorien",
@@ -548,7 +630,8 @@
     "gridView": "Rasteransicht",
     "listView": "Listenansicht",
     "detailEmpty": "Keine Videos in dieser Kategorie",
-    "detailEmptyHint": "Weise Videos aus der Bibliothek über das Kebab-Menü zu",
+    "unavailableHint": "Laufwerk wieder verbinden, um sie abzuspielen. Sie bleiben in der Kategorie.",
+    "detailEmptyHint": "Weise Videos aus der Bibliothek zu: Öffne die Optionen eines Videos (⋮) und hake diese Kategorie unter „Ordnen“ an.",
     "iconLabel": "Symbol",
     "iconModeColor": "Farbe",
     "iconModeShape": "Form",
@@ -598,7 +681,9 @@
       "clear": "Suche löschen"
     },
     "filterChips": {
-      "aria": "Aktive Filter"
+      "aria": "Aktive Filter",
+      "removeAria": "Filter entfernen: {label}",
+      "tag": "{facet}: {label}"
     },
     "actions": {
       "sort": "Sortieren",
@@ -630,7 +715,12 @@
       "vrAria": "VR-Filter",
       "vrAll": "Alle",
       "vrOnly": "Nur VR",
-      "vrFlat": "Kein VR"
+      "vrFlat": "Kein VR",
+      "tagsHeader": "Tags",
+      "tagsFindLabel": "Tag suchen",
+      "tagsFindPlaceholder": "Tag suchen…",
+      "tagsNoMatch": "Kein Tag passt zu „{query}“.",
+      "tagAria": "{label}, {count, plural, one {# Video} other {# Videos}}"
     },
     "sortSheet": {
       "title": "Sortieren nach",
@@ -717,7 +807,12 @@
       "avg": "Ø",
       "max": "Max",
       "speedUnit": "Einheiten/s",
-      "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s"
+      "speedTooltip": "Ø {avg} Einheiten/s • Max {max} Einheiten/s",
+      "variantListAria": "Funscript-Variante",
+      "edgeHold": "Edge-Halten - halten",
+      "edgeRelease": "Loslassen zum Fortsetzen",
+      "edgeTap": "Edge-Halten - tippen",
+      "edgeResume": "Tippen zum Fortsetzen"
     }
   },
   "hevc": {
@@ -742,11 +837,18 @@
     "browse": "Durchsuchen…",
     "noManualVariations": "Keine manuellen Varianten",
     "defaultLabel": "Standard",
+    "mainTag": "Hauptskript",
     "addScriptVariation": "Skriptvariante hinzufügen",
     "setDefault": "Als Standard für dieses Video festlegen",
     "unsetDefault": "Als Standard für dieses Video entfernen",
     "defaultSet": "„{label}“ als Standard für dieses Video festgelegt",
-    "defaultCleared": "Standardvariante zurückgesetzt"
+    "defaultCleared": "Standardvariante zurückgesetzt",
+    "bulkNamingTitle": "{count, plural, one {# Variante benennen} other {# Varianten benennen}}",
+    "bulkNamingHint": "Jedes Skript erhält im Variantenmenü einen Namen. Ändere einen Namen oder klicke darunter auf einen Vorschlag.",
+    "bulkSkipped": "{count, plural, one {Übersprungen, bereits in der Liste: {names}} other {# übersprungen, bereits in der Liste: {names}}}",
+    "bulkAddButton": "{count, plural, one {# Variante hinzufügen} other {# Varianten hinzufügen}}",
+    "bulkAdded": "{count, plural, one {# Variante hinzugefügt} other {# Varianten hinzugefügt}}",
+    "alreadyListed": "{count, plural, one {{names} ist bereits in der Variantenliste} other {Bereits in der Variantenliste: {names}}}"
   },
   "syncChip": {
     "noDevices": "Keine Geräte",
@@ -821,6 +923,8 @@
     "restartNow": "Jetzt neu starten"
   },
   "collectionModal": {
+    "titleCreate": "Sammlung erstellen",
+    "titleEdit": "Bearbeiten — {name}",
     "sourceLabel": "Quelle:",
     "allSources": "Alle Quellen",
     "sourceDisconnected": "{name} (getrennt)",
@@ -851,8 +955,11 @@
     "tcodePrecision4": "4-stellig (TCode-0.3)"
   },
   "toast": {
+    "tcodeGoHomePauseFirst": "Pausiere zuerst das Video auf deinem Handy oder Headset — es steuert gerade dein Gerät.",
     "dismissAria": "Benachrichtigung schließen",
     "tryAgain": "Erneut versuchen",
+    "vrTimestampServerHint": "VR-Companion kann den HereSphere-Timestamp-Server nicht erreichen. Auf deinem Quest: HereSphere → Settings → Timestamp Server. Stell sicher, dass er aktiviert ist, und drücke dann den Auto-Erkennungs-Button neben dem IP-Feld — die IP deines Quest ist {ip}, und der Port sollte 23554 sein. Wenn das nicht hilft, schalte den Timestamp-Server aus und wieder ein, um eine Neuinitialisierung zu erzwingen.",
+    "vrQuestIpUnknown": "die, die in den WLAN-Einstellungen des Quest angezeigt wird",
     "connecting": "Verbinde…",
     "undo": "Rückgängig",
     "getScript": "Skript holen",
@@ -884,7 +991,8 @@
     "syncPaused": "Synchronisierung pausiert — Wiedergabegeschwindigkeit geändert",
     "vrFlattenLabel": "VR flach: {label}",
     "noVRDetected": "Bei diesem Video wurde keine VR-Stereo-Verpackung erkannt",
-    "vrLooksLikeVR": "Sieht nach VR aus. Format im Player-Menue festlegen",
+    "vrLooksLikeVR": "Sieht nach VR aus. Format im Player-Menü festlegen",
+    "vrSetFormatInMenu": "Für dieses Video ist noch kein VR-Format festgelegt. Wähle eines im Player-Menü (⋮) unter VR-Format.",
     "noVideoLoaded": "Kein Video geladen",
     "tcodePort": "Port auswählen",
     "tcodeHost": "Host eingeben",
@@ -892,6 +1000,7 @@
     "tcodeWsUrlInvalid": "URL muss mit ws:// oder wss:// beginnen",
     "scriptLoadFailed": "Funscript konnte nicht geladen werden: {error}",
     "handyUploadFailed": "Skript-Upload zum Handy fehlgeschlagen",
+    "handyStopFailed": "Handy konnte nicht gestoppt werden — er bewegt sich möglicherweise noch. Drücke die Taste am Gerät.",
     "variantSwitchFailed": "Wechsel der Skriptvariante fehlgeschlagen",
     "noPlaylists": "Noch keine Playlists — erstelle eine im Playlist-Bereich",
     "addNoPath": "Kann nicht hinzugefügt werden — Video hat keinen Dateipfad",
@@ -905,6 +1014,8 @@
     "remoteDisconnected": "Fernsteuerung getrennt",
     "remoteTakenOver": "Fernsteuerung übernommen von {ip}",
     "funscriptUnreadable": "Funscript für {name} konnte nicht gelesen werden — Wiedergabe ohne Synchronisierung",
+    "scriptAccessDenied": "{name} kann nicht gelesen werden: Zugriff verweigert. Wiedergabe ohne Synchronisierung.",
+    "scriptUnreadableNow": "{name} kann gerade nicht gelesen werden. Wiedergabe ohne Synchronisierung.",
     "playlistNoPlayable": "Keine abspielbaren Videos in dieser Playlist",
     "fullscreenBlocked": "Vollbild blockiert: {error}",
     "fullscreenUnavailable": "Vollbild in diesem Kontext nicht verfügbar.",
@@ -913,7 +1024,7 @@
     "pipFailed": "Bild-in-Bild fehlgeschlagen.",
     "nameSourcePrompt": "Diese Quelle benennen",
     "nameSourcePlaceholder": "Quellname",
-    "deleteCollectionTitle": "Bibliothek löschen",
+    "deleteCollectionTitle": "Sammlung löschen",
     "deleteCollectionConfirm": "„{name}\" löschen? Deine Videos bleiben erhalten.",
     "renameVariationTitle": "Variante umbenennen",
     "renameVariationLabel": "Name",
@@ -927,12 +1038,17 @@
     "vrScriptLoadFailed": "VR-Skript konnte nicht geladen werden",
     "remoteNoScript": "Fernwiedergabe von {name} — kein Skript",
     "vrReconnected": "VR-Companion wieder verbunden — Geräte synchronisieren",
+    "settingSaveFailed": "Einstellung konnte nicht gespeichert werden — sie wurde zurückgesetzt",
+    "globalShortcutTaken": "{key} wird bereits von einer anderen App verwendet — wähle eine andere Tastenkombination",
+    "globalShortcutInvalid": "{key} ist keine gültige Tastenkombination — wähle eine andere Tastenkombination",
     "vrConnected": "VR-Companion verbunden — Geräte synchronisieren",
     "restartFailed": "Neustart fehlgeschlagen: {error}",
     "logsOpenFailed": "Log-Datei konnte nicht geöffnet werden: {error}",
     "handyAutoFailed": "Handy-Auto-Verbindung fehlgeschlagen — drücke H zum manuellen Verbinden",
     "sourceDisconnectedFile": "Quelle getrennt — Datei nicht mehr verfügbar",
+    "videoFileMissing": "{name} wurde nicht gefunden. Die Datei wurde vielleicht verschoben oder umbenannt, oder ihr Laufwerk ist nicht verbunden.",
     "multiAxisFailed": "Mehrachsig: {suffix}-Skript konnte nicht geladen werden ({error})",
+    "extractKeptExisting": "{count, plural, one {Vorhandene Begleitdatei behalten, nicht überschrieben: {names}} other {# vorhandene Begleitdateien behalten, nicht überschrieben: {names}}}",
     "queueReadFailed": "Warteschlangenelement {name}: Skript {script} konnte nicht gelesen werden — Wiedergabe ohne Synchronisierung",
     "queueReadError": "Warteschlangenelement {name}: Skript-Lesen fehlgeschlagen ({error}) — Wiedergabe ohne Synchronisierung",
     "handyUploadTimeout": "Handy-Skript-Upload hat das Zeitlimit überschritten — das Video läuft, aber das Handy ist nicht synchron. Prüfe deine Verbindung und lade das Video neu.",
@@ -941,7 +1057,10 @@
     "videoUnavailable": "Dieses Video ist derzeit nicht verfügbar. Verbinde das Laufwerk erneut.",
     "playlistAllUnavailable": "Keines dieser Videos ist derzeit verfügbar. Verbinde das Laufwerk erneut.",
     "playlistSkippedUnavailable": "{count, plural, one {# nicht verfügbares Video übersprungen} other {# nicht verfügbare Videos übersprungen}}",
-    "nextAllUnavailable": "Keine weiteren verfügbaren Videos in dieser Richtung. Verbinde das Laufwerk, um den Rest abzuspielen."
+    "nextAllUnavailable": "Keine weiteren verfügbaren Videos in dieser Richtung. Verbinde das Laufwerk, um den Rest abzuspielen.",
+    "settingsRecovered": "Die Einstellungen wurden aus einem aktuellen Backup wiederhergestellt. Unter Einstellungen → Daten siehst du den Backup-Verlauf.",
+    "settingsNotRecovered": "Die Einstellungen konnten nicht wiederhergestellt werden. Die App startet mit Standardwerten — über Einstellungen → Daten → Backup-Datei importieren kannst du eine Backup-Datei einspielen.",
+    "patternTestHandyFailed": "Das Handy konnte den Test nicht abspielen. Prüfe die Verbindung und versuche es noch einmal."
   },
   "modal": {
     "noItemsAvailable": "Keine Einträge verfügbar",
@@ -980,7 +1099,10 @@
       "alreadyAdded": "Bereits als „{name}\" hinzugefügt",
       "childOverlapTitle": "Ordner bereits abgedeckt",
       "childOverlapBody": "„{path}\" liegt innerhalb von „{parentName}\" ({parentPath}). Dateien hier werden bereits gescannt — eine Hinzufügung würde jedes Video doppelt zählen.\n\nTrotzdem hinzufügen?",
+      "addAnyway": "Trotzdem hinzufügen",
       "parentOverlapTitle": "Überlappende Quelle",
+      "parentOverlapBody": "„{path}\" enthält {count, plural, one {eine Quelle, die du schon hinzugefügt hast} other {# Quellen, die du schon hinzugefügt hast}}: {names}. Deren Dateien würden doppelt gescannt.\n\n{count, plural, one {Diese Quelle} other {Diese Quellen}} entfernen und stattdessen diesen Ordner hinzufügen?",
+      "parentOverlapConfirm": "Entfernen und hinzufügen",
       "convertedCollections": "{count, plural, one {# synchronisierte Sammlung verfolgt} other {# synchronisierte Sammlungen verfolgen}} den Ordner jetzt direkt. Füge den Ordner wieder als Quelle hinzu, um Videos zu sehen.",
       "added": "Quelle „{name}\" hinzugefügt",
       "removed": "Quelle „{name}\" entfernt",
@@ -1001,6 +1123,7 @@
       "title": "Auf Mehrachsig-Standard umstellen?",
       "bodyUnknown": "FunSync weist jedem Video mit erkannten Begleitdateien automatisch Mehrachs-Wiedergabe zu.",
       "bodyNone": "Aktuell sind in deiner Bibliothek keine Videos mit erkannten Begleitdateien. Neue Videos mit Begleitdateien werden bei Erscheinen automatisch zugewiesen.",
+      "bodyAllAssigned": "Alle Videos in deiner Bibliothek mit erkannten Begleitdateien haben bereits einen Wiedergabemodus, daher ändert sich jetzt nichts. Neue Videos mit Begleitdateien werden bei Erscheinen automatisch zugewiesen.",
       "bodyCount": "FunSync weist {count, plural, one {# Video} other {# Videos}} mit erkannten Begleitdateien automatisch Mehrachs-Wiedergabe zu.",
       "warning": "Ein späterer Wechsel zurück auf Einzelachse macht diese Zuweisungen nicht rückgängig. Nutze „Funscript ändern\" bei einzelnen Videos zum Rückgängigmachen.",
       "confirm": "Auf Mehrachsig umstellen"
@@ -1030,9 +1153,9 @@
       "autoplayOnAdvanceResetAria": "Autoplay auf Standard zurücksetzen",
       "multiHeader": "Mehrachsig",
       "fieldDefaultPlayback": "Standard-Wiedergabe",
-      "preferSingle": "Einzelachse (Standard)",
-      "preferMulti": "Mehrachsig, wenn verfügbar",
-      "preferResetTitle": "Auf Standard zurücksetzen (Einzelachse)",
+      "preferSingle": "Einzelachse",
+      "preferMulti": "Mehrachsig, wenn verfügbar (Standard)",
+      "preferResetTitle": "Auf Standard zurücksetzen (Mehrachsig)",
       "preferResetAria": "Standard-Wiedergabe zurücksetzen",
       "multiHint": "Bei Mehrachsig weist FunSync Videos mit erkannten Begleitdateien (twist, surge, etc.) automatisch Mehrachs-Wiedergabe zu. Bereits gesetzte Videos behalten ihre aktuelle Auswahl. Wechsel zurück auf Einzelachse macht Auto-Zuweisungen nicht rückgängig — nutze „Funscript ändern\" bei einzelnen Videos zum Rückgängigmachen.",
       "smoothingHeader": "Bewegungsglättung",
@@ -1052,6 +1175,10 @@
       "rangeExtenderHint": "Wenn die Hubpositionen eines Skripts in einem schmalen Bereich liegen (z. B. 30–70), werden sie gestreckt, um den vollen Gerätebereich zu nutzen. Wirkt sich beim nächsten Videoladen auf alle Geräte aus.",
       "rangeExtenderResetTitle": "Auf Standard zurücksetzen (aus)",
       "rangeExtenderResetAria": "Skripte strecken auf Standard zurücksetzen",
+      "rangeLivePreviewLabel": "Bereich am Gerät vorschauen",
+      "rangeLivePreviewHint": "Wenn nichts läuft, fährt das Gerät beim Ziehen eines Bereichsreglers im Verbindungsfenster an diese Grenze, damit du siehst, wo es steht — praktisch nach einem Sleeve-Wechsel. Nur Positionsgeräte; während der Wiedergabe inaktiv.",
+      "rangeLivePreviewResetTitle": "Auf Standard zurücksetzen (an)",
+      "rangeLivePreviewResetAria": "Bereich am Gerät vorschauen auf Standard zurücksetzen",
       "orgasmScriptLabel": "Orgasmus-Schalter-Skript",
       "orgasmScriptChoose": "Einrichten…",
       "orgasmScriptClear": "Orgasmus-Skript entfernen",
@@ -1061,11 +1188,29 @@
       "orgasmModeHold": "Halten zum Abspielen (beim Loslassen zurück)",
       "orgasmModeToggle": "Drücken zum Beenden (danach Stopp)",
       "orgasmModeHint": "Halten zum Abspielen: Halte X, um das Loop-Skript abzuspielen; beim Loslassen kehrt es zum Hauptskript zurück. Drücken zum Beenden: Tippe X, um die Schleife zu starten, tippe erneut, um das Gerät zu stoppen — es kehrt nicht zum Hauptskript zurück.",
+      "orgasmSourceLabel": "Quelle",
+      "orgasmSourceFile": "Skriptdatei",
+      "orgasmSourcePattern": "Erzeugtes Muster",
+      "orgasmPatternHint": "Spielt ein erzeugtes Muster in Schleife statt einer Skriptdatei. Deine Skriptauswahl bleibt erhalten, falls du zurückwechselst.",
+      "orgasmSummaryGenerated": "Erzeugt: {shape}, {bpm} BPM",
       "edgeHeader": "Edge-Halten",
       "edgeModeLabel": "Verhalten der Z-Taste",
-      "edgeModeHold": "Halten zum Edgen (beim Loslassen weiter)",
-      "edgeModeToggle": "Drücken zum Anhalten (erneut drücken zum Fortsetzen)",
+      "edgeModeHold": "Halten (Loslassen = weiter)",
+      "edgeModeToggle": "Drücken: anhalten / fortsetzen",
       "edgeModeHint": "Halten zum Edgen: Halte Z, um die Geräte zu stoppen, während das Video weiterläuft; beim Loslassen setzt das Skript synchron wieder ein. Drücken zum Anhalten: Tippe Z zum Stoppen, tippe erneut zum Fortsetzen — angenehmer bei langem Edgen.",
+      "globalHotkeysHeader": "Globale Tastenkürzel",
+      "globalHotkeysHint": "Diese funktionieren auch, wenn FunSync minimiert ist oder eine andere App im Vordergrund ist, und eine hier belegte Taste erreicht keine andere App mehr. Klicke auf ein Feld und drücke eine Taste zusammen mit zwei von Strg, Alt und Umschalt, oder F13–F24 bzw. eine Medientaste allein. Strg+Alt braucht zusätzlich Umschalt, denn auf vielen Tastaturen ist Strg+Alt AltGr, womit Zeichen wie @ getippt werden. Alltägliche Tastenkürzel (Kopieren, Einfügen, Rückgängig, Speichern …), F1–F12 mit weniger als zwei Zusatztasten sowie Cursor- und Bearbeitungstasten werden abgelehnt. Über ein globales Tastenkürzel schalten Orgasm Switch und Edge-Halten immer um (drücken zum Starten, erneut drücken zum Stoppen).",
+      "globalHotkeyPlayPause": "Wiedergabe / Pause",
+      "globalHotkeyOrgasm": "Orgasm Switch",
+      "globalHotkeyEdge": "Edge-Halten",
+      "globalHotkeyClear": "Tastenkürzel für {action} entfernen",
+      "globalHotkeyNeedsModifier": "Mit {key} kannst du diese Taste in keiner anderen App mehr tippen — versuche es mit Strg+Alt+Umschalt",
+      "globalHotkeyAppShortcut": "{key} ist ein Tastenkürzel, das andere Apps verwenden (Kopieren, Einfügen, Rückgängig, Speichern, Aktualisieren …), und funktioniert dann in keiner davon mehr — versuche es mit Strg+Alt+Umschalt oder nimm F13–F24",
+      "globalHotkeyAltGr": "Auf vielen Tastaturen ist Strg+Alt AltGr, daher kann {key} ein Zeichen wie @ oder € in allen Apps blockieren — füge Umschalt hinzu",
+      "globalHotkeyCursorKey": "{key} ist eine Cursor-, Bearbeitungs- oder Screenshot-Taste, die andere Apps mit jeder Zusatztaste verwenden — wähle stattdessen einen Buchstaben, eine Ziffer oder eine F-Taste",
+      "globalHotkeyKeptRisky": "Bleibt wie gespeichert aktiv. {reason}",
+      "globalHotkeyNotActiveTaken": "Nicht aktiv: {key} wird bereits vom System oder einer anderen App verwendet. Wähle eine andere Tastenkombination.",
+      "globalHotkeyNotActiveInvalid": "Nicht aktiv: {key} ist keine gültige Tastenkombination. Wähle eine andere Tastenkombination.",
       "randomVariantLabel": "Zufällige Skript-Variante",
       "randomVariantHint": "Wenn ein Video mehrere Skript-Varianten hat, wird bei jeder Wiedergabe eine zufällig gewählt. Übersteuert angepinnte Standard-Varianten, solange aktiv.",
       "bpHeader": "Buttplug-Linearausgabe (BLE)",
@@ -1085,16 +1230,24 @@
       "orgasmSummaryCustom": "Eigenes Routing ({count} Routen)",
       "inlineVizOpacityLabel": "Deckkraft der Overlays",
       "inlineVizOpacityResetTitle": "Standard-Deckkraft wiederherstellen",
-      "deviceSimOpacityLabel": "Deckkraft des Geraetesimulators",
-      "deviceSimOpacityHint": "Wie kraeftig die Hubanzeige ueber dem Video wirkt. Mit der Taste D einblenden.",
+      "deviceSimOpacityLabel": "Deckkraft des Gerätesimulators",
+      "deviceSimOpacityHint": "Wie kräftig die Hubanzeige über dem Video wirkt. Mit der Taste D oder über das ⋮-Menü im Player einblenden.",
       "deviceSimOpacityResetTitle": "Standard-Deckkraft wiederherstellen",
       "inlineVizOpacityHint": "Wie kräftig Skript-Zeitleiste und Heatmap über dem Video wirken. Einschalten über das ⋮-Menü im Player.",
+      "heatmapPlayheadLabel": "Abspielposition auf der Heatmap-Leiste",
+      "heatmapPlayheadHint": "Zeichnet an der aktuellen Position eine Linie auf die Heatmap-Leiste, wie der Cursor der Zeitleiste. Die Leiste schaltest du über das ⋮-Menü im Player ein.",
       "orgasmScriptMissing": "(Datei nicht gefunden)",
       "playbackHeader": "Wiedergabe",
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "Video & Leistung",
       "rememberSpeedLabel": "Wiedergabegeschwindigkeit merken",
       "rememberSpeedHint": "Behält die aktuelle Geschwindigkeit beim Laden eines anderen Videos bei. Standardmäßig aus, jedes Video startet mit 1x.",
+      "openFullscreenLabel": "Videos im Vollbild öffnen",
+      "openFullscreenHint": "Startet im Vollbild, wenn du ein Video aus der Bibliothek abspielst. Escape verlässt das Vollbild wie gewohnt.",
+      "autoplayOnOpenLabel": "Beim Öffnen sofort abspielen",
+      "autoplayOnOpenHint": "Spielt ein Video sofort ab, wenn du es aus der Bibliothek öffnest, statt es pausiert zu laden. Standardmäßig aus, damit ein einzelner Klick nie von selbst ein Gerät in Bewegung setzt.",
+      "autoplayOnOpenResetTitle": "Auf Standard zurücksetzen (aus)",
+      "autoplayOnOpenResetAria": "Beim Öffnen sofort abspielen auf Standard zurücksetzen",
       "fillerHeader": "Lückenfüller",
       "fillerEnable": "Lücken mit Bewegungen füllen",
       "fillerResetEnable": "Lückenfüller zurücksetzen",
@@ -1110,7 +1263,19 @@
       "fillerDepth": "Tiefe",
       "fillerAbsolute": "Genauen Bereich festlegen",
       "fillerAbsMin": "Minimum",
-      "fillerAbsMax": "Maximum"
+      "fillerAbsMax": "Maximum",
+      "orgasmSourceLibrary": "Muster aus der Bibliothek",
+      "orgasmSummaryLibrary": "Muster: {name}",
+      "orgasmLibraryHint": "Spielt ein Muster aus der eingebauten Bibliothek in Schleife statt einer Skriptdatei. Deine Skriptauswahl bleibt erhalten, falls du zurückwechselst.",
+      "edgeActionLabel": "Während Edge-Halten aktiv ist",
+      "edgeActionStop": "Geräte stoppen",
+      "edgeActionPattern": "Ein Muster spielen",
+      "edgeActionHint": "Geräte stoppen: Die Geräte ruhen, während das Video weiterläuft. Ein Muster spielen: Die Geräte spielen stattdessen das Muster unten, auch wenn das Video pausiert ist. In beiden Fällen setzt das Skript nach dem Halten synchron wieder ein; bei pausiertem Video wartet es, bis du auf Abspielen drückst.",
+      "patternRangeWidened": "Dieser Bereich ist für das Muster zu schmal, daher läuft es etwas breiter: {lo} bis {hi}.",
+      "orgasmLibraryNone": "Noch kein Muster ausgewählt. Bis du eins auswählst, spielt X wie bisher deine Skriptdatei.",
+      "edgePatternNone": "Noch kein Muster ausgewählt, daher stoppt Z die Geräte wie bei „Geräte stoppen“. Wähle oben ein Muster aus.",
+      "fillerThreshold": "Lücken füllen ab",
+      "fillerResetThresholdAria": "Schwelle des Lückenfüllers auf Standard zurücksetzen (10s)"
     },
     "appearance": {
       "themeHeader": "Design",
@@ -1127,6 +1292,10 @@
       "styleClassicDesc": "FunSyncs ursprüngliches Design",
       "styleModern": "Modern",
       "styleModernDesc": "Weichere Tiefe, Abstände und Bewegung",
+      "scaleHeader": "Oberflächengröße",
+      "scaleHint": "Macht alles im Hauptfenster größer oder kleiner. Strg+= und Strg+- ändern sie ebenfalls, Strg+0 stellt 100 % wieder her. Solange ein VR-Video geöffnet ist, zoomen diese Tasten stattdessen das Video.",
+      "scaleOption": "{percent} %",
+      "scaleOptionDefault": "{percent} % (Standard)",
       "languageHeader": "Sprache",
       "languageHint": "Oberflächensprache umschalten. Änderungen werden sofort wirksam.",
       "libraryHeader": "Bibliothek",
@@ -1141,10 +1310,16 @@
       "hwDecodeRestart": "Starte FunSync neu, um die Änderung der Videodekodierung anzuwenden.",
       "cardHeatmapLabel": "Heatmap auf Bibliothekskarten",
       "cardHeatmapHint": "Zeigt unter jedem Vorschaubild eine Heatmap der Stroke-Geschwindigkeit. Nutzt das Hauptskript des Videos. Standardmäßig aus, da pro Karte ein Skript gelesen wird.",
+      "tagsOnCardsLabel": "Tags auf Bibliothekskarten",
+      "tagsOnCardsHint": "Zeigt einige Tags jedes Videos unter seinem Namen. In den Optionen des Videos (⋮, dann Tags) stehen alle.",
       "resumeProgressLabel": "Fortschritt in Playlists",
       "resumeProgressHint": "Zeigt als Balken auf Playlist-Karten und -Zeilen, wie weit du gekommen bist. Nur bei Playlist-Wiedergabe — die Hauptbibliothek bleibt unmarkiert.",
       "hideDupesLabel": "Doppelte Namen ausblenden",
-      "hideDupesHint": "Zeigt nur einen Eintrag, wenn mehrere Videos denselben Dateinamen haben, etwa dieselbe Datei in zwei Quellordnern. Die Kopie mit Skript bleibt erhalten."
+      "hideDupesHint": "Zeigt nur einen Eintrag, wenn mehrere Videos denselben Dateinamen haben, etwa dieselbe Datei in zwei Quellordnern. Die Kopie mit Skript bleibt erhalten.",
+      "folderScriptsAsVariantsLabel": "Ordner mit nur einem Video: jedes Skript im Ordner als Variante anbieten",
+      "folderScriptsAsVariantsHint": "Für Journeys und FapLand-Runden: Liegt in einem Ordner nur ein Video, werden alle anderen Skripte darin im Skriptmenü dieses Videos angeboten, auch auf dem Smartphone. Sein eigenes Skript bleibt der Standard, und Achsendateien bleiben Achsendateien. Auf der Festplatte ändert sich nichts. Schaltest du das aus, werden sie einfach nicht mehr angeboten.",
+      "navHeader": "Navigationsleiste",
+      "navHint": "Entferne das Häkchen, um eine Schaltfläche aus der Leiste auszublenden. Bibliothek und Einstellungen bleiben immer. Die Taste H öffnet weiterhin Geräte, für Web-Fernsteuerung und VR gibt es aber keinen anderen Weg, also setze das Häkchen wieder, wenn du sie brauchst."
     },
     "data": {
       "backupHeader": "Backup & Wiederherstellung",
@@ -1162,6 +1337,7 @@
       "restoreModalTitle": "Aus Backup wiederherstellen",
       "restoreConfirmTitle": "Diesen Snapshot wiederherstellen?",
       "restoreConfirmBody": "Deine aktuellen Einstellungen werden zuerst als Notfall-Snapshot gespeichert, sodass du rückgängig machen kannst. Die App wird neu gestartet, um den wiederhergestellten Zustand zu übernehmen.",
+      "restoreConfirmBtn": "Wiederherstellen",
       "restoreFailed": "Wiederherstellung fehlgeschlagen",
       "restoreFailedReason": "Wiederherstellung fehlgeschlagen: {error}",
       "noBackupsList": "Backup-Liste konnte nicht geladen werden",
@@ -1169,7 +1345,7 @@
       "openFolder": "Backup-Ordner öffnen",
       "openFolderFailed": "Ordner konnte nicht geöffnet werden",
       "exportHeader": "Export & Import",
-      "exportBlurb": "Speichere deine Einstellungen, Playlists, Kategorien und Zuordnungen in einer portablen Datei — nützlich für den Wechsel auf einen anderen Rechner oder als zusätzliches Off-Host-Backup.",
+      "exportBlurb": "Speichere deine Einstellungen, Playlists, Kategorien, Zuordnungen und eigenen Vorschaubilder in einer portablen Datei — nützlich für den Wechsel auf einen anderen Rechner oder als zusätzliches Off-Host-Backup.",
       "export": "Backup-Datei exportieren",
       "exporting": "Exportiere…",
       "exportSaved": "Backup gespeichert: {path}",
@@ -1179,6 +1355,9 @@
       "importDone": "Importiert ({count} Skripte)",
       "importCancelled": "Import abgebrochen",
       "importFailed": "Import fehlgeschlagen",
+      "importFailedReason": "Import fehlgeschlagen: {error}",
+      "importConfirmTitle": "Backup-Datei importieren?",
+      "importConfirmBody": "Wähle als Nächstes eine FunSync-Backup-Datei. Ihre Playlists, Kategorien und Zuordnungen werden zu deinen hinzugefügt (eine Playlist, die du schon hast, bleibt, wie sie ist), ihre Einstellungen ersetzen deine aktuellen. Schlüssel und Anmeldungen, die du hier schon hast, bleiben erhalten. Wiedergabe und alle Geräte werden zuerst gestoppt. Dein aktueller Stand wird als Snapshot gespeichert, sodass du den Import mit „Aus Backup wiederherstellen“ rückgängig machen kannst. Die App wird neu gestartet, um das Ergebnis zu laden.",
       "triggerStartup": "Start",
       "triggerDebounced": "Auto-Speichern",
       "triggerPreAction": "Vor {label}",
@@ -1192,7 +1371,12 @@
       "summarySources": "{count, plural, one {# Quelle} other {# Quellen}}",
       "summaryCollections": "{count, plural, one {# Sammlung} other {# Sammlungen}}",
       "summaryPlaylists": "{count, plural, one {# Playlist} other {# Playlists}}",
+      "summaryCategories": "{count, plural, one {# Kategorie} other {# Kategorien}}",
+      "summaryCategoryAssignments": "{count, plural, one {# Kategoriezuweisung} other {# Kategoriezuweisungen}}",
+      "summaryAssociations": "{count, plural, one {# Zuordnung} other {# Zuordnungen}}",
       "summaryRoutings": "{count, plural, one {# Routing} other {# Routings}}",
+      "summaryTagAssignments": "{count, plural, one {# selbst hinzugefügtes Tag} other {# selbst hinzugefügte Tags}}",
+      "summaryEroscriptsLinks": "{count, plural, one {# EroScripts-Beitragslink} other {# EroScripts-Beitragslinks}}",
       "relJustNow": "Gerade eben",
       "relMinutesAgo": "{count, plural, one {vor # Minute} other {vor # Minuten}}",
       "relHoursAgo": "{count, plural, one {vor # Stunde} other {vor # Stunden}}",
@@ -1217,7 +1401,201 @@
       "logsHeader": "Protokoll-Privatsphäre",
       "logsBlurb": "Das Protokoll zeichnet auf, welche Videos du geöffnet hast. Das hilft bei der Fehlersuche, sollte aber vor dem öffentlichen Teilen bedacht werden.",
       "hideFileNames": "Dateinamen im Protokoll ausblenden",
-      "hideFileNamesHint": "Ersetzt Namen von Video-, Skript- und Untertiteldateien im Protokoll durch [hidden]. Ordner und Dateityp bleiben erhalten, sodass das Protokoll weiterhin zur Fehlersuche taugt. Standardmäßig aus."
+      "hideFileNamesHint": "Ersetzt Namen von Video-, Skript- und Untertiteldateien im Protokoll durch [hidden]. Ordner und Dateityp bleiben erhalten, sodass das Protokoll weiterhin zur Fehlersuche taugt. Beim Einschalten werden auch die Namen ausgeblendet, die schon im Protokoll stehen; beim Ausschalten kommen sie nicht zurück. Standardmäßig aus."
+    },
+    "duplicates": {
+      "sectionHeader": "Duplikate",
+      "findBtn": "Duplikate suchen…",
+      "sectionBlurb": "Suche nach Videos, von denen du mehrere Kopien hast, und verschiebe die überzähligen in den {os, select, win {Papierkorb} other {Papierkorb}}, um Platz zurückzugewinnen.",
+      "title": "Doppelte Videos",
+      "scanning": "Bibliothek wird geprüft…",
+      "noneTitle": "Keine Duplikate gefunden",
+      "noneHint": "Nichts in deiner Bibliothek sieht nach einer Kopie aus.",
+      "summary": "{groups, plural, one {# Gruppe} other {# Gruppen}}, bis zu {size} freizugeben",
+      "caveat": "Vergleicht Dateigröße, Länge, Inhalt und ähnliche Namen. Dasselbe Video in stark abweichender Qualität wird nicht erkannt.",
+      "tierIdentical": "Identisch",
+      "tierLikely": "Wahrscheinlich",
+      "tierPossible": "Möglich",
+      "whyIdentical": "Gleiche Dateigröße und Länge, gleicher Inhalt",
+      "whyLikely": "Gleiche Länge, andere Größe, vermutlich neu kodiert",
+      "whyPossible": "Nur ähnliche Namen, bitte selbst prüfen",
+      "groupHead": "{count, plural, one {# Kopie} other {# Kopien}}, {size} freigebbar",
+      "keep": "Behalten",
+      "hasScript": "Hat ein Funscript",
+      "scriptBadge": "Skript",
+      "selectTier": "Überzählige in {tier} auswählen ({count})",
+      "clearSelection": "Auswahl aufheben",
+      "nothingSelected": "Nichts ausgewählt",
+      "selectedCount": "{count, plural, one {# Datei} other {# Dateien}} ausgewählt, {size}",
+      "remove": "In den {os, select, win {Papierkorb} other {Papierkorb}}",
+      "confirmTitle": "In den {os, select, win {Papierkorb} other {Papierkorb}} verschieben?",
+      "confirmBody": "{count, plural, one {# Datei} other {# Dateien}} ({size}) in den {os, select, win {Papierkorb} other {Papierkorb}} verschieben? Du kannst sie von dort zurückholen. Die als Behalten markierte Kopie bleibt unangetastet.",
+      "confirmBtn": "In den {os, select, win {Papierkorb} other {Papierkorb}}",
+      "removedToast": "{count, plural, one {# Datei} other {# Dateien}} in den {os, select, win {Papierkorb} other {Papierkorb}} verschoben, {size} freigegeben",
+      "removeSomeFailed": "{count, plural, one {# Datei} other {# Dateien}} konnten nicht verschoben werden, evtl. geöffnet oder schreibgeschützt",
+      "removeFailed": "Dateien konnten nicht entfernt werden: {error}",
+      "tierStash": "Sieht gleich aus (Stash)",
+      "whyStash": "Dein Stash gibt ihnen denselben Bild-Fingerabdruck (phash), vermutlich neu kodiert",
+      "selectTierStash": "Überzählige auswählen, die in Stash gleich aussehen ({count})"
+    },
+    "support": {
+      "header": "Projekt unterstützen",
+      "blurb": "FunSync ist kostenlos und bleibt es auch. Wenn du dich mit anderen austauschen, etwas melden oder das Projekt am Laufen halten möchtest, findest du hier die passenden Orte.",
+      "discord": "Discord beitreten",
+      "kofi": "Spendier mir einen Kaffee",
+      "footnote": "Kein Konto, keine Paywall, nichts davon schaltet Funktionen frei."
+    },
+    "stash": {
+      "header": "Stash",
+      "intro": "Verknüpfe deinen eigenen Stash-Server, um seine Tags, Darsteller und Studios in FunSync zu holen. Nur lesend: FunSync ändert nie etwas in Stash.",
+      "addressLabel": "Adresse",
+      "keyLabel": "API-Schlüssel",
+      "keyHint": "Nur wenn dein Stash einen Benutzernamen und ein Passwort hat. In Stash: Settings > Security > API Key.",
+      "keyNotePlain": "Dieses FunSync speichert den Schlüssel unverschlüsselt in seinem Datenordner.",
+      "keyNotePortable": "Das portable FunSync speichert den Schlüssel unverschlüsselt in seinem portablen Datenordner, wie den Handy-Schlüssel.",
+      "keyNoteNoEncryption": "Dieser Computer kann den Schlüssel nicht verschlüsseln, daher speichert FunSync ihn unverschlüsselt in seinem Datenordner.",
+      "keyNoteMemory": "Der Schlüssel bleibt nur, bis FunSync geschlossen wird (er kann hier nicht an dein Konto gebunden werden).",
+      "keySavedEncrypted": "API-Schlüssel gespeichert, verschlüsselt auf diesem PC",
+      "keySavedPlain": "API-Schlüssel gespeichert, unverschlüsselt im Datenordner von FunSync",
+      "keySavedMemory": "API-Schlüssel bleibt, bis FunSync geschlossen wird",
+      "noKey": "Kein API-Schlüssel",
+      "replaceKey": "Ersetzen",
+      "removeKey": "Entfernen",
+      "addKey": "Schlüssel hinzufügen",
+      "removeKeyTitle": "API-Schlüssel entfernen?",
+      "removeKeyBody": "FunSync vergisst den gespeicherten Stash-API-Schlüssel. Wenn dein Stash ein Passwort hat, musst du ihn erneut einfügen.",
+      "keyRemoved": "API-Schlüssel entfernt.",
+      "test": "Verbindung testen",
+      "testing": "Wird getestet…",
+      "connected": "Mit Stash {version} verbunden. {count, plural, one {Es hat # Szene.} other {Es hat # Szenen.}}",
+      "help": "Stash lauscht auf allen Netzwerkadressen, solange du es nicht anders einstellst. Läuft es auf diesem PC, nimm 127.0.0.1 (und stelle den Host von Stash auf 127.0.0.1), oder setze in Stash einen Benutzernamen und ein Passwort und füge hier seinen API-Schlüssel ein.",
+      "keyInClear": "Der Schlüssel geht unverschlüsselt über dein Netzwerk an {host}. Lass Stash auf diesem PC laufen oder nutze https.",
+      "link": "Stash verknüpfen",
+      "linkNeedsTest": "Teste zuerst die Verbindung. Stash verknüpfen geht nach einem erfolgreichen Test.",
+      "linkedDone": "Stash verknüpft. Drücke „Jetzt synchronisieren“, um seine Tags, Darsteller und Studios zu holen.",
+      "linked": "Verknüpft mit {address}",
+      "linkedVersion": "Verknüpft mit {address} · Stash {version}",
+      "change": "Ändern…",
+      "turnOff": "Ausschalten",
+      "turnOn": "Einschalten",
+      "turnedOff": "Stash ausgeschaltet. Seine Daten bleiben erhalten.",
+      "turnedOn": "Stash eingeschaltet.",
+      "offText": "Stash ist aus: Nichts aus Stash erscheint in FunSync, und seine Daten bleiben erhalten. Verknüpft mit {address}.",
+      "neverSynced": "Noch nicht synchronisiert.",
+      "lastSync": "Letzte Synchronisierung {date}: {counts}",
+      "lastSyncPartial": "Sie wurde vorzeitig beendet. Nichts wurde entfernt.",
+      "countMatched": "{count, plural, one {# zugeordnet} other {# zugeordnet}}",
+      "countMatchedVideos": "{count, plural, one {# Video zugeordnet} other {# Videos zugeordnet}}",
+      "countCheck": "{count, plural, one {# muss geprüft werden} other {# müssen geprüft werden}}",
+      "countNotInStash": "{count, plural, one {# nicht in Stash} other {# nicht in Stash}}",
+      "countGone": "{count, plural, one {# aus Stash verschwunden} other {# aus Stash verschwunden}}",
+      "countChanged": "{count, plural, one {# geänderte Datei} other {# geänderte Dateien}}",
+      "countSkipped": "{count, plural, one {# übersprungen} other {# übersprungen}}",
+      "syncNow": "Jetzt synchronisieren",
+      "syncing": "Synchronisiere mit Stash…",
+      "progressLabel": "Fortschritt der Synchronisierung",
+      "stepStart": "Wird gestartet…",
+      "stepHash": "Datei-Fingerabdrücke werden gelesen, {done, number} von {total, number}.",
+      "stepList": "Szenenliste von Stash wird gelesen, Seite {done, number} von {total, number}.",
+      "stepMatch": "Wird abgeglichen.",
+      "stepDetails": "Details werden geholt, {done, number} von {total, number}.",
+      "stepWrite": "Wird gespeichert.",
+      "cancelling": "Wird abgebrochen…",
+      "syncDone": "Synchronisierung fertig: {counts}",
+      "syncCancelled": "Synchronisierung abgebrochen. Nichts wurde entfernt.",
+      "syncFailed": "Synchronisierung angehalten: {reason} Nichts wurde entfernt.",
+      "syncPartial": "Synchronisierung nach {done, number} von {total, number} Szenen angehalten: {reason} Was fertig war, wurde gespeichert; nichts wurde entfernt.",
+      "errorBusy": "Eine Stash-Synchronisierung läuft bereits.",
+      "errorNotLinked": "Verknüpfe Stash zuerst und schalte es ein.",
+      "errorOther": "Etwas ist schiefgelaufen ({code}).",
+      "syncOnStart": "Beim Start von FunSync mit Stash synchronisieren",
+      "syncOnStartHint": "Eine Synchronisierung nach dem ersten Scan der Mediathek. Sonst synchronisiert FunSync nur, wenn du „Jetzt synchronisieren“ drückst.",
+      "checkHeader": "Zu prüfen ({count, number})",
+      "checkSeveral": "{count, plural, one {# Stash-Szene hat diese Datei} other {# Stash-Szenen haben diese Datei}}",
+      "checkPathChanged": "Gleicher Pfad in Stash, andere Datei",
+      "choose": "Auswählen…",
+      "chooseAria": "Die Stash-Szene für {name} auswählen",
+      "checkVideoMissing": "Dieses Video ist gerade nicht in der Mediathek.",
+      "showAll": "Alle anzeigen ({count, number})",
+      "pathRules": "Pfadregeln (erweitert)",
+      "pathRulesHint": "Nur nötig, wenn Stash deine Videos unter anderen Ordnernamen sieht, zum Beispiel in Docker oder auf einem NAS. FunSync gleicht zuerst über den Datei-Fingerabdruck ab; Pfadregeln helfen nur bei einer zweiten Prüfung.",
+      "ruleLocal": "FunSync-Ordner",
+      "ruleStash": "Stash-Ordner",
+      "addRule": "Regel hinzufügen",
+      "removeRule": "Entfernen",
+      "removeRuleAria": "Die Pfadregel für {folder} entfernen",
+      "ruleIncomplete": "Eine Regel braucht beide Ordner. Fülle beide aus oder entferne sie.",
+      "remove": "Stash-Daten entfernen…",
+      "removeTitle": "Stash-Daten entfernen?",
+      "removeConfirm": "Die Stash-Daten für {count, plural, one {# Video} other {# Videos}} und den gespeicherten Schlüssel entfernen? In Stash ändert sich nichts. Deine eigenen Tags und Ausblendungen bleiben.",
+      "removeConfirmNoKey": "Die Stash-Daten für {count, plural, one {# Video} other {# Videos}} entfernen? In Stash ändert sich nichts. Deine eigenen Tags und Ausblendungen bleiben.",
+      "removed": "Stash-Daten entfernt.",
+      "removeUndone": "Stash-Daten wiederhergestellt.",
+      "removeFailed": "FunSync konnte die Stash-Daten nicht entfernen. Nichts wurde geändert.",
+      "undoFailed": "Die Stash-Daten konnten nicht wiederhergestellt werden.",
+      "undoRemoveAria": "Entfernen der Stash-Daten rückgängig machen",
+      "damaged": "FunSync konnte seine Stash-Daten nicht lesen. Sie wurden als {name} beiseitegelegt. Synchronisiere, um sie neu aufzubauen.",
+      "certTitle": "Dieser Computer vertraut dem https-Zertifikat dieses Stash nicht.",
+      "certChanged": "Dieser Stash zeigt jetzt ein anderes Zertifikat als das, dem du vertraut hast.",
+      "certSubject": "Ausgestellt für",
+      "certFingerprint": "SHA-256-Fingerabdruck",
+      "certExplain": "Vertraue ihm nur, wenn das dein eigener Stash ist (zum Beispiel ein NAS mit selbstsigniertem Zertifikat) und der Fingerabdruck mit dem deines Servers übereinstimmt. FunSync vertraut diesem Zertifikat dann nur für {address}.",
+      "certTrust": "Diesem Zertifikat vertrauen",
+      "certTrusted": "Zertifikat für {address} vertraut.",
+      "certTrustFailed": "FunSync konnte diesem Zertifikat nicht vertrauen. Teste die Verbindung erneut.",
+      "certPinned": "Vertrautes Zertifikat für {address}",
+      "certForget": "Nicht mehr vertrauen",
+      "certForgetAria": "Dem Zertifikat für {address} nicht mehr vertrauen",
+      "certForgotten": "Dem Zertifikat wird nicht mehr vertraut.",
+      "certForgetFailed": "FunSync konnte das vertraute Zertifikat nicht entfernen.",
+      "keyElsewhere": "Der gespeicherte API-Schlüssel gehört zu {address}, deshalb sendet FunSync ihn nicht an diese Adresse. Füge den Schlüssel dieses Stash ein oder entferne den gespeicherten.",
+      "damagedRecovered": "FunSync konnte seine Stash-Daten nicht lesen. Sie wurden als {name} beiseitegelegt, und die vorherige Kopie wird verwendet.",
+      "recoveredMissing": "Die Stash-Datendatei von FunSync fehlte. Die vorherige Kopie wird verwendet.",
+      "removeUndoneMerged": "Stash-Daten wiederhergestellt, zusammen mit dem, was seitdem synchronisiert wurde.",
+      "undoFailedKept": "Die Stash-Daten konnten nicht wiederhergestellt werden. Sie bleiben im Datenordner von FunSync beiseitegelegt; du kannst „Rückgängig“ noch einmal versuchen.",
+      "syncRelinked": "{count, plural, one {# Video wurde mit einer anderen Stash-Szene neu verknüpft.} other {# Videos wurden mit einer anderen Stash-Szene neu verknüpft.}}",
+      "relinkHeader": "Neu verknüpft ({count, number})",
+      "relinkHint": "Eine Synchronisierung hat diese Videos mit einer anderen Stash-Szene verknüpft (zum Beispiel, weil Szenen in Stash zusammengeführt wurden). Rückgängig stellt die frühere Verknüpfung wieder her.",
+      "relinkTo": "jetzt mit {name} verknüpft",
+      "relinkToUntitled": "jetzt mit einer anderen Stash-Szene verknüpft",
+      "relinkUndoAria": "Neue Verknüpfung von {name} rückgängig machen",
+      "relinkUndoAll": "Alle rückgängig machen",
+      "relinkUndoAllAria": "Alle {count, number} neuen Verknüpfungen rückgängig machen",
+      "undoRelinksAria": "{count, plural, one {Neue Verknüpfung rückgängig machen} other {# neue Verknüpfungen rückgängig machen}}",
+      "relinkUndone": "{name} ist wieder mit seiner früheren Stash-Szene verknüpft.",
+      "relinksUndone": "{count, plural, one {# neue Verknüpfung rückgängig gemacht.} other {# neue Verknüpfungen rückgängig gemacht.}}",
+      "relinkUndoFailed": "Die neue Verknüpfung von {name} konnte nicht rückgängig gemacht werden. Seine Stash-Daten haben sich seitdem geändert, oder FunSync konnte sie nicht speichern.",
+      "relinksUndonePartial": "{done, number} von {total, number} neuen Verknüpfungen rückgängig gemacht. Die anderen haben sich seitdem geändert oder konnten nicht gespeichert werden.",
+      "keyElsewhereNoAddress": "Der gespeicherte API-Schlüssel gehört zu einer anderen Adresse, deshalb sendet FunSync ihn nicht an diese. Füge den Schlüssel dieses Stash ein oder entferne den gespeicherten.",
+      "useTagRules": "Tag-Aliasse und Unter-Tags von Stash verwenden",
+      "useTagRulesHint": "Tags aus allen Quellen erscheinen unter dem Namen aus Stash, wenn Stash ihre Schreibweise als Alias führt, und ein Tag, das du im Tags-Filter wählst, findet auch seine Unter-Tags. Tags, die du ausgeblendet hast, bleiben ausgeblendet. Gilt sofort, mit der Tag-Liste aus der letzten Synchronisierung. Aus: Alle Tags erscheinen wie bisher."
+    },
+    "patternBlock": {
+      "quickPicks": "Schnellauswahl",
+      "preview": "Vorschau",
+      "previewAria": "Vorschau des Musters, wie es gespielt wird, 8 Sekunden",
+      "rangeExact": "Genau",
+      "rangeScript": "Dem Skript folgen",
+      "depthValue": "{pct} %",
+      "centre": "Mitte",
+      "centreOwn": "Wie das Skript",
+      "centreReset": "Zurück zur Mitte des Skripts",
+      "rangeScriptHint": "Tiefe: wie viel vom eigenen Bereich des Skripts das Muster nutzt, rund um die Stelle, an der es spielt. Mitte: wo es in diesem Bereich liegt.",
+      "testHint": "Spielt die Vorschau auf deinen verbundenen Geräten ab",
+      "groupAria": "{feature}: Muster",
+      "oneShotHintGap": "Ein Abschluss: Er läuft am Anfang jeder Lücke einmal ab und hält dann seine letzte Position, bis die Lücke endet.",
+      "setPattern": "Muster festlegen…",
+      "setPatternAria": "Muster für {feature} festlegen",
+      "drawerTitle": "Muster für {feature}",
+      "apply": "Übernehmen",
+      "summary": "{name}, {speed} Einheiten/s, {range}",
+      "summaryReversed": "{name}, {speed} Einheiten/s, umgekehrt, {range}",
+      "summaryRangeOwn": "eigener Bereich",
+      "summaryRangeExact": "{lo} bis {hi}",
+      "summaryRangeScript": "folgt dem Skript mit {pct} %",
+      "summaryNone": "Noch kein Muster gewählt",
+      "statsWithInstant": "Durchschnitt {avg} Einheiten/s, Spitze {max} Einheiten/s, dazu sofortige Sprünge",
+      "statsInstantOnly": "Sofortige Sprünge, so schnell, wie das Gerät kann"
     }
   },
   "feedback": {
@@ -1265,6 +1643,8 @@
     "searching": "Suche…",
     "noResultsTitle": "Keine Skripte gefunden für „{query}\"",
     "noResultsHint": "Versuche einen kürzeren oder allgemeineren Suchbegriff — Teiltitel passen oft besser als vollständige Dateinamen.",
+    "fewerWords": "Mit weniger Wörtern suchen",
+    "fewerWordsTitle": "Nach „{query}“ suchen",
     "likes": "{count, plural, one {# Like} other {# Likes}}",
     "views": "{count, plural, one {# Aufruf} other {# Aufrufe}}",
     "getScript": "Skript holen",
@@ -1272,10 +1652,32 @@
     "fetching": "Lade…",
     "savingScript": "Speichere Skript…",
     "scriptSaved": "Skript gespeichert",
+    "upToDate": "Bereits aktuell",
     "noAttachments": "Keine Funscript-Anhänge in diesem Thema gefunden",
     "downloadFailed": "Download fehlgeschlagen",
+    "downloadFailedStatus": "Download fehlgeschlagen (HTTP {status})",
+    "saveNotAFile": "{name} kann nicht gespeichert werden: Dort gibt es einen Ordner mit diesem Namen.",
+    "unusableName": "„{name}“ kann nicht gespeichert werden: Dieser Dateiname ist auf diesem Computer nicht zulässig.",
     "savedToast": "Skript gespeichert: {name}",
+    "savedFileToast": "Gespeichert: {name}",
+    "alreadyUpToDate": "Bereits aktuell: {name}",
+    "replaceTitle": "{name} ersetzen?",
+    "replaceMessage": "Unter diesem Namen ist schon eine andere Datei gespeichert. Durch den Download ersetzen? Die alte Datei kommt in den {os, select, win {Papierkorb} other {Papierkorb}}, du kannst sie von dort zurückholen.",
+    "replaceBtn": "Ersetzen",
+    "replaceManyTitle": "{count, plural, one {# Datei} other {# Dateien}} ersetzen?",
+    "replaceManyMessage": "Unter diesen Namen sind schon andere Dateien gespeichert: {names}. Durch den Download ersetzen? Die alten Dateien kommen in den {os, select, win {Papierkorb} other {Papierkorb}}, du kannst sie von dort zurückholen.",
+    "notReplaced": "{name} wurde nicht gespeichert: Dort liegt schon eine andere Datei.",
+    "notDownloaded": "{name} wurde nicht gespeichert: Die Datei konnte nicht heruntergeladen werden.",
+    "trashFailed": "{name} konnte nicht in den {os, select, win {Papierkorb} other {Papierkorb}} verschoben werden, deshalb wurde der Download nicht darüber gespeichert.",
     "sessionExpired": "EroScripts-Sitzung abgelaufen — bitte erneut über das EroScripts-Panel anmelden",
+    "error": {
+      "rateLimited": "EroScripts begrenzt gerade die Anfragen. Versuch es gleich noch einmal.",
+      "accessDenied": "Zugriff verweigert. Melde dich erneut an.",
+      "searchFailed": "Suche fehlgeschlagen (HTTP {status}). Melde dich ab und wieder an.",
+      "topicFailed": "Der Beitrag konnte nicht geladen werden (HTTP {status}).",
+      "noPosts": "Dieses Thema hat keine Beiträge.",
+      "network": "EroScripts ist nicht erreichbar. Prüfe deine Verbindung und versuch es erneut."
+    },
     "inline": {
       "title": "Skript auf EroScripts finden",
       "axesLine": "Haupt + {count} Achsen ({list})",
@@ -1288,7 +1690,8 @@
       "noMain": "Nur Achsendateien, kein Hauptskript",
       "zipNote": "{count} ZIP-Anhänge können noch nicht geöffnet werden",
       "loadingPost": "Beitrag wird geladen..."
-    }
+    },
+    "loginToSearch": "Melde dich bei EroScripts an, um zu suchen."
   },
   "upNext": {
     "regionAria": "Als Nächstes",
@@ -1302,7 +1705,8 @@
     "funscriptChip": "Funscript",
     "endLabel": "ENDE DER LISTE",
     "endDismissAria": "Schließen",
-    "endText": "Keine weiteren Videos in dieser {source}.",
+    "endText": "Keine weiteren Videos in „{source}“.",
+    "endTextGeneric": "Keine weiteren Videos in dieser Liste.",
     "endCta": "Zurück zu {source}",
     "endSourceFallback": "Liste",
     "sourcePlaylist": "Wiedergabeliste",
@@ -1390,31 +1794,45 @@
     "hostHint": "Tipp: Lass das Host-Feld auf der IP deines Quest — FunSync merkt sich das und verbindet beim nächsten Start automatisch.",
     "subnetWarning": "⚠ {host} ist in einem anderen Netzwerk als dieser PC ({pcIp}). Die IP deines Quest sollte wie {pcNet}.x aussehen. Hol sie im selben WLAN und deaktiviere jedes VPN — ein VPN gibt deinem Quest eine Adresse, die dieser PC nicht erreichen kann.",
     "playing": "Wiedergabe",
-    "offset": "Offset",
+    "offset": "Offset (alle Videos)",
     "offsetHint": "Kompensiert VR-Display-Lag. Stapelt sich auf den Offset jedes Geräts — siehe Sync-Tab für den kombinierten effektiven Wert pro Gerät.",
     "backendNotRunning": "Backend läuft nicht"
+  },
+  "videoSyncOffset": {
+    "label": "Dieses Video",
+    "earlier": "{ms} ms früher",
+    "later": "{ms} ms später",
+    "reset": "Zurücksetzen",
+    "hint": "Kommt zum Offset jedes Geräts hinzu, solange dieses Video läuft, auch in VR. Negativ löst früher aus. Nur für dieses Video gespeichert."
   },
   "editor": {
     "toolbarAria": "Skript-Editor-Werkzeuge",
     "mainAxisLabel": "Haupt (L0)",
+    "embeddedAxisLabel": "{axis} (eingebettet): zum Bearbeiten extrahieren…",
     "btn": {
-      "undo": "Rückgängig (Ctrl+Z)",
-      "redo": "Wiederholen (Ctrl+Y)",
-      "delete": "Auswahl löschen (Del)",
-      "invert": "Auswahl invertieren (Ctrl+I)",
+      "undo": "Rückgängig (Strg+Z)",
+      "redo": "Wiederholen (Strg+Y)",
+      "delete": "Auswahl löschen (Entf)",
+      "invert": "Auswahl invertieren (Strg+I)",
       "simplify": "Auswahl vereinfachen",
-      "cut": "Auswahl ausschneiden (Ctrl+X)",
+      "cut": "Auswahl ausschneiden (Strg+X)",
       "metadata": "Metadaten bearbeiten",
       "bookmark": "Lesezeichen hinzufügen (B)",
       "fillGaps": "Lücken füllen",
       "waveform": "Wellenform umschalten (W)",
       "beats": "Aus Beats generieren",
       "zoomIn": "Vergrößern (+)",
-      "zoomOut": "Verkleinern (-)",
+      "zoomOut": "Verkleinern (Strg+-)",
       "fitAll": "Alles einpassen",
-      "save": "Speichern (Ctrl+S)",
+      "save": "Speichern (Strg+S)",
       "stacked": "Gestapelte Ansicht — alle Achsen zeigen",
-      "popout": "Editor in eigenes Fenster ausklappen"
+      "popout": "Editor in eigenes Fenster ausklappen",
+      "dock": "Editor wieder ins Hauptfenster einklappen"
+    },
+    "unsaved": {
+      "title": "Änderungen an {name} speichern?",
+      "message": "Deine Änderungen an diesem Skript sind nicht gespeichert. Wenn du sie nicht speicherst, gehen sie verloren.",
+      "dontSave": "Nicht speichern"
     },
     "modify": {
       "title": "Skript ändern",
@@ -1427,7 +1845,21 @@
       "removePauses": "Pausen entfernen…",
       "rangeExtend": "Bereich erweitern/komprimieren…",
       "generatePattern": "Muster generieren…",
+      "fillPattern": "Mit Muster füllen…",
       "exportHeatmap": "Heatmap als PNG exportieren…"
+    },
+    "select": {
+      "title": "Punkte auswählen",
+      "placeholder": "Auswählen…",
+      "all": "Alle auswählen (Strg+A)",
+      "beforePlayhead": "Vor dem Abspielkopf auswählen (Strg+Alt+Pfeil links)",
+      "afterPlayhead": "Nach dem Abspielkopf auswählen (Strg+Alt+Pfeil rechts)",
+      "topThird": "Oberes Drittel (Strg+1)",
+      "middleThird": "Mittleres Drittel (Strg+2)",
+      "bottomThird": "Unteres Drittel (Strg+3)",
+      "everyNth": "Jeden N-ten Punkt…",
+      "created": "Nur neue Punkte (N)",
+      "none": "Auswahl aufheben (Esc)"
     },
     "speedLabel": "Geschwindigkeit:",
     "autosaveLabel": "Auto-Speichern",
@@ -1454,6 +1886,14 @@
     "extendTitle": "Bereich erweitern / komprimieren",
     "extendFactor": "Zeitskalierungsfaktor",
     "extendHint": "1.0 = keine Änderung, 2.0 = doppelte Dauer, 0.5 = halbe Dauer",
+    "everyNthTitle": "Jeden N-ten Punkt auswählen",
+    "everyNthEvery": "Jeden",
+    "everyNthStart": "Beginnen bei Punkt",
+    "everyNthScopeSelected": "Zählt {count, plural, one {den # ausgewählten Punkt} other {die # ausgewählten Punkte}} in zeitlicher Reihenfolge.",
+    "everyNthScopeAll": "Zählt {count, plural, one {# Punkt} other {alle # Punkte}} in zeitlicher Reihenfolge.",
+    "everyNthResult": "Wählt {count, plural, one {# Punkt} other {# Punkte}} aus.",
+    "everyNthTooFew": "Zum Zählen werden mindestens 2 Punkte gebraucht.",
+    "everyNthSelect": "Auswählen",
     "patternTitle": "Muster generieren",
     "patternStyle": "Muster",
     "patternBpm": "BPM",
@@ -1509,8 +1949,17 @@
       "offsetBy": "Um {ms} ms verschoben",
       "pausesRemoved": "Pausen entfernt",
       "selectToExtend": "Mindestens 2 Aktionen zum Erweitern/Komprimieren auswählen",
+      "selectionChanged": "Die Auswahl hat sich geändert, während der Dialog offen war. Es wurde nichts angewendet.",
       "timeScaled": "Zeit um {factor}x skaliert",
-      "recordingOn": "Aufnahmemodus AN — Numpad-Tasten fügen am Live-Playhead ein",
+      "needsContinuous": "{name} braucht eine lückenlose Auswahl. Eine Auswahl mit Lücken, etwa jeder N-te Punkt, lässt sich verschieben, invertieren und neu zuordnen.",
+      "nothingChanged": "Nichts geändert",
+      "selectToEqualize": "Mindestens 3 Aktionen zum Angleichen auswählen",
+      "equalized": "{count, plural, one {# Aktion} other {# Aktionen}} angeglichen",
+      "everyNthSelected": "{count, number} von {total, plural, one {# Punkt} other {# Punkten}} ausgewählt.",
+      "everyNthNone": "Nichts auszuwählen: Jeder N-te Punkt braucht mindestens 2 Punkte.",
+      "newPointsSelected": "{count, plural, one {# neuer Punkt} other {# neue Punkte}} ausgewählt.",
+      "newPointsNone": "Keine neuen Punkte zum Auswählen. Zuerst einen Befehl aus „Ändern…“ oder einen Generator ausführen.",
+      "recordingOn": "Aufnahmemodus AN — Ziffernblock-Tasten fügen am Live-Playhead ein",
       "recordingOff": "Aufnahmemodus AUS",
       "patternInserted": "{count, plural, one {# Aktion} other {# Aktionen}} eingefügt ({type})",
       "patternNone": "Keine Aktionen generiert — prüfe die Parameter",
@@ -1527,7 +1976,9 @@
       "gapsFilled": "{gaps, plural, one {# Lücke} other {# Lücken}} mit {actions, plural, one {# Aktion} other {# Aktionen}} gefüllt",
       "saved": "Funscript gespeichert",
       "saveFailed": "Speichern fehlgeschlagen: {error}",
-      "created": "{name} erstellt"
+      "created": "{name} erstellt",
+      "remoteScriptNotShown": "Dein Handy oder VR-Headset spielt sein eigenes Skript, deshalb zeigt der Editor es nicht an. Der Editor bearbeitet das Video in diesem Fenster.",
+      "popoutUnavailable": "Der Editor kann nicht ausgeklappt werden: Die Verbindung zwischen Fenster und App fehlt."
     },
     "extractingWaveform": "Extrahiere Wellenform…",
     "extractingWaveformPct": "Extrahiere Wellenform… {pct}%",
@@ -1535,7 +1986,7 @@
     "detectingBeatsPct": "Erkenne Beats… {pct}%",
     "customKeysTitle": "Positionstasten",
     "customKeysDefaultsHeader": "Standard",
-    "customKeysDefaultsBody": "0–9 (oder Numpad) → 0, 10, 20 … 90. Umschalt+0 / - / Numpad- → 100.",
+    "customKeysDefaultsBody": "0–9 (oder Ziffernblock) → 0, 10, 20 … 90. Umschalt+0 / - / Ziffernblock - → 100.",
     "customKeysCustomHeader": "Benutzerdefinierte Belegungen",
     "customKeysEmpty": "Noch keine benutzerdefinierten Belegungen.",
     "customKeysAddBtn": "Belegung hinzufügen",
@@ -1549,7 +2000,60 @@
     "customKeysDuplicateWarn": "{key} ist bereits auf Position {pos} belegt",
     "customKeysMidiHint": "MIDI-Keyboard-Nutzer kombinieren dies meist mit einem MIDI-zu-Taste-Übersetzer (z. B. MIDIKey2Key).",
     "customKeysHelpGroup": "Benutzerdefinierte Positionstasten",
-    "popoutWindowTitle": "Skript-Editor"
+    "popoutWindowTitle": "Skript-Editor",
+    "popout": {
+      "dock": "Einklappen",
+      "waveformTitle": "Wellenform im Hauptfenster umschalten (W)"
+    },
+    "patternFill": {
+      "title": "Mit Muster füllen",
+      "menu": "Mit Muster füllen…",
+      "contextMenu": "Aktionen der Zeitleiste",
+      "needSelection": "Wähle mindestens zwei Punkte aus oder ziehe über einen leeren Abschnitt der Zeitleiste. Das Muster füllt die Zeit dazwischen.",
+      "search": "Muster suchen",
+      "family": "Gruppe",
+      "allFamilies": "Alle",
+      "patterns": "Muster",
+      "noMatch": "Kein Muster passt zu „{query}“.",
+      "speed": "Tempo",
+      "speedValue": "{speed} Einheiten/s",
+      "ownSpeed": "Eigenes Tempo des Musters: {speed} Einheiten/s",
+      "rampTo": "Übergang bis",
+      "rampOff": "Aus",
+      "reverse": "Umkehren",
+      "range": "Bereich",
+      "rangeOwn": "Wie im Muster",
+      "rangeMin": "Unten",
+      "rangeMax": "Oben",
+      "variation": "Variation",
+      "seed": "Startwert",
+      "reroll": "Neu würfeln",
+      "rerollTitle": "Eine andere Variation probieren (neuer Startwert)",
+      "join": "Weiche Übergänge",
+      "endFit": "Ende",
+      "endFitStretch": "Bis zum letzten Punkt dehnen",
+      "endFitPartial": "Teilhub",
+      "mode": "Füllen",
+      "modeReplace": "Punkte ersetzen",
+      "modeGap": "Nur leere Lücken",
+      "selection": "Auswahl: {seconds} s, {count, plural, one {# Punkt} other {# Punkte}}",
+      "rangeSelection": "Zeitbereich: {seconds} s, {count, plural, =0 {keine Punkte} one {# Punkt} other {# Punkte}}",
+      "stats": "{points, plural, one {# neuer Punkt} other {# neue Punkte}}, Mittel {mean} Einheiten/s, max. {max} Einheiten/s.",
+      "replaces": "Ersetzt {count, plural, one {# Punkt} other {# Punkte}}.",
+      "apply": "Anwenden",
+      "applied": "Gefüllt mit „{name}“: {count, plural, one {# Punkt} other {# Punkte}}.",
+      "noGap": "Keine leere Lücke ist lang genug. Eine Lücke braucht mindestens 1 Sekunde und zwei Hübe.",
+      "tooShort": "Die Auswahl ist zum Füllen zu kurz. Wähle einen längeren Abschnitt.",
+      "endFitFallback": "Das Muster ließ sich nicht bis zum letzten Punkt dehnen und endet deshalb mit einem Teilhub.",
+      "joinTooFast": "Die beiden Enden liegen für diese Zeit zu weit auseinander: Die Übergänge bleiben im Tempolimit.",
+      "speedCapped": "Einige Bewegungen wurden auf {max} Einheiten/s begrenzt, das Höchsttempo für Muster.",
+      "speedUnreachable": "Dieses Muster erreicht das Tempo hier nicht. Es kommt so nah heran wie möglich.",
+      "rangeAdjusted": "Der Bereich wurde erweitert, damit die Hübe des Musters hineinpassen.",
+      "failed": "Diese Füllung ließ sich nicht erstellen. Probiere ein anderes Muster oder eine andere Einstellung.",
+      "changed": "Das Skript oder die Auswahl hat sich seit dieser Vorschau geändert. Es wurde nichts gefüllt.",
+      "editingPaused": "Bearbeitungstasten pausieren, bis du anwendest oder abbrichst.",
+      "updating": "Vorschau wird aktualisiert…"
+    }
   },
   "connection": {
     "vibeHelp": {
@@ -1570,7 +2074,18 @@
       "connectedToIntiface": "Mit Intiface verbunden",
       "disconnected": "Getrennt",
       "failed": "Verbindung fehlgeschlagen",
-      "failedIntiface": "Verbindung fehlgeschlagen — läuft Intiface?"
+      "failedIntiface": "Verbindung fehlgeschlagen — läuft Intiface?",
+      "notResponding": "Verbunden, reagiert nicht",
+      "respondingSlowly": "Verbunden, reagiert langsam"
+    },
+    "failure": {
+      "tcodePortNotFound": "Port nicht gefunden. Prüfe das Kabel und wähle den Port dann erneut aus.",
+      "tcodePortBusy": "Der Port ist belegt oder der Zugriff wurde verweigert. Schließe andere Programme, die ihn nutzen, und versuche es dann erneut.",
+      "tcodeWsRefused": "Diese WebSocket-Adresse ist nicht erreichbar. Prüfe sie und ob das Gerät oder Programm läuft.",
+      "autoblowOffline": "Gerät nicht verbunden. Prüfe Stromversorgung und WLAN.",
+      "autoblowRateLimited": "Zu viele Anfragen. Warte einen Moment und versuche es dann erneut.",
+      "generic": "Verbindung fehlgeschlagen: {detail}",
+      "withDetail": "{reason} ({detail})"
     },
     "btn": {
       "connect": "Verbinden",
@@ -1585,7 +2100,9 @@
       "test": "Test",
       "measure": "Messen",
       "measuring": "Messe…",
-      "applyLatency": "Übernehmen"
+      "applyLatency": "Übernehmen",
+      "reconnect": "Neu verbinden",
+      "reconnectHint": "Verbindung trennen und mit dem gespeicherten Schlüssel neu aufbauen."
     },
     "handy": {
       "connectionKey": "Verbindungs-Code",
@@ -1607,9 +2124,13 @@
       "cutoffMinAria": "Minimale Ausgabe-Untergrenze",
       "cutoffMaxAria": "Maximale Ausgabe-Obergrenze",
       "cutoffHint": "Harte Grenze: Positionen unter der Untergrenze oder über der Obergrenze werden darauf festgesetzt; der Rest bleibt unverändert. Wird beim nächsten Laden des Videos angewendet.",
+      "invert": "Richtung umkehren",
+      "invertHint": "Kehrt jeden Stroke um, 0 wird zu 100. Nutze es, wenn sich das Handy entgegen dem Video bewegt. Wirkt bei normaler Wiedergabe sofort, sonst beim nächsten Laden des Videos.",
       "syncing": "Synchronisiere…",
       "syncFailed": "Synchronisierung fehlgeschlagen",
-      "rtdResult": "RTD: {rtd}ms"
+      "rtdResult": "RTD: {rtd}ms",
+      "showKey": "Verbindungs-Code anzeigen",
+      "hideKey": "Verbindungs-Code verbergen"
     },
     "buttplug": {
       "axisMainStroke": "Haupt / Stroke (L0)",
@@ -1637,7 +2158,8 @@
       "safetyCap": "Sicherheitslimit:",
       "vibScriptOverride": "Vibration wird vom dedizierten Skript gesteuert — Modus- und Invertieren-Einstellungen haben keine Wirkung.",
       "highIntensityTitle": "Hohe Intensität",
-      "highIntensityBody": "E-Stim-Intensität auf {percent}% setzen — hohe Werte können Unbehagen verursachen. Fortfahren?",
+      "highIntensityBody": "Damit darf das Gerät mit bis zu {percent}% Intensität laufen. Hohe Werte können Unbehagen verursachen, besonders bei E-Stim oder einer Maschine. Sicherheitslimit auf {percent}% setzen?",
+      "highIntensityConfirm": "Auf {percent}% setzen",
       "vibrationModeTitle": "Vibrationsmodus",
       "rotationModeTitle": "Rotationsmodus",
       "estimModeTitle": "E-Stim-Modus",
@@ -1655,9 +2177,9 @@
       "badgeSpray": "Spray",
       "machineModeTitle": "Maschinengeschwindigkeit",
       "heater": "Heizung",
-      "spray": "Einmal spruehen",
+      "spray": "Einmal sprühen",
       "heatFailed": "Heizung konnte nicht geschaltet werden",
-      "sprayFailed": "Spray konnte nicht ausgeloest werden"
+      "sprayFailed": "Spray konnte nicht ausgelöst werden"
     },
     "tcode": {
       "l0Label": "Stroke (Haupt)",
@@ -1681,6 +2203,8 @@
       "motionHalfTop": "Obere Hälfte",
       "motionHalfBottom": "Untere Hälfte",
       "motionSpeed": "Geschwindigkeit",
+      "motionBlend": "Mischung",
+      "motionBlendHint": "Mischt den Hub in diese Achse: 0 % ist nur die erzeugte Bewegung, 100 % folgt dem Hub.",
       "type": {
         "linear": "linear",
         "rotate": "rotation",
@@ -1705,6 +2229,8 @@
       "wsUrl": "WebSocket-URL",
       "wsUrlAria": "WebSocket-URL",
       "wsHint": "Kompatibel mit MultiFunPlayer-Protokoll-Consumern (restim, Howl, etc.) — auf deren Listen-URL zeigen.",
+      "goHome": "Zur Mitte",
+      "goHomeTitle": "Fährt jede Achse langsam zurück in die Mitte und schaltet Vibration und Saugen aus. Pausiert vorher das Video.",
       "precision": "TCode-Präzision",
       "precisionAria": "TCode-Präzision",
       "updateRate": "Aktualisierungsrate",
@@ -1741,7 +2267,9 @@
       "latencyToast": "Autoblow-Latenz: {ms} ms",
       "latencyFailed": "Latenzmessung fehlgeschlagen: {error}",
       "latencyNoReading": "Keine Latenzmessung. Prüfe, ob das Gerät verbunden ist.",
-      "latencyApplied": "Sync-Versatz auf {ms} ms gesetzt"
+      "latencyApplied": "Sync-Versatz auf {ms} ms gesetzt",
+      "showToken": "Geräte-Token anzeigen",
+      "hideToken": "Geräte-Token verbergen"
     },
     "sync": {
       "experimental": "EXPERIMENTELL",
@@ -1753,14 +2281,15 @@
       "vrTransport": "VR-Transport",
       "noVrSession": "keine VR-Session",
       "handyNotConnected": "Handy nicht verbunden",
-      "perDeviceOffsets": "Geräte-Offsets",
-      "perDeviceHint": "Jedes Gerät hat seinen eigenen Offset zur Kompensation der Befehlslatenz. Negative Werte feuern Befehle früher. Der Slider hier spiegelt den Offset im Tab des jeweiligen Geräts — eines ändern, beide werden aktualisiert.",
+      "perDeviceOffsets": "Geräte-Offsets (alle Videos)",
+      "perDeviceHint": "Jedes Gerät hat seinen eigenen Offset zur Kompensation der Befehlslatenz. Bei Buttplug- und T-Code-Geräten feuern negative Werte Befehle früher; beim Handy und Autoblow feuern positive Werte früher, so wie ihre eigenen APIs arbeiten. Die VR-Gesamtzeile rechnet bei jedem Gerät mit negativ = früher. Der Slider hier spiegelt den Offset im Tab des jeweiligen Geräts — eines ändern, beide werden aktualisiert.",
       "connectDeviceHint": "Verbinde ein Gerät, um seine Offset-Steuerung zu sehen.",
       "deviceHandy": "The Handy (WiFi)",
       "deviceButtplug": "Buttplug.io-Geräte",
       "deviceTcode": "TCode (seriell)",
       "suggested": "Vorgeschlagen: {ms} ms",
       "vrModeTotal": "VR-Modus: {device} (Gerät) {vr} (VR) = {total} ms effektiv",
+      "vrModeTotalVideo": "VR-Modus: {device} (Gerät) {vr} (VR) {thisVideo} (dieses Video) = {total} ms effektiv",
       "latencyRefreshed": "Latenz aktualisiert",
       "refreshFailed": "Aktualisierung fehlgeschlagen: {error}"
     }
@@ -1769,7 +2298,9 @@
     "connectionFailed": "Verbindung fehlgeschlagen",
     "uploadFailed": "Upload fehlgeschlagen",
     "handyConnectionFailed": "Verbindung fehlgeschlagen — Bitte prüfe deinen Connection Key",
-    "connectionKeyTooShort": "Connection Key muss mindestens 5 Zeichen lang sein"
+    "handyStopFailed": "Der Handy hat das Stoppen nicht bestätigt. Er bewegt sich möglicherweise noch — drücke die Taste am Gerät.",
+    "connectionKeyTooShort": "Connection Key muss mindestens 5 Zeichen lang sein",
+    "handyNotAnswering": "Der Handy antwortet nicht. Prüfe das WLAN und das Display des Geräts."
   },
   "deviceTest": {
     "handyNotConnected": "Handy nicht verbunden",
@@ -1820,8 +2351,8 @@
     "cycleAspect": "Seitenverhältnis durchwechseln",
     "vrFlatten": "VR-Abflachung umschalten (Aus / linkes Auge / rechtes Auge)",
     "vrPan": "VR-Projektion schwenken (im sphärischen Modus)",
-    "vrZoom": "VR-Video zoomen (oder Pinch / Strg +-)",
-    "vrZoomReset": "VR-Zoom zuruecksetzen",
+    "vrZoom": "VR-Video zoomen (oder Pinch / Strg +-). Ohne geöffnetes VR-Video zoomt Strg +- die Oberfläche",
+    "vrZoomReset": "VR-Zoom zurücksetzen (den Oberflächen-Zoom, wenn kein VR-Video geöffnet ist)",
     "speedDown": "Wiedergabegeschwindigkeit verringern",
     "speedUp": "Wiedergabegeschwindigkeit erhöhen",
     "toggleInfo": "Info-Overlay umschalten",
@@ -1846,7 +2377,6 @@
     "prevBookmark": "Vorheriges Lesezeichen",
     "nextBookmark": "Nächstes Lesezeichen",
     "openFile": "Datei öffnen (nativer Dialog)",
-    "backToLibrary": "Vom Player zurück zur Bibliothek",
     "showHelp": "Diese Hilfe anzeigen",
     "editorSelection": "Auswahl & Navigation",
     "editorEdit": "Auswahl bearbeiten",
@@ -1858,6 +2388,7 @@
     "editorFastFrame": "Schneller Frame-Schritt (konfigurierbar; Standard 6)",
     "editorSelectAll": "Alle auswählen",
     "editorSelectThird": "Oberes / mittleres / unteres Drittel auswählen",
+    "editorSelectCreated": "Nur die Punkte auswählen, die der letzte Modifikator oder Generator erzeugt hat",
     "editorClearSelection": "Auswahl aufheben / Editor schließen",
     "editorNudgeCoarse": "Position ±5 verschieben (grob)",
     "editorNudgeFine": "Position ±1 verschieben (fein)",
@@ -1865,6 +2396,7 @@
     "editorMoveFrames": "Aktion(en) ±N Frames zeitlich verschieben",
     "editorDelete": "Auswahl löschen",
     "editorInvert": "Positionen invertieren",
+    "editorFillPattern": "Auswahl mit einem Muster füllen",
     "editorPlaceNumpad": "Aktion bei 0 / 10 / 20 / … / 90 platzieren",
     "editorPlaceTop": "Aktion bei 100 (oben) platzieren",
     "editorInsertAtClick": "Aktion an Klickposition einfügen",
@@ -1881,13 +2413,16 @@
     "editorZoom": "Vergrößern / verkleinern",
     "editorAlternatingInsert": "Wechselnd einfügen (vorigen Wert umkehren)",
     "editorRepeatLastStroke": "Letzten Zwei-Aktions-Hub wiederholen",
-    "editorBookmarkNav": "Zum nächsten/vorigen Lesezeichen springen",
+    "editorBookmarkNav": "Zum vorigen/nächsten Lesezeichen springen",
     "editorMultiBand": "Mehrband-Wellenform umschalten (tief/mittel/hoch)",
     "editorVAD": "Sprachaktivitäts-Spur umschalten",
     "editorSpeedStep": "Wiedergabegeschwindigkeit verringern/erhöhen",
     "editorSelectLeftRightOfCursor": "Alles vor/nach dem Abspielkopf auswählen",
     "editorEqualize": "Angleichen — mittlere Aktionen gleichmäßig in der Zeit verteilen",
-    "editorMoveToPlayhead": "Einzeln ausgewählte Aktion zum Abspielkopf verschieben"
+    "editorMoveToPlayhead": "Einzeln ausgewählte Aktion zum Abspielkopf verschieben",
+    "edgeHoldPattern": "Edge-Halten — Edge-Muster spielen, Video läuft weiter",
+    "edgeHoldPatternToggle": "Edge-Halten (Umschalten) — Edge-Muster spielen, Video läuft weiter",
+    "videoOptions": "Videooptionen (auf einer fokussierten Karte)"
   },
   "orgasmConfig": {
     "title": "Orgasmus-Schalter einrichten",
@@ -1932,6 +2467,870 @@
       "activity": "Aktivität",
       "objects": "Objekte",
       "travel": "Reisen & Orte"
+    }
+  },
+  "keys": {
+    "ctrl": "Strg",
+    "alt": "Alt",
+    "shift": "Umschalt",
+    "space": "Leertaste",
+    "enter": "Eingabe",
+    "tab": "Tab",
+    "backspace": "Rücktaste",
+    "delete": "Entf",
+    "insert": "Einfg",
+    "home": "Pos1",
+    "end": "Ende",
+    "pageUp": "Bild auf",
+    "pageDown": "Bild ab",
+    "printScreen": "Druck",
+    "escape": "Esc",
+    "arrowLeft": "Pfeil links",
+    "arrowRight": "Pfeil rechts",
+    "arrowUp": "Pfeil hoch",
+    "arrowDown": "Pfeil runter",
+    "arrows": "Pfeiltasten",
+    "mediaPlayPause": "Wiedergabe/Pause",
+    "mediaNext": "Nächster Titel",
+    "mediaPrevious": "Vorheriger Titel",
+    "mediaStop": "Stopp",
+    "volumeUp": "Lauter",
+    "volumeDown": "Leiser",
+    "volumeMute": "Stummschalten",
+    "scroll": "Mausrad",
+    "click": "Klick",
+    "dragPoint": "Punkt ziehen",
+    "numpad": "Ziffernblock {key}"
+  },
+  "patterns": {
+    "family": {
+      "full-strokes": {
+        "name": "Volle und halbe Hübe",
+        "desc": "Einfache Hübe über die ganze Länge oder durch die Mitte, einzeln, paarweise oder zu dritt."
+      },
+      "tip-work": {
+        "name": "An der Spitze",
+        "desc": "Hübe und kleine schnelle Bewegungen oben an der Spitze, die nie tief gehen."
+      },
+      "base-grind": {
+        "name": "Basis und Reiben",
+        "desc": "Hübe und enges Reiben unten an der Basis, die tief bleiben."
+      },
+      "buzz": {
+        "name": "Summen und Vibration",
+        "desc": "Schnelle Vibration, allein oder über die Hübe gelegt."
+      },
+      "climbs": {
+        "name": "Anstiege und Leitern",
+        "desc": "Hübe, die sich nach und nach die Länge hinauf- oder hinunterarbeiten."
+      },
+      "holds": {
+        "name": "Pausen und Absinken",
+        "desc": "Pausen oben, unten oder auf halber Strecke, und ein kurzes Absinken vor einer Pause."
+      },
+      "waves": {
+        "name": "Wellen und Anschwellen",
+        "desc": "Hübe, die mit der Zeit anschwellen, abklingen, schneller oder langsamer werden."
+      },
+      "stutters": {
+        "name": "Stocken und Zittern",
+        "desc": "Hübe, die unterwegs hängen bleiben, stocken oder kurz zurückzucken."
+      },
+      "endings": {
+        "name": "Enden und Abschlüsse",
+        "desc": "So endet es: ein letzter Hub nach unten, langsames Ausklingen, ein Sprint, ein tiefer Sturz oder Vibration."
+      },
+      "flutters": {
+        "name": "Flattern und Nachbeben",
+        "desc": "Hübe mit sehr schnellem Flattern an den Wendepunkten und ein Ende, das an der Basis weitervibriert."
+      },
+      "simple-shapes": {
+        "name": "Einfache Formen",
+        "desc": "Die klassischen erzeugten Wellen: Sinus, Dreieck, Sägezahn, Rechteck, steigend und zufällig."
+      }
+    },
+    "quick-full-strokes": {
+      "name": "Zügige volle Hübe",
+      "desc": "Zügige Hübe über die ganze Länge."
+    },
+    "uneven-long-strokes": {
+      "name": "Unregelmäßige lange Hübe",
+      "desc": "Gemächliche lange Hübe durch die Mitte, deren Takt und Tiefe schwanken und sich nie ganz wiederholen."
+    },
+    "full-strokes-slow-up-quick-down": {
+      "name": "Volle Hübe, langsam hoch, schnell runter",
+      "desc": "Gleichmäßige Hübe über die ganze Länge, langsam nach oben und schnell nach unten."
+    },
+    "frantic-long-strokes": {
+      "name": "Rasende lange Hübe",
+      "desc": "Lange Hübe durch die Mitte, so schnell es geht."
+    },
+    "slow-long-strokes-top-linger": {
+      "name": "Langsame lange Hübe, oben verweilen",
+      "desc": "Langsame, bedächtige lange Hübe durch die Mitte, die oben verweilen."
+    },
+    "full-strokes-long-short-top": {
+      "name": "Volle Hübe, lang-kurz von oben",
+      "desc": "Gleichmäßige Hübe über die ganze Länge: ein langer Hub, dann einer, der etwa halb so tief geht und vor dem unteren Ende umkehrt."
+    },
+    "long-strokes-long-short-top": {
+      "name": "Lange Hübe, lang-kurz von oben",
+      "desc": "Gleichmäßige lange Hübe durch die Mitte: ein langer Hub, dann ein etwas kürzerer, der vor dem unteren Ende umkehrt."
+    },
+    "slow-full-strokes-slow-up-quick-down": {
+      "name": "Langsame volle Hübe, langsam hoch, schnell runter",
+      "desc": "Langsame, bedächtige Hübe über die ganze Länge, langsam hoch und schnell runter, oben verweilend."
+    },
+    "fast-full-stroke-pairs": {
+      "name": "Schnelle volle Hübe in Paaren",
+      "desc": "Schnelle Hübe über die ganze Länge in Paaren, der zweite kehrt etwas vor dem ersten um."
+    },
+    "fast-full-strokes-bottom-bump": {
+      "name": "Schnelle volle Hübe, Stups unten",
+      "desc": "Schnelle Hübe über die ganze Länge, nach jedem langen Hub ein kleiner Stups unten."
+    },
+    "slow-full-strokes-slow-quick": {
+      "name": "Langsame volle Hübe, langsam-schnell",
+      "desc": "Langsame, bedächtige Hübe über die ganze Länge: ein langsamerer Hub, dann ein schnellerer."
+    },
+    "quick-full-strokes-threes": {
+      "name": "Zügige volle Hübe in Dreiergruppen",
+      "desc": "Zügige Hübe über die ganze Länge in einem Dreierzyklus, der sich fast wie einfache Hübe anfühlt."
+    },
+    "uneven-tip-strokes": {
+      "name": "Unregelmäßige Hübe an der Spitze",
+      "desc": "Gemächliche kurze Hübe oben an der Spitze, deren Takt und Tiefe schwanken und sich nie ganz wiederholen."
+    },
+    "fast-tip-flicks": {
+      "name": "Schnelles Schnippen an der Spitze",
+      "desc": "Schnelle kleine Bewegungen oben an der Spitze, die nie tief gehen."
+    },
+    "slow-tip-strokes": {
+      "name": "Langsame Hübe an der Spitze",
+      "desc": "Langsame, bedächtige lange Hübe um die Spitze, die nie tief gehen."
+    },
+    "tip-strokes-slow-up-quick-down": {
+      "name": "Hübe an der Spitze, langsam hoch, schnell runter",
+      "desc": "Gleichmäßige halbe Hübe an der Spitze, langsam hoch und schnell runter."
+    },
+    "quick-tip-strokes-long-short-high": {
+      "name": "Zügige Hübe an der Spitze, lang-kurz, hoch",
+      "desc": "Zügige halbe Hübe hoch an der Spitze: ein langer Hub, dann einer, der etwa halb so tief geht."
+    },
+    "frantic-tip-strokes": {
+      "name": "Rasende Hübe an der Spitze",
+      "desc": "Halbe Hübe oben an der Spitze, so schnell es geht."
+    },
+    "tip-strokes-long-short": {
+      "name": "Hübe an der Spitze, lang-kurz",
+      "desc": "Gleichmäßige halbe Hübe an der Spitze: ein langer Hub, dann einer, der etwa halb so tief geht."
+    },
+    "quick-tip-strokes-long-short-low": {
+      "name": "Zügige Hübe an der Spitze, lang-kurz, tiefer",
+      "desc": "Zügige lange Hübe um die Spitze, die tiefer reichen: ein langer Hub, dann ein kürzerer."
+    },
+    "tip-strokes-slow-quick": {
+      "name": "Hübe an der Spitze, langsam-schnell",
+      "desc": "Gleichmäßige halbe Hübe an der Spitze: ein langsamerer Hub, dann ein viel schnellerer."
+    },
+    "frantic-tip-strokes-top-dip": {
+      "name": "Rasende Hübe an der Spitze, Absinken oben",
+      "desc": "Halbe Hübe an der Spitze, so schnell es geht, nach jedem langen Hub ein kleines Absinken oben."
+    },
+    "fast-base-strokes": {
+      "name": "Schnelle Hübe an der Basis",
+      "desc": "Schnelle halbe Hübe unten an der Basis, die tief bleiben."
+    },
+    "uneven-base-strokes": {
+      "name": "Unregelmäßige Hübe an der Basis",
+      "desc": "Zügige kurze Hübe an der Basis, deren Takt und Tiefe schwanken und sich nie ganz wiederholen."
+    },
+    "slow-base-grind": {
+      "name": "Langsames Reiben an der Basis",
+      "desc": "Langsames, enges Reiben ganz unten an der Basis, langsam hoch und schnell runter."
+    },
+    "base-strokes-slow-up-quick-down": {
+      "name": "Hübe an der Basis, langsam hoch, schnell runter",
+      "desc": "Zügige halbe Hübe an der Basis, langsam hoch und schnell runter."
+    },
+    "fast-base-strokes-long-short": {
+      "name": "Schnelle Hübe an der Basis, lang-kurz",
+      "desc": "Schnelle halbe Hübe an der Basis: ein langer Hub, dann ein kürzerer, der vor dem oberen Ende umkehrt."
+    },
+    "frantic-base-grind": {
+      "name": "Rasendes Reiben an der Basis",
+      "desc": "Enges Reiben ganz unten an der Basis, so schnell es geht, langsam hoch und schnell runter."
+    },
+    "base-strokes-high-low": {
+      "name": "Hübe an der Basis, hoch-tief",
+      "desc": "Zügige halbe Hübe an der Basis: einer reicht weit hoch, der nächste weniger."
+    },
+    "frantic-base-strokes-bottom-bump": {
+      "name": "Rasende Hübe an der Basis, Stups unten",
+      "desc": "Halbe Hübe an der Basis, so schnell es geht, nach jedem langen Hub ein kleiner Stups unten."
+    },
+    "buzz-uneven-short-base-strokes": {
+      "name": "Vibration auf unregelmäßigen kurzen Basis-Hüben",
+      "desc": "Unregelmäßige, zügige kurze Hübe an der Basis, über den meisten eine Vibration."
+    },
+    "buzz-uneven-half-base-strokes": {
+      "name": "Vibration auf unregelmäßigen halben Basis-Hüben",
+      "desc": "Unregelmäßige halbe Hübe in ruhigem Tempo an der Basis, über den meisten eine Vibration."
+    },
+    "buzz-uneven-long-strokes": {
+      "name": "Vibration auf unregelmäßigen langen Hüben",
+      "desc": "Unregelmäßige, schnelle lange Hübe durch die Mitte, über den meisten eine Vibration."
+    },
+    "steady-buzz-base": {
+      "name": "Gleichmäßige Vibration an der Basis",
+      "desc": "Eine Vibration an der Basis, die an Ort und Stelle bleibt, ohne echte Hübe darunter."
+    },
+    "buzz-long-strokes": {
+      "name": "Vibration auf langen Hüben",
+      "desc": "Gleichmäßige lange Hübe durch die Mitte mit einer darübergelegten Vibration."
+    },
+    "steady-buzz-tip-high": {
+      "name": "Gleichmäßige Vibration an der Spitze, hoch",
+      "desc": "Eine Vibration hoch oben an der Spitze, die an Ort und Stelle bleibt, ohne echte Hübe darunter."
+    },
+    "buzz-frantic-base-strokes": {
+      "name": "Vibration auf rasenden Basis-Hüben",
+      "desc": "Unregelmäßige kurze Hübe an der Basis, so schnell es geht, über den meisten eine Vibration."
+    },
+    "buzz-uneven-tip-strokes": {
+      "name": "Vibration auf unregelmäßigen Hüben an der Spitze",
+      "desc": "Unregelmäßige halbe Hübe in ruhigem Tempo an der Spitze, über den meisten eine Vibration."
+    },
+    "buzz-tiny-base-strokes": {
+      "name": "Vibration auf winzigen Basis-Hüben",
+      "desc": "Winzige Hübe an der Basis, so schnell es geht, mit einer darübergelegten Vibration."
+    },
+    "steady-buzz-tip-low": {
+      "name": "Gleichmäßige Vibration an der Spitze, tiefer",
+      "desc": "Eine Vibration weiter unten an der Spitze, die an Ort und Stelle bleibt, ohne echte Hübe darunter."
+    },
+    "buzz-short-tip-strokes": {
+      "name": "Vibration auf kurzen Hüben an der Spitze",
+      "desc": "Kurze Hübe an der Spitze, so schnell es geht, mit einer darübergelegten Vibration."
+    },
+    "climbing-long-strokes": {
+      "name": "Aufsteigende lange Hübe",
+      "desc": "Schnelle lange Hübe, die in der Mitte beginnen und sich zur Spitze hocharbeiten."
+    },
+    "sinking-full-strokes": {
+      "name": "Absinkende volle Hübe",
+      "desc": "Langsame Hübe, die in der Mitte beginnen und sich zur Basis hinunterarbeiten."
+    },
+    "climbing-half-strokes-from-low": {
+      "name": "Aufsteigende halbe Hübe von unten",
+      "desc": "Halbe Hübe, so schnell es geht, die tief beginnen und sich zur Spitze hocharbeiten."
+    },
+    "ladder-stepping-up": {
+      "name": "Leiter, stufenweise hoch",
+      "desc": "Gleichmäßige Hübe, deren unteres Ende jedes Mal eine Stufe höher rückt, dann geht es von vorn los."
+    },
+    "pause-at-top": {
+      "name": "Pause oben",
+      "desc": "Kommt hoch, wartet etwa zwei Sekunden nahe der Spitze und geht dann wieder runter."
+    },
+    "pause-at-bottom": {
+      "name": "Pause unten",
+      "desc": "Ruht etwa zwei Sekunden ganz unten an der Basis vor dem nächsten Hub nach oben."
+    },
+    "pause-halfway": {
+      "name": "Pause auf halber Strecke",
+      "desc": "Hält mitten in einem Hub etwa zwei Sekunden an und macht dann weiter."
+    },
+    "dip-climb-hold-top": {
+      "name": "Absinken, hochklettern, oben halten",
+      "desc": "Ein kurzes Absinken, ein langsamer Weg zurück zur Spitze, dann ein paar Sekunden Warten."
+    },
+    "fading-long-strokes-bottoms-rising": {
+      "name": "Abklingende lange Hübe, unten steigend",
+      "desc": "Zügige lange Hübe, die kürzer und schneller werden, während das untere Ende steigt."
+    },
+    "swelling-long-strokes-deeper": {
+      "name": "Anschwellende lange Hübe, tiefer reichend",
+      "desc": "Gleichmäßige lange Hübe, die länger werden, während sie tiefer reichen."
+    },
+    "slowing-full-strokes": {
+      "name": "Langsamer werdende volle Hübe",
+      "desc": "Gleichmäßige Hübe über die ganze Länge, die mit der Zeit langsamer werden."
+    },
+    "swelling-long-strokes-higher": {
+      "name": "Anschwellende lange Hübe, höher reichend",
+      "desc": "Zügige lange Hübe, die länger werden, während sie höher reichen."
+    },
+    "fading-long-strokes-tops-falling": {
+      "name": "Abklingende lange Hübe, oben sinkend",
+      "desc": "Zügige lange Hübe, die kürzer und schneller werden, während das obere Ende sinkt."
+    },
+    "speeding-up-low-strokes": {
+      "name": "Schneller werdende tiefe Hübe",
+      "desc": "Zügige lange Hübe weit unten, die schneller werden, langsam hoch und schnell runter."
+    },
+    "fading-half-strokes-tops-falling": {
+      "name": "Abklingende halbe Hübe, oben sinkend",
+      "desc": "Schnelle halbe Hübe an der Basis, die kürzer werden, während das obere Ende sinkt."
+    },
+    "fading-tip-strokes-bottoms-rising": {
+      "name": "Abklingende Hübe an der Spitze, unten steigend",
+      "desc": "Gleichmäßige halbe Hübe an der Spitze, die kürzer und schneller werden, während das untere Ende steigt."
+    },
+    "stuttering-middle-strokes": {
+      "name": "Stockende Hübe in der Mitte",
+      "desc": "Gleichmäßige halbe Hübe durch die Mitte, die immer wieder hängen bleiben, mit kleinem Zurückzucken."
+    },
+    "stuttering-tip-strokes": {
+      "name": "Stockende Hübe an der Spitze",
+      "desc": "Gleichmäßige halbe Hübe an der Spitze, die immer wieder hängen bleiben, mit kleinem Zurückzucken."
+    },
+    "stuttering-base-strokes": {
+      "name": "Stockende Hübe an der Basis",
+      "desc": "Zügige kurze Hübe an der Basis, die immer wieder hängen bleiben, mit kleinem Zurückzucken."
+    },
+    "mixed-flutters-tip": {
+      "name": "Gemischtes Flattern an der Spitze",
+      "desc": "Kleines Flattern im Wechsel mit größeren, langsameren Bewegungen an der Spitze, sanft und nie regelmäßig."
+    },
+    "long-strokes-catch-up": {
+      "name": "Lange Hübe, Hänger auf dem Weg hoch",
+      "desc": "Gleichmäßige lange Hübe, die auf halbem Weg nach oben kurz zurückrutschen und dann bis oben weitergehen."
+    },
+    "full-strokes-stall-down": {
+      "name": "Volle Hübe, Stopp auf dem Weg runter",
+      "desc": "Zügige Hübe über die ganze Länge, die auf dem Weg nach unten kurz anhalten."
+    },
+    "fast-full-strokes-catch-up": {
+      "name": "Schnelle volle Hübe, Hänger auf dem Weg hoch",
+      "desc": "Schnelle Hübe über die ganze Länge, die auf halbem Weg nach oben kurz zurückrutschen, langsam hoch und schnell runter."
+    },
+    "half-strokes-catch-down": {
+      "name": "Halbe Hübe, Hänger auf dem Weg runter",
+      "desc": "Gleichmäßige halbe Hübe an der Spitze, die auf halbem Weg nach unten kurz zurückfedern."
+    },
+    "long-strokes-stall-up": {
+      "name": "Lange Hübe, Stopp auf dem Weg hoch",
+      "desc": "Gleichmäßige lange Hübe, die auf dem Weg nach oben kurz anhalten: ein langsamer Hub, dann ein schneller."
+    },
+    "last-stroke-then-still": {
+      "name": "Letzter Hub nach unten, dann Ruhe",
+      "desc": "Die Hübe hören auf: ein letzter Hub ganz nach unten, und dort bleibt es."
+    },
+    "slow-down-finish": {
+      "name": "Ausklingen bis zum Ende",
+      "desc": "Die Hübe laufen weiter, werden aber immer langsamer, bis sie aufhören."
+    },
+    "sprint-finish": {
+      "name": "Sprint bis zum Ende",
+      "desc": "Schneller als zuvor und bis zum Schluss durchgehalten, dann hört es auf."
+    },
+    "plunge-finish": {
+      "name": "Der tiefe Sturz",
+      "desc": "Ein letzter schneller Sturz von weit oben ganz nach unten, und dort bleibt es."
+    },
+    "buzz-finish": {
+      "name": "Abschluss mit Vibration",
+      "desc": "Das letzte Stück wird statt Hüben überwiegend zu Vibration."
+    },
+    "finishing-fast-strokes-long-short": {
+      "name": "Schnelle Schlusshübe, lang-kurz",
+      "desc": "Schnelle Hübe über die ganze Länge: ein langer Hub, dann ein kürzerer, langsam hoch und schnell runter."
+    },
+    "full-strokes-base-flutter": {
+      "name": "Volle Hübe, Flattern an der Basis",
+      "desc": "Große Hübe, die bis ganz unten gehen, dort kurz flattern und dann direkt wieder hochgehen."
+    },
+    "drop-buzzing-aftershocks": {
+      "name": "Absturz, dann vibrierende Nachbeben",
+      "desc": "Die Hübe gehen ganz nach unten und vibrieren und zucken dort noch ein paar Sekunden weiter."
+    },
+    "fast-strokes-flutter-both-ends": {
+      "name": "Schnelle Hübe, Flattern an beiden Enden",
+      "desc": "Zügige Hübe, die oben flattern, nach unten schießen, unten flattern und wieder hochschießen."
+    },
+    "fast-full-strokes-long-short-bottom": {
+      "name": "Schnelle volle Hübe, lang-kurz von unten",
+      "desc": "Schnelle Hübe über die ganze Länge: ein langer Hub, dann einer, der etwa halb so tief geht und vor dem oberen Ende umkehrt."
+    },
+    "frantic-base-strokes-long-short": {
+      "name": "Rasende Hübe an der Basis, lang-kurz",
+      "desc": "Lange Hübe an der Basis, so schnell es geht: ein langer Hub, dann ein kürzerer, der vor dem oberen Ende umkehrt."
+    },
+    "full-strokes-bottom-linger": {
+      "name": "Volle Hübe, unten verweilen",
+      "desc": "Gleichmäßige Hübe über die ganze Länge, die unten verweilen."
+    },
+    "ui": {
+      "pattern": "Muster",
+      "family": "Gruppe",
+      "allFamilies": "Alle Gruppen",
+      "choose": "Auswählen…",
+      "pickerTitle": "Muster auswählen",
+      "search": "Muster suchen",
+      "noMatch": "Kein Muster passt.",
+      "speed": "Geschwindigkeit",
+      "speedValue": "{speed} Einheiten pro Sekunde",
+      "reverse": "Umkehren",
+      "range": "Bereich",
+      "rangeOwn": "Eigener Bereich des Musters",
+      "rangeMin": "Minimum",
+      "rangeMax": "Maximum",
+      "reset": "Zurück zur eigenen Geschwindigkeit des Musters",
+      "speedLimited": "Begrenzt auf {max} Einheiten pro Sekunde",
+      "tooShort": "Zu kurz für dieses Muster.",
+      "choosePattern": "Muster auswählen…",
+      "oneShotName": "{name} (läuft einmal, hält dann)",
+      "oneShotHint": "Ein Abschluss: Er läuft einmal ab dem Moment, in dem du die Taste drückst, und hält dann seine letzte Position, bis du loslässt."
+    },
+    "shape-sine": {
+      "name": "Sinus",
+      "desc": "Weiche, gleichmäßige Hübe, die sanft in jede Wende gleiten."
+    },
+    "shape-triangle": {
+      "name": "Dreieck",
+      "desc": "Gleichmäßige Hübe mit konstanter Geschwindigkeit, die an beiden Enden scharf wenden."
+    },
+    "shape-sawtooth": {
+      "name": "Sägezahn",
+      "desc": "Ein gleichmäßiger Anstieg, dann ein sofortiger Fall zurück nach unten."
+    },
+    "shape-square": {
+      "name": "Rechteck",
+      "desc": "Hält oben und unten, mit einem schnellen Sprung dazwischen."
+    },
+    "shape-escalating": {
+      "name": "Steigend",
+      "desc": "Hübe, die flach beginnen und immer tiefer werden, bis sie den ganzen Bereich nutzen."
+    },
+    "shape-random": {
+      "name": "Zufall",
+      "desc": "Hübe zu einer neuen, zufälligen Tiefe bei jedem halben Hub."
+    }
+  },
+  "videoOptions": {
+    "openAria": "Optionen für {name}",
+    "openTitle": "Videooptionen (Alt+Eingabe)",
+    "railAria": "Bereiche der Videooptionen",
+    "rail": {
+      "organise": "Ordnen",
+      "tags": "Tags",
+      "script": "Skript",
+      "subtitles": "Untertitel",
+      "playback": "Wiedergabe",
+      "thumbnail": "Vorschaubild",
+      "vr": "VR",
+      "file": "Datei"
+    },
+    "header": {
+      "script": "Skript: {how}",
+      "vrAuto": "VR (automatisch)",
+      "vrYours": "VR (von dir festgelegt)",
+      "flatYours": "Flach (von dir festgelegt)"
+    },
+    "organise": {
+      "libraries": "Bibliotheken",
+      "noPlaylists": "Noch keine Playlists.",
+      "noCategories": "Noch keine Kategorien.",
+      "newPlaylist": "Neue Playlist…",
+      "newCategory": "Neue Kategorie…",
+      "synced": "(mit ihrer Quelle synchronisiert)"
+    },
+    "tags": {
+      "heading": "Tags dieses Videos ({count})",
+      "empty": "Dieses Video hat noch keine Tags. Füge unten eins hinzu oder hol die Tags des Beitrags von EroScripts.",
+      "noMatch": "Kein Tag passt zu „{query}“.",
+      "filter": {
+        "placeholder": "Tag suchen…",
+        "label": "Tag in diesem Video suchen"
+      },
+      "showAll": "Alle anzeigen ({count})",
+      "showFewer": "Weniger anzeigen",
+      "removeAria": "{name} aus diesem Video entfernen",
+      "add": {
+        "placeholder": "Tag hinzufügen…",
+        "label": "Diesem Video ein Tag hinzufügen",
+        "button": "Hinzufügen",
+        "hint": "Um ein Tag einer Gruppe zuzuordnen, gib die Gruppe zuerst ein, zum Beispiel device:the handy oder performer:Jane Doe.",
+        "suggestionsAria": "Vorgeschlagene Tags"
+      },
+      "sourcesHeading": "Woher sie stammen",
+      "source": {
+        "post": "„{title}“ von {creator}",
+        "postNoCreator": "„{title}“",
+        "postId": "Beitrag {id}",
+        "got": "geholt am {date}",
+        "stale": "nicht mehr auf EroScripts",
+        "fileRow": "Skriptdatei",
+        "tagCount": "{count, plural, one {# Tag} other {# Tags}}",
+        "notRead": "Tags noch nicht geholt",
+        "stashRow": "{tags, plural, one {# Tag} other {# Tags}}, {performers, plural, one {# Darsteller} other {# Darsteller}}, {studios, plural, one {# Studio} other {# Studios}}",
+        "stashGone": "nicht mehr in Stash",
+        "stashHidden": "diese Datei hat sich geändert; ihre Stash-Tags sind bis zur nächsten Synchronisierung ausgeblendet"
+      },
+      "viewPost": "Beitrag ansehen",
+      "pasteLink": "Beitragslink einfügen…",
+      "findPost": "Beitrag auf EroScripts suchen…",
+      "paste": {
+        "title": "EroScripts-Beitrag verknüpfen",
+        "label": "Beitragslink",
+        "hint": "Füge die Adresse des Beitrags ein, zum Beispiel https://discuss.eroscripts.com/t/scene-name/12345. Es wird erst etwas gesendet, wenn du die Tags holst.",
+        "invalid": "Das ist kein EroScripts-Beitragslink. Er beginnt mit https://discuss.eroscripts.com/t/",
+        "ok": "Beitrag verknüpfen"
+      },
+      "find": {
+        "title": "Beitrag auf EroScripts suchen",
+        "hint": "Suche und wähle dann den Beitrag, von dem das Skript dieses Videos stammt. Es wird nichts heruntergeladen.",
+        "prompt": "Gib den Namen des Beitrags ein und starte dann die Suche.",
+        "pick": "Diesen Beitrag verknüpfen",
+        "pickAria": "Beitrag {title} verknüpfen"
+      },
+      "hiddenHeading": "In diesem Video ausgeblendet ({count})",
+      "showAgain": "Wieder anzeigen",
+      "showAgainAria": "{name} in diesem Video wieder anzeigen",
+      "undoAria": "Rückgängig: {message}",
+      "menu": {
+        "aria": "Optionen für das Tag {name}",
+        "showVideos": "Videos mit diesem Tag anzeigen",
+        "makeCategory": "Kategorie aus diesem Tag erstellen…",
+        "remove": "Aus diesem Video entfernen"
+      },
+      "category": {
+        "title": "Kategorie aus diesem Tag erstellen",
+        "nameLabel": "Name der Kategorie",
+        "count": "{count, plural, =0 {Kein Video in der Bibliothek hat dieses Tag.} one {# Video hat dieses Tag.} other {# Videos haben dieses Tag.}}",
+        "exists": "Eine Kategorie namens {name} gibt es schon. Die Videos werden ihr hinzugefügt.",
+        "create": "Kategorie erstellen",
+        "addTo": "Zu {name} hinzufügen",
+        "emptyName": "Gib einen Namen für die Kategorie ein."
+      },
+      "live": {
+        "added": "{name} hinzugefügt.",
+        "addedShown": "{name} hinzugefügt. Es wird in diesem Video wieder angezeigt.",
+        "already": "{name} ist schon in diesem Video.",
+        "removed": "{name} aus diesem Video entfernt.",
+        "shownAgain": "{name} wird in diesem Video wieder angezeigt.",
+        "undone": "Rückgängig gemacht.",
+        "undoPartial": "Rückgängig gemacht. Eine spätere Änderung von dir bleibt erhalten.",
+        "linked": "Beitrag verknüpft. Es wird erst etwas gesendet, wenn du seine Tags holst.",
+        "categoryMade": "Kategorie {name} mit {count, plural, one {# Video} other {# Videos}} erstellt.",
+        "categoryAdded": "{count, plural, one {# Video} other {# Videos}} zu {name} hinzugefügt.",
+        "categoryNothing": "Alle Videos mit diesem Tag sind schon in {name}.",
+        "categoryFailed": "Die Kategorie konnte nicht erstellt werden.",
+        "categoryRemoved": "Rückgängig gemacht. Die Kategorie {name} wurde entfernt.",
+        "categoryUnassigned": "Rückgängig gemacht. Die Videos wurden wieder aus {name} entfernt.",
+        "reason": {
+          "empty": "Gib zuerst ein Tag ein.",
+          "tooLong": "Dieses Tag ist zu lang (höchstens {max} Zeichen).",
+          "badStore": "Die gespeicherten Tags dieses Videos sind beschädigt, daher wurde nichts geändert.",
+          "noPath": "Dieses Video hat keinen Dateipfad, daher können seine Tags nicht gespeichert werden."
+        },
+        "postChanged": "Beitrag geändert. Seine Tags kommen, wenn du auf „Tags holen“ drückst.",
+        "samePost": "Das ist schon der Beitrag dieses Videos. Nichts geändert.",
+        "undoChangedSince": "Nicht rückgängig gemacht: Der Beitrag dieses Videos wurde seitdem noch einmal geändert.",
+        "getTagsUndone": "Rückgängig: Die Tags sind wieder wie vor „Tags holen“.",
+        "getTagsUndoChanged": "Nicht rückgängig: Die EroScripts-Tags dieses Videos haben sich seitdem wieder geändert."
+      },
+      "fetch": {
+        "button": "Tags von EroScripts holen",
+        "loginButton": "Anmelden, um Tags zu holen…",
+        "running": "Tags werden geholt…",
+        "success": "{count, plural, one {# Tag} other {# Tags}} von EroScripts geholt ({newCount} neu).",
+        "successEmpty": "Dieser Beitrag hat auf EroScripts keine Tags.",
+        "unknown": "EroScripts hat nicht angegeben, welche Tags dieser Beitrag hat.",
+        "gone": "Dieser Beitrag ist nicht mehr auf EroScripts. Seine Tags bleiben erhalten.",
+        "loginAgain": "Melde dich erneut bei EroScripts an",
+        "loginAction": "Anmelden…",
+        "loginRequired": "Zum Holen von Tags musst du bei EroScripts angemeldet sein. Es wurde nichts gesendet.",
+        "cooldown": "EroScripts bittet um etwas Geduld. Versuch es in {seconds} s noch einmal",
+        "otherScript": "Der verknüpfte Beitrag gehört zu einem anderen Skript ({name})",
+        "noPost": "Mit dem Skript dieses Videos ist kein EroScripts-Beitrag verknüpft",
+        "noScript": "Dieses Video hat kein Skript, daher ist kein EroScripts-Beitrag verknüpft.",
+        "superseded": "Der Beitrag dieses Videos wurde geändert, während seine Tags geholt wurden. Es wurde nichts gespeichert.",
+        "hub": "Dieser Beitrag ist der Skript-Index seines Erstellers, nicht der Beitrag dieses Videos. Seine Tags wurden deshalb nicht übernommen. Suche den Beitrag dieses Videos, um seine Tags zu holen.",
+        "hubNote": "Das Skript verlinkt auf den Skript-Index seines Erstellers, nicht auf den Beitrag dieses Videos"
+      },
+      "changePost": "Beitrag ändern…",
+      "change": {
+        "title": "EroScripts-Beitrag ändern",
+        "message": "Die Tags von {post} werden bei diesem Video ab sofort nicht mehr angezeigt. Die Tags des neuen Beitrags kommen, wenn du auf „Tags holen“ drückst."
+      }
+    },
+    "script": {
+      "heading": "Funscript",
+      "none": "Dieses Video hat noch kein Skript.",
+      "change": "Ändern…",
+      "findOnEroScripts": "Auf EroScripts suchen…",
+      "fallback": "{name} kann gerade nicht gelesen werden, darum spielt dieses Video solange sein eigenes Skript. Deine Zuordnung bleibt erhalten.",
+      "modeHeading": "Modus",
+      "modeSingle": "Einzelnes Skript",
+      "modeMulti": "Mehrachsig ({count, plural, one {# Achse} other {# Achsen}})",
+      "modeCustom": "Eigenes Routing ({count, plural, one {# Route} other {# Routen}})",
+      "modeHint": "Mit „Ändern…“ änderst du den Modus.",
+      "slotsHeading": "Gespeicherte Zuordnungen",
+      "slot": {
+        "single": "Einzelnes Skript: {name}",
+        "multi": "Mehrachsen-Set ({count, plural, one {# Achse} other {# Achsen}})",
+        "plays": "läuft jetzt",
+        "saved": "gespeichert, nicht aktiv",
+        "unpairRemoves": "Aufheben entfernt es",
+        "unpairKeeps": "Aufheben behält es"
+      },
+      "playFirst": "Zuerst abspielen",
+      "playFirstSet": "{name} wird jetzt zuerst abgespielt.",
+      "variation": {
+        "folder": "aus dem Ordner",
+        "added": "von dir hinzugefügt",
+        "removeAria": "{name} aus den Varianten dieses Videos entfernen",
+        "removed": "{name} aus den Varianten entfernt."
+      },
+      "addVariation": "Variante hinzufügen…",
+      "randomHint": "„Zufällige Skript-Variante“ ist in den Einstellungen an, darum läuft eine zufällige. Diese Wahl gilt, sobald sie aus ist.",
+      "embeddedHeading": "Eingebettete Achsen",
+      "unpairHeading": "Zuordnung aufheben",
+      "pairing": {
+        "none": "Kein Skript",
+        "byName": "Über den Namen zugeordnet",
+        "folder": "Erstes Skript im Ordner",
+        "autoMulti": "Über den Namen zugeordnet, mit Achsendateien",
+        "single": "Von dir gewählt",
+        "multi": "Mehrachsig, von dir gewählt",
+        "custom": "Eigenes Routing, von dir gewählt"
+      },
+      "status": {
+        "missing": "Skript nicht gefunden",
+        "unknown": "Das Skript kann gerade nicht geprüft werden"
+      },
+      "unpair": {
+        "byName": "Über den Dateinamen zugeordnet. Benenne die .funscript um oder verschiebe sie, um die Zuordnung aufzuheben.",
+        "autoMulti": "Über den Dateinamen zugeordnet, mit den Achsendateien. Benenne die .funscript um oder verschiebe sie, um die Zuordnung aufzuheben.",
+        "folder": "Das erste Skript im Ordner dieses Videos wird abgespielt. Verschiebe die .funscript in einen anderen Ordner, um das zu ändern.",
+        "ownScript": "Das Hauptskript ist das eigene Skript dieses Videos (gleicher Dateiname). Mit „Ändern…“ bearbeitest du den Rest.",
+        "noMain": "Diese Zuordnung hat kein Hauptskript. Bearbeite sie mit „Ändern…“.",
+        "confirmTitle": "Funscript-Zuordnung aufheben",
+        "confirmQuestion": "Zuordnung von {name} aufheben? Die Datei bleibt auf der Festplatte.",
+        "nextOwn": "Dieses Video nutzt dann sein eigenes Skript, {name}.",
+        "nextNone": "Dieses Video hat dann kein Skript.",
+        "confirmButton": "Aufheben",
+        "removesMulti": "Dabei wird auch das von dir erstellte Mehrachsen-Set entfernt ({count, plural, one {# Achse} other {# Achsen}}).",
+        "removesCustom": "Dabei wird auch dein eigenes Routing entfernt ({count, plural, one {# Route} other {# Routen}}).",
+        "keepsSingle": "Bleibt erhalten: {name}, das von dir gespeicherte Einzelskript. „Ändern…“ kann es wieder verwenden.",
+        "keepsMulti": "Bleibt erhalten: das von dir gespeicherte Mehrachsen-Set ({count, plural, one {# Achse} other {# Achsen}}). „Ändern…“ kann es wieder verwenden.",
+        "keepsCustom": "Bleibt erhalten: dein gespeichertes eigenes Routing ({count, plural, one {# Route} other {# Routen}}). „Ändern…“ kann es wieder verwenden.",
+        "done": "Zuordnung von {name} aufgehoben.",
+        "undone": "{name} wieder zugeordnet.",
+        "undoChanged": "Rückgängig nicht möglich: Das Skript dieses Videos wurde inzwischen geändert."
+      },
+      "removeSet": {
+        "multiTitle": "Mehrachsen-Set entfernen",
+        "customTitle": "Eigenes Routing entfernen",
+        "multiQuestion": "Das von dir erstellte Mehrachsen-Set entfernen ({count, plural, one {# Achse} other {# Achsen}})? Die Skriptdateien bleiben auf der Festplatte.",
+        "customQuestion": "Dein eigenes Routing entfernen ({count, plural, one {# Route} other {# Routen}})? Die Skriptdateien bleiben auf der Festplatte.",
+        "playsSame": "Es ist gerade nicht aktiv, daher ändert sich nicht, was dieses Video abspielt.",
+        "multiDone": "Mehrachsen-Set entfernt.",
+        "customDone": "Eigenes Routing entfernt.",
+        "multiUndone": "Das Mehrachsen-Set ist wieder da.",
+        "customUndone": "Das eigene Routing ist wieder da.",
+        "singleTitle": "Gespeichertes Einzelskript entfernen",
+        "singleQuestion": "{name} entfernen, das von dir gespeicherte Einzelskript? Die Datei bleibt auf der Festplatte.",
+        "singleDone": "{name} aus den gespeicherten Zuordnungen entfernt.",
+        "singleUndone": "{name} ist wieder gespeichert."
+      },
+      "locate": {
+        "aria": "Skript nicht gefunden: Wähle aus, wo {name} jetzt liegt",
+        "done": "{newName} wird jetzt statt {name} abgespielt.",
+        "undone": "Wieder {name}."
+      }
+    },
+    "subtitles": {
+      "heading": "Untertitel",
+      "none": "Dieses Video hat keine Untertitel.",
+      "byName": "Über den Dateinamen zugeordnet. Benenne die Untertiteldatei um oder verschiebe sie, um die Zuordnung aufzuheben."
+    },
+    "playback": {
+      "progressHeading": "Fortschritt",
+      "watchedTo": "Gesehen bis {position} von {duration} ({percent} %)",
+      "notStarted": "Nicht begonnen",
+      "progressReset": "Fortschritt zurückgesetzt."
+    },
+    "thumbnail": {
+      "auto": "Aus dem Video erstellt",
+      "frame": "Ein von dir gewählter Frame",
+      "image": "Ein von dir hochgeladenes Bild"
+    },
+    "vr": {
+      "legend": "Dieses Video ist",
+      "auto": "Automatisch (erkannt: {detected, select, vr {VR} other {Flach}})",
+      "vr": "VR",
+      "flat": "Flach",
+      "formatAuto": "Aus der Datei erkannt"
+    },
+    "file": {
+      "path": "Pfad",
+      "folder": "Ordner",
+      "size": "Größe",
+      "source": "Quelle",
+      "unknown": "Unbekannt",
+      "copyPath": "Pfad kopieren",
+      "copied": "Pfad kopiert.",
+      "copyFailed": "Der Pfad konnte nicht kopiert werden."
+    },
+    "live": {
+      "addedTo": "Zu {name} hinzugefügt.",
+      "removedFrom": "Aus {name} entfernt.",
+      "undone": "Rückgängig gemacht.",
+      "undoGone": "Rückgängig nicht möglich: Es wurde inzwischen gelöscht.",
+      "undoChanged": "Rückgängig nicht möglich: Es wurde inzwischen geändert."
+    },
+    "stash": {
+      "heading": "Stash",
+      "sceneTitle": "„{title}“",
+      "untitled": "Szene {id}",
+      "studioOf": "{studio} ({parent})",
+      "code": "Code {code}",
+      "rated": "bewertet mit {rating}/100",
+      "organised": "organisiert",
+      "director": "Regie: {name}",
+      "markerCount": "{count, plural, one {# Marker} other {# Marker}}",
+      "by": {
+        "oshash": "über den Datei-Fingerabdruck zugeordnet",
+        "chosen": "von dir gewählt",
+        "manual": "von dir verknüpft"
+      },
+      "synced": "synchronisiert am {date}",
+      "verify": "seitdem verschoben; wird bei der nächsten Synchronisierung geprüft",
+      "performers": "Darsteller",
+      "markers": "Marker",
+      "moreMarkers": "{count, plural, one {# weiterer} other {# weitere}}",
+      "urls": "Links",
+      "copyUrl": "Kopieren",
+      "copyUrlAria": "{url} kopieren",
+      "urlCopied": "Link kopiert.",
+      "urlCopyFailed": "Der Link konnte nicht kopiert werden.",
+      "showDescription": "Beschreibung anzeigen",
+      "copy": "Eine andere Datei in deiner Bibliothek ist dasselbe Video: {path}",
+      "open": "In Stash öffnen",
+      "openAria": "In Stash öffnen (öffnet deinen Browser)",
+      "syncVideo": "Dieses Video synchronisieren",
+      "syncing": "Synchronisiere…",
+      "notThis": "Nicht diese Szene…",
+      "unlink": "Verknüpfung lösen",
+      "find": "In Stash suchen…",
+      "notSynced": "FunSync hat noch nicht mit Stash synchronisiert.",
+      "notFound": "Nicht in Stash gefunden.",
+      "changed": "Diese Datei hat sich seit der Zuordnung geändert. Ihre Stash-Daten sind bis zur nächsten Synchronisierung ausgeblendet.",
+      "gone": "Diese Szene ist nicht mehr in Stash. Ihre Daten bleiben erhalten.",
+      "refused": "Du hast gesagt, dass diese Datei nicht {name} ist.",
+      "refusedSome": "{count, plural, =1 {Du hast gesagt, dass diese Datei nicht die angebotene Stash-Szene ist.} other {Du hast gesagt, dass diese Datei keine der # angebotenen Stash-Szenen ist.}}",
+      "otherServer": "Aus deinem anderen Stash ({address}).",
+      "check": {
+        "several": "{count, plural, =2 {Zwei Stash-Szenen haben genau diese Datei.} other {# Stash-Szenen haben genau diese Datei.}} Welche ist es?",
+        "pathChanged": "Stash hat eine Datei unter diesem Pfad, aber es ist nicht dieselbe Datei. Sie hat sich geändert, nachdem Stash sie zuletzt gescannt hat.",
+        "keptLink": "Derzeit verknüpft: {name}.",
+        "legend": "Welche Stash-Szene ist das?",
+        "use": "Diese Szene verwenden",
+        "none": "Keine davon",
+        "useAnyway": "Trotzdem verwenden",
+        "ignore": "Ignorieren",
+        "durationDiff": "Länge weicht um {seconds} s ab"
+      },
+      "notThisConfirm": {
+        "title": "Nicht diese Szene?",
+        "message": "FunSync löst die Verknüpfung dieses Videos mit {name} und verknüpft diese Datei nicht wieder damit. In Stash ändert sich nichts.",
+        "button": "Nicht diese Szene"
+      },
+      "live": {
+        "syncing": "Synchronisiere dieses Video mit Stash…",
+        "synced": "Mit Stash synchronisiert.",
+        "syncedLinked": "Synchronisiert. Dieses Video ist {name} in Stash.",
+        "syncedCheck": "Synchronisiert. Stash konnte nicht entscheiden, welche Szene dieses Video ist: Wähle unten.",
+        "syncedNotFound": "Synchronisiert. Dieses Video wurde in Stash nicht gefunden.",
+        "syncedGone": "Synchronisiert. {name} ist nicht mehr in Stash; die Daten bleiben erhalten.",
+        "syncedChanged": "Synchronisiert. Diese Datei unterscheidet sich weiter von der zugeordneten; ihre Stash-Daten bleiben ausgeblendet.",
+        "relinked": "Diese Datei ist jetzt mit {name} verknüpft.",
+        "linked": "Dieses Video ist jetzt mit {name} verknüpft.",
+        "unlinked": "Verknüpfung dieses Videos mit {name} gelöst.",
+        "noneOfThese": "Keine dieser Szenen wird für diese Datei noch einmal angeboten.",
+        "ignored": "Diese Stash-Szene wird für diese Datei nicht noch einmal angeboten.",
+        "undoFailed": "Rückgängig nicht möglich: FunSync konnte seine Stash-Daten nicht ändern.",
+        "refusedLinkChanged": "Sie ist jetzt mit {name} verknüpft; diese Verknüpfung bleibt, wie sie ist."
+      },
+      "error": {
+        "fileOffline": "FunSync konnte die Datei dieses Videos nicht lesen (das Laufwerk ist vielleicht offline). Nichts wurde geändert.",
+        "busy": "Stash wird gerade synchronisiert. Versuche es danach noch einmal.",
+        "cancelled": "Abgebrochen. Nichts wurde geändert.",
+        "changedMeanwhile": "Die Stash-Daten dieses Videos haben sich inzwischen geändert. Nichts wurde geändert.",
+        "saveFailed": "FunSync konnte seine Stash-Daten nicht speichern. Nichts wurde geändert.",
+        "generic": "Stash konnte nicht abgefragt werden. Nichts wurde geändert."
+      },
+      "sceneChanged": "Die Stash-Szene mit dieser ID enthält diese Datei nicht mehr (Stash wurde vielleicht zurückgesetzt oder neu gescannt). Ihre Daten sind ausgeblendet. Löse die Verknüpfung oder verknüpfe sie mit „In Stash suchen…“ neu.",
+      "plays": "Wiedergaben",
+      "lastPlayed": "Zuletzt abgespielt",
+      "lastPlayedNever": "nie",
+      "oCount": "O-Zähler"
+    }
+  },
+  "tags": {
+    "facet": {
+      "vr": "VR",
+      "display": "Anzeige",
+      "length": "Länge",
+      "device": "Gerät",
+      "axis": "Achse",
+      "scriptType": "Skripttyp",
+      "sexuality": "Sexualität",
+      "threesome": "Dreier",
+      "content": "Inhalt",
+      "performer": "Darsteller",
+      "creator": "Ersteller",
+      "studio": "Studio"
+    },
+    "lengthMinutes": "{range} Min.",
+    "source": {
+      "user": "du",
+      "stash": "Stash",
+      "stashbox": "StashDB",
+      "funscript": "Datei",
+      "eroscripts": "EroScripts"
+    }
+  },
+  "stash": {
+    "error": {
+      "unreachable": "Stash unter {address} ist nicht erreichbar. Läuft Stash?",
+      "timeout": "Stash hat nicht rechtzeitig geantwortet.",
+      "badKey": "Stash hat den API-Schlüssel abgelehnt. Wenn dein Stash kein Passwort hat, entferne den Schlüssel.",
+      "needsKey": "Dieser Stash hat ein Passwort. Füge seinen API-Schlüssel ein (Stash: Settings > Security).",
+      "forbidden": "Stash hat diesen Computer abgelehnt. Lege in Stash ein Passwort fest und füge seinen API-Schlüssel ein.",
+      "tooOld": "Dieser Stash ({version}) ist zu alt. FunSync braucht v{minVersion} oder neuer.",
+      "tooOldNoVersion": "Dieser Stash ist zu alt. FunSync braucht v{minVersion} oder neuer.",
+      "notStash": "Unter dieser Adresse hat etwas geantwortet, aber nicht Stash.",
+      "redirect": "Stash hat FunSync an eine andere Adresse weitergeleitet. FunSync folgt dem nicht. Prüfe die Adresse.",
+      "certificate": "Dieser Computer vertraut dem https-Zertifikat von Stash nicht. Prüfe die Adresse.",
+      "graphql": "Stash konnte die Anfrage von FunSync nicht beantworten.",
+      "http": "Stash hat mit einem Fehler geantwortet (HTTP {status}).",
+      "tooLarge": "Die Antwort von Stash war zu groß zum Lesen.",
+      "cancelled": "Abgebrochen.",
+      "badAddress": "Gib eine Adresse ein, die mit http:// oder https:// beginnt, zum Beispiel http://127.0.0.1:9999.",
+      "badInput": "FunSync konnte diese Anfrage nicht an Stash senden.",
+      "invalidKey": "Das ist kein Stash-API-Schlüssel. Kopiere ihn in Stash unter Settings > Security > API Key.",
+      "writeFailed": "FunSync konnte den API-Schlüssel nicht speichern. Er bleibt erhalten, bis du FunSync schließt.",
+      "removeFailed": "FunSync konnte die gespeicherte API-Schlüsseldatei nicht entfernen.",
+      "keyUnreadable": "Der gespeicherte API-Schlüssel kann auf diesem Computer nicht gelesen werden. Füge ihn erneut ein."
+    },
+    "picker": {
+      "title": "In Stash suchen",
+      "label": "Deinen Stash durchsuchen",
+      "placeholder": "Szenentitel, Code oder Dateiname",
+      "search": "Suchen",
+      "hint": "Wähle die Szene, die dieses Video ist. FunSync verknüpft sie nur; in Stash ändert sich nichts.",
+      "prompt": "Gib etwas ein und drücke Suchen. Vorher wird nichts gesendet.",
+      "searching": "Suche…",
+      "none": "Keine Szenen für „{query}“ gefunden.",
+      "found": "{count, plural, one {# Szene gefunden.} other {# Szenen gefunden.}}",
+      "someOf": "Die ersten {shown} von {count} werden angezeigt. Füge Wörter hinzu, um die Suche einzugrenzen.",
+      "link": "Verknüpfen",
+      "linkAria": "Dieses Video mit {name} verknüpfen",
+      "resultsAria": "Stash-Szenen"
     }
   }
 }

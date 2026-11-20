@@ -1,5 +1,17 @@
 // ProgressBar — Enhanced seek bar with thumbnail preview and heatmap overlay
 
+import { heatmapSpeedToColor } from './heatmap-palette.js';
+import { t } from './i18n.js';
+
+/**
+ * Stash scene markers on the chapter strip (Stash S1): one colour, not in
+ * the script chapters' palette (funscript-engine.js), so they read as
+ * Stash's. A marker's start is a tick; a marker with an end also gets a
+ * fainter segment to its end.
+ */
+export const STASH_MARKER_COLOR = '#7fd8ff';
+export const STASH_MARKER_RANGE_COLOR = 'rgba(127, 216, 255, 0.45)';
+
 export class ProgressBar {
   constructor({ containerElement, videoPlayer, backendPort }) {
     this.container = containerElement;
@@ -17,6 +29,27 @@ export class ProgressBar {
     this._thumbSeeking = false;
 
     this._cacheElements();
+    this._bindTooltipVisibility();
+  }
+
+  /**
+   * The hover preview (time + thumbnail) is shown by CSS on
+   * `.controls__progress:hover` alone, and VideoPlayer moves it to the cursor
+   * on mousemove. Hover can start with no mousemove at all: the bar moving
+   * under a still pointer (opening the editor lifts the controls 250 px), or
+   * synthetic input. The box then sat at the bar's left edge with the
+   * markup's "0:00" and an empty grey thumbnail (CB-09, seen once after
+   * synthetic mouse input over the editor). It stays hidden until a
+   * mousemove has put it at the cursor, and hides again when the pointer
+   * leaves, so the next hover cannot show a stale position either.
+   */
+  _bindTooltipVisibility() {
+    const tip = document.getElementById('progress-tooltip');
+    if (!tip || !this.container?.addEventListener) return;
+    this.tooltip = tip;
+    tip.style.visibility = 'hidden';
+    this.container.addEventListener('mousemove', () => { tip.style.visibility = ''; });
+    this.container.addEventListener('mouseleave', () => { tip.style.visibility = 'hidden'; });
   }
 
   _cacheElements() {
@@ -34,6 +67,14 @@ export class ProgressBar {
     this.tooltipMarkerName = document.getElementById('tooltip-marker-name');
     this._chapters = [];
     this._bookmarks = [];
+    // Stash scene markers of the playing video (Stash S1, Dave's answer 3):
+    // their own list, drawn on the chapter strip ALONGSIDE the script's
+    // chapters, so the many setMarkers() calls of the script paths never
+    // drop them and they never replace a chapter. See setStashMarkers().
+    this._stashMarkers = [];
+    // The hover label's words, `(title) => text` (app.js gives the
+    // translated "Stash marker: <title>"); null: the plain fallback.
+    this.stashMarkerLabel = null;
   }
 
   /**
@@ -278,11 +319,49 @@ export class ProgressBar {
     // Show/hide the chapter strip element based on whether we have any.
     // `hidden` attribute respects the global `[hidden] { display: none }`
     // CSS reset so layout collapses cleanly when no chapters present.
-    if (this.chapterStripContainer) {
-      this.chapterStripContainer.hidden = this._chapters.length === 0;
-    }
+    this._syncChapterStripVisibility();
 
     this.redraw();
+  }
+
+  /**
+   * The playing video's Stash scene markers (Stash S1; DESIGN-stash-s1.md
+   * (j) row 1, in S1 by Dave's answer 3). Drawn on the chapter strip with
+   * the script's chapters, never instead of them: with both, the script's
+   * chapters keep the strip's top half and Stash's markers take the bottom
+   * half. A marker with an end is a segment, one without is a tick. The
+   * hover label says it is from Stash. An empty list (Stash off, the video
+   * not linked, another video) takes them away again.
+   *
+   * @param {Array<{startMs: number, endMs?: number|null, title?: string}>} markers
+   */
+  setStashMarkers(markers) {
+    const out = [];
+    for (const m of Array.isArray(markers) ? markers : []) {
+      const startMs = Number(m?.startMs);
+      if (!Number.isFinite(startMs) || startMs < 0) continue;
+      const end = m?.endMs == null ? null : Number(m.endMs);
+      out.push({
+        startMs,
+        endMs: Number.isFinite(end) && end > startMs ? end : null,
+        title: typeof m?.title === 'string' ? m.title : '',
+        source: 'stash',
+      });
+    }
+    out.sort((a, b) => a.startMs - b.startMs);
+    this._stashMarkers = out;
+    this._syncChapterStripVisibility();
+    if (this.chapterStripCtx && this.chapterStripCanvas && out.length === 0 && this._chapters.length === 0) {
+      this.chapterStripCtx.clearRect(0, 0, this.chapterStripCanvas.width, this.chapterStripCanvas.height);
+    }
+    this.redraw();
+  }
+
+  /** The strip shows while the script has chapters or Stash has markers. */
+  _syncChapterStripVisibility() {
+    if (this.chapterStripContainer) {
+      this.chapterStripContainer.hidden = this._chapters.length === 0 && this._stashMarkers.length === 0;
+    }
   }
 
   /**
@@ -296,7 +375,7 @@ export class ProgressBar {
   renderChapterStrip(durationSec) {
     if (!this.chapterStripCanvas || !this.chapterStripCtx) return;
     if (!Number.isFinite(durationSec) || durationSec <= 0) return;
-    if (this._chapters.length === 0) return;
+    if (this._chapters.length === 0 && this._stashMarkers.length === 0) return;
 
     const canvas = this.chapterStripCanvas;
     const ctx = this.chapterStripCtx;
@@ -311,12 +390,37 @@ export class ProgressBar {
 
     ctx.clearRect(0, 0, w, h);
 
+    // Two lanes when both kinds are there: the script's chapters on top,
+    // Stash's markers below (neither covers the other).
+    const both = this._chapters.length > 0 && this._stashMarkers.length > 0;
+    const chapterH = both ? h / 2 : h;
     for (const c of this._chapters) {
       const x1 = Math.max(0, Math.min(w, (c.startMs / durationMs) * w));
       const x2 = Math.max(0, Math.min(w, (c.endMs / durationMs) * w));
       const width = Math.max(1, x2 - x1);
       ctx.fillStyle = c.color;
-      ctx.fillRect(x1, 0, width, h);
+      ctx.fillRect(x1, 0, width, chapterH);
+    }
+    if (this._stashMarkers.length > 0) {
+      this._renderStashMarkers(ctx, w, both ? h / 2 : 0, both ? h / 2 : h, durationMs);
+    }
+  }
+
+  /**
+   * Stash's markers in their lane (`top`, `laneH`): a segment for a marker
+   * with an end, a 2px tick for one without, in Stash's one colour.
+   */
+  _renderStashMarkers(ctx, w, top, laneH, durationMs) {
+    if (durationMs <= 0) return;
+    for (const m of this._stashMarkers) {
+      const x1 = Math.max(0, Math.min(w, (m.startMs / durationMs) * w));
+      if (m.endMs != null) {
+        const x2 = Math.max(0, Math.min(w, (m.endMs / durationMs) * w));
+        ctx.fillStyle = STASH_MARKER_RANGE_COLOR;
+        ctx.fillRect(x1, top, Math.max(1, x2 - x1), laneH);
+      }
+      ctx.fillStyle = STASH_MARKER_COLOR;
+      ctx.fillRect(Math.max(0, Math.min(w - 2, Math.round(x1) - 1)), top, 2, laneH);
     }
   }
 
@@ -332,6 +436,7 @@ export class ProgressBar {
    */
   updateMarkerTooltip(xPx, widthPx, durationMs) {
     if (!this.tooltipMarker) return;
+    this._updateStashMarkerTooltip(xPx, widthPx, durationMs);
     const m = this.resolveHoverMarker(xPx, widthPx, durationMs);
     if (!m) {
       this.tooltipMarker.hidden = true;
@@ -392,6 +497,102 @@ export class ProgressBar {
   }
 
   /**
+   * The Stash marker at the cursor (Stash S1), or null: the nearest marker
+   * start within the tick's hit radius first (a point is the precise
+   * target), else the last marker whose start..end range holds the cursor.
+   * The script's chapters and bookmarks are resolved apart
+   * (resolveHoverMarker), so both labels can show at once.
+   *
+   * @param {number} xPx cursor x relative to the container
+   * @param {number} widthPx container width in CSS px
+   * @param {number} durationMs
+   * @returns {{kind: 'stash', data: {startMs: number, endMs: number|null, title: string}}|null}
+   */
+  resolveStashMarker(xPx, widthPx, durationMs) {
+    if (!(widthPx > 0) || !(durationMs > 0) || this._stashMarkers.length === 0) return null;
+    const HIT_RADIUS_PX = 6;
+    let best = null;
+    let bestDist = Infinity;
+    for (const m of this._stashMarkers) {
+      const dist = Math.abs(xPx - (m.startMs / durationMs) * widthPx);
+      if (dist <= HIT_RADIUS_PX && dist < bestDist) { best = m; bestDist = dist; }
+    }
+    if (best) return { kind: 'stash', data: best };
+    for (let i = this._stashMarkers.length - 1; i >= 0; i--) {
+      const m = this._stashMarkers[i];
+      if (m.endMs == null) continue;
+      const x1 = (m.startMs / durationMs) * widthPx;
+      const x2 = (m.endMs / durationMs) * widthPx;
+      if (xPx >= x1 && xPx <= x2) return { kind: 'stash', data: m };
+    }
+    return null;
+  }
+
+  /**
+   * The words for a Stash marker's hover label: always says "Stash". The
+   * window's label hook, else the loaded language's words (the pop-out
+   * player's bar too, s1-review-a RA-S1-6), else the plain fallback.
+   */
+  _stashMarkerText(title) {
+    const name = typeof title === 'string' ? title.trim() : '';
+    if (typeof this.stashMarkerLabel === 'function') {
+      try {
+        const out = this.stashMarkerLabel(name);
+        if (typeof out === 'string' && out) return out;
+      } catch { /* the fallback below */ }
+    }
+    const key = name ? 'player.stashMarker' : 'player.stashMarkerUntitled';
+    try {
+      const out = name ? t(key, { title: name }) : t(key);
+      if (typeof out === 'string' && out && out !== key) return out;
+    } catch { /* no words loaded: the fallback below */ }
+    return name ? `Stash: ${name}` : 'Stash';
+  }
+
+  /**
+   * The Stash line of the hover tooltip: its own element, made once next to
+   * the script's marker label (the same look), so a script chapter and a
+   * Stash marker at one spot both show. The title is set as text, never as
+   * HTML (it comes from the user's Stash).
+   */
+  _updateStashMarkerTooltip(xPx, widthPx, durationMs) {
+    const m = this.resolveStashMarker(xPx, widthPx, durationMs);
+    if (!m) {
+      if (this.tooltipStashMarker) this.tooltipStashMarker.hidden = true;
+      return;
+    }
+    const el = this._stashTooltipElement();
+    if (!el) return;
+    el.hidden = false;
+    el.querySelector('.tooltip__marker-name').textContent = this._stashMarkerText(m.data.title);
+  }
+
+  _stashTooltipElement() {
+    if (this.tooltipStashMarker) return this.tooltipStashMarker;
+    const anchor = this.tooltipMarker;
+    if (!anchor?.parentNode || typeof document === 'undefined') return null;
+    const el = document.createElement('div');
+    el.className = 'tooltip__marker tooltip__marker--stash';
+    el.id = 'tooltip-marker-stash';
+    // A line of its own under the script's label, centred like it.
+    el.style.display = 'flex';
+    el.style.width = 'max-content';
+    el.style.maxWidth = '220px';
+    el.style.margin = '0 auto 4px';
+    el.hidden = true;
+    const swatch = document.createElement('span');
+    swatch.className = 'tooltip__marker-swatch';
+    swatch.setAttribute('aria-hidden', 'true');
+    swatch.style.background = STASH_MARKER_COLOR;
+    const name = document.createElement('span');
+    name.className = 'tooltip__marker-name';
+    el.append(swatch, name);
+    anchor.parentNode.insertBefore(el, anchor.nextSibling);
+    this.tooltipStashMarker = el;
+    return el;
+  }
+
+  /**
    * Set gap data for rendering indicators on the progress bar.
    * @param {Array<{startMs: number, endMs: number}>} gaps
    */
@@ -431,26 +632,8 @@ export class ProgressBar {
    * @returns {string} CSS color string
    */
   _speedToColor(speed) {
-    // Normalize speed to 0–1 range (0.5 pos/ms is very fast)
-    const normalized = Math.min(speed / 0.5, 1);
-
-    if (normalized < 0.25) {
-      // Blue to cyan
-      const t = normalized / 0.25;
-      return `rgb(0, ${Math.round(t * 200)}, ${Math.round(255 - t * 55)})`;
-    } else if (normalized < 0.5) {
-      // Cyan to green
-      const t = (normalized - 0.25) / 0.25;
-      return `rgb(0, ${Math.round(200 + t * 55)}, ${Math.round(200 - t * 200)})`;
-    } else if (normalized < 0.75) {
-      // Green to yellow
-      const t = (normalized - 0.5) / 0.25;
-      return `rgb(${Math.round(t * 255)}, 255, 0)`;
-    } else {
-      // Yellow to red
-      const t = (normalized - 0.75) / 0.25;
-      return `rgb(255, ${Math.round(255 - t * 255)}, 0)`;
-    }
+    // Shared with the HM overlay strip (inline-viz.js) so the two agree.
+    return heatmapSpeedToColor(speed);
   }
 
   /**
@@ -478,7 +661,7 @@ export class ProgressBar {
     if (this._heatmapData) {
       this.renderHeatmap(this._heatmapData.actions, this._heatmapData.duration);
     }
-    if (this._chapters.length > 0) {
+    if (this._chapters.length > 0 || this._stashMarkers.length > 0) {
       const duration = this._heatmapData?.duration ?? this.player?.duration ?? 0;
       if (duration > 0) this.renderChapterStrip(duration);
     }

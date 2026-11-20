@@ -1,7 +1,7 @@
 // ConnectionPanel — UI for connecting to Handy or Buttplug.io devices
 
 import { PATTERN_TYPES, DEFAULT_PATTERN, sampleMotion } from '../js/motion-source.js';
-import { icon, X, Info } from '../js/icons.js';
+import { icon, X, Info, Eye, EyeOff } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import {
   classifyTransport,
@@ -11,9 +11,19 @@ import {
 import { eventBus } from '../js/event-bus.js';
 import { showToast } from '../js/toast.js';
 import { medianLatency, isApplicableLatency, clampToOffsetRange } from '../js/latency-sample.js';
+import { createRangePreview } from '../js/range-preview.js';
+import { createVideoSyncOffsetRow } from './video-sync-offset-row.js';
+import { VIDEO_SYNC_OFFSET_DEVICE_SIGN } from '../js/video-sync-offset.js';
+import { describeConnectFailure } from '../js/connect-failure-reason.js';
+import { GO_HOME_MOVE_MS } from '../js/tcode-sync.js';
 
 /** Probes per "Measure" press. Odd, so the median is a real sample. */
 const LATENCY_SAMPLE_COUNT = 5;
+// Travel time for a live range-preview jog. Long enough that a stroker moves
+// smoothly rather than slamming into the end stop, short enough to still read
+// as a response to the drag. Comfortably above the preview rate limit, so a
+// held slider produces continuous motion instead of a stutter of short hops.
+const PREVIEW_MOVE_MS = 250;
 // TCode v0.3 axes exposed in the Axis Ranges UI. Naming + type match the
 // multi-axis spec module (renderer/js/multi-axis.js) and the official TCode
 // specification. L0 is the main stroke; R0-R2 are rotation, V* are vibration,
@@ -41,7 +51,8 @@ const TCODE_UI_AXES = [
 ];
 
 export class ConnectionPanel {
-  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete, onButtplugResync, onHandyCutoffChanged, audienceBridge }) {
+  constructor({ handyManager, buttplugManager, buttplugSync, tcodeManager, tcodeSync, autoblowManager, autoblowSync, vrBridge, settings, onResyncComplete, onButtplugResync, onHandyCutoffChanged, onHandyInvertChanged, audienceBridge, getVideoSyncOffset, onVideoSyncOffsetChange, onTCodeGoHome }) {
+    this._onTCodeGoHome = typeof onTCodeGoHome === 'function' ? onTCodeGoHome : null;
     this.handy = handyManager;
     this.buttplug = buttplugManager || null;
     this.buttplugSync = buttplugSync || null;
@@ -68,9 +79,36 @@ export class ConnectionPanel {
     // wires this to push the new clamp into the per-tick HDSP engine
     // (HSSP picks it up on the next upload). Optional.
     this.onHandyCutoffChanged = onHandyCutoffChanged || null;
+    // Called when the Handy invert checkbox changes (app.js
+    // `_onHandyInvertChanged`). Optional.
+    this.onHandyInvertChanged = onHandyInvertChanged || null;
+    // Sync tab "This video" row (#380): app.js `_videoSyncOffsetState` /
+    // `_setVideoSyncOffset`. Optional; without them the row never shows.
+    this.getVideoSyncOffset = getVideoSyncOffset || null;
+    this.onVideoSyncOffsetChange = onVideoSyncOffsetChange || null;
+    this._videoSyncOffsetRow = null;
     this._panel = null;
     this._visible = false;
     this._activeTab = 'handy'; // 'handy' | 'buttplug'
+    // The status each device tab last showed, so a language switch can
+    // re-draw it in the new locale (see `_replayStatus`).
+    this._lastStatus = { handy: null, buttplug: null, tcode: null, autoblow: null };
+    // What the last failed T-Code / Autoblow connect reported (onError), raw,
+    // so its reason is re-worded in a new language too (FT-060).
+    this._connectFailure = { tcode: null, autoblow: null };
+
+    // Live range preview (stingray, 2026-08-24): "is it possible when
+    // adjusting the range sliders when no video is playing or paused to have
+    // the device react in real time? I use the feedback of realtime to
+    // determine the position of the device. It's useful when switching to a
+    // different sleeve and adjusting the position."
+    //
+    // Dragging a range boundary jogs the device to that boundary, so you can
+    // see where the sleeve actually sits instead of loading a script to find
+    // out. Rate-limited — `input` fires per pixel and no device wants that.
+    // Every send goes through a path that refuses while playback is running,
+    // so this cannot fight the scheduler.
+    this._rangePreview = createRangePreview((fn) => fn());
 
     this._createPanel();
     this._bindEvents();
@@ -117,10 +155,10 @@ export class ConnectionPanel {
         </button>
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-audience" aria-selected="false" aria-controls="tab-audience" data-tab="audience" tabindex="-1">
           <span class="connection-panel__tab-led" data-tab-led="audience" aria-hidden="true"></span>
-          <span class="connection-panel__tab-label" data-i18n="audience.tab.label">Audience</span>
+          <span class="connection-panel__tab-label" data-i18n="audience.tab.label">${_esc(t('audience.tab.label'))}</span>
         </button>
         <button class="connection-panel__tab" role="tab" id="connection-panel__tab-btn-sync" aria-selected="false" aria-controls="tab-sync" data-tab="sync" tabindex="-1">
-          <span class="connection-panel__tab-label" data-i18n="connection.tabSync">Sync</span>
+          <span class="connection-panel__tab-label" data-i18n="connection.tabSync">${_esc(t('connection.tabSync'))}</span>
         </button>
       </div>
 
@@ -134,14 +172,28 @@ export class ConnectionPanel {
       <div class="connection-panel__form">
         <label for="connection-key-input" class="connection-panel__label" data-i18n="connection.handy.connectionKey">${_esc(t('connection.handy.connectionKey'))}</label>
         <div class="connection-panel__input-row">
-          <input type="text" id="connection-key-input"
+          <!-- Masked by default: the key is a password, and this tab ends up in
+               screenshots, screen shares and streams (privacy, Handy session
+               2026-11-17, also in v0.9.2). The eye shows it; hide() masks it
+               again. Paste and Enter work the same either way. -->
+          <input type="password" id="connection-key-input"
                  class="connection-panel__input"
+                 autocomplete="off" spellcheck="false" autocapitalize="off"
                  data-i18n-placeholder="connection.handy.connectionKeyPlaceholder"
                  placeholder="${_esc(t('connection.handy.connectionKeyPlaceholder'))}"
                  maxlength="32"
                  data-i18n-aria-label="connection.handy.connectionKeyAria"
                  aria-label="${_esc(t('connection.handy.connectionKeyAria'))}">
+          <button type="button" id="btn-connection-key-reveal" class="connection-panel__btn connection-panel__btn--utility"
+                  aria-controls="connection-key-input" aria-pressed="false"
+                  data-reveal-show="connection.handy.showKey" data-reveal-hide="connection.handy.hideKey"
+                  data-i18n-aria-label="connection.handy.showKey" aria-label="${_esc(t('connection.handy.showKey'))}"
+                  data-i18n-title="connection.handy.showKey" title="${_esc(t('connection.handy.showKey'))}"></button>
           <button id="btn-connect" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
+          <!-- Shown only when the connection is in a bad state. A retry is
+               useless noise while things work, and the one moment you want it
+               is the moment there was previously nothing to click. -->
+          <button id="btn-reconnect" class="connection-panel__btn connection-panel__btn--secondary" hidden data-i18n="connection.btn.reconnect" data-i18n-title="connection.btn.reconnectHint" title="${_esc(t('connection.btn.reconnectHint'))}">${_esc(t('connection.btn.reconnect'))}</button>
         </div>
       </div>
 
@@ -206,6 +258,16 @@ export class ConnectionPanel {
         <button id="btn-reset-stroke" class="connection-panel__btn connection-panel__btn--reset" data-i18n="connection.btn.resetStroke">
           ${_esc(t('connection.btn.resetStroke'))}
         </button>
+
+        <!-- Invert (#276 alvinchris, #390 lonelyuber): flips the stroke,
+             pos -> 100 - pos. Same control as Buttplug's per-device Invert.
+             Baked into the HSSP upload before the output limits; live for
+             HDSP. Persisted to handy.inverted (default off). -->
+        <label class="connection-panel__device-toggle" style="margin-top:12px;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="handy-invert-toggle">
+          <span data-i18n="connection.handy.invert">${_esc(t('connection.handy.invert'))}</span>
+        </label>
+        <div class="connection-panel__setting-hint" data-i18n="connection.handy.invertHint">${_esc(t('connection.handy.invertHint'))}</div>
 
         <!-- Output limits (cutoff): a HARD floor/ceiling clamp, distinct
              from Stroke range above. Stroke range REMAPS the script into a
@@ -365,6 +427,9 @@ export class ConnectionPanel {
 
         <div class="connection-panel__input-row" style="margin-top:10px">
           <button id="tcode-connect-btn" class="connection-panel__btn" style="flex:1" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
+          <button type="button" id="tcode-home-btn" class="connection-panel__btn connection-panel__btn--utility" hidden
+                  data-i18n="connection.tcode.goHome"
+                  data-i18n-title="connection.tcode.goHomeTitle" title="${_esc(t('connection.tcode.goHomeTitle'))}">${_esc(t('connection.tcode.goHome'))}</button>
         </div>
       </div>
 
@@ -387,10 +452,16 @@ export class ConnectionPanel {
         <div class="connection-panel__input-row">
           <input type="password" id="ab-token-input"
                  class="connection-panel__input"
+                 autocomplete="off" spellcheck="false" autocapitalize="off"
                  data-i18n-placeholder="connection.autoblow.deviceTokenPlaceholder"
                  placeholder="${_esc(t('connection.autoblow.deviceTokenPlaceholder'))}"
                  data-i18n-aria-label="connection.autoblow.deviceTokenAria"
                  aria-label="${_esc(t('connection.autoblow.deviceTokenAria'))}">
+          <button type="button" id="btn-ab-token-reveal" class="connection-panel__btn connection-panel__btn--utility"
+                  aria-controls="ab-token-input" aria-pressed="false"
+                  data-reveal-show="connection.autoblow.showToken" data-reveal-hide="connection.autoblow.hideToken"
+                  data-i18n-aria-label="connection.autoblow.showToken" aria-label="${_esc(t('connection.autoblow.showToken'))}"
+                  data-i18n-title="connection.autoblow.showToken" title="${_esc(t('connection.autoblow.showToken'))}"></button>
           <button id="ab-connect-btn" class="connection-panel__btn" data-i18n="connection.btn.connect">${_esc(t('connection.btn.connect'))}</button>
         </div>
       </div>
@@ -479,6 +550,10 @@ export class ConnectionPanel {
         <div id="sync-device-rows"></div>
       </div>
 
+      <!-- "This video" (#380): the playing video's own delta on top of the
+           offsets above. Shown only while a library video is loaded. -->
+      <div class="connection-panel__section" id="sync-video-offset-section" hidden></div>
+
       </div><!-- end tab-sync -->
 
     `;
@@ -539,9 +614,16 @@ export class ConnectionPanel {
     keyInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this._onConnect();
     });
+    // The Handy key and the Autoblow token show only while their eye is on.
+    this._bindSecretReveal(keyInput, this._panel.querySelector('#btn-connection-key-reveal'));
+    this._bindSecretReveal(
+      this._panel.querySelector('#ab-token-input'),
+      this._panel.querySelector('#btn-ab-token-reveal'),
+    );
 
     // Re-sync button
     this._panel.querySelector('#btn-resync').addEventListener('click', () => this._onResync());
+    this._panel.querySelector('#btn-reconnect')?.addEventListener('click', () => this._onReconnect());
 
     // Offset slider + number input
     const offsetSlider = this._panel.querySelector('#offset-slider');
@@ -567,13 +649,27 @@ export class ConnectionPanel {
     // them here. Idempotent — re-rendering doesn't lose user state.
     eventBus.on('language:changed', () => {
       try {
-        // Re-derive status text on all four device tabs from current
-        // connection state — picks up the new locale immediately.
-        if (this.handy) this._updateStatus(this.handy.connected ? 'connected' : 'disconnected');
-        if (this.buttplug) this._updateButtplugStatus(this.buttplug.connected ? 'connected' : 'disconnected');
-        if (this.tcodeManager) this._updateTCodeStatus(this.tcodeManager.connected ? 'connected' : 'disconnected');
-        if (this.autoblowManager) this._updateAutoblowStatus(this.autoblowManager.connected ? 'connected' : 'disconnected');
+        // Translated tab labels (Audience, Sync). Rendered with t() above;
+        // they used to be literal English that only translatePage() ever
+        // fixed, and nothing runs that after this panel is built at boot,
+        // so every other locale saw "Audience" / "Sync" (app test V51).
+        for (const el of this._panel.querySelectorAll('.connection-panel__tab-label[data-i18n]')) {
+          el.textContent = t(el.getAttribute('data-i18n'));
+        }
+        // Re-draw status text on all four device tabs in the new locale.
+        // Replays the status each tab last SHOWED, checked against the live
+        // connection: re-deriving it from `connected` alone turned
+        // "Responding slowly" / "Not responding" into "Connected" and
+        // "Connection failed" into "Not connected" on a switch (V69).
+        if (this.handy) this._updateStatus(this._replayStatus(this._lastStatus.handy, this.handy.connected));
+        if (this.buttplug) this._updateButtplugStatus(this._replayStatus(this._lastStatus.buttplug, this.buttplug.connected));
+        if (this.tcodeManager) this._updateTCodeStatus(this._replayStatus(this._lastStatus.tcode, this.tcodeManager.connected));
+        if (this.autoblowManager) this._updateAutoblowStatus(this._replayStatus(this._lastStatus.autoblow, this.autoblowManager.connected));
         if (this.buttplug?.connected) this._updateButtplugDeviceList();
+        // T-Code's "No ports found" placeholder (the only option with no
+        // port path), drawn by the last port scan.
+        const noPorts = this._panel.querySelector('#tcode-port-select option[value=""]');
+        if (noPorts) noPorts.textContent = t('connection.tcode.noPorts');
         if (this._activeTab === 'sync') this._refreshSyncTab();
       } catch (err) {
         console.warn('[ConnectionPanel] language re-render failed:', err.message);
@@ -595,6 +691,17 @@ export class ConnectionPanel {
           offsetNumber.value = value;
         }
       }
+      // The Autoblow tab's slider follows a change made elsewhere: the
+      // phone's sync-pill slider, which the device follows since FT-052.
+      // It read the saved value once, at build, so it kept showing the old
+      // offset, even reopened (block C verifier 2; also in v0.9.2).
+      if (path === 'autoblow.offset') {
+        const v = Number.isFinite(Number(value)) ? Number(value) : 0;
+        const abSlider = this._panel?.querySelector('#ab-offset');
+        const abLabel = this._panel?.querySelector('#ab-offset-value');
+        if (abSlider && String(abSlider.value) !== String(v)) abSlider.value = String(v);
+        if (abLabel) abLabel.textContent = `${v}ms`;
+      }
       // Refresh the Sync tab if it's the one being viewed — device
       // offsets or VR offset just changed and the row values (plus the
       // "total effective" hint in VR mode) need to reflect it.
@@ -606,6 +713,13 @@ export class ConnectionPanel {
       )) {
         this._refreshSyncTab();
       }
+    });
+
+    // A video change, or a "This video" press here or in the VR modal (#380).
+    // The device rows' VR totals include the delta, so they re-read it too.
+    eventBus.on('videoSyncOffset:changed', () => {
+      this._refreshVideoSyncOffsetRow();
+      this._panel?.querySelectorAll('#sync-device-rows > *').forEach((r) => r._refreshSyncTotal?.());
     });
 
     // Stroke range sliders (dual-thumb)
@@ -672,6 +786,7 @@ export class ConnectionPanel {
     // so changes take effect on the next video load / variant switch (same
     // model as the Range Extender — HSSP bakes it into the uploaded script).
     this._initHandyCutoff();
+    this._initHandyInvert();
 
     // Tab switching — click activates a tab; arrow keys move focus
     // within the tablist per WAI-ARIA APG (Left/Right + Home/End,
@@ -696,9 +811,45 @@ export class ConnectionPanel {
     }
 
     // SDK callbacks
-    this.handy.onConnect = () => this._updateStatus('connected');
+    this.handy.onConnect = () => {
+      // Populate firmware/model here, not only in `_onConnect`. That handler
+      // runs when the user clicks the button in this panel — so a connection
+      // established ANY other way (auto-connect at launch, an SDK reconnect)
+      // left the device info showing "—" even though the manager had it all
+      // along. Dave, 2026-08-26: "its launched and connected no firmware
+      // version is shown". Verified: `handy.deviceInfo.fwVersion` was
+      // "4.2.1+ca4dd961" at that exact moment, and the panel read "—".
+      //
+      // Worth more than a cosmetic fix — Welliambrisk (#328) reports his
+      // Handy misbehaving specifically in "any connection style where it is
+      // now able to display my firmware version", so whether this field is
+      // populated has been read as a signal about the connection itself.
+      this._updateDeviceInfo();
+      this._updateStatus('connected');
+    };
+    // Fires when firmware/model actually arrive, which is after onConnect.
+    // Without this the panel only ever showed device info when the user
+    // happened to click Connect in the panel itself.
+    this.handy.onDeviceInfo = () => this._updateDeviceInfo();
     this.handy.onDisconnect = () => this._updateStatus('disconnected');
     this.handy.onError = (msg) => this._showError(msg);
+    // Commands stopped landing / started landing again. Only fired on a
+    // change, so this is safe to route straight at the status display.
+    this.handy.onResponsivenessChange = (responsive) => {
+      if (!this.handy.connected) return;   // a disconnect owns the status instead
+      this._updateStatus(responsive ? this._healthyHandyStatus() : 'unresponsive');
+      if (this._onHandyHealthChanged) this._onHandyHealthChanged(responsive);
+    };
+    // A command has been in flight longer than the slow threshold, or
+    // everything has caught up. Distinct from responsiveness: nothing has
+    // failed yet, but the device has gone quiet and the user is entitled to
+    // know that BEFORE the app gives up on it. A hard failure outranks this —
+    // "not responding" must not be downgraded to "responding slowly".
+    this.handy.onSlownessChange = (slow) => {
+      if (!this.handy.connected) return;
+      if (!this.handy.responsive) return;
+      this._updateStatus(slow ? 'slow' : 'connected');
+    };
 
     // Buttplug callbacks + events
     if (this.buttplug) {
@@ -717,6 +868,17 @@ export class ConnectionPanel {
     // TCode callbacks + events
     if (this.tcodeManager) {
       this._panel.querySelector('#tcode-connect-btn').addEventListener('click', () => this._onTCodeConnect());
+      // Go home (#384, #389): the app pauses the video, then every axis eases
+      // to the middle (TCodeSync.goHome). The button rests while it moves.
+      const homeBtn = this._panel.querySelector('#tcode-home-btn');
+      homeBtn?.addEventListener('click', () => {
+        if (!this._onTCodeGoHome || homeBtn.disabled) return;
+        homeBtn.disabled = true;
+        Promise.resolve()
+          .then(() => this._onTCodeGoHome())
+          .catch((err) => console.warn('[ConnectionPanel] T-Code Go home failed:', err?.message || err))
+          .finally(() => setTimeout(() => { homeBtn.disabled = false; }, GO_HOME_MOVE_MS));
+      });
       this._panel.querySelector('#tcode-refresh-btn').addEventListener('click', () => this._refreshTCodePorts());
       const transportSelect = this._panel.querySelector('#tcode-transport-select');
       if (transportSelect) {
@@ -772,6 +934,9 @@ export class ConnectionPanel {
 
       this.tcodeManager.onConnect = () => this._updateTCodeStatus('connected');
       this.tcodeManager.onDisconnect = () => this._updateTCodeStatus('disconnected');
+      // A failed connect reports only here (FT-060). Kept for the connect
+      // that is running, which shows it once it returns.
+      this.tcodeManager.onError = (msg) => { this._connectFailure.tcode = msg; };
 
       // Push saved axis ranges/enabled state into tcodeSync so they apply
       // as soon as the device connects — no need to open the panel first.
@@ -805,6 +970,13 @@ export class ConnectionPanel {
       });
 
       this._initAutoblowCutoff();
+
+      // A failed connect reports only here (FT-060). An upload that fails
+      // later reports here too: only a connect in progress shows it, since
+      // the tab of a connected device must keep saying "Connected".
+      this.autoblowManager.onError = (msg) => {
+        if (this._autoblowConnecting) this._connectFailure.autoblow = msg;
+      };
 
       // Measure, then OFFER to apply. Deliberately not automatic: the offset
       // may have been tuned by hand and silently overwriting that is worse
@@ -865,6 +1037,52 @@ export class ConnectionPanel {
     // VR Bridge UI + offset slider live in components/vr-modal.js now —
     // this panel stays focused on physical devices (Handy / Buttplug /
     // TCode / Autoblow). The bridge itself still runs; only the UI moved.
+  }
+
+  /**
+   * The eye beside a secret field (the Handy connection key, the Autoblow
+   * token): it shows the value as text while it is pressed, and masks it
+   * again on a second press or when the panel closes. Privacy, Handy session
+   * 2026-11-17 (also in v0.9.2): the Handy key was a plain text field, so a
+   * screenshot, a screen share or a stream of this tab showed it. Only the
+   * field's type changes: its value, paste and Enter-to-connect are as they
+   * were, and nothing here logs the value.
+   */
+  _bindSecretReveal(input, button) {
+    if (!input || !button) return;
+    this._secretFields = this._secretFields || [];
+    this._secretFields.push({ input, button });
+    this._showSecret(input, button, false);
+    button.addEventListener('click', () => this._showSecret(input, button, input.type === 'password'));
+  }
+
+  _showSecret(input, button, shown) {
+    input.type = shown ? 'text' : 'password';
+    // A toggle button: aria-pressed carries the state and the accessible
+    // name stays "Show ..." (bf-review BF-R4, 2026-11-19: a name that
+    // flipped to "Hide ..." was read as "Hide key, toggle button, pressed",
+    // the state twice and contradicting itself; the app's other toggles keep
+    // one name too). The tooltip says what a press does. Both in the live
+    // language (the data-i18n attributes are re-read on a language switch).
+    button.setAttribute('aria-pressed', shown ? 'true' : 'false');
+    const name = button.dataset.revealShow;
+    const tip = shown ? button.dataset.revealHide : button.dataset.revealShow;
+    if (name) {
+      button.setAttribute('data-i18n-aria-label', name);
+      button.setAttribute('aria-label', t(name));
+    }
+    if (tip) {
+      button.setAttribute('data-i18n-title', tip);
+      button.title = t(tip);
+    }
+    button.replaceChildren(icon(shown ? EyeOff : Eye, { width: 16, height: 16 }));
+  }
+
+  /** Mask every secret field again (the panel closed). */
+  _maskSecrets() {
+    for (const { input, button } of this._secretFields || []) {
+      if (input.type !== 'password') this._showSecret(input, button, false);
+    }
   }
 
   _loadSavedSettings() {
@@ -933,6 +1151,67 @@ export class ConnectionPanel {
     }
   }
 
+  /**
+   * Which "things are working" status to show — plain connected, or connected
+   * with a command currently overdue. Recovering from a failure while a call
+   * is still outstanding must not paint a clean "Connected" over it.
+   */
+  _healthyHandyStatus() {
+    return this.handy?.slow ? 'slow' : 'connected';
+  }
+
+  /**
+   * The status to re-draw a device tab with after a language switch: the
+   * one it last showed, unless the live connection flag contradicts it (a
+   * missed callback must not keep a dead device "Connected", or vice versa).
+   * @param {string|null} last — what the tab last showed
+   * @param {boolean} connected — the manager's live flag
+   * @returns {string}
+   */
+  _replayStatus(last, connected) {
+    if (connected) return ['connected', 'slow', 'unresponsive'].includes(last) ? last : 'connected';
+    return ['connecting', 'error'].includes(last) ? last : 'disconnected';
+  }
+
+  /**
+   * Tear the connection down and build it back up with the saved key.
+   *
+   * Deliberately a full disconnect-then-connect rather than a bare retry: the
+   * states this exists to escape (device rejecting every command, cloud
+   * session gone stale, mode cache pointing at a mode the device is no longer
+   * in) are exactly the ones a fresh handshake clears and a retry does not.
+   *
+   * Only reachable while the status is unresponsive/error, so it cannot be
+   * used to churn a healthy connection.
+   */
+  async _onReconnect() {
+    const key = this._panel.querySelector('#connection-key-input')?.value?.trim()
+      || this.settings.get('handy.connectionKey');
+    if (!key) {
+      this._showError(t('error.handyConnectionFailed'));
+      return;
+    }
+    const reconnectBtn = this._panel.querySelector('#btn-reconnect');
+    if (reconnectBtn) reconnectBtn.disabled = true;
+    this._updateStatus('connecting');
+    try {
+      // Best-effort teardown — a device that is already gone will throw here
+      // and that is not a reason to skip the reconnect.
+      try { await this.handy.disconnect(); } catch { /* already gone */ }
+      const ok = await this.handy.connect(key);
+      if (ok) {
+        this._updateDeviceInfo();
+        this._updateStatus('connected');
+      } else {
+        this._updateStatus('error');
+      }
+    } finally {
+      // Re-enable regardless. Leaving a disabled retry button behind is the
+      // exact bug this panel just had.
+      if (reconnectBtn) reconnectBtn.disabled = false;
+    }
+  }
+
   async _onResync() {
     const syncQuality = this._panel.querySelector('#sync-quality');
     syncQuality.textContent = t('connection.handy.syncing');
@@ -977,9 +1256,18 @@ export class ConnectionPanel {
   }
 
   _updateStatus(status) {
+    this._lastStatus.handy = status;
     const led = this._panel.querySelector('#connection-led');
     const text = this._panel.querySelector('#connection-status-text');
     const btn = this._panel.querySelector('#btn-connect');
+    const reconnectBtn = this._panel.querySelector('#btn-reconnect');
+    // Offer the retry exactly when the connection is not healthy. Hidden the
+    // rest of the time so the panel does not carry a permanently useless
+    // button; `_updateStatus` is the single place status is decided, so this
+    // cannot drift out of step with the LED.
+    if (reconnectBtn) {
+      reconnectBtn.hidden = !(status === 'unresponsive' || status === 'error');
+    }
     const infoSection = this._panel.querySelector('#device-info-section');
     const syncSection = this._panel.querySelector('#sync-section');
     const offsetSection = this._panel.querySelector('#offset-section');
@@ -993,6 +1281,16 @@ export class ConnectionPanel {
         led.classList.add('connection-panel__led--connected');
         text.textContent = t('connection.status.connected');
         btn.textContent = t('connection.btn.disconnect');
+        // Re-enable. `connecting` disables this button and nothing here put it
+        // back, so a MANUAL connect (the only path that passes through
+        // `connecting`) left the button reading "Disconnect" and permanently
+        // greyed out — no way to disconnect, and no way to retry a connection
+        // that had gone bad. Auto-connect at launch skips `connecting`, which
+        // is why it only ever bit people who paired by hand (Dave,
+        // 2026-08-26; reproduced on-device). Every other branch in this switch
+        // sets `disabled`, and so does the whole Buttplug/Autoblow equivalent
+        // below — this one case was the omission.
+        btn.disabled = false;
         infoSection.hidden = false;
         syncSection.hidden = false;
         offsetSection.hidden = false;
@@ -1000,6 +1298,37 @@ export class ConnectionPanel {
         this._handyEverConnected = true;
         // Apply saved offset and stroke zone to device
         this._applySavedDeviceSettings();
+        break;
+
+      // Session is up and commands are still expected to land, but one has
+      // been outstanding longer than the slow threshold. Deliberately NOT an
+      // error colour and no Reconnect button: nothing has failed, and telling
+      // someone to reconnect a working device on a slow link would make things
+      // worse. Welliambrisk watched a 20s stall behind a "Connected" label
+      // with no indication anything was wrong (log, 2026-08-27).
+      case 'slow':
+        led.classList.add('connection-panel__led--connecting');
+        text.textContent = t('connection.status.respondingSlowly');
+        btn.textContent = t('connection.btn.disconnect');
+        btn.disabled = false;
+        infoSection.hidden = false;
+        syncSection.hidden = false;
+        offsetSection.hidden = false;
+        strokeSection.hidden = false;
+        break;
+
+      // Session is up, but commands are not landing. Keeps the device
+      // sections visible — settings still apply once it recovers — and keeps
+      // Disconnect available, while the Reconnect button above appears.
+      case 'unresponsive':
+        led.classList.add('connection-panel__led--error');
+        text.textContent = t('connection.status.notResponding');
+        btn.textContent = t('connection.btn.disconnect');
+        btn.disabled = false;
+        infoSection.hidden = false;
+        syncSection.hidden = false;
+        offsetSection.hidden = false;
+        strokeSection.hidden = false;
         break;
 
       case 'connecting':
@@ -1034,7 +1363,18 @@ export class ConnectionPanel {
 
   _updateDeviceInfo() {
     const info = this.handy.deviceInfo;
-    if (!info) return;
+    if (!info) {
+      // None (yet): show none, not the previous connection's firmware. After
+      // a reconnect the old value stood there while the manager had no
+      // firmware and HDSP moves were off (FT-117); a re-read that lands
+      // fills it through onDeviceInfo. The model and the firmware warning
+      // too: both were the previous connection's (block F review).
+      this._panel.querySelector('#device-firmware').textContent = '—';
+      this._panel.querySelector('#device-model').textContent = '—';
+      const staleWarning = this._panel.querySelector('#firmware-warning');
+      if (staleWarning) staleWarning.hidden = true;
+      return;
+    }
 
     this._panel.querySelector('#device-firmware').textContent = info.fwVersion || '—';
     this._panel.querySelector('#device-model').textContent = info.model || '—';
@@ -1127,6 +1467,25 @@ export class ConnectionPanel {
   }
 
   /**
+   * Wire the Handy invert checkbox. Loads `handy.inverted` (strictly true =
+   * on, so a missing key is off) and commits changes back, then tells the
+   * app so it can flip HDSP live and re-arm HSSP when it is safe.
+   */
+  _initHandyInvert() {
+    const cb = this._panel.querySelector('#handy-invert-toggle');
+    if (!cb) return;
+    cb.checked = this.settings.get('handy.inverted') === true;
+    cb.addEventListener('change', () => {
+      this.settings.set('handy.inverted', cb.checked);
+      if (this.onHandyInvertChanged) {
+        Promise.resolve(this.onHandyInvertChanged()).catch((err) => {
+          console.warn('[ConnectionPanel] Handy invert change failed:', err?.message || err);
+        });
+      }
+    });
+  }
+
+  /**
    * Wire the Autoblow output-limits (cutoff) sliders. Persists to
    * `autoblow.cutoff`; read at upload time by app.js `_cutoffFromSettings`,
    * so it applies on the next video load / variant switch (Autoblow is a
@@ -1187,9 +1546,13 @@ export class ConnectionPanel {
     const led = this._panel.querySelector(`[data-tab-led="${tabId}"]`);
     if (led) {
       led.className = 'connection-panel__tab-led';
+      // `unresponsive` and `slow` are Handy-only statuses and neither was
+      // listed here, so the tab LED went BLANK for both — the strip claimed
+      // nothing at all about a device that was in trouble, which is worse
+      // than the "Connected" it replaced.
       if (status === 'connected') led.classList.add('connection-panel__tab-led--connected');
-      else if (status === 'connecting') led.classList.add('connection-panel__tab-led--connecting');
-      else if (status === 'error') led.classList.add('connection-panel__tab-led--error');
+      else if (status === 'connecting' || status === 'slow') led.classList.add('connection-panel__tab-led--connecting');
+      else if (status === 'error' || status === 'unresponsive') led.classList.add('connection-panel__tab-led--error');
     }
     const labels = {
       handy: 'Handy', buttplug: 'Buttplug.io',
@@ -1198,6 +1561,8 @@ export class ConnectionPanel {
     const stateMap = {
       connected: t('connection.status.connected'),
       connecting: t('connection.status.connecting'),
+      slow: t('connection.status.respondingSlowly'),
+      unresponsive: t('connection.status.notResponding'),
       error: t('connection.status.failed'),
       disconnected: t('connection.status.notConnected'),
     };
@@ -1369,6 +1734,7 @@ export class ConnectionPanel {
   }
 
   _updateButtplugStatus(status) {
+    this._lastStatus.buttplug = status;
     const led = this._panel.querySelector('#bp-connection-led');
     const text = this._panel.querySelector('#bp-connection-status-text');
     const btn = this._panel.querySelector('#btn-bp-connect');
@@ -1465,6 +1831,8 @@ export class ConnectionPanel {
       axisLabel.textContent = t('connection.buttplug.source');
       const axisSelect = document.createElement('select');
       axisSelect.className = 'connection-panel__device-select';
+      // Found by this, not by its class: the mode selects share it (E-03).
+      axisSelect.dataset.control = 'source';
       axisSelect.title = t('connection.buttplug.sourceTitle');
 
       // Per-device axis assignment dropdown. Labels follow "Name (Code)"
@@ -1486,9 +1854,14 @@ export class ConnectionPanel {
         { value: 'R1', label: 'Roll (R1)' },
         { value: 'R2', label: 'Pitch (R2)' },
         { value: 'V0', label: 'Vibe (V0)' },
-        { value: 'V1', label: 'Lube/Pump (V1)' },
-        { value: 'V2', label: 'Suction (V2)' },
+        // The channels multi-axis.js AXIS_DEFINITIONS gives these axes, as the
+        // player feeds them (block C fix-up 2026-11-06): pump alone on V1,
+        // suck on A1 and lube on A2. "Lube/Pump (V1)" and "Suction (V2)" were
+        // the old table; nothing plays on V2 now (a saved V2 loads as A1).
+        { value: 'V1', label: 'Pump (V1)' },
         { value: 'A0', label: 'Valve (A0)' },
+        { value: 'A1', label: 'Suck (A1)' },
+        { value: 'A2', label: 'Lube (A2)' },
       ];
       for (const opt of axisOptions) {
         const o = document.createElement('option');
@@ -1498,10 +1871,7 @@ export class ConnectionPanel {
       }
 
       // Determine current value
-      const currentAssignment = this.buttplugSync?.getAxisAssignment(dev.index) || 'L0';
-      const isCustomRouted = this.buttplugSync?._customRoutingActive &&
-        currentAssignment.startsWith('CR');
-      axisSelect.value = isCustomRouted ? '__custom__' : currentAssignment;
+      axisSelect.value = this._buttplugSourceValue(dev);
 
       axisSelect.addEventListener('change', () => {
         if (!this.buttplugSync) return;
@@ -1631,6 +2001,18 @@ export class ConnectionPanel {
         rangeReadout.textContent = `${mn}-${mx}%`;
         if (this.buttplugSync) this.buttplugSync.setDeviceRange(dev.index, mn, mx);
         this._saveButtplugDeviceSettings();
+
+        // Live preview — jog THIS device to the boundary being dragged.
+        // 0 and 100 are pre-transform, so the range we just set maps them
+        // onto the min and max the readout is showing.
+        const held = this._draggedBoundary(rangeMinSlider, rangeMaxSlider);
+        if (held && dev.canLinear) {
+          this._previewRange(() => {
+            this.buttplugSync?.previewDevicePosition?.(
+              dev.index, held === 'min' ? 0 : 100, PREVIEW_MOVE_MS,
+            );
+          });
+        }
       };
       rangeMinSlider.addEventListener('input', commitRange);
       rangeMaxSlider.addEventListener('input', commitRange);
@@ -1733,24 +2115,39 @@ export class ConnectionPanel {
           if (v >= 70) maxVal.classList.add('connection-panel__safety-value--warn');
           else maxVal.classList.remove('connection-panel__safety-value--warn');
         });
+        // The cap the device holds now: what Cancel puts back, and what a
+        // change is compared with. Only RAISING the cap above 90 % asks
+        // (FT-058; also in v0.9.2): it asked whenever the new value was over
+        // 90, so lowering 100 -> 99 with the arrow keys asked to confirm a
+        // SAFER setting, and Cancel then dropped the cap to 70, a value the
+        // user never chose.
+        let committedCap = currentMax;
         maxSlider.addEventListener('change', async () => {
           const v = parseInt(maxSlider.value, 10);
-          if (v > 90) {
+          const prev = this.buttplugSync?.getMaxIntensity(dev.index) ?? committedCap;
+          if (v > 90 && v > prev) {
             const { Modal } = await import('./modal.js');
+            // These controls show for every oscillating device, not only
+            // e-stim (a Svakom Jordan, a Hismith), so the text says
+            // "device", and the button names the action (V74, V76, #359).
             const confirmed = await Modal.confirm(
               t('connection.buttplug.highIntensityTitle'),
-              t('connection.buttplug.highIntensityBody', { percent: v })
+              t('connection.buttplug.highIntensityBody', { percent: v }),
+              { confirmText: t('connection.buttplug.highIntensityConfirm', { percent: v }) },
             );
             if (!confirmed) {
-              maxSlider.value = '70';
-              maxVal.textContent = '70%';
-              maxVal.classList.remove('connection-panel__safety-value--warn');
-              if (this.buttplugSync) this.buttplugSync.setMaxIntensity(dev.index, 70);
+              // Back to the cap it had: nothing changes on Cancel.
+              maxSlider.value = String(prev);
+              maxVal.textContent = `${prev}%`;
+              maxVal.classList.toggle('connection-panel__safety-value--warn', prev >= 70);
+              if (this.buttplugSync) this.buttplugSync.setMaxIntensity(dev.index, prev);
+              committedCap = prev;
               this._saveButtplugDeviceSettings();
               return;
             }
           }
           if (this.buttplugSync) this.buttplugSync.setMaxIntensity(dev.index, v);
+          committedCap = v;
           this._saveButtplugDeviceSettings();
         });
         maxRow.appendChild(maxLabel);
@@ -1834,6 +2231,35 @@ export class ConnectionPanel {
     this.updateVibControlState();
   }
 
+  /**
+   * Queue one live jog for a range boundary the user is dragging.
+   *
+   * `send` is a thunk so the caller decides which device API to hit — the
+   * three families have nothing in common at the call site, and the rate
+   * limit is what they need to share. Off when the user has switched the
+   * preview off; a missing key means on (the store default).
+   *
+   * @param {() => void} send
+   */
+  _previewRange(send) {
+    if (this.settings?.get('player.rangeLivePreview') === false) return;
+    this._rangePreview.request(send);
+  }
+
+  /**
+   * Which boundary of a min/max pair the user is currently holding, or null
+   * when neither has focus — a programmatic commit (loading saved settings,
+   * a reset button) must not move the device.
+   *
+   * @returns {'min'|'max'|null}
+   */
+  _draggedBoundary(minEl, maxEl) {
+    const active = document.activeElement;
+    if (active === minEl) return 'min';
+    if (active === maxEl) return 'max';
+    return null;
+  }
+
   async _testDevice(dev) {
     if (!this.buttplug || this._testingDevice) return;
     this._testingDevice = true;
@@ -1892,9 +2318,19 @@ export class ConnectionPanel {
     return badge;
   }
 
+  /** What a device row's Source select shows: its axis, or "Custom routing"
+   *  while a route holds it (a synthetic CR axis is no option of its own). */
+  _buttplugSourceValue(dev) {
+    const assignment = this.buttplugSync?.getAxisAssignment(dev.index) || 'L0';
+    const isCustomRouted = this.buttplugSync?._customRoutingActive && String(assignment).startsWith('CR');
+    return isCustomRouted ? '__custom__' : assignment;
+  }
+
   _makeModeSelect(dev, type, title, defaultMode, getter, setter) {
     const modeSelect = document.createElement('select');
     modeSelect.className = 'connection-panel__device-select connection-panel__vib-control';
+    // Which mode this select sets: vibe / rotate / oscillate / scalar (E-03).
+    modeSelect.dataset.control = type;
     modeSelect.title = title;
     const modes = [
       { value: 'speed', label: t('connection.buttplug.modeSpeed') },
@@ -1992,7 +2428,11 @@ export class ConnectionPanel {
           && !String(saved.axisAssignment).startsWith('CR')
           && !this.buttplugSync._customRoutingActive
         ) {
-          this.buttplugSync.setAxisAssignment(dev.index, saved.axisAssignment);
+          // Suction left V2 for A1 (multi-axis.js; the player follows since
+          // the block C fix-up): a device saved on "Suction (V2)" keeps
+          // getting the suction script. Nothing is rewritten on disk here.
+          const axis = saved.axisAssignment === 'V2' ? 'A1' : saved.axisAssignment;
+          this.buttplugSync.setAxisAssignment(dev.index, axis);
         }
         if (saved.inverted) this.buttplugSync.setInverted(dev.index, true);
         if (saved.vibeMode) this.buttplugSync.setVibeMode(dev.index, saved.vibeMode);
@@ -2025,8 +2465,23 @@ export class ConnectionPanel {
       const dev = devices[i];
       const invertCb = row.querySelector('.connection-panel__device-toggle input');
       if (invertCb) invertCb.checked = this.buttplugSync.isInverted(dev.index);
-      const modeSelect = row.querySelector('.connection-panel__device-select');
-      if (modeSelect) modeSelect.value = this.buttplugSync.getVibeMode(dev.index);
+      // Each select by its own role (E-03; also in v0.9.2). This looked up
+      // the FIRST `.connection-panel__device-select` in the row, which is the
+      // Source select, and set it to the vibe mode ('speed'): no such option,
+      // so Source showed blank for every device, the axis chosen was never
+      // shown, and the vibe-mode select itself was never synced.
+      const sourceSelect = row.querySelector('select[data-control="source"]');
+      if (sourceSelect) sourceSelect.value = this._buttplugSourceValue(dev);
+      const modes = {
+        vibe: () => this.buttplugSync.getVibeMode(dev.index),
+        rotate: () => this.buttplugSync.getRotateMode(dev.index),
+        oscillate: () => this.buttplugSync.getOscillateMode(dev.index),
+        scalar: () => this.buttplugSync.getScalarMode(dev.index),
+      };
+      for (const [type, get] of Object.entries(modes)) {
+        const modeSelect = row.querySelector(`select[data-control="${type}"]`);
+        if (modeSelect) modeSelect.value = get() || (type === 'scalar' ? 'position' : 'speed');
+      }
     });
   }
 
@@ -2152,8 +2607,22 @@ export class ConnectionPanel {
       return;
     }
 
+    this._connectFailure.tcode = null;
     this._updateTCodeStatus('connecting');
     const success = await this.tcodeManager.connect(kind, opts);
+
+    // A failed connect reports only through onError. With nothing wired the
+    // tab read "Connecting…" with an amber LED for good; then "Not
+    // connected" with no reason (FT-060). It now says why, and a toast says
+    // it too, since the tab may be scrolled or the panel closed.
+    if (!success) {
+      if (this._connectFailure.tcode) {
+        this._updateTCodeStatus('error');
+        showToast(this._connectFailureText('tcode'), 'error', 6000);
+      } else {
+        this._updateTCodeStatus('disconnected');
+      }
+    }
 
     if (success) {
       // Persist per-transport so the next launch restores the right inputs.
@@ -2194,6 +2663,7 @@ export class ConnectionPanel {
   }
 
   _updateTCodeStatus(status) {
+    this._lastStatus.tcode = status;
     const led = this._panel.querySelector('#tcode-led');
     const text = this._panel.querySelector('#tcode-status-text');
     const btn = this._panel.querySelector('#tcode-connect-btn');
@@ -2206,14 +2676,19 @@ export class ConnectionPanel {
       else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
     }
     if (status === 'connected') this._tcodeEverConnected = true;
+    if (led && status === 'error') led.classList.add('connection-panel__led--error');
     if (text) {
       text.textContent = status === 'connected' ? t('connection.status.connected')
         : status === 'connecting' ? t('connection.status.connecting')
+        : status === 'error' ? this._connectFailureText('tcode')
         : (this._tcodeEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
     }
     if (btn) {
       btn.textContent = status === 'connected' ? t('connection.btn.disconnect') : t('connection.btn.connect');
     }
+    // Go home only means something with a device to move (#384, #389).
+    const homeBtn = this._panel.querySelector('#tcode-home-btn');
+    if (homeBtn) homeBtn.hidden = status !== 'connected' || !this._onTCodeGoHome;
     if (axisSection) {
       axisSection.hidden = status !== 'connected';
       if (status === 'connected') this._renderTCodeAxes();
@@ -2363,6 +2838,19 @@ export class ConnectionPanel {
         }
         valReadout.textContent = `${mn}-${mx}%`;
         if (this.tcodeSync) this.tcodeSync.setAxisRange(tcode, mn, mx);
+
+        // Live preview on the axis whose slider is being dragged. Position
+        // axes only — a vibrate channel has an intensity, not a place you
+        // can feel your way to, which is what this feedback is for.
+        const held = this._draggedBoundary(minSlider, maxSlider);
+        if (held && type === 'linear') {
+          this._previewRange(() => {
+            this.tcodeSync?.previewAxisPosition?.(
+              tcode, held === 'min' ? 0 : 100, PREVIEW_MOVE_MS,
+            );
+          });
+        }
+
         this._saveTCodeAxis(tcode, {
           enabled: toggle.checked,
           min: mn,
@@ -2556,6 +3044,33 @@ export class ConnectionPanel {
         const motionReadout = document.createElement('span');
         motionReadout.className = 'connection-panel__safety-value';
 
+        // Blend (dio_likes_jojo, EroScripts #320; MFP's MotionProviderBlend):
+        // mixes the stroke into the generated motion, 0 by default so nothing
+        // changes for anyone. Random and Pattern only, because Follow stroke
+        // already is the stroke. FT-020: the engine and the preview had it,
+        // the slider was never built, and every other change in this row
+        // saved the motion without it.
+        const mBlend = Number.isFinite(mCfg.blend) ? Math.min(100, Math.max(0, mCfg.blend)) : 0;
+        const blendRow = document.createElement('div');
+        blendRow.className = 'connection-panel__device-safety connection-panel__motion-blend-row';
+        const blendLabel = document.createElement('span');
+        blendLabel.className = 'connection-panel__tcode-range-label';
+        blendLabel.textContent = t('connection.tcode.motionBlend');
+        blendLabel.title = t('connection.tcode.motionBlendHint');
+        const blendSlider = document.createElement('input');
+        blendSlider.type = 'range';
+        blendSlider.min = '0';
+        blendSlider.max = '100';
+        blendSlider.value = String(mBlend);
+        blendSlider.className = 'connection-panel__safety-slider connection-panel__motion-blend';
+        blendSlider.setAttribute('aria-label', t('connection.tcode.motionBlend'));
+        blendSlider.title = t('connection.tcode.motionBlendHint');
+        const blendReadout = document.createElement('span');
+        blendReadout.className = 'connection-panel__safety-value';
+        blendRow.appendChild(blendLabel);
+        blendRow.appendChild(blendSlider);
+        blendRow.appendChild(blendReadout);
+
         // Curve preview. Picking a waveform from a list of names is picking
         // blind — "sharp bounce" means nothing until you see it. Drawn from
         // the same functions the engine runs, on its own row so it has the
@@ -2584,6 +3099,7 @@ export class ConnectionPanel {
             half: halfSelect.value,
             pattern: patternSelect.value,
             speed: parseInt(speedSlider.value, 10) / 100,
+            blend: parseInt(blendSlider.value, 10),
           };
           const values = sampleMotion(cfg, { samples: w });
           if (!values.length) return;
@@ -2635,6 +3151,8 @@ export class ConnectionPanel {
           motionReadout.textContent = timed
             ? `${depthSlider.value}% · ${(parseInt(speedSlider.value, 10) / 100).toFixed(2)}x`
             : `${depthSlider.value}%`;
+          blendRow.hidden = !timed;
+          blendReadout.textContent = `${blendSlider.value}%`;
           previewRow.hidden = mode === 'script';
           drawPreview();
         };
@@ -2647,6 +3165,9 @@ export class ConnectionPanel {
             half: halfSelect.value,
             speed: parseInt(speedSlider.value, 10) / 100,
             pattern: patternSelect.value,
+            // Kept in Follow stroke too (the engine ignores it there), so
+            // switching back to Random or Pattern brings the user's mix back.
+            blend: parseInt(blendSlider.value, 10),
           };
           paintMotion();
           if (this.tcodeSync) this.tcodeSync.setAxisMotion(tcode, motion);
@@ -2657,6 +3178,7 @@ export class ConnectionPanel {
         halfSelect.addEventListener('change', commitMotion);
         depthSlider.addEventListener('input', commitMotion);
         speedSlider.addEventListener('input', commitMotion);
+        blendSlider.addEventListener('input', commitMotion);
 
         // Keep the motion controls in lockstep with the axis enable toggle.
         toggle.addEventListener('change', () => {
@@ -2666,12 +3188,14 @@ export class ConnectionPanel {
           halfSelect.disabled = !on;
           patternSelect.disabled = !on;
           speedSlider.disabled = !on;
+          blendSlider.disabled = !on;
         });
         if (!enabled) {
           depthSlider.disabled = true;
           halfSelect.disabled = true;
           patternSelect.disabled = true;
           speedSlider.disabled = true;
+          blendSlider.disabled = true;
         }
 
         shapeRow.appendChild(depthLabel);
@@ -2682,6 +3206,7 @@ export class ConnectionPanel {
         shapeRow.appendChild(speedSlider);
         shapeRow.appendChild(motionReadout);
         row.appendChild(shapeRow);
+        row.appendChild(blendRow);
         row.appendChild(previewRow);
       }
 
@@ -2715,8 +3240,28 @@ export class ConnectionPanel {
       return;
     }
 
+    this._connectFailure.autoblow = null;
+    this._autoblowToken = token;   // kept out of the shown reason
     this._updateAutoblowStatus('connecting');
-    const success = await this.autoblowManager.connect(token);
+    this._autoblowConnecting = true;
+    let success = false;
+    try {
+      success = await this.autoblowManager.connect(token);
+    } finally {
+      this._autoblowConnecting = false;
+    }
+
+    // Same as T-Code: a failed connect reports only through onError, so the
+    // tab stayed on "Connecting…", then read "Not connected" with no reason
+    // (FT-060). It now says why, in the tab and a toast.
+    if (!success) {
+      if (this._connectFailure.autoblow) {
+        this._updateAutoblowStatus('error');
+        showToast(this._connectFailureText('autoblow'), 'error', 6000);
+      } else {
+        this._updateAutoblowStatus('disconnected');
+      }
+    }
 
     if (success) {
       this.settings.set('autoblow.token', token);
@@ -2724,6 +3269,7 @@ export class ConnectionPanel {
   }
 
   _updateAutoblowStatus(status) {
+    this._lastStatus.autoblow = status;
     const led = this._panel.querySelector('#ab-led');
     const text = this._panel.querySelector('#ab-status-text');
     const btn = this._panel.querySelector('#ab-connect-btn');
@@ -2737,9 +3283,11 @@ export class ConnectionPanel {
       else if (status === 'connecting') led.classList.add('connection-panel__led--connecting');
     }
     if (status === 'connected') this._autoblowEverConnected = true;
+    if (led && status === 'error') led.classList.add('connection-panel__led--error');
     if (text) {
       text.textContent = status === 'connected' ? t('connection.status.connected')
         : status === 'connecting' ? t('connection.status.connecting')
+        : status === 'error' ? this._connectFailureText('autoblow')
         : (this._autoblowEverConnected ? t('connection.status.disconnected') : t('connection.status.notConnected'));
     }
     if (btn) {
@@ -2751,6 +3299,19 @@ export class ConnectionPanel {
     if (typeEl && this.autoblowManager?.deviceType) {
       typeEl.textContent = this.autoblowManager.isUltra ? t('connection.autoblow.deviceUltra') : t('connection.autoblow.deviceVacu2');
     }
+  }
+
+  /**
+   * Why the last T-Code / Autoblow connect failed, in the current language
+   * (FT-060). Worded from the raw onError message each time it is drawn, so
+   * a language switch re-words it; the Autoblow token never reaches it.
+   */
+  _connectFailureText(device) {
+    const raw = this._connectFailure?.[device];
+    if (!raw) return t('connection.status.failed');
+    return describeConnectFailure(device, raw, t, {
+      secret: device === 'autoblow' ? this._autoblowToken : undefined,
+    });
   }
 
   // VR Bridge UI is now in components/vr-modal.js. The panel still
@@ -2767,9 +3328,14 @@ export class ConnectionPanel {
   }
 
   show() {
+    const wasVisible = this._visible;
     if (this._backdrop) this._backdrop.hidden = false;
     this._panel.hidden = false;
     this._visible = true;
+    // This backdrop is the panel's own, not Modal's, so the panel says it
+    // is up itself: the Windows caption buttons dim with the page under it
+    // too (FT-100's 'modal:backdrop'; E2-08, also in v0.9.2). Once per open.
+    if (!wasVisible) this._sayBackdrop(true);
 
     // Stash the previously-focused element so we can restore on hide.
     // Modal contract per DESIGN.md §2.5 — focus trap on Tab/Shift+Tab,
@@ -2778,9 +3344,17 @@ export class ConnectionPanel {
     this._previouslyFocused = document.activeElement;
 
     // Initial focus — prefer the connection-key input on the active
-    // tab; fall back to the active tab button if it's hidden.
-    const initialFocus = this._panel.querySelector('#connection-key-input')
-      || this._panel.querySelector('.connection-panel__tab--active');
+    // tab; fall back to the active tab button if it's hidden. The key
+    // input always EXISTS (it sits on the Handy tab), so "hidden" has to be
+    // checked: with the panel last on another tab, focus() on it failed
+    // silently, the focus stayed on <body>, the panel's own Escape listener
+    // never saw the key and keyboard.js cleared the A-B loop as it closed
+    // the panel (FT-072, verify-1; also in v0.9.2).
+    const shown = (el) => !!el && !el.disabled && !el.closest('[hidden]');
+    const initialFocus = [
+      this._panel.querySelector('#connection-key-input'),
+      this._panel.querySelector('.connection-panel__tab--active'),
+    ].find(shown);
     initialFocus?.focus();
 
     // Focus trap — Tab cycles within the panel.
@@ -2807,6 +3381,11 @@ export class ConnectionPanel {
     // the X button. DESIGN.md §2.5 contract: three exit paths.
     this._boundEscapeKey = (e) => {
       if (e.key === 'Escape') {
+        // A dialog opened from the panel (the Safety Cap confirm) owns
+        // Escape. Modal already stops the key in a document capture
+        // listener before it gets here; this is the EroScripts panel's
+        // guard, so the panel steps aside even if that ever changes.
+        if (document.querySelector('.modal-overlay')) return;
         e.preventDefault();
         this.hide();
       }
@@ -2818,6 +3397,13 @@ export class ConnectionPanel {
       document.removeEventListener('click', this._boundOutsideClick, true);
     }
     this._boundOutsideClick = (e) => {
+      // A dialog opened from the panel lives outside it (Modal mounts on
+      // <body>). Without this its first click closed the panel and was
+      // swallowed, so the Safety Cap confirm took two clicks and the panel
+      // was gone afterwards (V75, EroScripts #359). Toasts are not
+      // "outside" either: the X on the panel's own latency toast closed
+      // the panel and left the toast.
+      if (e.target.closest?.('.modal-overlay, #toast-container')) return;
       if (!this._panel.contains(e.target)) {
         e.preventDefault();
         e.stopPropagation();
@@ -2830,9 +3416,16 @@ export class ConnectionPanel {
   }
 
   hide() {
+    const wasVisible = this._visible;
     if (this._backdrop) this._backdrop.hidden = true;
     this._panel.hidden = true;
     this._visible = false;
+    // A key shown for a moment is masked again: the next open, and the next
+    // screenshot of it, start hidden.
+    this._maskSecrets();
+    // Only a panel that was open says it closed: every Esc in the player
+    // calls hide() (keyboard.js), open or not.
+    if (wasVisible) this._sayBackdrop(false);
     if (this._boundOutsideClick) {
       document.removeEventListener('click', this._boundOutsideClick, true);
       this._boundOutsideClick = null;
@@ -2856,6 +3449,11 @@ export class ConnectionPanel {
       this._previouslyFocused.focus();
     }
     this._previouslyFocused = null;
+  }
+
+  /** 'modal:backdrop' from the Devices panel (E2-08): app.js keeps one per source. */
+  _sayBackdrop(shown) {
+    try { eventBus.emit('modal:backdrop', { dimmed: shown, source: 'devices' }); } catch { /* cosmetic only */ }
   }
 
   /**
@@ -2934,16 +3532,24 @@ export class ConnectionPanel {
 
     // Handy device row (only meaningful when Handy is connected via WiFi API)
     if (this.handy?.connected) {
-      const suggested = computeSuggestedOffset({
+      // computeSuggestedOffset answers in "negative = earlier" (the VR
+      // proxy, Buttplug, T-Code). The Handy's own HSTP offset runs the
+      // other way: a POSITIVE value fires it earlier (measured on Dave's
+      // Handy 2026-11-05; the vendored v2 spec agrees). So the suggestion
+      // is converted into the Handy's convention before it is shown or
+      // applied; unconverted, Apply made the Handy fire LATER.
+      const handySign = VIDEO_SYNC_OFFSET_DEVICE_SIGN.handy;
+      const suggested = handySign * computeSuggestedOffset({
         device: 'handy', context: ctx,
         handyRtdMs: handyRtd ?? 0,
         vrJitterMs: jitter ?? 0,
         vrPlayerType,
-      });
+      }) || 0;
       rowsEl.appendChild(this._buildSyncRow({
         label: t('connection.sync.deviceHandy'),
         currentMs: this.settings.get('handy.defaultOffset') || 0,
         suggestedMs: suggested,
+        deviceSign: handySign,
         vrOffsetMs,
         onChange: async (v) => {
           this.settings.set('handy.defaultOffset', v);
@@ -3025,6 +3631,8 @@ export class ConnectionPanel {
       rowsEl.appendChild(empty);
     }
 
+    this._refreshVideoSyncOffsetRow();
+
     // Wire the Refresh button (idempotent — replaceWith strips old listeners)
     const refreshBtn = this._panel.querySelector('#sync-refresh-btn');
     if (refreshBtn && !refreshBtn._wired) {
@@ -3052,11 +3660,31 @@ export class ConnectionPanel {
   }
 
   /**
+   * The Sync tab's "This video" row (#380): built on first use, then only
+   * re-read, so a − / + press never rebuilds the device rows. Hidden with
+   * its section while no library video is loaded. No device needs to be
+   * connected: the delta is saved now and applies when one is.
+   */
+  _refreshVideoSyncOffsetRow() {
+    const section = this._panel?.querySelector('#sync-video-offset-section');
+    if (!section || !this.getVideoSyncOffset) return;
+    if (!this._videoSyncOffsetRow) {
+      this._videoSyncOffsetRow = createVideoSyncOffsetRow({
+        getState: () => this.getVideoSyncOffset?.() || null,
+        onChange: (ms) => this.onVideoSyncOffsetChange?.(ms),
+      });
+      section.appendChild(this._videoSyncOffsetRow.el);
+    }
+    this._videoSyncOffsetRow.refresh();
+    section.hidden = this._videoSyncOffsetRow.el.hidden;
+  }
+
+  /**
    * Build one device's offset control row: label, current value, suggested
    * value with Apply button, and the slider for live tuning. Centralised
    * so adding a new device type is just one more call site.
    */
-  _buildSyncRow({ label, currentMs, suggestedMs, onChange, onApply, vrOffsetMs }) {
+  _buildSyncRow({ label, currentMs, suggestedMs, onChange, onApply, vrOffsetMs, deviceSign = 1 }) {
     const row = document.createElement('div');
     row.className = 'connection-panel__section';
     row.style.cssText = 'padding:10px;border:1px solid rgba(255,255,255,0.08);border-radius:6px;margin-bottom:8px';
@@ -3079,12 +3707,25 @@ export class ConnectionPanel {
     // Surface the stacked total so users don't double-compensate.
     const fmt = (ms) => (ms >= 0 ? `+${ms}` : `${ms}`);
     let totalEl = null;
+    // The playing video's own delta (#380) stacks on top too; it is named in
+    // the line only when it is not 0, so without one the line is as before.
+    // The line counts in "negative = earlier" for every term, so a device
+    // whose own offset runs the other way (the Handy, deviceSign -1) is
+    // converted first: a Handy at +50 fires 50 ms early and shows as -50.
+    const writeTotal = (deviceMs) => {
+      if (!totalEl) return;
+      const videoMs = Number(this.getVideoSyncOffset?.()?.ms) || 0;
+      const devEarlyMs = deviceSign * deviceMs || 0;
+      const total = devEarlyMs + vrOffsetMs + videoMs;
+      totalEl.textContent = videoMs
+        ? t('connection.sync.vrModeTotalVideo', { device: fmt(devEarlyMs), vr: fmt(vrOffsetMs), thisVideo: fmt(videoMs), total: fmt(total) })
+        : t('connection.sync.vrModeTotal', { device: fmt(devEarlyMs), vr: fmt(vrOffsetMs), total: fmt(total) });
+    };
     if (Number.isFinite(vrOffsetMs) && vrOffsetMs !== 0) {
       totalEl = document.createElement('div');
       totalEl.className = 'connection-panel__sync-row-total';
       totalEl.style.cssText = 'font-size:11px;opacity:0.6;margin-bottom:6px';
-      const total = currentMs + vrOffsetMs;
-      totalEl.textContent = t('connection.sync.vrModeTotal', { device: fmt(currentMs), vr: fmt(vrOffsetMs), total: fmt(total) });
+      writeTotal(currentMs);
       row.appendChild(totalEl);
     }
 
@@ -3112,10 +3753,7 @@ export class ConnectionPanel {
     slider.addEventListener('input', () => {
       const v = parseInt(slider.value, 10) || 0;
       valEl.textContent = `${v} ms`;
-      if (totalEl) {
-        const total = v + vrOffsetMs;
-        totalEl.textContent = t('connection.sync.vrModeTotal', { device: fmt(v), vr: fmt(vrOffsetMs), total: fmt(total) });
-      }
+      writeTotal(v);
     });
     slider.addEventListener('change', () => {
       const v = parseInt(slider.value, 10) || 0;
@@ -3124,6 +3762,8 @@ export class ConnectionPanel {
       applyBtn.disabled = v === suggestedMs;
     });
     row.appendChild(slider);
+    // A "This video" press re-reads the total without rebuilding the row.
+    row._refreshSyncTotal = () => writeTotal(parseInt(slider.value, 10) || 0);
 
     return row;
   }

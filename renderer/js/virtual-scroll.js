@@ -86,7 +86,14 @@ export function computeGridRange({ totalItems, columns, rowHeight, viewportHeigh
 
   const totalRows = Math.ceil(totalItems / columns);
   const totalHeight = totalRows * rowHeight;
-  const rawStartRow = Math.floor(scrollTop / rowHeight);
+  // Clamp to what this layout can actually scroll to. A scrollTop from a
+  // DIFFERENT layout (list mode's 50px rows, carried into grid mode by the
+  // restore) can be past the end of this one: unclamped, startRow landed
+  // beyond the last row and the range came back empty, so nothing rendered
+  // and the row-height measurement found no card to measure (V30).
+  const maxScrollTop = Math.max(0, totalHeight - viewportHeight);
+  const clampedScrollTop = Math.min(Math.max(0, scrollTop || 0), maxScrollTop);
+  const rawStartRow = Math.floor(clampedScrollTop / rowHeight);
   const rawVisibleRows = Math.ceil(viewportHeight / rowHeight);
 
   const startRow = Math.max(0, rawStartRow - overscan);

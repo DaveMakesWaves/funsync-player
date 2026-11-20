@@ -9,8 +9,15 @@
 // Editor / queue / back / playlist) lives in the main window.
 
 import { t, initI18n, setLocale, translatePage } from './js/i18n.js';
+import { eventBus } from './js/event-bus.js';
 import { installConsoleForwarding } from './js/logger.js';
-import { applyWcoClass } from './js/wco.js';
+import { watchWcoClass } from './js/wco.js';
+import { layoutKey } from './js/keyboard-layout.js';
+import { localizeChordPart } from './js/keyboard-help.js';
+import { targetOwnsKey } from './js/keyboard.js';
+import { playedSeconds } from './js/video-load-check.js';
+import { isPictureStarved, ProgressWatch } from './js/playback-stall.js';
+import { showUpdateAvailableToast, showUpdateReadyToast } from './js/update-toasts.js';
 import {
   createIcons, Play, Pause, RotateCcw, Volume2, Volume1, VolumeX,
   ChevronDown, PictureInPicture2, Maximize, Minimize, Repeat1,
@@ -22,15 +29,16 @@ import { ProgressBar } from './js/progress-bar.js';
 import { InlineViz } from './components/inline-viz.js';
 import { UpNextCard } from './components/up-next-card.js';
 import {
-  INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME,
+  INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME, SET_LOOP,
   HEATMAP, CHAPTERS, VARIANTS, SWITCH_VARIANT, QUEUE_STATE, LOAD_PREV, LOAD_NEXT,
   UP_NEXT, UP_NEXT_ACTION, THEME, LOCALE, READY, TIME_TICK, VIDEO_EVENT, VIDEO_META,
-  SET_INLINE_VIZ, makeMessage, classifyMessage,
+  SET_INLINE_VIZ, INLINE_VIZ_STATE, ORGASM_HOLD, EDGE_HOLD, makeMessage, classifyMessage,
 } from './js/player-popout-protocol.js';
 
 try { installConsoleForwarding(); } catch { /* non-fatal */ }
 // Frameless window → the page owns the drag region (.ppo-dragstrip).
-applyWcoClass();
+// Kept in step with the overlay for the whole session, not just at boot (FT-055).
+watchWcoClass({ where: 'player pop-out' });
 
 const $ = (id) => document.getElementById(id);
 const loadingEl = $('player-popout-loading');
@@ -51,8 +59,25 @@ let _backendPort = null;
 // Metadata for the up-next card the engine (in main) last asked us to show.
 // The card resolves its title/duration via a library shim keyed on this.
 let _upNextMeta = null;
+// Repaints the loop chip + menu state; set up in setupPlayer so SET_LOOP
+// from main can refresh the same UI the local toggle does.
+let _updateLoopUI = null;
+// READY goes out once, and only once setupPlayer() has run. Main answers it
+// with INITIAL_STATE + LOAD_VIDEO, and a LOAD_VIDEO that lands before the
+// VideoPlayer exists is dropped. It used to be sent from both 'opened' and
+// the i18n init, so main sent the state and the video twice (V17).
+let _setupDone = false;
+let _readySent = false;
 
 function send(payload) { window.funsync?.playerPopoutRelay?.('to-parent', payload); }
+/** X / Z held down in this window (the press was sent, the release not yet). */
+const _holdKeys = { orgasm: false, edge: false };
+
+function sendReady() {
+  if (!_setupDone || _readySent) return;
+  _readySent = true;
+  send(makeMessage(READY));
+}
 
 /**
  * Wire the TL/HM checkbox items in the overflow menu. Mirrors the main
@@ -126,14 +151,32 @@ function _applyInlineVizState(state) {
   _vizState.heatmap = state.heatmap === true;
   inlineViz?.setTimelineVisible(_vizState.timeline);
   inlineViz?.setHeatmapVisible(_vizState.heatmap);
+  // HM playhead marker (#381): the main window's setting, read when the
+  // pop-out opens. A change while it is open arrives as INLINE_VIZ_STATE.
+  inlineViz?.setHeatmapPlayhead(state.playhead === true);
   $('btn-inline-tl')?.setAttribute('aria-checked', String(_vizState.timeline));
   $('btn-inline-hm')?.setAttribute('aria-checked', String(_vizState.heatmap));
-  const pct = Number(state.opacity);
-  if (Number.isFinite(pct)) {
-    document.documentElement.style.setProperty(
-      '--inline-viz-opacity', String(Math.min(100, Math.max(20, pct)) / 100),
-    );
-  }
+  _applyInlineVizOpacity(state.opacity);
+}
+
+/** The overlay opacity (percent, clamped 20-100), as the main window applies it. */
+function _applyInlineVizOpacity(value) {
+  const pct = Number(value);
+  if (value === null || value === undefined || !Number.isFinite(pct)) return;
+  document.documentElement.style.setProperty(
+    '--inline-viz-opacity', String(Math.min(100, Math.max(20, pct)) / 100),
+  );
+}
+
+/**
+ * Settings > Playback changed the HM playhead marker or the overlay opacity
+ * while this window is open (FT-028: before, it took effect only on the next
+ * open). Applied here; nothing is sent back, main already saved it.
+ */
+function _applyInlineVizLive(state) {
+  if (!state) return;
+  if (typeof state.playhead === 'boolean') inlineViz?.setHeatmapPlayhead(state.playhead);
+  _applyInlineVizOpacity(state.opacity);
 }
 function applyTheme(theme) {
   if (theme === 'dark' || theme === 'light') document.documentElement.dataset.theme = theme;
@@ -151,13 +194,53 @@ function applyStyle(style) {
 }
 
 // --- clock streaming up to main (drives the device-sync proxy) ---
+// N-01: a stall fires no 'pause', and `paused` stayed false through it, so
+// main's proxy kept "playing" at a frozen time while the Handy ran 12 s
+// ahead, and when the picture moved again nothing re-anchored it
+// (reproduced 2026-11-16). Each tick also says whether the picture is
+// stalled: starved, seeking or failed (the phone's remote-sync.js test), or
+// a time that has not moved for a second. `paused` stays the element's own
+// flag, which main's Play/Pause toggle needs.
+const _progress = new ProgressWatch();
+function stallState() {
+  const paused = !!video.paused;
+  const starved = isPictureStarved(video);
+  // Starved counts as accounted for, so the watch restarts its window when
+  // the picture moves again instead of reporting the stall's old one.
+  const frozen = _progress.sample(video.currentTime || 0, paused || starved, performance.now());
+  return { paused, stalled: !paused && (starved || frozen) };
+}
 function sendTick() {
+  const { paused, stalled } = stallState();
   send(makeMessage(TIME_TICK, {
     timeMs: Math.round((video.currentTime || 0) * 1000),
-    paused: !!video.paused,
+    paused,
+    stalled,
     rate: video.playbackRate || 1,
     loop: !!video.loop, // main suppresses Up Next / auto-advance while looping
+    ...decodeReport(),
   }));
+}
+
+/**
+ * What main's no-frames check needs from THIS window's <video> (E-10, also
+ * in v0.9.2): with the player popped out it skipped the check (the inline
+ * copy is paused and hidden), so a track that has a size but decodes no
+ * frames played black here with no message. Frames decoded so far (null when
+ * the browser cannot say), seconds actually played, and whether this window
+ * is hidden (a minimised window may legitimately skip decoding).
+ */
+function decodeReport() {
+  let frames = null;
+  try {
+    const q = video.getVideoPlaybackQuality?.();
+    if (q && typeof q.totalVideoFrames === 'number') frames = q.totalVideoFrames;
+  } catch { /* unknown */ }
+  return {
+    frames,
+    playedSec: Math.round(playedSeconds(video) * 1000) / 1000,
+    hidden: document.visibilityState === 'hidden',
+  };
 }
 function startTicks() { if (!_tickTimer) _tickTimer = setInterval(sendTick, 100); }
 function stopTicks() { if (_tickTimer) { clearInterval(_tickTimer); _tickTimer = null; } }
@@ -174,6 +257,25 @@ function renderQueueState({ hasPrev, hasNext, label } = {}) {
 function render() {
   if (!_i18nReady) return;
   if (loadingEl && !_hasVideo) loadingEl.textContent = t('player.windowWaiting');
+}
+
+/**
+ * Re-apply, in the new language, everything this window paints from state.
+ * setLocale() walks the static data-i18n keys and only then emits
+ * language:changed, so this runs after the walk. The walk alone reset
+ * "Loop video" to "Off" with loop on and a muted video's button to "Mute"
+ * (app test V69). It always lands late on open: main's READY handoff sends
+ * SET_VOLUME and SET_LOOP while the INITIAL_STATE locale is still loading.
+ * The Up Next card redraws itself.
+ */
+function retranslateWindow() {
+  _updateLoopUI?.();
+  videoPlayer?.refreshLabels?.();
+  // An open shortcut card was built in the old language and has no data-i18n
+  // keys for the walk: build it again (FT-065).
+  const card = document.getElementById('ppo-shortcuts');
+  if (card) { card.remove(); showShortcutsHelp(); }
+  render();
 }
 
 // --- build the reused player once i18n is ready ---
@@ -201,8 +303,22 @@ function setupPlayer() {
     videoPlayer,
     backendPort: _backendPort,
   });
-  // Hover scrubbing preview (same wiring the inline player uses).
-  videoPlayer.onProgressHover = (timeSeconds) => progressBar.updateThumbnailPreview(timeSeconds);
+  // A Stash marker's hover label in this window's language, worded as the
+  // main window's (app.js _applyStashMarkers; s1-review-a RA-S1-6). t()
+  // reads the current language at hover time, so a live switch follows.
+  progressBar.stashMarkerLabel = (title) => (title
+    ? t('player.stashMarker', { title })
+    : t('player.stashMarkerUntitled'));
+  // Hover scrubbing preview and the marker label (same wiring the inline
+  // player uses, app.js): the chapter, bookmark or Stash marker under the
+  // cursor is named above the thumbnail. Before the Stash fix-up
+  // (RA-S1-6) this window drew its markers but never named them on hover.
+  videoPlayer.onProgressHover = (timeSeconds, xPx, widthPx) => {
+    progressBar.updateThumbnailPreview(timeSeconds);
+    if (Number.isFinite(xPx) && Number.isFinite(widthPx)) {
+      progressBar.updateMarkerTooltip(xPx, widthPx, (videoPlayer.duration || 0) * 1000);
+    }
+  };
 
   // Inline TL/HM overlays — the SAME component as the inline player, fed by
   // the actions main already streams for the seek-bar heatmap.
@@ -249,6 +365,10 @@ function setupPlayer() {
   // the devices) follow. VideoPlayer handles the UI; these are additive.
   video.addEventListener('play', () => {
     startTicks();
+    // A tick first (N-01): it tells main whether the picture can move yet,
+    // so a Play on a position still loading does not start the devices
+    // ahead of it; the 'play' below then only ends a hang's hold (FT-098).
+    sendTick();
     send(makeMessage(VIDEO_EVENT, { event: 'play', timeMs: Math.round(video.currentTime * 1000) }));
   });
   video.addEventListener('pause', () => {
@@ -263,6 +383,12 @@ function setupPlayer() {
     stopTicks();
     send(makeMessage(VIDEO_EVENT, { event: 'ended', timeMs: Math.round(video.currentTime * 1000) }));
   });
+  // Volume lives in main's settings (player.volume); report every change,
+  // from this window's slider or from main's own volume keys, so main can
+  // keep the saved value and its next relative step in step (V13).
+  video.addEventListener('volumechange', () => {
+    send(makeMessage(VIDEO_EVENT, { event: 'volumechange', volume: video.volume, muted: video.muted }));
+  });
 
   // Buffering / hand-off spinner.
   video.addEventListener('waiting', () => showSpinner(true));
@@ -270,6 +396,14 @@ function setupPlayer() {
   video.addEventListener('playing', () => showSpinner(false));
   video.addEventListener('canplay', () => showSpinner(false));
   video.addEventListener('seeked', () => showSpinner(false));
+  // Stall boundaries push a tick at once (N-01), as the phone does: each one
+  // flips `stalled`, which holds or releases the devices in main, and the
+  // 100 ms cadence alone would let a device run on (or wait) that long.
+  // Only while ticks stream: a paused window has nothing to hold.
+  const stallBoundary = () => { if (_tickTimer) sendTick(); };
+  for (const ev of ['waiting', 'seeking', 'stalled', 'playing', 'canplay', 'error']) {
+    video.addEventListener(ev, stallBoundary);
+  }
 
   // Variant selector — click relays the chosen label up; main does the
   // actual switch (loads script, re-uploads to cloud devices) and streams
@@ -301,6 +435,14 @@ function setupPlayer() {
     if (chip) chip.hidden = (rate === 1);
   };
   const applyRate = (rate) => { videoPlayer.setPlaybackRate(rate); updateSpeedUI(rate); };
+  // A rate set from main (SET_RATE, its < / > keys) repaints the chip too.
+  // And every change is reported up at once: ticks only stream during
+  // playback, so while paused main's proxy kept the old rate, and its
+  // < / > keys stepped from that (V13).
+  video.addEventListener('ratechange', () => {
+    updateSpeedUI(video.playbackRate || 1);
+    sendTick();
+  });
   const openSpeedPopover = () => {
     speedPopover.replaceChildren();
     const cur = video.playbackRate || 1;
@@ -323,7 +465,10 @@ function setupPlayer() {
     if ($('loop-video-state')) $('loop-video-state').textContent = on ? t('player.loopVideo.stateOn') : t('player.loopVideo.stateOff');
     $('btn-loop-video')?.setAttribute('aria-checked', String(on));
   };
-  const toggleLoop = () => { video.loop = !video.loop; updateLoopUI(); };
+  _updateLoopUI = updateLoopUI;
+  // Tick at once so main's Up Next suppression follows the loop flag even
+  // while paused (ticks only stream during playback).
+  const toggleLoop = () => { video.loop = !video.loop; updateLoopUI(); sendTick(); };
   $('btn-loop-video')?.addEventListener('click', (e) => { e.stopPropagation(); overflowMenu.hidden = true; toggleLoop(); });
   $('loop-chip')?.addEventListener('click', (e) => { e.stopPropagation(); toggleLoop(); });
 
@@ -352,8 +497,17 @@ function setupPlayer() {
     applyRate(SPEEDS[i]);
   };
   window.addEventListener('keydown', (e) => {
-    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-    switch (e.key) {
+    // The main window's rule (keyboard.js targetOwnsKey, C-01): a focused
+    // control keeps only the keys it uses. This returned for ANY focused
+    // <input>, so the volume slider, once Tab had focused it, swallowed
+    // Space, K, F, M and the arrows (E-01, also in v0.9.2). A key the
+    // focused control already handled (the seek bar's arrows, Enter or
+    // Space on the Up Next card) is not acted on a second time either.
+    if (targetOwnsKey(e)) return;
+    // layoutKey (FT-035): the Latin letter on the key when the layout types
+    // another alphabet, so K, F, M, J, L, P, N work on a Russian or Korean
+    // layout too; they matched e.key ('л', 'а', …) and did nothing (CB-07).
+    switch (layoutKey(e)) {
       case ' ': case 'k': e.preventDefault(); videoPlayer.togglePlay(); break;
       case 'f': case 'F': videoPlayer.toggleFullscreen(); break;
       case 'm': case 'M': videoPlayer.toggleMute(); break;
@@ -366,10 +520,47 @@ function setupPlayer() {
       case 'L': if (e.shiftKey) toggleLoop(); break;
       case 'p': e.preventDefault(); send(makeMessage(LOAD_PREV)); break;
       case 'n': e.preventDefault(); send(makeMessage(LOAD_NEXT)); break;
+      // X (Orgasm Switch) and Z (Edge Hold), as in the main window
+      // (keyboard.js): the press is sent once (keydown auto-repeats while
+      // the key is held), the release on keyup below. Main applies hold or
+      // toggle as set (next major, Dave 2026-11-17).
+      case 'x': case 'X':
+        e.preventDefault();
+        if (!_holdKeys.orgasm) { _holdKeys.orgasm = true; send(makeMessage(ORGASM_HOLD, { active: true })); }
+        break;
+      case 'z': case 'Z':
+        e.preventDefault();
+        if (!_holdKeys.edge) { _holdKeys.edge = true; send(makeMessage(EDGE_HOLD, { active: true })); }
+        break;
+      // ? opens this window's shortcut card, as it opens the main window's
+      // list; it opened only from the overflow menu here. Escape closes it
+      // (R3 fix-up, real-app verifier 1).
+      case '?': e.preventDefault(); showShortcutsHelp(); break;
+      case 'Escape': {
+        const card = document.getElementById('ppo-shortcuts');
+        if (card) { e.preventDefault(); card.remove(); }
+        break;
+      }
       default: break;
     }
   });
+  // The release of a hold started above. Like the main window's keyup
+  // (keyboard.js _onKeyUp) it is not gated on focus: a hold that started
+  // must always end, even if a control took the focus meanwhile. The same
+  // layoutKey as the press, so a Russian layout's ч / я end what they began.
+  window.addEventListener('keyup', (e) => {
+    const key = layoutKey(e);
+    if ((key === 'x' || key === 'X') && _holdKeys.orgasm) {
+      _holdKeys.orgasm = false;
+      send(makeMessage(ORGASM_HOLD, { active: false }));
+    }
+    if ((key === 'z' || key === 'Z') && _holdKeys.edge) {
+      _holdKeys.edge = false;
+      send(makeMessage(EDGE_HOLD, { active: false }));
+    }
+  });
 }
+
 
 // Minimal keyboard-shortcuts overlay for the detached window.
 function showShortcutsHelp() {
@@ -378,19 +569,42 @@ function showShortcutsHelp() {
   el = document.createElement('div');
   el.id = 'ppo-shortcuts';
   el.className = 'ppo-shortcuts';
+  // Chords in canonical English, each alternative rendered through the
+  // keys.* names like the main window's ? overlay (localizeChordPart,
+  // CB-08), so a German card reads Leertaste / Umschalt+L instead of
+  // "Space / K", "Shift + L" (R3-24).
   const rows = [
     ['Space / K', t('player.play')],
-    ['← / →', '± 5s'],
-    ['J / L', '± 10s'],
+    ['Left / Right', t('kbd.seek5s')],
+    ['J / L', t('kbd.seek10s')],
     ['M', t('player.mute')],
     ['F', t('player.fullscreen')],
     ['< / >', t('player.speed.menuLabel')],
-    ['Shift + L', t('player.loopVideo.menuLabel')],
+    ['Shift+L', t('player.loopVideo.menuLabel')],
     ['P / N', t('player.previous') + ' / ' + t('player.next')],
   ];
-  el.innerHTML = `<div class="ppo-shortcuts__card"><h2>${t('player.keyboardShortcuts')}</h2>${
-    rows.map(([k, v]) => `<div class="ppo-shortcuts__row"><kbd>${k}</kbd><span>${v}</span></div>`).join('')
-  }</div>`;
+  const card = document.createElement('div');
+  card.className = 'ppo-shortcuts__card';
+  const title = document.createElement('h2');
+  title.textContent = t('player.keyboardShortcuts');
+  card.appendChild(title);
+  for (const [keys, desc] of rows) {
+    const row = document.createElement('div');
+    row.className = 'ppo-shortcuts__row';
+    const chord = document.createElement('span');
+    chord.className = 'ppo-shortcuts__keys';
+    for (const part of keys.split(/\s*\/\s*/)) {
+      if (chord.children.length) chord.appendChild(document.createTextNode(' / '));
+      const kbd = document.createElement('kbd');
+      kbd.textContent = localizeChordPart(part);
+      chord.appendChild(kbd);
+    }
+    const text = document.createElement('span');
+    text.textContent = desc;
+    row.append(chord, text);
+    card.appendChild(row);
+  }
+  el.appendChild(card);
   el.addEventListener('click', () => el.remove());
   document.body.appendChild(el);
 }
@@ -418,7 +632,7 @@ function loadVideo({ src, timeMs, autoplay, title }) {
 }
 
 // --- render funscript-driven overlays (data streamed from main) ---
-function renderVariants(list, activeLabel) {
+function renderVariants(list, activeLabel, activeText, extra = {}) {
   const selector = $('variant-selector');
   const dropdown = $('variant-dropdown');
   const label = $('variant-btn-label');
@@ -426,13 +640,44 @@ function renderVariants(list, activeLabel) {
   const variants = Array.isArray(list) ? list : [];
   if (variants.length < 2) { selector.hidden = true; return; }
   selector.hidden = false;
-  if (label) label.textContent = activeLabel || variants[0]?.label || '';
+  // `text` is the label as shown (main names an unlabelled script by its
+  // file, FN-03); `label` stays what a switch is matched on.
+  const shown = (v) => v?.text || v?.label || '';
+  // The playing entry by place when main says it (`activeIndex`, -1: none
+  // plays), else by label as before.
+  const activeAt = Number.isInteger(extra.activeIndex)
+    ? extra.activeIndex
+    : variants.findIndex((v) => (v.label || '') === activeLabel);
+  const active = activeAt >= 0 ? variants[activeAt] : null;
+  // `activeText`: no entry plays (removed in Manage variations while it
+  // played); main names the script that does, and nothing is marked.
+  if (label) label.textContent = active ? shown(active) : (activeText || activeLabel || shown(variants[0]));
   dropdown.replaceChildren();
-  variants.forEach((v) => {
+  variants.forEach((v, i) => {
     const item = document.createElement('button');
     item.className = 'variant-selector__item';
-    if ((v.label || '') === activeLabel) item.classList.add('is-active');
-    item.textContent = v.label || '';
+    // The same look as the inline menu (FN-03): tinted, ticked and announced
+    // as current. It used to get `is-active`, which no stylesheet styles, so
+    // the pop-out marked nothing.
+    const playing = i === activeAt;
+    if (playing) {
+      item.classList.add('variant-selector__item--active');
+      item.setAttribute('aria-current', 'true');
+    }
+    const check = document.createElement('span');
+    check.className = 'variant-selector__check';
+    check.setAttribute('aria-hidden', 'true');
+    check.textContent = playing ? '✓' : '';
+    const name = document.createElement('span');
+    name.className = 'variant-selector__item-label';
+    name.textContent = shown(v);
+    item.append(check, name);
+    if (v.main && extra.mainTag) {
+      const main = document.createElement('span');
+      main.className = 'variant-selector__main-tag';
+      main.textContent = extra.mainTag;
+      item.appendChild(main);
+    }
     item.addEventListener('click', (e) => {
       e.stopPropagation();
       dropdown.hidden = true;
@@ -490,7 +735,14 @@ function onMessage(payload) {
     case SET_PLAY_STATE: if (payload.paused) video.pause(); else video.play().catch(() => {}); break;
     case SET_RATE: if (payload.rate > 0) videoPlayer?.setPlaybackRate?.(payload.rate); break;
     case SET_VOLUME:
+      // Muted first: setVolume repaints the mute button from video.muted.
+      if (typeof payload.muted === 'boolean') video.muted = payload.muted;
       if (typeof payload.volume === 'number') videoPlayer?.setVolume?.(payload.volume);
+      else if (typeof payload.muted === 'boolean') videoPlayer?.setVolume?.(video.volume);
+      break;
+    case SET_LOOP:
+      video.loop = payload.loop === true;
+      _updateLoopUI?.();
       break;
     case HEATMAP:
       if (Array.isArray(payload.actions)) {
@@ -509,22 +761,39 @@ function onMessage(payload) {
     case CHAPTERS:
       if (progressBar) {
         progressBar.setMarkers({ chapters: payload.chapters || [], bookmarks: payload.bookmarks || [] });
+        progressBar.setStashMarkers?.(payload.stashMarkers || []); // Stash S1: next to the chapters
         if (payload.durationMs) progressBar.renderChapterStrip((payload.durationMs) / 1000);
       }
       break;
-    case VARIANTS: renderVariants(payload.list, payload.activeLabel); break;
+    case VARIANTS: renderVariants(payload.list, payload.activeLabel, payload.activeText, payload); break;
     case QUEUE_STATE: renderQueueState(payload); break;
     case UP_NEXT: handleUpNext(payload); break;
+    case INLINE_VIZ_STATE: _applyInlineVizLive(payload); break;
     case THEME: applyTheme(payload.theme); applyStyle(payload.uiStyle); break;
-    case LOCALE: if (payload.locale) setLocale(payload.locale).then(() => { translatePage(document); render(); }); break;
+    // A live switch in the main window (V50). setLocale walks the static
+    // data-i18n keys itself, then its language:changed runs
+    // retranslateWindow(), which re-applies what this window owns (V69).
+    case LOCALE: if (payload.locale) setLocale(payload.locale).then(() => { render(); }); break;
     default: break;
   }
 }
 
+// --- update notices (FT-101) ---
+// The updater in main sends its events to this window too: someone watching
+// here never saw "Update available" or "ready to install" (also in v0.9.2).
+// Same toasts as the main window (update-toasts.js), in this window's
+// language once it has one.
+function onUpdateEvent(channel, data) {
+  if (channel === 'update:available') showUpdateAvailableToast(data || {});
+  else if (channel === 'update:downloaded') showUpdateReadyToast(data || {});
+}
+
 // --- bootstrap ---
+window.funsync?.onUpdateEvent?.(onUpdateEvent);
+eventBus.on('language:changed', retranslateWindow);
 window.funsync?.onPlayerPopoutEvent?.((evt) => {
   if (!evt) return;
-  if (evt.type === 'opened') { send(makeMessage(READY)); return; }
+  if (evt.type === 'opened') { sendReady(); return; }
   if (evt.type === 'closed') return;
   if (evt.type === 'message') onMessage(evt.payload);
 });
@@ -532,12 +801,14 @@ window.funsync?.onPlayerPopoutEvent?.((evt) => {
 initI18n({ savedLocale: 'en' }).then(() => {
   _i18nReady = true;
   setupPlayer();
-  send(makeMessage(READY));
+  _setupDone = true;
+  sendReady();
   render();
 }).catch((err) => {
   console.warn('[player-window] initI18n failed:', err);
   _i18nReady = true;
   try { setupPlayer(); } catch (e) { console.warn('[player-window] setupPlayer failed:', e); }
-  send(makeMessage(READY));
+  _setupDone = true;
+  sendReady();
   render();
 });

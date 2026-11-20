@@ -66,10 +66,14 @@ export class OrgasmSwitch {
    *   immediately (local, no mode handshake); the Handy waits so its commands
    *   aren't sent before the device is actually in HDSP mode. Default: always ready.
    * @param {() => number} [deps.now]        — monotonic clock (injected for tests)
+   * @param {(dev: object, pos: number, prevPos: number, sinceLastMs: number, startMs: number) => void} [deps.oscillate]
+   *   — drives one oscillate-only device (a flywheel machine) from the loop's
+   *   position, the way ButtplugSync drives it from the script; `startMs` is
+   *   the hold's start on this clock (the ramp-up counts from it)
    * @param {object} [opts]
    * @param {number} [opts.tickIntervalMs=40]
    */
-  constructor({ buttplugManager, tcodeManager, handyManager, onActivate, onDeactivate, handyReady, getCutoff, now } = {}, opts = {}) {
+  constructor({ buttplugManager, tcodeManager, handyManager, onActivate, onDeactivate, handyReady, getCutoff, now, oscillate } = {}, opts = {}) {
     this.buttplugManager = buttplugManager || null;
     this.tcodeManager = tcodeManager || null;
     this.handyManager = handyManager || null;
@@ -101,6 +105,14 @@ export class OrgasmSwitch {
                                 // versa), so the MIN_POS_DELTA skip is
                                 // tracked per channel, not globally.
     this._timer = null;
+    // A one-shot plan (`plan.once`) has played to its end and settled.
+    this._onceDone = false;
+    // Flywheel machines (oscillate only) follow the loop through this
+    // driver (Dave, 2026-11-17): the app hands ButtplugSync's own oscillate
+    // maths in (mode, range, cutoff, invert, Max cap and ramp), so a machine
+    // gets exactly what the video's script would give it. None = they sit
+    // the loop out, as before.
+    this._oscillate = typeof oscillate === 'function' ? oscillate : null;
     // Wrap (don't store a bare reference): the browser/Electron `setInterval`
     // and `clearInterval` MUST be invoked with `this === window`. Storing the
     // bare function and later calling `this._setIntervalImpl(...)` invokes it
@@ -123,9 +135,10 @@ export class OrgasmSwitch {
    * SINGLE-mode plan (broadcast to every connected device kind — the
    * original behavior). Returns true if a usable (>= 2 valid actions)
    * script loaded; false (and clears any prior plan) on bad JSON / missing
-   * or too-few actions.
+   * or too-few actions. `opts.once` (an ending from the pattern library):
+   * play it once from the start of the hold, then hold its last position.
    */
-  loadScript(rawContent) {
+  loadScript(rawContent, opts = {}) {
     if (typeof rawContent !== 'string' || rawContent.length === 0) { this.loadPlan(null); return false; }
     let parsed;
     try { parsed = JSON.parse(stripBOM(rawContent)); } catch { this.loadPlan(null); return false; }
@@ -143,6 +156,7 @@ export class OrgasmSwitch {
       vib: null,
       bpMode: 'broadcast',
       bpRoutes: null,
+      once: opts.once === true,
     });
     return true;
   }
@@ -177,6 +191,8 @@ export class OrgasmSwitch {
   }
 
   get configured() { return !!this._plan && this._durationMs > 0; }
+  /** The plan plays once and holds its end (an ending), instead of looping. */
+  get once() { return this._plan?.once === true; }
   get active() { return this._active; }
 
   /**
@@ -204,6 +220,8 @@ export class OrgasmSwitch {
     this._lastSentPos = -1;
     this._livePos = null;
     this._chanLast = new Map();
+    this._onceDone = false;
+    this._lastOscMs = null;
     try { this.onActivate?.(); } catch { /* swallow — best-effort */ }
     this._timer = this._setIntervalImpl(() => this._tick(), this._tickMs);
     this._tick();  // respond immediately, don't wait a full interval
@@ -227,7 +245,13 @@ export class OrgasmSwitch {
     // (longer) video plays on underneath. ALL channels share this one clock
     // and the plan's loop length (shorter channel scripts clamp-and-hold).
     const elapsed = Math.max(0, this._now() - this._startMs);
-    const loopMs = this._durationMs > 0 ? elapsed % this._durationMs : 0;
+    // An ending (plan.once) plays once from the start of the hold and then
+    // holds its last position: the clock stops at its end, never wraps.
+    const once = this._plan.once === true;
+    if (once && this._onceDone) return;
+    const loopMs = this._durationMs > 0
+      ? (once ? Math.min(elapsed, this._durationMs) : elapsed % this._durationMs)
+      : 0;
 
     // Main channel (absent in axis-only multi plans). Tracked via
     // _lastSentPos, preserving the original single-mode skip contract.
@@ -244,6 +268,39 @@ export class OrgasmSwitch {
       }
     }
     this._send(pos, prev ?? pos, mainMoved, loopMs);
+    if (once && elapsed >= this._durationMs) {
+      // At the end: a stroker stays where the shape ended (its last target
+      // was just sent). Outputs that run on motion (a speed-derived vibrate,
+      // rotate, a flywheel) settle at zero, since the hold has no motion;
+      // nothing else is sent until the release.
+      this._onceDone = true;
+      if (pos !== null) this._settleOnce(pos);
+    }
+  }
+
+  /** The end of a one-shot plan: one last send with no motion (see _tick). */
+  _settleOnce(pos) {
+    this._lastSentPos = pos;
+    const plan = this._plan;
+    if (plan?.bpMode !== 'broadcast') return;
+    const bp = this.buttplugManager;
+    if (!bp?.connected || !Array.isArray(bp.devices)) return;
+    const p = applyCutoff(pos, this._getCutoff('buttplug'));
+    for (const dev of bp.devices) {
+      if (dev?.canOscillate && !dev?.canLinear) {
+        if (this._oscillate) {
+          try { this._oscillate(dev, pos, pos, this._tickMs, this._startMs); } catch { /* */ }
+        }
+        continue;
+      }
+      if (dev?.canOscillate) continue;
+      if (!dev?.canLinear && dev?.canVibrate && !plan.vib) {
+        try { bp.sendVibrate(dev.index, 0); } catch { /* */ }
+      }
+      if (dev?.canRotate) {
+        try { bp.sendRotate(dev.index, 0, true); } catch { /* */ }
+      }
+    }
   }
 
   /**
@@ -318,12 +375,14 @@ export class OrgasmSwitch {
    * stroke; vibe devices take the dedicated vib channel when the plan has
    * one (position IS intensity — it's an intensity script), else the main
    * stroke's speed-formula intensity; rotate devices take the speed formula.
-   * E-stim (canScalar-only) and flywheel MACHINES (canOscillate) are
-   * deliberately NEVER driven — their max-cap + ramp-up safety lives in the
-   * sync engine and the finisher must not bypass it. For a machine that
-   * matters more than for e-stim: the finisher is a sustained hold at high
-   * speed, and a flywheel has inertia it cannot shed on release. Revisit
-   * only after real-hardware time (SCOPE-fuck-machine-oscillate.md §6).
+   * E-stim (canScalar-only) is deliberately NEVER driven — its max-cap +
+   * ramp-up safety lives in the sync engine and the finisher must not
+   * bypass it. Flywheel MACHINES (canOscillate) sat out for the same reason
+   * until Dave said they should follow the Orgasm and Edge loops
+   * (2026-11-17): they now go through the injected `oscillate` driver,
+   * which IS the sync engine's oscillate path (mode, Max cap, ramp-up from
+   * the hold's start), and the release zeroes them with the other
+   * sustained outputs. No driver = they sit out, as before.
    */
   _sendBpBroadcast(bp, plan, pos, prevPos, mainMoved, loopMs, dur) {
     const cutoff = this._getCutoff('buttplug');
@@ -340,11 +399,34 @@ export class OrgasmSwitch {
     let vibCh = null;
     if (plan.vib) vibCh = this._chanPos('bp:vib', plan.vib, loopMs);
 
+    // Time since the last tick that reached the machines: the speed a
+    // flywheel gets is the stroke's velocity over that interval, as in
+    // ButtplugSync (`sinceLastMs`), never over a fixed guess.
+    const nowMs = this._now();
+    const sinceLast = this._lastOscMs !== null && this._lastOscMs !== undefined && nowMs > this._lastOscMs
+      ? nowMs - this._lastOscMs : dur;
     for (const dev of bp.devices) {
-      // Machines sit out the finisher entirely — see the note above. Guarded
-      // explicitly rather than relying on them lacking canVibrate, because
-      // some hardware exposes both.
-      if (dev?.canOscillate) continue;
+      // Flywheel machines (oscillate only) follow the loop through the
+      // app's driver: ButtplugSync's own oscillate maths, with the Max cap
+      // and the ramp-up from the hold's start (Dave, 2026-11-17: "yes").
+      // Without a driver they sit the loop out, as they always did.
+      // Hardware that is both linear and oscillate takes the position, as
+      // in ButtplugSync. Guarded explicitly rather than relying on them
+      // lacking canVibrate, because some hardware exposes both.
+      if (dev?.canOscillate && !dev?.canLinear) {
+        if (this._oscillate && p !== null && mainMoved) {
+          // Raw positions: the driver applies the device's own invert,
+          // range and cutoff, as ButtplugSync does.
+          try { this._oscillate(dev, pos, prevPos ?? pos, sinceLast, this._startMs); } catch { /* per-device best-effort */ }
+        }
+        continue;
+      }
+      if (dev?.canOscillate) {
+        if (this._oscillate && dev.canLinear && p !== null && mainMoved) {
+          try { bp.sendLinear(dev.index, p, BP_LINEAR_MOVE_MS); } catch { /* */ }
+        }
+        continue;
+      }
       if (dev?.canLinear) {
         if (p !== null && mainMoved) {
           // Move window, NOT the tick — see BP_LINEAR_MOVE_MS.
@@ -363,6 +445,7 @@ export class OrgasmSwitch {
         try { bp.sendRotate(dev.index, intensity, p >= pPrev); } catch { /* */ }
       }
     }
+    if (p !== null && mainMoved) this._lastOscMs = nowMs;
   }
 
   /**
@@ -379,9 +462,16 @@ export class OrgasmSwitch {
       if (!ch || !ch.moved) continue;
       const dev = bp.devices.find((d) => d && d.index === r.deviceIndex);
       if (!dev) continue;
-      // Same exclusion as the broadcast path: a routed machine still sits
-      // out the finisher.
-      if (dev.canOscillate) continue;
+      // A routed flywheel machine follows its route through the driver, as
+      // in the broadcast path (raw positions: the driver applies the
+      // device's own transforms). Position wins on hardware that is both.
+      // Without a driver every machine sits out, as before.
+      if (dev.canOscillate && (!dev.canLinear || !this._oscillate)) {
+        if (this._oscillate) {
+          try { this._oscillate(dev, ch.pos, ch.prev, dur, this._startMs); } catch { /* */ }
+        }
+        continue;
+      }
       const p = applyCutoff(ch.pos, cutoff);
       const pPrev = applyCutoff(ch.prev, cutoff);
       const speed = dur > 0 ? (Math.abs(p - pPrev) / dur) * 1000 : 0;

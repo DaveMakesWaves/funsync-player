@@ -142,6 +142,19 @@
               <label class="sheet__option"><input type="radio" name="vr" value="flat"><span data-i18n="webRemote.filterSheet.vrFlat">Non-VR</span></label>
             </div>
           </section>
+          <!-- Tags (P1 tags, 2026-11-18): the desktop's merged tags, grouped by
+               facet. Filled by app.js from /api/remote/tags when the sheet
+               first opens; hidden while there are none. Not remembered
+               across launches. -->
+          <section class="sheet__group sheet__group--tags" id="tagFilterGroup" aria-labelledby="tagFilterTitle" hidden>
+            <h3 class="sheet__group-title" id="tagFilterTitle" data-i18n="webRemote.filterSheet.tagsHeader">Tags</h3>
+            <div class="sheet__tag-find" id="tagFilterFindRow" hidden>
+              <input type="search" id="tagFilterFind" class="sheet__tag-find-input" autocomplete="off" enterkeyhint="search"
+                     placeholder="Find a tag…" data-i18n-placeholder="webRemote.filterSheet.tagsFindPlaceholder"
+                     aria-label="Find a tag" data-i18n-aria-label="webRemote.filterSheet.tagsFindLabel">
+            </div>
+            <div id="tagFilterFacets"></div>
+          </section>
         </div>
       </div>
     </div>

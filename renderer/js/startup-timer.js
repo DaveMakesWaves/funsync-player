@@ -9,19 +9,27 @@
 //   record('something', 42);
 //   logSummary();
 
+import { isConsoleForwardingInstalled } from './logger.js';
+
 const spans = [];
 let initStart = null;
 
-// Write timing lines through both console.log AND the IPC log-line
-// bridge. The latter writes directly to electron-log's file transport
-// in main, so timing data still lands in main.log even if the renderer
-// console forwarding transport is broken (e.g. when the parent process
-// closed stdout, which causes the EPIPE flood we hit during automated
-// launches).
+// Write timing lines through console.log, and through the IPC log-line
+// bridge only while console forwarding (logger.js) is NOT installed. The
+// bridge writes directly to electron-log's file transport in main, so timing
+// data still lands in main.log without forwarding (e.g. when the parent
+// process closed stdout, which causes the EPIPE flood we hit during automated
+// launches). With forwarding installed console.log already goes down that
+// same bridge, after the console print (which it guards), so writing both
+// put every [Timing] line in main.log twice (FT-086).
 function _emit(line) {
   console.log(line);
+  if (isConsoleForwardingInstalled()) return;
   if (typeof window !== 'undefined' && window.funsync?.logLine) {
-    try { window.funsync.logLine('info', line); } catch { /* ignore */ }
+    try {
+      const p = window.funsync.logLine('info', line);
+      if (p && typeof p.catch === 'function') p.catch(() => {});
+    } catch { /* ignore */ }
   }
 }
 

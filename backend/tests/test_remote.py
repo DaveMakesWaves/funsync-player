@@ -21,7 +21,7 @@ def anyio_backend():
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:5123") as c:  # what the desktop dials (FT-009 gate checks Host)
         yield c
 
 
@@ -125,6 +125,98 @@ async def test_remote_video_variants_surface_when_present(client):
     for entry in multi["variants"]:
         assert entry["scriptUrl"].startswith(f"/api/media/script/{multi['id']}")
         assert f"variant={entry['label']}" in entry["scriptUrl"]
+
+
+# FN-03 / FN-04 (Dave 2026-11-16: "yes variations should show on phone";
+# "the default means nothing"; also in v0.9.2). The desktop now registers the
+# list its own menu shows: the hand-added variations after the scan's, each
+# with the name it shows (`text`: an unlabelled script by its file, never
+# "Default") and whether it is the script the video opens on (`main`). The
+# phone lists, names and switches by what /api/remote/videos passes on.
+@pytest.mark.anyio
+async def test_remote_video_variants_carry_names_main_and_hand_added(client):
+    register_videos([
+        {
+            "path": "C:\\Videos\\Multi.mp4",
+            "name": "Multi.mp4",
+            "funscriptPath": "C:\\Videos\\Multi.funscript",
+            "hasFunscript": True,
+            "variants": [
+                {"label": "Default", "path": "C:\\Videos\\Multi.funscript", "name": "Multi.funscript",
+                 "text": "Multi", "main": True},
+                {"label": "Soft", "path": "C:\\Videos\\Multi (Soft).funscript", "name": "Multi (Soft).funscript",
+                 "text": "Soft", "main": False},
+                # Hand-added (library.manualVariants), in the desktop's order.
+                {"label": "Hard Remix", "path": "C:\\Scripts\\Multi hard remix.funscript",
+                 "name": "Multi hard remix.funscript", "text": "Hard Remix", "main": False},
+            ],
+            "duration": 600,
+        },
+    ])
+    response = await client.get("/api/remote/videos")
+    variants = response.json()["videos"][0]["variants"]
+    assert [(v["label"], v["text"], v["main"]) for v in variants] == [
+        ("Default", "Multi", True),
+        ("Soft", "Soft", False),
+        ("Hard Remix", "Hard Remix", False),
+    ]
+
+
+@pytest.mark.anyio
+async def test_remote_video_variant_text_from_an_older_registration(client):
+    """A registration without `text` (an older desktop) still never shows the
+    scan's word: the unlabelled script is named by its file."""
+    register_videos([
+        {
+            "path": "C:\\Videos\\Old.mp4",
+            "name": "Old.mp4",
+            "funscriptPath": "C:\\Videos\\Old Take.funscript",
+            "hasFunscript": True,
+            "variants": [
+                {"label": "Default", "path": "C:\\Videos\\Old Take.funscript", "name": "Old Take.funscript"},
+                {"label": "Default", "path": "C:\\Videos\\Old Night.FUNSCRIPT"},
+                {"label": "Soft", "path": "C:\\Videos\\Old (Soft).funscript", "name": "Old (Soft).funscript"},
+            ],
+        },
+    ])
+    response = await client.get("/api/remote/videos")
+    variants = response.json()["videos"][0]["variants"]
+    assert [v["text"] for v in variants] == ["Old Take", "Old Night", "Soft"]
+    assert [v["main"] for v in variants] == [False, False, False]
+
+
+@pytest.mark.anyio
+async def test_remote_variant_script_url_survives_a_free_text_label(client, tmp_path):
+    """A hand-added name is free text. Its `scriptUrl` is URL-quoted, so the
+    phone fetches THAT script (for its heatmap), not a 404: unquoted, the
+    query was cut at the & and at the #, and the + read as a space."""
+    import json
+    from routes.media import _path_to_id
+
+    main = tmp_path / "clip.funscript"
+    main.write_text(json.dumps({"actions": [{"at": 0, "pos": 0}]}))
+    manual = tmp_path / "clip slow and soft.funscript"
+    manual.write_text(json.dumps({"actions": [{"at": 0, "pos": 42}]}))
+    label = "Slow & Soft+ #2"
+    register_videos([{
+        "path": str(tmp_path / "clip.mp4"),
+        "name": "clip.mp4",
+        "funscriptPath": str(main),
+        "hasFunscript": True,
+        "variants": [
+            {"label": "Default", "path": str(main), "name": "clip.funscript", "text": "clip", "main": True},
+            {"label": label, "path": str(manual), "name": manual.name, "text": label, "main": False},
+        ],
+    }])
+    response = await client.get("/api/remote/videos")
+    entry = response.json()["videos"][0]["variants"][1]
+    assert entry["label"] == label
+    assert entry["scriptUrl"] == (
+        f"/api/media/script/{_path_to_id(str(tmp_path / 'clip.mp4'))}?variant=Slow%20%26%20Soft%2B%20%232"
+    )
+    script = await client.get(entry["scriptUrl"])
+    assert script.status_code == 200
+    assert script.json()["actions"][0]["pos"] == 42
 
 
 @pytest.mark.anyio

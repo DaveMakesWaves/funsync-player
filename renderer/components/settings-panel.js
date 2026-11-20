@@ -4,14 +4,36 @@ import { Modal } from './modal.js';
 import { icon, Trash2, Pencil, GripVertical } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { classifyOverlap } from '../js/path-utils.js';
-import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale, translatePage } from '../js/i18n.js';
+import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale } from '../js/i18n.js';
 import { createToggleSwitch } from './toggle-switch.js';
-import { FILLER_PRESETS, DEFAULT_PRESET_ID, resolveFillerOptions } from '../js/filler-presets.js';
-import { resolveDepth } from '../js/filler-engine.js';
-import { buildPreviewSample, drawFillerWaveform } from '../js/filler-preview.js';
+import { createPatternTestSession } from '../js/filler-test-player.js';
+import {
+  readPatternChoice, readOrgasmSource, patternChoiceWrites, orgasmSourceWrites, patternChoicePlayer,
+} from '../js/pattern-choice.js';
 import { isUserEnabled, isToggleLocked, setUserEnabled } from '../js/source-state.js';
 import { eventBus } from '../js/event-bus.js';
 import { openFeedbackModal } from './feedback-modal.js';
+import { GlobalHotkeysSettings } from './global-hotkeys-settings.js';
+import { NAV_HIDEABLE_ITEMS } from './nav-bar.js';
+import { binOs } from '../js/recycle-bin.js';
+import { edgeHoldAction } from '../js/pattern-source.js';
+import { createPatternSummaryRow, openPatternDrawer } from './pattern-drawer.js';
+import { StashSettingsBlock } from './settings-stash.js';
+
+// Interface size (V79). The steps and the default come from main's
+// electron/ui-scale.js through the preload, so the select can only offer
+// what main applies and labels the default store.js actually has.
+const uiScaleDefault = () => Number(globalThis.window?.funsync?.uiScaleDefault) || 100;
+function uiScaleSteps() {
+  const steps = globalThis.window?.funsync?.uiScaleSteps;
+  return Array.isArray(steps) && steps.length ? steps.map(Number) : [uiScaleDefault()];
+}
+/** A stored value as the nearest offered step (a hand-edited 120 shows as 125). */
+function nearestUiScale(value, steps) {
+  const n = Number(value);
+  if (value === null || value === undefined || !Number.isFinite(n)) return uiScaleDefault();
+  return steps.reduce((best, s) => (Math.abs(s - n) < Math.abs(best - n) ? s : best), steps[0]);
+}
 
 // Canonical default values for each tunable Playback field. Used by the
 // per-field reset-to-default `↻` button (Shneiderman #6 reversibility)
@@ -22,12 +44,26 @@ const SETTINGS_DEFAULTS = {
   'player.gapSkip.mode': 'off',
   'player.gapFiller.enabled': false,
   'player.gapFiller.presetId': 'slowTease',
+  // Fill gaps longer than (s). Absent, app.js uses Gap Skip's threshold,
+  // else 10 s; ↻ writes 10 s.
+  'player.gapFiller.thresholdSec': 10,
   'player.gapSkip.thresholdSec': 10,
   'player.upNext.mode': 'auto',
   'player.upNext.countdownSec': 10,
   'player.autoplayOnAdvance': false,
+  // MUST match electron/store.js — see the note on preferMultiAxis there.
+  'player.autoplayOnOpen': false,
   'player.rangeExtender.enabled': false,
-  'player.preferMultiAxis': 'single',
+  // MUST match electron/store.js — see the note on preferMultiAxis there.
+  'player.rangeLivePreview': true,
+  // 'multi' since 0.9.3. It was 'single', which meant a user who had gone to
+  // the trouble of downloading .pitch/.roll companions and owned an OSR2 got
+  // single-axis playback with nothing anywhere saying why — the files were
+  // detected and then deliberately ignored (stingray, PM: "multi-axis scripts
+  // don't actually play in multi-axis"). Auto-promotion is already
+  // conservative: it never touches a video whose association the user has set
+  // themselves, so a safer default costs nothing.
+  'player.preferMultiAxis': 'multi',
   'player.smoothing': 'linear',
   'player.speedLimit': 0,
   'player.linearStrategy': 'action-boundary',
@@ -35,17 +71,67 @@ const SETTINGS_DEFAULTS = {
   'player.minStrokeMs': 60,
   'library.movingPreviews': true,
   'library.folderPreviews': true,
-  'player.miniPlayer': true,
+  // MUST match electron/store.js (FT-102).
+  'library.folderScriptsAsVariants': false,
+  // Off: cards look as they always did (P1 tags, Round 3). MUST match electron/store.js.
+  'library.showTagsOnCards': false,
+  // Off since 0.9.3 (promised to lr_x3). MUST match electron/store.js.
+  'player.miniPlayer': false,
 };
+
+// The keys v0.9.2 reads, as it stored them. A Pattern block never writes
+// them (a downgrade must find them exactly as they were); pattern-choice.js
+// promises the same, and this holds it to that.
+const OLD_PATTERN_KEYS = new Set([
+  'player.orgasmPattern', 'player.orgasmLibraryPattern', 'player.edgePattern',
+  'player.gapFiller.presetId', 'player.gapFiller.custom',
+]);
+const OLD_GAP_FILLER_FIELDS = ['presetId', 'custom'];
+
+/**
+ * patternChoiceWrites' list as it may be saved: an old key is dropped, and a
+ * whole `player.gapFiller` keeps presetId / custom exactly as read (present
+ * or absent).
+ * @param {{key: string, value: any}[]} writes
+ * @param {object} player — settings.player as read before the change
+ */
+export function safePatternWrites(writes, player) {
+  const out = [];
+  for (const w of Array.isArray(writes) ? writes : []) {
+    if (!w || typeof w.key !== 'string' || OLD_PATTERN_KEYS.has(w.key)) continue;
+    if (w.key === 'player' || w.key === 'player.gapFiller') {
+      // Whole objects: put the old fields back as they were read.
+      const read = w.key === 'player' ? (player || {}) : (player?.gapFiller || {});
+      const value = w.value && typeof w.value === 'object' ? { ...w.value } : w.value;
+      if (value && typeof value === 'object') {
+        if (w.key === 'player') {
+          for (const k of ['orgasmPattern', 'orgasmLibraryPattern', 'edgePattern', 'gapFiller']) {
+            if (k in read) value[k] = read[k]; else delete value[k];
+          }
+        } else {
+          for (const k of OLD_GAP_FILLER_FIELDS) {
+            if (k in read) value[k] = read[k]; else delete value[k];
+          }
+        }
+      }
+      out.push({ key: w.key, value });
+      continue;
+    }
+    out.push({ key: w.key, value: w.value });
+  }
+  return out;
+}
 
 export class SettingsPanel {
   constructor({
     settings,
     onSourcesChanged,
     onGapSkipChanged,
+    onGapFillerChanged,
     onUpNextChanged,
     onPreferMultiAxisChanged,
     getMultiAxisEligibleCount,
+    onFindDuplicates,
     onSmoothingChanged,
     onSpeedLimitChanged,
     onLinearStrategyChanged,
@@ -53,17 +139,29 @@ export class SettingsPanel {
     onMinStrokeChanged,
     onRangeExtenderChanged,
     onInlineVizOpacityChanged,
+    onInlineHeatmapPlayheadChanged,
+    onDeviceSimOpacityChanged,
     onLibraryDisplayChanged,
+    onNavHiddenChanged,
     onPickOrgasmScript,
     onClearOrgasmScript,
     getOrgasmScriptName,
+    onOrgasmPatternChanged,
     getConnectionState,
     getUnreachableSources,
+    getFailedScanSources,
     onRecheckSources,
     onTestFillerPattern,
     onStopFillerTest,
+    getStashVideos,
+    onOpenStashCheck,
   }) {
     this._settings = settings;
+    // Settings > Sources > Stash (S1): Sync now sends the library's videos
+    // (app.js has them), and a Need-a-check row's Choose… opens that video's
+    // dialog at File on its Stash choice (app.js → library.js).
+    this.getStashVideos = getStashVideos || (() => []);
+    this.onOpenStashCheck = onOpenStashCheck || null;
     // Filler test button. The panel owns no devices — app.js holds the sync
     // engines, so it hands back a start/stop pair and reports progress.
     this.onTestFillerPattern = onTestFillerPattern || null;
@@ -73,11 +171,24 @@ export class SettingsPanel {
     // Supplied as a GETTER, not a value, so a re-probe is reflected without
     // re-constructing the panel.
     this.getUnreachableSources = getUnreachableSources || (() => new Set());
+    // Sources whose folder exists but could not be read on the last scan.
+    // Only the Recheck summary reads this; it does not lock the toggle.
+    this.getFailedScanSources = getFailedScanSources || (() => new Set());
     this.onRecheckSources = onRecheckSources || null;
     this.onGapSkipChanged = onGapSkipChanged || null;
+    // Every option app.js passes has to be named above AND kept here: a key
+    // the destructuring leaves out is dropped without a word, and the
+    // `if (this.onX)` at its call site then quietly does nothing. These two
+    // were passed and dropped, so gap filler and the simulator opacity only
+    // applied on the next video / restart (app test V71). Pinned by
+    // settings-panel-callbacks.test.js.
+    this.onGapFillerChanged = onGapFillerChanged || null;
     this.onUpNextChanged = onUpNextChanged || null;
     this.onPreferMultiAxisChanged = onPreferMultiAxisChanged || null;
     this.getMultiAxisEligibleCount = getMultiAxisEligibleCount || null;
+    // Opens the duplicate-finder modal. app.js owns it because it needs the
+    // library's video list and has to trigger a rescan after files are removed.
+    this.onFindDuplicates = onFindDuplicates || null;
     this.onSmoothingChanged = onSmoothingChanged || null;
     this.onSpeedLimitChanged = onSpeedLimitChanged || null;
     this.onLinearStrategyChanged = onLinearStrategyChanged || null;
@@ -85,10 +196,18 @@ export class SettingsPanel {
     this.onMinStrokeChanged = onMinStrokeChanged || null;
     this.onRangeExtenderChanged = onRangeExtenderChanged || null;
     this.onInlineVizOpacityChanged = onInlineVizOpacityChanged || null;
+    // HM playhead marker (#381): app.js applies it to the live overlay.
+    this.onInlineHeatmapPlayheadChanged = onInlineHeatmapPlayheadChanged || null;
+    this.onDeviceSimOpacityChanged = onDeviceSimOpacityChanged || null;
     this.onLibraryDisplayChanged = onLibraryDisplayChanged || null;
+    // Navigation bar section (#381): app.js re-applies the hidden map.
+    this.onNavHiddenChanged = onNavHiddenChanged || null;
     this.onPickOrgasmScript = onPickOrgasmScript || null;
     this.onClearOrgasmScript = onClearOrgasmScript || null;
     this.getOrgasmScriptName = getOrgasmScriptName || null;
+    // Orgasm Switch source "Generated pattern" (#373): app.js reloads the
+    // finisher from the saved `player.orgasmPattern`.
+    this.onOrgasmPatternChanged = onOrgasmPatternChanged || null;
     // Optional — returns a snapshot of device connection state for the
     // "Report a problem" dialog. Caller (app.js) owns the device managers
     // so it's the natural place to read this from.
@@ -103,13 +222,21 @@ export class SettingsPanel {
    * false if cancelled (Esc / backdrop / Cancel button).
    */
   _confirmMultiAxisToggle(eligibleCount) {
-    const count = (typeof eligibleCount === 'number' && eligibleCount >= 0)
-      ? eligibleCount : null;
+    // A number (eligible only) or `{ eligible, assigned }`, where `assigned`
+    // counts videos with companions that already have a playback mode.
+    const detail = (eligibleCount && typeof eligibleCount === 'object') ? eligibleCount : null;
+    const raw = detail ? detail.eligible : eligibleCount;
+    const count = (typeof raw === 'number' && raw >= 0) ? raw : null;
+    const assigned = (typeof detail?.assigned === 'number') ? detail.assigned : 0;
     const subjectLine = (count == null)
       ? t('settingsPanel.multiAxisConfirm.bodyUnknown')
-      : count === 0
-        ? t('settingsPanel.multiAxisConfirm.bodyNone')
-        : t('settingsPanel.multiAxisConfirm.bodyCount', { count });
+      : count > 0
+        ? t('settingsPanel.multiAxisConfirm.bodyCount', { count })
+        // Nothing to assign. "No videos have companion files" is only true
+        // when none are already assigned either (V39).
+        : assigned > 0
+          ? t('settingsPanel.multiAxisConfirm.bodyAllAssigned')
+          : t('settingsPanel.multiAxisConfirm.bodyNone');
 
     return Modal.open({
       title: t('settingsPanel.multiAxisConfirm.title'),
@@ -148,10 +275,27 @@ export class SettingsPanel {
 
   async show() {
     let unsubscribeLang = null;
+    let unsubscribeScale = null;
     await Modal.open({
       title: t('settingsPanel.modalTitle'),
+      // Its own panel layout (modal.css): the dialog body never scrolls,
+      // only the content column (and the rail if it cannot fit). The plain
+      // dialog body scrolled too, so at 125% Settings had two nested
+      // scrollbars (FT-039).
+      panelClass: 'modal-panel--settings',
+      // Escape with a pattern drawer open closes the drawer (its draft
+      // discarded), not Settings.
+      onEscape: () => (this._patternDrawer?.isOpen() ? this._patternDrawer.cancel() : false),
       onRender: (body, close) => {
         this._renderBody(body, close, 'sources');
+
+        // Ctrl+= / Ctrl+- / Ctrl+0 with Settings open: main saved the new
+        // interface size; show it in the select (V79).
+        unsubscribeScale = eventBus.on('settings:changed', ({ path, value } = {}) => {
+          if (path !== 'player.uiScale') return;
+          const select = body.querySelector('[data-setting="player.uiScale"]');
+          if (select) select.value = String(nearestUiScale(value, uiScaleSteps()));
+        });
 
         // Re-render on locale change — strings are baked via t() into the
         // tab labels, section headers, hints, etc. at render time, so
@@ -159,7 +303,13 @@ export class SettingsPanel {
         // tab so the user stays where they were when they picked the
         // language (otherwise they'd get bounced back to Sources).
         unsubscribeLang = eventBus.on('language:changed', () => {
-          const activeTab = body.querySelector('.settings-panel__tab--active')?.dataset.tab || 'sources';
+          // From the rail's own state (activateArea sets it). This used to
+          // query `.settings-panel__tab--active`, a class from the old
+          // horizontal tab strip that nothing sets any more, so every
+          // language change bounced the panel back to Sources and the
+          // refocus below never ran (app test V49).
+          const activeTab = this._activeTabId || 'sources';
+          const scrollTop = this._contentEl?.scrollTop || 0;
           // Update the modal chrome (title + close button) that lives in
           // the parent panel, outside our body.
           const panel = body.closest('.modal-panel');
@@ -171,6 +321,9 @@ export class SettingsPanel {
             closeBtn.title = t('common.close');
           }
           this._renderBody(body, close, activeTab);
+          // activateArea scrolls to the top; put the user back where they
+          // were in the area they stayed on.
+          if (this._contentEl) this._contentEl.scrollTop = scrollTop;
           // Re-focus the language picker so keyboard users keep their
           // place after the rebuild wipes the DOM they were on.
           if (activeTab === 'appearance') {
@@ -181,6 +334,100 @@ export class SettingsPanel {
       },
     });
     if (unsubscribeLang) unsubscribeLang();
+    if (unsubscribeScale) unsubscribeScale();
+    // The Stash block listens to main (sync progress, data changes) and may
+    // hold an Undo; closing Settings ends both (an Undo moves to a toast).
+    this._stashBlock?.destroy();
+    this._stashBlock = null;
+    this._closeSettings = null;
+    // A Pattern block's test does not outlive its Stop button.
+    this._endPatternBlocks();
+  }
+
+  /**
+   * A feature's pattern in Settings (Dave, 2026-11-19 ~14:20: the sections
+   * were "rather big"): ONE summary row (pattern-drawer.js
+   * createPatternSummaryRow: the applied choice in a line, its small graph,
+   * "Set pattern…"), the same for Gap Filler, Orgasm Switch and Edge Hold.
+   * "Set pattern…" opens the shared drawer around the Pattern block
+   * (pattern-source-rows.js) on a DRAFT; only Apply saves it, through
+   * patternChoiceWrites: the keys that names and nothing else
+   * (safePatternWrites drops an old key all the same).
+   * @returns {{ row: object, read: () => object, refresh: () => void, open: () => void }|null}
+   */
+  _mountPatternSetting(feature, mount, {
+    idPrefix, title, featureName, label, oneShotHint, onSaved, sampleOptions,
+  } = {}) {
+    if (!mount) return null;
+    // The same reader app.js plays from, so the row shows what plays.
+    const read = () => readPatternChoice(feature, this._choicePlayer());
+    let row = null;
+    const open = () => {
+      this._patternDrawer?.cancel();
+      const host = this._dialogPanel || mount.closest('.modal-panel') || document.body;
+      this._patternDrawer = openPatternDrawer({
+        host,
+        idPrefix,
+        feature,
+        title,
+        label,
+        oneShotHint,
+        sampleOptions,
+        value: read(),
+        testSession: this._patternTestSession(),
+        // Why nothing played: a video owns the devices, or none is connected.
+        onTestRefused: (status) => showToast(
+          t(status === 'busy' ? 'toast.fillerTestBusy' : 'toast.fillerTestNoDevices'), 'info', 3000,
+        ),
+        onApply: (choice) => {
+          const player = this._choicePlayer();
+          for (const { key, value } of safePatternWrites(patternChoiceWrites(feature, choice, player), player)) {
+            this._settings.set(key, value);
+          }
+          row.setValue(read());
+          if (onSaved) onSaved(choice);
+        },
+        onClose: () => {
+          this._patternDrawer = null;
+          // Back where the user was: the button that opened it.
+          if (row.button.isConnected) row.button.focus();
+        },
+      });
+    };
+    row = createPatternSummaryRow({
+      idPrefix, featureName, feature, sampleOptions, value: read(), onSet: open,
+    });
+    mount.appendChild(row.element);
+    (this._patternRows ||= []).push(row);
+    return { row, read, refresh: () => row.refresh(), open };
+  }
+
+  /** settings.player as the three blocks read it (pattern-choice.js patternChoicePlayer, as app.js). */
+  _choicePlayer() {
+    return patternChoicePlayer((path) => this._settings.get(path));
+  }
+
+  /**
+   * One Test at a time across the three blocks, through app.js's existing
+   * test path (it refuses while a video drives the devices: 'busy').
+   */
+  _patternTestSession() {
+    if (!this._patternTest) {
+      this._patternTest = createPatternTestSession({
+        start: (actions, hooks) => this.onTestFillerPattern?.(actions, hooks),
+        stop: () => this.onStopFillerTest?.(),
+      });
+    }
+    return this._patternTest;
+  }
+
+  /** Close a pattern drawer (its draft discarded), stop a running test, let go of the rows (Settings closed or rebuilt). */
+  _endPatternBlocks() {
+    this._patternDrawer?.cancel();
+    this._patternDrawer = null;
+    this._patternTest?.stop();
+    for (const row of this._patternRows || []) row.destroy();
+    this._patternRows = [];
   }
 
   /**
@@ -204,7 +451,12 @@ export class SettingsPanel {
           { id: 'sp-sec-playback', label: t('settingsPanel.playback.playbackHeader') },
           { id: 'sp-sec-upnext', label: t('settingsPanel.playback.upNextHeader') },
           { id: 'sp-sec-gapskip', label: t('settingsPanel.playback.gapSkipHeader') },
+          // Dave, 2026-11-19 ~15:05 ("Add both"): the three pattern features
+          // each have an entry, next to each other.
+          { id: 'sp-sec-gapfiller', label: t('settingsPanel.playback.fillerHeader') },
           { id: 'sp-sec-orgasm', label: t('settingsPanel.playback.orgasmHeader') },
+          { id: 'sp-sec-edge', label: t('settingsPanel.playback.edgeHeader') },
+          { id: 'sp-sec-global-hotkeys', label: t('settingsPanel.playback.globalHotkeysHeader') },
           { id: 'sp-sec-multiaxis', label: t('settingsPanel.playback.multiHeader') },
           // Linux-only setting, so the group would otherwise be an empty
           // rail entry on Windows.
@@ -218,8 +470,10 @@ export class SettingsPanel {
         groups: [
           { id: 'sp-sec-theme', label: t('settingsPanel.appearance.themeHeader') },
           { id: 'sp-sec-style', label: t('settingsPanel.appearance.styleHeader') },
+          { id: 'sp-sec-scale', label: t('settingsPanel.appearance.scaleHeader') },
           { id: 'sp-sec-language', label: t('settingsPanel.appearance.languageHeader') },
           { id: 'sp-sec-library', label: t('settingsPanel.appearance.libraryHeader') },
+          { id: 'sp-sec-nav', label: t('settingsPanel.appearance.navHeader') },
         ],
       },
       { id: 'data', label: t('settingsPanel.tabData'), groups: [] },
@@ -249,6 +503,15 @@ export class SettingsPanel {
     const rail = this._railEl;
     const content = this._contentEl;
     if (!rail || !content) return;
+    // A clicked group stays lit while its scroll runs and after it (FT-079):
+    // the last sections can never reach the top, so the rule below marked
+    // the one above them (Global hotkeys or Multi-Axis clicked, Orgasm Switch
+    // lit). Released by the scroll's end or the user's own wheel, key or
+    // pointer on the content (_releaseRailPin).
+    if (this._railPin) {
+      this._markRailGroupActive(this._railPin);
+      return;
+    }
     const visibleList = rail.querySelector('.settings-panel__rail-groups:not([hidden])');
     if (!visibleList) return;
 
@@ -258,7 +521,11 @@ export class SettingsPanel {
     // A section counts as "current" once its top has passed just under the
     // top of the viewport; the last such section wins. The tolerance stops
     // a section sitting exactly at the edge from flickering between two.
-    const cutoff = content.scrollTop + 24;
+    // Scrolled to the bottom, the last section whose top is in view wins:
+    // the ones below the cutoff there can never pass it.
+    const atBottom = content.scrollHeight > content.clientHeight
+      && content.scrollTop + content.clientHeight >= content.scrollHeight - 2;
+    const cutoff = atBottom ? content.scrollTop + content.clientHeight - 1 : content.scrollTop + 24;
     let currentId = links[0].dataset.section;
     for (const link of links) {
       const section = content.querySelector(`#${link.dataset.section}`);
@@ -267,8 +534,20 @@ export class SettingsPanel {
     this._markRailGroupActive(currentId);
   }
 
+  /** The user scrolls or acts on the content themselves: the rail follows the view again. */
+  _releaseRailPin() {
+    this._railPin = null;
+  }
+
   _renderBody(body, close, initialTabId) {
+    // A rebuild (a language change) drops the Pattern blocks and their
+    // Stop buttons: their test stops with them.
+    this._endPatternBlocks();
     body.innerHTML = '';
+    // Stash's "Choose…" closes Settings before it opens the video's dialog.
+    this._closeSettings = close;
+    // The pattern drawer opens over the whole dialog.
+    this._dialogPanel = body.closest('.modal-panel');
 
     // Two-column shell: a vertical rail on the left, the active area's
     // panel scrolling on the right. Replaces the old horizontal tab strip,
@@ -304,6 +583,7 @@ export class SettingsPanel {
         if (groupLists[a.id]) groupLists[a.id].hidden = !isActive;
         if (panels[a.id]) panels[a.id].hidden = !isActive;
       }
+      this._railPin = null; // a pin belongs to the area it was clicked in
       content.scrollTop = 0;
       this._activeTabId = areaId;
       const item = rail.querySelector(`[data-area="${areaId}"]`);
@@ -341,6 +621,9 @@ export class SettingsPanel {
             if (!target) return;
             // Scroll the CONTENT column, not the page — the panel is the
             // scrolling container.
+            // Pinned before the scroll starts: its scroll events must not
+            // move the highlight off the group the user picked (FT-079).
+            this._railPin = group.id;
             content.scrollTo({
               top: Math.max(0, target.offsetTop - 8),
               behavior: 'smooth',
@@ -376,7 +659,14 @@ export class SettingsPanel {
     // screen when the user scrolls rather than clicks.
     this._railEl = rail;
     this._contentEl = content;
+    this._railPin = null;
     content.addEventListener('scroll', () => this._syncRailGroupHighlight(), { passive: true });
+    // A rail click's pin (FT-079) ends with its scroll, or as soon as the
+    // user scrolls or acts on the content themselves.
+    content.addEventListener('scrollend', () => this._releaseRailPin(), { passive: true });
+    for (const type of ['wheel', 'keydown', 'pointerdown', 'touchstart']) {
+      content.addEventListener(type, () => this._releaseRailPin(), { passive: true });
+    }
 
     layout.appendChild(rail);
     layout.appendChild(content);
@@ -579,7 +869,10 @@ export class SettingsPanel {
               // while unreachable — that refusal is what preserves the user's
               // last choice across a session where the drive was missing.
               const res = setUserEnabled(srcs, src.id, next, unreachable);
-              if (!res.changed) return;
+              // Explicit false = rejected, so the switch springs back rather
+              // than sitting in a state the stored sources do not agree with.
+              // (setUserEnabled refuses while the path is unreachable.)
+              if (!res.changed) return false;
               this._settings.set('library.sources', res.sources);
               renderSources();
               // Switching a source ON rescans it. Show the same busy state as
@@ -640,7 +933,9 @@ export class SettingsPanel {
           deleteBtn.title = t('settingsPanel.sources.remove');
           deleteBtn.appendChild(icon(Trash2, { width: 14, height: 14 }));
           deleteBtn.addEventListener('click', async () => {
-            const confirmed = await Modal.confirm(t('settingsPanel.sources.removeTitle'), t('settingsPanel.sources.removeConfirm', { name: src.name }));
+            // "Remove", not "Delete": the files stay on disk (the message
+            // says so), and a red Delete button contradicted it.
+            const confirmed = await Modal.confirm(t('settingsPanel.sources.removeTitle'), t('settingsPanel.sources.removeConfirm', { name: src.name }), { confirmText: t('common.remove') });
             if (confirmed) {
               // Pre-action snapshot — removing a source can cascade
               // into collection conversions, so this is one of the
@@ -724,14 +1019,15 @@ export class SettingsPanel {
         const proceed = await Modal.confirm(
           t('settingsPanel.sources.childOverlapTitle'),
           t('settingsPanel.sources.childOverlapBody', { path: dirPath, parentName: overlap.parent.name, parentPath: overlap.parent.path }),
+          { confirmText: t('settingsPanel.sources.addAnyway') },
         );
         if (!proceed) return;
       }
 
       if (overlap.kind === 'parent') {
         const childNames = overlap.children.map(c => `"${c.name}"`).join(', ');
-        const msg = `"${dirPath}" contains existing source${overlap.children.length !== 1 ? 's' : ''} ${childNames}. Those files will be scanned twice unless you remove the nested source${overlap.children.length !== 1 ? 's' : ''}.\n\nRemove nested source${overlap.children.length !== 1 ? 's' : ''} and add this one?`;
-        const confirmed = await Modal.confirm(t('settingsPanel.sources.parentOverlapTitle'), msg);
+        const msg = t('settingsPanel.sources.parentOverlapBody', { path: dirPath, count: overlap.children.length, names: childNames });
+        const confirmed = await Modal.confirm(t('settingsPanel.sources.parentOverlapTitle'), msg, { confirmText: t('settingsPanel.sources.parentOverlapConfirm') });
         if (!confirmed) return;
         removeChildrenIds = new Set(overlap.children.map(c => c.id));
       }
@@ -768,7 +1064,19 @@ export class SettingsPanel {
       try {
         if (this.onRecheckSources) await this.onRecheckSources();
         renderSources();
-        const stillOut = (this.getUnreachableSources() || new Set()).size;
+        // Count the sources the scan could not read as well as the ones the
+        // probe could not reach. A folder that exists but cannot be listed
+        // passes the probe and fails the scan, and Recheck used to report
+        // "All sources are reachable." 50 ms before the scan's "Source
+        // unavailable" toast for the same folder (app test V04). Only paths
+        // that are still enabled sources count, so a removed one cannot linger.
+        const enabledPaths = new Set((this._settings.get('library.sources') || [])
+          .filter((s) => s.enabled !== false)
+          .map((s) => s.path));
+        const stillOut = new Set([
+          ...(this.getUnreachableSources() || []),
+          ...[...(this.getFailedScanSources() || [])].filter((p) => enabledPaths.has(p)),
+        ]).size;
         showToast(
           stillOut > 0
             ? t('settingsPanel.sources.recheckedSome', { count: stillOut })
@@ -787,6 +1095,18 @@ export class SettingsPanel {
     sourceActions.appendChild(addBtn);
     sourceActions.appendChild(recheckBtn);
     panel.appendChild(sourceActions);
+
+    // Stash (S1): a block at the bottom of Sources, not a rail item (Dave's
+    // answer 1 in notes/features/DESIGN-stash-s1.md). settings-stash.js owns
+    // it; a rebuild (a language change) replaces the old block.
+    this._stashBlock?.destroy();
+    this._stashBlock = new StashSettingsBlock({
+      settings: this._settings,
+      getVideos: () => this.getStashVideos(),
+      onOpenCheck: this.onOpenStashCheck ? (videoPath) => this.onOpenStashCheck(videoPath) : null,
+      closeSettings: () => this._closeSettings?.(),
+    });
+    panel.appendChild(this._stashBlock.el);
 
     return panel;
   }
@@ -817,62 +1137,35 @@ export class SettingsPanel {
         <button type="button" id="sp-gap-threshold-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.gapResetThreshold')}" aria-label="${t('settingsPanel.playback.gapResetThresholdAria')}">↻</button>
       </div>
       <div class="settings-panel__hint" id="sp-gap-hint">${t('settingsPanel.playback.gapHint')}</div>
+    `;
+    panel.appendChild(gapSection);
 
+    // Gap Filler: a section of its own since it has its own rail entry
+    // (Dave, 2026-11-19 ~15:05: "Add both"), right after Gap Skip as before.
+    const fillerSection = document.createElement('div');
+    fillerSection.className = 'settings-panel__section';
+    fillerSection.id = 'sp-sec-gapfiller';
+    fillerSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.playback.fillerHeader')}</h2>
+      <!-- Gap Filler's own "when" rows, then (while the filler is on) the
+           pattern's summary row and "Set pattern…", which opens the shared
+           pattern drawer (pattern-drawer.js; the same for Orgasm Switch and
+           Edge Hold, Dave 2026-11-19). -->
       <div class="settings-panel__field">
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerEnable')}</span>
+        <label class="settings-panel__field-label" for="sp-filler-enabled">${t('settingsPanel.playback.fillerEnable')}</label>
         <input type="checkbox" id="sp-filler-enabled" class="settings-panel__input settings-panel__input--checkbox">
         <button type="button" id="sp-filler-enabled-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.fillerResetEnable')}" aria-label="${t('settingsPanel.playback.fillerResetEnableAria')}">↻</button>
       </div>
-      <div class="settings-panel__field" id="sp-filler-preset-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerPattern')}</span>
-        <select id="sp-filler-preset" class="settings-panel__input settings-panel__input--select"></select>
+      <div class="settings-panel__field" id="sp-filler-threshold-row" hidden>
+        <label class="settings-panel__field-label" for="sp-filler-threshold">${t('settingsPanel.playback.fillerThreshold')}</label>
+        <input type="range" id="sp-filler-threshold" class="settings-panel__input settings-panel__input--range" min="5" max="60" step="1" value="10">
+        <span id="sp-filler-threshold-val" class="settings-panel__field-value">10s</span>
+        <button type="button" id="sp-filler-threshold-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.gapResetThreshold')}" aria-label="${t('settingsPanel.playback.fillerResetThresholdAria')}">↻</button>
       </div>
-      <div class="settings-panel__field" id="sp-filler-custom-pattern-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerShape')}</span>
-        <select id="sp-filler-custom-pattern" class="settings-panel__input settings-panel__input--select">
-          <option value="sine">${t('filler.shape.sine')}</option>
-          <option value="triangle">${t('filler.shape.triangle')}</option>
-          <option value="sawtooth">${t('filler.shape.sawtooth')}</option>
-          <option value="square">${t('filler.shape.square')}</option>
-          <option value="escalating">${t('filler.shape.escalating')}</option>
-          <option value="random">${t('filler.shape.random')}</option>
-        </select>
-      </div>
-      <div class="settings-panel__field" id="sp-filler-custom-bpm-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerBpm')}</span>
-        <input type="range" id="sp-filler-custom-bpm" class="settings-panel__input settings-panel__input--range" min="10" max="120" step="1" value="20">
-        <span id="sp-filler-custom-bpm-val" class="settings-panel__field-value">20</span>
-      </div>
-      <div class="settings-panel__field" id="sp-filler-custom-depth-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerDepth')}</span>
-        <input type="range" id="sp-filler-custom-depth" class="settings-panel__input settings-panel__input--range" min="10" max="100" step="5" value="100">
-        <span id="sp-filler-custom-depth-val" class="settings-panel__field-value">100%</span>
-      </div>
-      <div class="settings-panel__field" id="sp-filler-custom-abs-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerAbsolute')}</span>
-        <input type="checkbox" id="sp-filler-custom-abs" class="settings-panel__input settings-panel__input--checkbox">
-      </div>
-      <div class="settings-panel__field" id="sp-filler-custom-absmin-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerAbsMin')}</span>
-        <input type="range" id="sp-filler-custom-absmin" class="settings-panel__input settings-panel__input--range" min="0" max="100" step="5" value="0">
-        <span id="sp-filler-custom-absmin-val" class="settings-panel__field-value">0</span>
-      </div>
-      <div class="settings-panel__field" id="sp-filler-custom-absmax-row" hidden>
-        <span class="settings-panel__field-label">${t('settingsPanel.playback.fillerAbsMax')}</span>
-        <input type="range" id="sp-filler-custom-absmax" class="settings-panel__input settings-panel__input--range" min="0" max="100" step="5" value="100">
-        <span id="sp-filler-custom-absmax-val" class="settings-panel__field-value">100</span>
-      </div>
-      <div id="sp-filler-preview-row" hidden>
-        <canvas id="sp-filler-preview" class="settings-panel__filler-preview" width="260" height="60" role="img" aria-label="${t('settingsPanel.playback.fillerPreviewAria')}"></canvas>
-        <div class="settings-panel__filler-test-row">
-          <button type="button" id="sp-filler-test" class="settings-panel__add-btn">${t('settingsPanel.playback.fillerTest')}</button>
-          <span class="settings-panel__hint" id="sp-filler-stats"></span>
-        </div>
-      </div>
+      <div id="sp-filler-pattern-rows" hidden></div>
       <div class="settings-panel__hint" id="sp-filler-hint">${t('settingsPanel.playback.fillerHint')}</div>
     `;
-    panel.appendChild(gapSection);
+    panel.appendChild(fillerSection);
 
     // Up Next — autoplay-countdown card at the end of the video. Sits
     // next to Gap Skip because both decide what happens at the trailing
@@ -1001,6 +1294,12 @@ export class SettingsPanel {
         <button type="button" id="sp-range-extender-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.rangeExtenderResetTitle')}" aria-label="${t('settingsPanel.playback.rangeExtenderResetAria')}">↻</button>
       </div>
       <div class="settings-panel__hint" id="sp-range-extender-hint">${t('settingsPanel.playback.rangeExtenderHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-range-live-preview">${t('settingsPanel.playback.rangeLivePreviewLabel')}</label>
+        <input type="checkbox" id="sp-range-live-preview" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-range-live-preview-hint">
+        <button type="button" id="sp-range-live-preview-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.rangeLivePreviewResetTitle')}" aria-label="${t('settingsPanel.playback.rangeLivePreviewResetAria')}">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-range-live-preview-hint">${t('settingsPanel.playback.rangeLivePreviewHint')}</div>
       <div class="settings-panel__hint" id="sp-smoothing-hint">${t('settingsPanel.playback.smoothingHint')}</div>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-inline-viz-opacity">${t('settingsPanel.playback.inlineVizOpacityLabel')}</label>
@@ -1010,6 +1309,11 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-inline-viz-opacity-hint">${t('settingsPanel.playback.inlineVizOpacityHint')}</div>
       <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-hm-playhead">${t('settingsPanel.playback.heatmapPlayheadLabel')}</label>
+        <input type="checkbox" id="sp-hm-playhead" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.inlineHeatmapPlayhead') === true ? 'checked' : ''} aria-describedby="sp-hm-playhead-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-hm-playhead-hint">${t('settingsPanel.playback.heatmapPlayheadHint')}</div>
+      <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-device-sim-opacity">${t('settingsPanel.playback.deviceSimOpacityLabel')}</label>
         <input type="range" id="sp-device-sim-opacity" class="settings-panel__input settings-panel__input--range" min="20" max="100" step="5" value="80" aria-describedby="sp-device-sim-opacity-hint">
         <span id="sp-device-sim-opacity-val" class="settings-panel__field-value">80%</span>
@@ -1018,7 +1322,7 @@ export class SettingsPanel {
       <div class="settings-panel__hint" id="sp-device-sim-opacity-hint">${t('settingsPanel.playback.deviceSimOpacityHint')}</div>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
-        <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.miniPlayer') !== false ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
+        <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.miniPlayer') === true ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
       </div>
       <div class="settings-panel__hint" id="sp-mini-player-hint">${t('settingsPanel.appearance.miniPlayerHint')}</div>
       <div class="settings-panel__field">
@@ -1026,15 +1330,41 @@ export class SettingsPanel {
         <input type="checkbox" id="sp-remember-speed" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.rememberPlaybackSpeed') === true ? 'checked' : ''} aria-describedby="sp-remember-speed-hint">
       </div>
       <div class="settings-panel__hint" id="sp-remember-speed-hint">${t('settingsPanel.playback.rememberSpeedHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-open-fullscreen">${t('settingsPanel.playback.openFullscreenLabel')}</label>
+        <input type="checkbox" id="sp-open-fullscreen" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.openFullscreen') === true ? 'checked' : ''} aria-describedby="sp-open-fullscreen-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-open-fullscreen-hint">${t('settingsPanel.playback.openFullscreenHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-autoplay-on-open">${t('settingsPanel.playback.autoplayOnOpenLabel')}</label>
+        <input type="checkbox" id="sp-autoplay-on-open" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.autoplayOnOpen') === true ? 'checked' : ''} aria-describedby="sp-autoplay-on-open-hint">
+        <button type="button" id="sp-autoplay-on-open-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.autoplayOnOpenResetTitle')}" aria-label="${t('settingsPanel.playback.autoplayOnOpenResetAria')}">↻</button>
+      </div>
+      <div class="settings-panel__hint" id="sp-autoplay-on-open-hint">${t('settingsPanel.playback.autoplayOnOpenHint')}</div>
     `;
     playbackSection.querySelector('#sp-mini-player')
       .addEventListener('change', (e) => {
         this._settings.set('player.miniPlayer', !!e.target.checked);
       });
     // No propagation needed — VideoPlayer reads this at each video load.
+    playbackSection.querySelector('#sp-open-fullscreen')
+      ?.addEventListener('change', (e) => {
+        this._settings.set('player.openFullscreen', !!e.target.checked);
+      });
+    // Read live by app.js at each video load — no callback needed.
+    playbackSection.querySelector('#sp-autoplay-on-open')
+      ?.addEventListener('change', (e) => {
+        this._settings.set('player.autoplayOnOpen', !!e.target.checked);
+      });
     playbackSection.querySelector('#sp-remember-speed')
       .addEventListener('change', (e) => {
         this._settings.set('player.rememberPlaybackSpeed', !!e.target.checked);
+      });
+    // HM playhead marker (#381): applied to the live overlay at once.
+    playbackSection.querySelector('#sp-hm-playhead')
+      .addEventListener('change', (e) => {
+        this._settings.set('player.inlineHeatmapPlayhead', !!e.target.checked);
+        if (this.onInlineHeatmapPlayheadChanged) this.onInlineHeatmapPlayheadChanged(!!e.target.checked);
       });
     panel.appendChild(playbackSection);
 
@@ -1048,7 +1378,28 @@ export class SettingsPanel {
     orgasmSection.id = 'sp-sec-orgasm';
     orgasmSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.playback.orgasmHeader')}</h2>
+      <!-- X's own "when" rows (Dave 2026-11-19, same order as Edge Hold's):
+           the key behaviour, then the source: the script file(s) set with
+           Configure… (unchanged), or a pattern: its summary row and
+           "Set pattern…" (the shared pattern drawer, pattern-drawer.js),
+           whose library takes in the old "Generated pattern" shapes as its
+           Simple shapes. -->
       <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-orgasm-mode">${t('settingsPanel.playback.orgasmModeLabel')}</label>
+        <select id="sp-orgasm-mode" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-orgasm-mode-hint">
+          <option value="hold">${t('settingsPanel.playback.orgasmModeHold')}</option>
+          <option value="toggle">${t('settingsPanel.playback.orgasmModeToggle')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__hint" id="sp-orgasm-mode-hint">${t('settingsPanel.playback.orgasmModeHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-orgasm-source">${t('settingsPanel.playback.orgasmSourceLabel')}</label>
+        <select id="sp-orgasm-source" class="settings-panel__input settings-panel__input--select">
+          <option value="file">${t('settingsPanel.playback.orgasmSourceFile')}</option>
+          <option value="pattern">${t('patterns.ui.pattern')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__field" id="sp-orgasm-file-row">
         <span class="settings-panel__field-label">${t('settingsPanel.playback.orgasmScriptLabel')}</span>
         <button type="button" id="sp-orgasm-script-pick" class="settings-panel__add-btn">${t('settingsPanel.playback.orgasmScriptChoose')}</button>
         <button type="button" id="sp-orgasm-script-clear" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.orgasmScriptClear')}" aria-label="${t('settingsPanel.playback.orgasmScriptClear')}">✕</button>
@@ -1058,15 +1409,12 @@ export class SettingsPanel {
            or custom-routing config names several scripts, which never fit on
            one line next to a button). -->
       <div id="sp-orgasm-script-name" class="settings-panel__value-block" hidden></div>
-      <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmScriptHint')}</div>
-      <div class="settings-panel__field">
-        <label class="settings-panel__field-label" for="sp-orgasm-mode">${t('settingsPanel.playback.orgasmModeLabel')}</label>
-        <select id="sp-orgasm-mode" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-orgasm-mode-hint">
-          <option value="hold">${t('settingsPanel.playback.orgasmModeHold')}</option>
-          <option value="toggle">${t('settingsPanel.playback.orgasmModeToggle')}</option>
-        </select>
+      <div id="sp-orgasm-pattern-rows" hidden>
+        <div id="sp-orgasm-pattern-mount"></div>
+        <div class="settings-panel__hint" id="sp-orgasm-pattern-none" hidden>${t('settingsPanel.playback.orgasmLibraryNone')}</div>
+        <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmLibraryHint')}</div>
       </div>
-      <div class="settings-panel__hint" id="sp-orgasm-mode-hint">${t('settingsPanel.playback.orgasmModeHint')}</div>
+      <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmScriptHint')}</div>
     `;
     panel.appendChild(orgasmSection);
 
@@ -1088,8 +1436,40 @@ export class SettingsPanel {
         </select>
       </div>
       <div class="settings-panel__hint" id="sp-edge-mode-hint">${t('settingsPanel.playback.edgeModeHint')}</div>
+      <!-- What Z does while it is on (next major): stop the devices (today)
+           or play a pattern from the library, rows below. -->
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-edge-action">${t('settingsPanel.playback.edgeActionLabel')}</label>
+        <select id="sp-edge-action" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-edge-action-hint">
+          <option value="stop">${t('settingsPanel.playback.edgeActionStop')}</option>
+          <option value="pattern">${t('settingsPanel.playback.edgeActionPattern')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__hint" id="sp-edge-action-hint">${t('settingsPanel.playback.edgeActionHint')}</div>
+      <div id="sp-edge-pattern-rows" hidden></div>
+      <div class="settings-panel__hint" id="sp-edge-pattern-none" hidden>${t('settingsPanel.playback.edgePatternNone')}</div>
     `;
     panel.appendChild(edgeSection);
+
+    // --- Global hotkeys ---
+    // Play/pause, Orgasm Switch and Edge Hold from any app (Eroto #316).
+    // Registration and the handler shipped without any way to set a key
+    // here, and a hand-edited binding applied only at the next launch
+    // (V47). The rows write `player.globalShortcuts`; app.js re-registers
+    // on that setting changing.
+    const hotkeysSection = document.createElement('div');
+    hotkeysSection.className = 'settings-panel__section';
+    hotkeysSection.id = 'sp-sec-global-hotkeys';
+    hotkeysSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.globalHotkeysHeader')}</h2>
+      <div id="sp-global-hotkeys-mount"></div>
+      <div class="settings-panel__hint">${t('settingsPanel.playback.globalHotkeysHint')}</div>
+    `;
+    panel.appendChild(hotkeysSection);
+    new GlobalHotkeysSettings({
+      element: hotkeysSection.querySelector('#sp-global-hotkeys-mount'),
+      settings: this._settings,
+    });
 
 
     // Final order for the rail. Re-appending an existing child MOVES it, so
@@ -1099,8 +1479,10 @@ export class SettingsPanel {
       panel.querySelector('#sp-sec-playback'),
       panel.querySelector('#sp-sec-upnext'),
       panel.querySelector('#sp-sec-gapskip'),
+      panel.querySelector('#sp-sec-gapfiller'),
       panel.querySelector('#sp-sec-orgasm'),
       panel.querySelector('#sp-sec-edge'),
+      panel.querySelector('#sp-sec-global-hotkeys'),
       panel.querySelector('#sp-sec-multiaxis'),
       panel.querySelector('#sp-sec-video'),
     ]) {
@@ -1136,203 +1518,63 @@ export class SettingsPanel {
         if (this.onGapSkipChanged) this.onGapSkipChanged(mode, seconds * 1000);
       });
 
-      // Gap filler — strokes during blank stretches of script.
+      // Gap filler — strokes during blank stretches of script. Its own
+      // "when" rows (on / off, the threshold), then the shared Pattern block
+      // while it is on. The on / off and threshold rows write the whole
+      // `player.gapFiller` object as today, with every other field exactly
+      // as read (presetId / custom are v0.9.2's and never rewritten, and
+      // never added when absent); the block writes only what
+      // patternChoiceWrites says.
       const fillerEnabled = panel.querySelector('#sp-filler-enabled');
-      const fillerPreset = panel.querySelector('#sp-filler-preset');
-      const fillerPresetRow = panel.querySelector('#sp-filler-preset-row');
-      const fillerPreviewRow = panel.querySelector('#sp-filler-preview-row');
-      const fillerCanvas = panel.querySelector('#sp-filler-preview');
-      const fillerStats = panel.querySelector('#sp-filler-stats');
-
-      const fillerCustom = {
-        patternRow: panel.querySelector('#sp-filler-custom-pattern-row'),
-        pattern: panel.querySelector('#sp-filler-custom-pattern'),
-        bpmRow: panel.querySelector('#sp-filler-custom-bpm-row'),
-        bpm: panel.querySelector('#sp-filler-custom-bpm'),
-        bpmVal: panel.querySelector('#sp-filler-custom-bpm-val'),
-        depthRow: panel.querySelector('#sp-filler-custom-depth-row'),
-        depth: panel.querySelector('#sp-filler-custom-depth'),
-        depthVal: panel.querySelector('#sp-filler-custom-depth-val'),
-        absRow: panel.querySelector('#sp-filler-custom-abs-row'),
-        abs: panel.querySelector('#sp-filler-custom-abs'),
-        absMinRow: panel.querySelector('#sp-filler-custom-absmin-row'),
-        absMin: panel.querySelector('#sp-filler-custom-absmin'),
-        absMinVal: panel.querySelector('#sp-filler-custom-absmin-val'),
-        absMaxRow: panel.querySelector('#sp-filler-custom-absmax-row'),
-        absMax: panel.querySelector('#sp-filler-custom-absmax'),
-        absMaxVal: panel.querySelector('#sp-filler-custom-absmax-val'),
-      };
-
-      if (fillerPreset && !fillerPreset.options.length) {
-        for (const p of FILLER_PRESETS) {
-          const opt = document.createElement('option');
-          opt.value = p.id;
-          opt.textContent = t(p.labelKey);
-          fillerPreset.appendChild(opt);
-        }
-        // Custom is not in FILLER_PRESETS — it has no fixed pattern/bpm/depth
-        // by definition, so it is appended rather than living in the table.
-        const customOpt = document.createElement('option');
-        customOpt.value = 'custom';
-        customOpt.textContent = t('filler.preset.custom');
-        fillerPreset.appendChild(customOpt);
-      }
-
+      const fillerThreshold = panel.querySelector('#sp-filler-threshold');
+      const fillerThresholdVal = panel.querySelector('#sp-filler-threshold-val');
+      const fillerThresholdRow = panel.querySelector('#sp-filler-threshold-row');
+      const fillerPatternRows = panel.querySelector('#sp-filler-pattern-rows');
       const savedFiller = this._settings.get('player.gapFiller') || {};
-      const savedCustom = savedFiller.custom || {};
       if (fillerEnabled) fillerEnabled.checked = !!savedFiller.enabled;
-      if (fillerPreset) fillerPreset.value = savedFiller.presetId || DEFAULT_PRESET_ID;
-      if (fillerCustom.pattern) fillerCustom.pattern.value = savedCustom.pattern || 'sine';
-      if (fillerCustom.bpm) fillerCustom.bpm.value = String(savedCustom.bpm ?? 20);
-      if (fillerCustom.depth) fillerCustom.depth.value = String(savedCustom.depthPct ?? 100);
-      if (fillerCustom.abs) fillerCustom.abs.checked = !!savedCustom.absolute;
-      if (fillerCustom.absMin) fillerCustom.absMin.value = String(savedCustom.absolute?.min ?? 0);
-      if (fillerCustom.absMax) fillerCustom.absMax.value = String(savedCustom.absolute?.max ?? 100);
-
-      /** The custom block as stored, read straight off the controls. */
-      const readCustom = () => {
-        const useAbs = !!fillerCustom.abs?.checked;
-        let absolute = null;
-        if (useAbs) {
-          const lo = parseInt(fillerCustom.absMin?.value, 10) || 0;
-          const hi = parseInt(fillerCustom.absMax?.value, 10) || 100;
-          // Degenerate or inverted bands are refused rather than silently
-          // swapped — a swap is a hidden behaviour change the user did not
-          // ask for, and resolveDepth would fall back to full throw anyway.
-          absolute = hi > lo ? { min: lo, max: hi } : null;
-        }
-        return {
-          pattern: fillerCustom.pattern?.value || 'sine',
-          bpm: parseInt(fillerCustom.bpm?.value, 10) || 20,
-          depthPct: parseInt(fillerCustom.depth?.value, 10) || 100,
-          absolute,
-        };
+      // What app.js uses: the filler's own threshold, else Gap Skip's, else 10 s.
+      const fillerThresholdSec = () => {
+        const own = Number(this._settings.get('player.gapFiller')?.thresholdMs);
+        const skip = Number(this._settings.get('player.gapSkip')?.threshold);
+        const ms = own > 0 ? own : (skip > 0 ? skip : 10000);
+        return Math.max(5, Math.min(60, Math.round(ms / 1000)));
       };
-
-      const syncCustomLabels = () => {
-        const c = readCustom();
-        if (fillerCustom.bpmVal) fillerCustom.bpmVal.textContent = String(c.bpm);
-        if (fillerCustom.depthVal) fillerCustom.depthVal.textContent = `${c.depthPct}%`;
-        if (fillerCustom.absMinVal) fillerCustom.absMinVal.textContent = fillerCustom.absMin?.value ?? '0';
-        if (fillerCustom.absMaxVal) fillerCustom.absMaxVal.textContent = fillerCustom.absMax?.value ?? '100';
-      };
-
-      const redrawFillerPreview = () => {
-        const on = !!fillerEnabled?.checked;
-        const isCustom = fillerPreset?.value === 'custom';
-        const useAbs = isCustom && !!fillerCustom.abs?.checked;
-
-        if (fillerPresetRow) fillerPresetRow.hidden = !on;
-        if (fillerPreviewRow) fillerPreviewRow.hidden = !on;
-        // Custom controls only exist when Custom is selected. Absolute
-        // min/max only when the absolute override is on — depth % and an
-        // absolute band are two ways of saying the same thing, so showing
-        // both at once invites the user to set contradictory values.
-        for (const row of [fillerCustom.patternRow, fillerCustom.bpmRow, fillerCustom.absRow]) {
-          if (row) row.hidden = !on || !isCustom;
-        }
-        if (fillerCustom.depthRow) fillerCustom.depthRow.hidden = !on || !isCustom || useAbs;
-        if (fillerCustom.absMinRow) fillerCustom.absMinRow.hidden = !on || !isCustom || !useAbs;
-        if (fillerCustom.absMaxRow) fillerCustom.absMaxRow.hidden = !on || !isCustom || !useAbs;
-
-        syncCustomLabels();
-        if (!on || !fillerCanvas) return;
-
-        // Resolve through the SAME path playback uses, so the preview cannot
-        // drift from what the device will actually do.
-        const opts = resolveFillerOptions({
-          enabled: true,
-          presetId: fillerPreset?.value || DEFAULT_PRESET_ID,
-          custom: readCustom(),
-        });
-        // The panel has no script loaded, so preview against a notional
-        // full-range one. depthPct is a percentage of the AUTHORED range,
-        // and 0-100 is the honest stand-in for "whatever you play it over".
-        const depth = resolveDepth(
-          [{ at: 0, pos: 0 }, { at: 1, pos: 100 }],
-          { depthPct: opts.depthPct, centrePct: opts.centrePct, absolute: opts.absoluteDepth },
-        );
-        const { actions, stats } = buildPreviewSample({
-          pattern: opts.pattern,
-          bpm: opts.bpm,
-          min: depth.min,
-          max: depth.max,
-        });
-        const css = getComputedStyle(document.documentElement);
-        this._fillerPreviewActions = actions;
-        drawFillerWaveform(fillerCanvas, actions, {
-          stroke: css.getPropertyValue('--accent')?.trim() || '#4aa3ff',
-          grid: 'rgba(127,127,127,0.25)',
-        }, { playhead: this._fillerTestHead });
-        if (fillerStats) {
-          fillerStats.textContent = t('settingsPanel.playback.fillerStats', {
-            avg: stats.avgSpeed,
-            max: stats.maxSpeed,
-          });
-        }
-      };
-
-      // Test button — play the previewed pattern through the connected
-      // devices. The preview is drawn in SCRIPT space, so a per-device
-      // invert/range/cutoff can make the hardware do something quite
-      // different from the picture; this is the only way to find that out
-      // without playing a video with a gap in it (Dave, 2026-08-21).
-      const fillerTestBtn = panel.querySelector('#sp-filler-test');
-      if (fillerTestBtn) {
-        const endTest = () => {
-          this._fillerTestHead = null;
-          fillerTestBtn.textContent = t('settingsPanel.playback.fillerTest');
-          redrawFillerPreview();
-        };
-        fillerTestBtn.addEventListener('click', () => {
-          if (this._fillerTestHead !== null && this._fillerTestHead !== undefined) {
-            this.onStopFillerTest?.();
-            endTest();
-            return;
-          }
-          const actions = this._fillerPreviewActions;
-          if (!actions || actions.length < 2) return;
-          const result = this.onTestFillerPattern?.(actions, {
-            onProgress: (progress) => {
-              this._fillerTestHead = progress;
-              redrawFillerPreview();
-            },
-            onEnd: endTest,
-          });
-          if (result === 'started') {
-            this._fillerTestHead = 0;
-            fillerTestBtn.textContent = t('settingsPanel.playback.fillerTestStop');
-            redrawFillerPreview();
-          } else if (result === 'busy') {
-            showToast(t('toast.fillerTestBusy'), 'info', 3000);
-          } else {
-            showToast(t('toast.fillerTestNoDevices'), 'info', 3000);
-          }
-        });
-      }
-
-      const persistFiller = () => {
-        this._settings.set('player.gapFiller', {
-          ...(this._settings.get('player.gapFiller') || {}),
-          enabled: !!fillerEnabled?.checked,
-          presetId: fillerPreset?.value || DEFAULT_PRESET_ID,
-          custom: readCustom(),
-        });
-        redrawFillerPreview();
+      if (fillerThreshold) fillerThreshold.value = String(fillerThresholdSec());
+      if (fillerThresholdVal) fillerThresholdVal.textContent = `${fillerThreshold?.value || 10}s`;
+      const writeFiller = (patch) => {
+        this._settings.set('player.gapFiller', { ...(this._settings.get('player.gapFiller') || {}), ...patch });
         if (this.onGapFillerChanged) this.onGapFillerChanged();
       };
-
-      fillerEnabled?.addEventListener('change', persistFiller);
-      fillerPreset?.addEventListener('change', persistFiller);
-      fillerCustom.pattern?.addEventListener('change', persistFiller);
-      fillerCustom.abs?.addEventListener('change', persistFiller);
-      // Sliders redraw live while dragging but only persist on release, so
-      // a drag across the range doesn't write settings on every frame.
-      for (const el of [fillerCustom.bpm, fillerCustom.depth, fillerCustom.absMin, fillerCustom.absMax]) {
-        el?.addEventListener('input', redrawFillerPreview);
-        el?.addEventListener('change', persistFiller);
-      }
-      redrawFillerPreview();
+      const fillerBlock = this._mountPatternSetting('gapFiller', fillerPatternRows, {
+        idPrefix: 'sp-filler-pattern',
+        featureName: t('settingsPanel.playback.fillerHeader'),
+        title: t('settingsPanel.patternBlock.drawerTitle', { feature: t('settingsPanel.playback.fillerHeader') }),
+        label: t('settingsPanel.patternBlock.groupAria', { feature: t('settingsPanel.playback.fillerHeader') }),
+        oneShotHint: t('settingsPanel.patternBlock.oneShotHintGap'),
+        // The preview's joins at the filler's own cap, as it plays.
+        sampleOptions: Number(savedFiller.maxJoinSpeed) > 0 ? { maxJoinSpeed: Number(savedFiller.maxJoinSpeed) } : undefined,
+        onSaved: () => { if (this.onGapFillerChanged) this.onGapFillerChanged(); },
+      });
+      const syncFiller = () => {
+        const on = !!fillerEnabled?.checked;
+        if (fillerThresholdRow) fillerThresholdRow.hidden = !on;
+        if (fillerPatternRows) fillerPatternRows.hidden = !on;
+        if (on) fillerBlock?.refresh();
+        else if (this._patternDrawer?.isOpen()) this._patternDrawer.cancel();
+      };
+      fillerEnabled?.addEventListener('change', () => {
+        writeFiller({ enabled: !!fillerEnabled.checked });
+        syncFiller();
+      });
+      // The value follows the thumb; it saves on release, so a drag across
+      // the range does not rebuild the filler on every frame.
+      fillerThreshold?.addEventListener('input', () => {
+        if (fillerThresholdVal) fillerThresholdVal.textContent = `${fillerThreshold.value}s`;
+      });
+      fillerThreshold?.addEventListener('change', () => {
+        writeFiller({ thresholdMs: (parseInt(fillerThreshold.value, 10) || 10) * 1000 });
+      });
+      syncFiller();
 
       // Up Next
       const upNextMode = panel.querySelector('#sp-upnext-mode');
@@ -1401,23 +1643,52 @@ export class SettingsPanel {
         const previousValue = this._settings.get('player.preferMultiAxis')
           || SETTINGS_DEFAULTS['player.preferMultiAxis'];
 
-        // Single → Multi triggers the confirmation modal. Multi →
-        // Single is a no-op for already-promoted videos so it doesn't
-        // need a prompt.
-        if (newValue === 'multi' && previousValue !== 'multi') {
-          const eligibleCount = this.getMultiAxisEligibleCount
-            ? this.getMultiAxisEligibleCount()
-            : null;
-          const confirmed = await this._confirmMultiAxisToggle(eligibleCount);
-          if (!confirmed) {
-            // Revert the select silently — no setting write, no callback.
-            preferMulti.value = previousValue;
-            return;
-          }
-        }
+        try {
+          // Single → Multi triggers the confirmation modal. Multi →
+          // Single is a no-op for already-promoted videos so it doesn't
+          // need a prompt.
+          if (newValue === 'multi' && previousValue !== 'multi') {
+            // Yield before counting and before opening anything. Two
+            // reasons, both learned from stingray's report (2026-08-24:
+            // "the app freezes for a few seconds and once it recovers the
+            // drop down remains on single-axis"):
+            //
+            //  1. The count walks the library. It is much cheaper now that
+            //     companions are indexed, but it is still the one piece of
+            //     real work on this path, and doing it inside the `change`
+            //     event means the window is unresponsive while it runs.
+            //  2. Opening a full-screen overlay synchronously from `change`
+            //     puts a backdrop under the pointer before the events that
+            //     follow the native select popup have been dispatched. Those
+            //     hit-test against the live DOM, so a trailing click can land
+            //     on the fresh backdrop and dismiss the dialog as a cancel —
+            //     which reverts the select and writes nothing, exactly the
+            //     symptom reported. Letting the event finish first removes
+            //     the overlap entirely.
+            await new Promise((resolve) => setTimeout(resolve, 0));
 
-        this._settings.set('player.preferMultiAxis', newValue);
-        if (this.onPreferMultiAxisChanged) this.onPreferMultiAxisChanged(newValue);
+            const eligibleCount = this.getMultiAxisEligibleCount
+              ? this.getMultiAxisEligibleCount()
+              : null;
+            const confirmed = await this._confirmMultiAxisToggle(eligibleCount);
+            if (!confirmed) {
+              // Revert the select silently — no setting write, no callback.
+              preferMulti.value = previousValue;
+              return;
+            }
+          }
+
+          this._settings.set('player.preferMultiAxis', newValue);
+          if (this.onPreferMultiAxisChanged) this.onPreferMultiAxisChanged(newValue);
+        } catch (err) {
+          // Never leave the control showing a value that was not saved.
+          // Silently swallowing here is how "I selected it and it didn't
+          // stick" becomes unreportable — put it back and say so.
+          console.error('[SettingsPanel] preferMultiAxis change failed:', err);
+          preferMulti.value = this._settings.get('player.preferMultiAxis')
+            || SETTINGS_DEFAULTS['player.preferMultiAxis'];
+          showToast(t('toast.settingSaveFailed'), 'error', 4000);
+        }
       });
 
       const smoothing = panel.querySelector('#sp-smoothing');
@@ -1457,6 +1728,24 @@ export class SettingsPanel {
       rangeExtender?.addEventListener('change', () => {
         this._settings.set('player.rangeExtender.enabled', !!rangeExtender.checked);
         if (this.onRangeExtenderChanged) this.onRangeExtenderChanged(!!rangeExtender.checked);
+      });
+
+      // Live range preview — with nothing playing, dragging a range slider in
+      // the Connection panel jogs the device to that boundary so you can see
+      // where it actually sits (stingray, 2026-08-24, adjusting for a new
+      // sleeve). On by default: it only ever moves a device the user is
+      // actively dragging a slider for, and it is silent during playback.
+      // Switchable because a device moving unprompted should always be
+      // something you can stop. Read live by ConnectionPanel — no callback.
+      const rangeLivePreview = panel.querySelector('#sp-range-live-preview');
+      const savedPreview = this._settings.get('player.rangeLivePreview');
+      if (rangeLivePreview) {
+        rangeLivePreview.checked = typeof savedPreview === 'boolean'
+          ? savedPreview
+          : SETTINGS_DEFAULTS['player.rangeLivePreview'];
+      }
+      rangeLivePreview?.addEventListener('change', () => {
+        this._settings.set('player.rangeLivePreview', !!rangeLivePreview.checked);
       });
 
       // Orgasm Switch — pick / clear the global orgasm script (hold X to use).
@@ -1516,6 +1805,57 @@ export class SettingsPanel {
         refreshOrgasmName();
       });
 
+      // Orgasm Switch source: the script file(s) (Configure…, untouched by
+      // the other choice, so "Script file" brings them straight back) or a
+      // pattern in the shared block. The select writes `player.orgasmSource`
+      // only: the old `orgasmPattern` / `orgasmLibraryPattern` are v0.9.2's
+      // and never rewritten (a downgrade finds them as they were). Every
+      // change asks app.js to reload the finisher.
+      const orgasmSource = panel.querySelector('#sp-orgasm-source');
+      const orgasmFileRow = panel.querySelector('#sp-orgasm-file-row');
+      const orgasmPatternRows = panel.querySelector('#sp-orgasm-pattern-rows');
+      // No pattern chosen (X starts there): the note says X plays the file.
+      const orgasmPatternNone = panel.querySelector('#sp-orgasm-pattern-none');
+      if (orgasmSource && orgasmPatternRows) {
+        orgasmSource.value = readOrgasmSource(this._choicePlayer()) === 'pattern' ? 'pattern' : 'file';
+        const reloadFinisher = async () => {
+          syncOrgasmSource();
+          if (this.onOrgasmPatternChanged) await this.onOrgasmPatternChanged();
+          // The summary of the file(s) is app.js's, read after its reload.
+          syncOrgasmSource();
+        };
+        const orgasmBlock = this._mountPatternSetting('orgasm', panel.querySelector('#sp-orgasm-pattern-mount'), {
+          idPrefix: 'sp-orgasm-pattern',
+          featureName: t('settingsPanel.playback.orgasmHeader'),
+          title: t('settingsPanel.patternBlock.drawerTitle', { feature: t('settingsPanel.playback.orgasmHeader') }),
+          label: t('settingsPanel.patternBlock.groupAria', { feature: t('settingsPanel.playback.orgasmHeader') }),
+          oneShotHint: t('patterns.ui.oneShotHint'),
+          onSaved: reloadFinisher,
+        });
+        // The file row and the summary of the chosen file(s) belong to
+        // "Script file"; the block and its notes to "Pattern".
+        const syncOrgasmSource = () => {
+          const isPattern = orgasmSource.value === 'pattern';
+          if (orgasmFileRow) orgasmFileRow.hidden = isPattern;
+          orgasmPatternRows.hidden = !isPattern;
+          if (isPattern) {
+            if (orgasmName) { orgasmName.replaceChildren(); orgasmName.hidden = true; }
+            orgasmBlock?.refresh();
+          } else {
+            refreshOrgasmName();
+            this._patternTest?.stop('orgasm');
+          }
+          if (orgasmPatternNone) orgasmPatternNone.hidden = !isPattern || orgasmBlock?.read().id !== null;
+        };
+        orgasmSource.addEventListener('change', () => {
+          for (const { key, value } of safePatternWrites(orgasmSourceWrites(orgasmSource.value), this._choicePlayer())) {
+            this._settings.set(key, value);
+          }
+          reloadFinisher();
+        });
+        syncOrgasmSource();
+      }
+
       // Inline TL/HM overlay opacity. Live-applies on input so the user can
       // see the effect against the video while dragging, rather than having
       // to close the panel to judge it.
@@ -1544,6 +1884,9 @@ export class SettingsPanel {
           this._settings.set('player.inlineVizOpacity', DEFAULT_OPACITY);
           paintOpacity(DEFAULT_OPACITY);
           if (this.onInlineVizOpacityChanged) this.onInlineVizOpacityChanged(DEFAULT_OPACITY);
+          // paintOpacity just hid the focused ↻: hand focus to its slider, or
+          // it falls to <body> and Space plays the video behind Settings.
+          vizOpacity.focus();
         });
       }
 
@@ -1575,6 +1918,8 @@ export class SettingsPanel {
           this._settings.set('player.deviceSimOpacity', DEFAULT_SIM_OPACITY);
           paintSimOpacity(DEFAULT_SIM_OPACITY);
           if (this.onDeviceSimOpacityChanged) this.onDeviceSimOpacityChanged(DEFAULT_SIM_OPACITY);
+          // Same as the overlay opacity reset above: keep focus in the dialog.
+          simOpacity.focus();
         });
       }
 
@@ -1591,10 +1936,46 @@ export class SettingsPanel {
       const edgeMode = panel.querySelector('#sp-edge-mode');
       if (edgeMode) {
         edgeMode.value = this._settings.get('player.edgeHoldMode') || 'hold';
+        // No callback, like the Orgasm Switch mode above: app.js
+        // `_onEdgeHold` reads `player.edgeHoldMode` on every press. (This
+        // used to call an `onEdgeHoldModeChanged` that nothing passed or
+        // stored, V71.)
         edgeMode.addEventListener('change', () => {
           this._settings.set('player.edgeHoldMode', edgeMode.value);
-          if (this.onEdgeHoldModeChanged) this.onEdgeHoldModeChanged(edgeMode.value);
         });
+      }
+
+      // What Z does while it is on: stop the devices (the default, today)
+      // or play a pattern, in the shared block. No callback: app.js reads
+      // both at each Z press. `player.edgePattern` is v0.9.2's and never
+      // rewritten; the block writes only what patternChoiceWrites says.
+      const edgeAction = panel.querySelector('#sp-edge-action');
+      const edgePatternRows = panel.querySelector('#sp-edge-pattern-rows');
+      // 'pattern' with no pattern chosen (the default) behaves as 'stop':
+      // this note says so while it is the case.
+      const edgePatternNone = panel.querySelector('#sp-edge-pattern-none');
+      if (edgeAction && edgePatternRows) {
+        edgeAction.value = edgeHoldAction(this._settings.get('player.edgeHoldAction'));
+        const syncEdgeAction = () => {
+          const isPattern = edgeAction.value === 'pattern';
+          edgePatternRows.hidden = !isPattern;
+          if (isPattern) edgeBlock?.refresh();
+          else this._patternTest?.stop('edge');
+          if (edgePatternNone) edgePatternNone.hidden = !isPattern || edgeBlock?.read().id !== null;
+        };
+        const edgeBlock = this._mountPatternSetting('edge', edgePatternRows, {
+          idPrefix: 'sp-edge-pattern',
+          featureName: t('settingsPanel.playback.edgeHeader'),
+          title: t('settingsPanel.patternBlock.drawerTitle', { feature: t('settingsPanel.playback.edgeHeader') }),
+          label: t('settingsPanel.patternBlock.groupAria', { feature: t('settingsPanel.playback.edgeHeader') }),
+          oneShotHint: t('patterns.ui.oneShotHint'),
+          onSaved: () => syncEdgeAction(),
+        });
+        edgeAction.addEventListener('change', () => {
+          this._settings.set('player.edgeHoldAction', edgeHoldAction(edgeAction.value));
+          syncEdgeAction();
+        });
+        syncEdgeAction();
       }
 
       // Random script variation on play (zaikechi #209) — when a video has
@@ -1636,6 +2017,12 @@ export class SettingsPanel {
       };
 
       wireDefault(gapMode, null, panel.querySelector('#sp-gap-mode-reset'), SETTINGS_DEFAULTS['player.gapSkip.mode']);
+      wireDefault(
+        panel.querySelector('#sp-filler-threshold'),
+        panel.querySelector('#sp-filler-threshold-val'),
+        panel.querySelector('#sp-filler-threshold-reset'),
+        SETTINGS_DEFAULTS['player.gapFiller.thresholdSec'],
+      );
       wireDefault(gapThreshold, gapThresholdVal, panel.querySelector('#sp-gap-threshold-reset'), SETTINGS_DEFAULTS['player.gapSkip.thresholdSec']);
       wireDefault(upNextMode, null, panel.querySelector('#sp-upnext-mode-reset'), SETTINGS_DEFAULTS['player.upNext.mode']);
       wireDefault(upNextCountdown, upNextCountdownVal, panel.querySelector('#sp-upnext-countdown-reset'), SETTINGS_DEFAULTS['player.upNext.countdownSec']);
@@ -1658,7 +2045,18 @@ export class SettingsPanel {
         refresh();
       };
       wireDefaultCheckbox(autoplayCheckbox, panel.querySelector('#sp-autoplay-on-advance-reset'), SETTINGS_DEFAULTS['player.autoplayOnAdvance']);
+      wireDefaultCheckbox(
+        panel.querySelector('#sp-filler-enabled'),
+        panel.querySelector('#sp-filler-enabled-reset'),
+        SETTINGS_DEFAULTS['player.gapFiller.enabled'],
+      );
       wireDefaultCheckbox(rangeExtender, panel.querySelector('#sp-range-extender-reset'), SETTINGS_DEFAULTS['player.rangeExtender.enabled']);
+      wireDefaultCheckbox(rangeLivePreview, panel.querySelector('#sp-range-live-preview-reset'), SETTINGS_DEFAULTS['player.rangeLivePreview']);
+      wireDefaultCheckbox(
+        panel.querySelector('#sp-autoplay-on-open'),
+        panel.querySelector('#sp-autoplay-on-open-reset'),
+        SETTINGS_DEFAULTS['player.autoplayOnOpen'],
+      );
     }, 0);
 
     return panel;
@@ -1796,6 +2194,39 @@ export class SettingsPanel {
       });
     panel.appendChild(styleSection);
 
+    // Interface size (Pudknocker #372, V79): the main window's zoom. Main
+    // applies it (electron/ui-scale.js, through set-setting) and the View
+    // menu's Ctrl+= / Ctrl+- / Ctrl+0 save to the same setting, so this
+    // select and those keys always agree (show() keeps it in step while open).
+    const scaleSection = document.createElement('div');
+    scaleSection.className = 'settings-panel__section';
+    scaleSection.id = 'sp-sec-scale';
+    const scaleSteps = uiScaleSteps();
+    const currentScale = nearestUiScale(this._settings.get('player.uiScale'), scaleSteps);
+    const scaleOptions = scaleSteps.map((pct) => {
+      const label = pct === uiScaleDefault()
+        ? t('settingsPanel.appearance.scaleOptionDefault', { percent: pct })
+        : t('settingsPanel.appearance.scaleOption', { percent: pct });
+      return `<option value="${pct}" ${pct === currentScale ? 'selected' : ''}>${label}</option>`;
+    }).join('');
+    scaleSection.innerHTML = `
+      <h2 class="settings-panel__section-header" id="sp-scale-header">${t('settingsPanel.appearance.scaleHeader')}</h2>
+      <div class="settings-panel__hint" id="sp-scale-hint" style="margin-bottom:10px">
+        ${t('settingsPanel.appearance.scaleHint')}
+      </div>
+      <select class="settings-panel__input settings-panel__input--select" data-setting="player.uiScale"
+              aria-labelledby="sp-scale-header" aria-describedby="sp-scale-hint">
+        ${scaleOptions}
+      </select>
+    `;
+    scaleSection.querySelector('[data-setting="player.uiScale"]')
+      .addEventListener('change', (e) => {
+        const target = e.target;
+        if (!(target instanceof HTMLSelectElement)) return;
+        this._settings.set('player.uiScale', Number(target.value));
+      });
+    panel.appendChild(scaleSection);
+
     // Language section — locale picker. Native names in the dropdown so a
     // user who can't read the current UI language still recognises their
     // own (Nielsen #6 recognition over recall).
@@ -1828,8 +2259,10 @@ export class SettingsPanel {
         // not re-prompt on next launch.
         this._settings.set('player.languageSelected', true);
         try {
+          // setLocale walks the static data-i18n keys itself, BEFORE the
+          // language:changed handlers. Walking again here undid what they
+          // set from state: a connected Handy read "Not connected" (V69).
           await setLocale(next);
-          translatePage(document);
         } catch (err) {
           console.warn('[settings] setLocale failed:', err);
         }
@@ -1850,6 +2283,8 @@ export class SettingsPanel {
     // Default OFF (`=== true`), unlike the previews above: it adds a row to
     // every card and needs a funscript read per card to compute bins.
     const cardHeatmapOn = this._settings.get('library.showCardHeatmap') === true;
+    // Default OFF (`=== true`, store default false): a tag line on every card.
+    const cardTagsOn = this._settings.get('library.showTagsOnCards') === true;
     // Default ON (`!== false`): an invisible resume feature is no feature.
     // Still switchable — the bar is a visible record of what you watched.
     const resumeProgressOn = this._settings.get('library.showResumeProgress') !== false;
@@ -1873,6 +2308,11 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-card-heatmap-hint">${t('settingsPanel.appearance.cardHeatmapHint')}</div>
       <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-card-tags">${t('settingsPanel.appearance.tagsOnCardsLabel')}</label>
+        <input type="checkbox" id="sp-card-tags" class="settings-panel__input settings-panel__input--checkbox" ${cardTagsOn ? 'checked' : ''} aria-describedby="sp-card-tags-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-card-tags-hint">${t('settingsPanel.appearance.tagsOnCardsHint')}</div>
+      <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-resume-progress">${t('settingsPanel.appearance.resumeProgressLabel')}</label>
         <input type="checkbox" id="sp-resume-progress" class="settings-panel__input settings-panel__input--checkbox" ${resumeProgressOn ? 'checked' : ''} aria-describedby="sp-resume-progress-hint">
       </div>
@@ -1882,6 +2322,11 @@ export class SettingsPanel {
         <input type="checkbox" id="sp-hide-dupes" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('library.hideDuplicateNames') === true ? 'checked' : ''} aria-describedby="sp-hide-dupes-hint">
       </div>
       <div class="settings-panel__hint" id="sp-hide-dupes-hint">${t('settingsPanel.appearance.hideDupesHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-folder-variants">${t('settingsPanel.appearance.folderScriptsAsVariantsLabel')}</label>
+        <input type="checkbox" id="sp-folder-variants" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('library.folderScriptsAsVariants') === true ? 'checked' : ''} aria-describedby="sp-folder-variants-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-folder-variants-hint">${t('settingsPanel.appearance.folderScriptsAsVariantsHint')}</div>
     `;
     librarySection.querySelector('#sp-moving-previews')
       .addEventListener('change', (e) => {
@@ -1897,6 +2342,12 @@ export class SettingsPanel {
         // Cards are built once; the row has to be added/removed by a re-render.
         if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
       });
+    librarySection.querySelector('#sp-card-tags')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.showTagsOnCards', !!e.target.checked);
+        // Cards are built once: the tag line comes and goes with a re-render.
+        if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
+      });
     librarySection.querySelector('#sp-resume-progress')
       .addEventListener('change', (e) => {
         this._settings.set('library.showResumeProgress', !!e.target.checked);
@@ -1910,7 +2361,41 @@ export class SettingsPanel {
         // the grid has to re-filter, not merely re-render.
         if (this.onLibraryDisplayChanged) this.onLibraryDisplayChanged(!!e.target.checked);
       });
+    librarySection.querySelector('#sp-folder-variants')
+      .addEventListener('change', (e) => {
+        this._settings.set('library.folderScriptsAsVariants', !!e.target.checked);
+        // The pairing is the scan's (FT-102): rescan, the way a source change
+        // does, so the variant menus, the phone and VR follow at once.
+        if (this._onSourcesChanged) this._onSourcesChanged();
+      });
     panel.appendChild(librarySection);
+
+    // Navigation bar (zaikechi #381): untick a button to take it off the bar.
+    // A tick means "shown", so the default (everything ticked) is the bar as
+    // it always was. Stored inverted as `player.navHidden` flags, which is
+    // what NavBar reads. Library and Settings are not listed: hiding either
+    // would leave no way back.
+    const navSection = document.createElement('div');
+    navSection.className = 'settings-panel__section';
+    navSection.id = 'sp-sec-nav';
+    const navHidden = this._settings.get('player.navHidden') || {};
+    navSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.navHeader')}</h2>
+      <div class="settings-panel__hint" id="sp-nav-hint" style="margin-bottom:10px">${t('settingsPanel.appearance.navHint')}</div>
+      ${NAV_HIDEABLE_ITEMS.map(({ key, labelKey }) => `
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-nav-show-${key}">${t(labelKey)}</label>
+        <input type="checkbox" id="sp-nav-show-${key}" data-nav-key="${key}" class="settings-panel__input settings-panel__input--checkbox" ${navHidden[key] === true ? '' : 'checked'} aria-describedby="sp-nav-hint">
+      </div>`).join('')}
+    `;
+    navSection.addEventListener('change', (e) => {
+      const key = e.target?.dataset?.navKey;
+      if (!key) return;
+      const next = { ...(this._settings.get('player.navHidden') || {}), [key]: !e.target.checked };
+      this._settings.set('player.navHidden', next);
+      if (this.onNavHiddenChanged) this.onNavHiddenChanged(next);
+    });
+    panel.appendChild(navSection);
 
     return panel;
   }
@@ -1958,6 +2443,33 @@ export class SettingsPanel {
     `;
     panel.appendChild(exportSection);
 
+    // --- Section: Find duplicates ----------------------------------------
+    // pallokala2 (#330) wants disk space back, not a tidier grid, so this
+    // lives in Data next to the other library-maintenance actions rather
+    // than in Appearance with the display-only "hide duplicate names"
+    // toggle. Different jobs: that one hides them, this one removes them.
+    const dupesSection = document.createElement('div');
+    dupesSection.className = 'settings-panel__section';
+    dupesSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.duplicates.sectionHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:12px">
+        ${t('settingsPanel.duplicates.sectionBlurb', { os: binOs() })}
+      </div>
+    `;
+    const dupesBtn = document.createElement('button');
+    dupesBtn.type = 'button';
+    // Same look as the Snapshot / Export buttons above. `settings-panel__btn`
+    // has no CSS anywhere, so this rendered as a bare native button (V52).
+    dupesBtn.className = 'settings-panel__add-btn';
+    dupesBtn.style.borderStyle = 'solid';
+    dupesBtn.id = 'sp-find-duplicates';
+    dupesBtn.textContent = t('settingsPanel.duplicates.findBtn');
+    dupesBtn.addEventListener('click', () => {
+      if (this.onFindDuplicates) this.onFindDuplicates();
+    });
+    dupesSection.appendChild(dupesBtn);
+    panel.appendChild(dupesSection);
+
     setTimeout(() => {
       this._wireDataTab(panel);
       this._refreshBackupStatus(panel);
@@ -1997,11 +2509,14 @@ export class SettingsPanel {
       </div>
     `;
 
+    // The field-row pattern every other setting uses. `settings-panel__row`
+    // and `settings-panel__label` have no CSS, so the label came out at the
+    // base font size with the switch butted against it (V52).
     const row = document.createElement('div');
-    row.className = 'settings-panel__row';
+    row.className = 'settings-panel__field';
 
     const label = document.createElement('label');
-    label.className = 'settings-panel__label';
+    label.className = 'settings-panel__field-label';
     label.textContent = t('settingsPanel.security.hideFileNames');
 
     const toggle = createToggleSwitch({
@@ -2113,6 +2628,34 @@ export class SettingsPanel {
       }
     }).catch(() => { /* not portable / unavailable */ });
 
+    // --- Section: Support ------------------------------------------------
+    //
+    // The Ko-fi link existed in exactly one place: the EroScripts thread OP,
+    // which is now hundreds of posts long and which a growing share of users
+    // never read. Weekday analysis (2026-08-26) showed downloads have
+    // decoupled from forum activity — Monday forum posts run 77% below
+    // average while installs hold at +2% — so people are arriving via GitHub
+    // and word of mouth and never seeing that the project has a coffee link
+    // at all. Lifetime: 3 donations against ~5,600 downloads. The constraint
+    // was exposure, not willingness.
+    //
+    // Deliberately a quiet section at the BOTTOM of Help, not a nag: no
+    // modal, no toast, no badge on the nav bar, nothing that appears
+    // uninvited. Someone who never opens Settings never sees it, which is
+    // the correct trade for a free tool.
+    const supportSection = document.createElement('div');
+    supportSection.className = 'settings-panel__section';
+    supportSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.support.header')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.support.blurb')}</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="sp-support-discord" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.support.discord')}</button>
+        <button id="sp-support-kofi" class="settings-panel__add-btn" style="border-style:solid">${t('settingsPanel.support.kofi')}</button>
+      </div>
+      <div class="settings-panel__hint" style="margin-top:10px">${t('settingsPanel.support.footnote')}</div>
+    `;
+    panel.appendChild(supportSection);
+
     setTimeout(() => this._wireHelpTab(panel), 0);
     return panel;
   }
@@ -2139,6 +2682,15 @@ export class SettingsPanel {
     });
     panel.querySelector('#sp-about-license')?.addEventListener('click', () => {
       window.funsync.openExternal('https://github.com/DaveMakesWaves/funsync-player/blob/main/LICENSE');
+    });
+    // Support links. Same openExternal path as the About links above — the
+    // main process only opens http/https, so these cannot become an
+    // arbitrary-scheme launcher.
+    panel.querySelector('#sp-support-discord')?.addEventListener('click', () => {
+      window.funsync.openExternal('https://discord.gg/tuveeXxFx5');
+    });
+    panel.querySelector('#sp-support-kofi')?.addEventListener('click', () => {
+      window.funsync.openExternal('https://ko-fi.com/davemakeswaves');
     });
   }
 
@@ -2174,6 +2726,26 @@ export class SettingsPanel {
       case 'baseline':      return t('settingsPanel.data.triggerBaseline');
       default:              return trigger || t('settingsPanel.data.triggerSnapshot');
     }
+  }
+
+  // One restore-list row's contents. The counts are how a user tells the
+  // snapshot from before a loss apart from the one after it, so every kind
+  // of data a loss can hit is listed: category assignments and
+  // associations were missing, and a V01-style loss (assignments gone,
+  // everything else intact) left two rows that read the same (V58).
+  _formatSnapshotSummary(summary) {
+    const s = summary || {};
+    const parts = [];
+    if (s.sources)             parts.push(t('settingsPanel.data.summarySources', { count: s.sources }));
+    if (s.collections)         parts.push(t('settingsPanel.data.summaryCollections', { count: s.collections }));
+    if (s.playlists)           parts.push(t('settingsPanel.data.summaryPlaylists', { count: s.playlists }));
+    if (s.categories)          parts.push(t('settingsPanel.data.summaryCategories', { count: s.categories }));
+    if (s.categoryAssignments) parts.push(t('settingsPanel.data.summaryCategoryAssignments', { count: s.categoryAssignments }));
+    if (s.manualAssociations)  parts.push(t('settingsPanel.data.summaryAssociations', { count: s.manualAssociations }));
+    if (s.customRoutings)      parts.push(t('settingsPanel.data.summaryRoutings', { count: s.customRoutings }));
+    if (s.tagAssignments)      parts.push(t('settingsPanel.data.summaryTagAssignments', { count: s.tagAssignments }));
+    if (s.eroscriptsLinks)     parts.push(t('settingsPanel.data.summaryEroscriptsLinks', { count: s.eroscriptsLinks }));
+    return parts.join(', ') || t('settingsPanel.data.summaryEmpty');
   }
 
   _formatBytes(bytes) {
@@ -2242,13 +2814,7 @@ export class SettingsPanel {
           hour: '2-digit', minute: '2-digit',
         });
         const trig = this._formatTrigger(snap.trigger, snap.label);
-        const summary = snap.summary || {};
-        const parts = [];
-        if (summary.sources)        parts.push(t('settingsPanel.data.summarySources', { count: summary.sources }));
-        if (summary.collections)    parts.push(t('settingsPanel.data.summaryCollections', { count: summary.collections }));
-        if (summary.playlists)      parts.push(t('settingsPanel.data.summaryPlaylists', { count: summary.playlists }));
-        if (summary.customRoutings) parts.push(t('settingsPanel.data.summaryRoutings', { count: summary.customRoutings }));
-        const subtitle = `${this._formatBytes(snap.sizeBytes)} · ${parts.join(', ') || t('settingsPanel.data.summaryEmpty')}`;
+        const subtitle = `${this._formatBytes(snap.sizeBytes)} · ${this._formatSnapshotSummary(snap.summary)}`;
         return {
           id: `${snap.subdir}/${snap.filename}`,
           label: `${when}  ·  ${trig}`,
@@ -2266,12 +2832,16 @@ export class SettingsPanel {
       const ok = await Modal.confirm(
         t('settingsPanel.data.restoreConfirmTitle'),
         t('settingsPanel.data.restoreConfirmBody'),
+        { confirmText: t('settingsPanel.data.restoreConfirmBtn') },
       );
       if (!ok) return;
 
       const [subdir, filename] = picked.split('/');
       try {
         const result = await window.funsync.backupRestore(subdir, filename);
+        // Cancel at the unsaved-editor-edits question: nothing was restored
+        // and the user chose that, so no failure toast (R3-19).
+        if (result?.cancelled) return;
         if (!result?.success) {
           showToast(t('settingsPanel.data.restoreFailedReason', { error: result?.error || 'unknown error' }), 'error');
         }
@@ -2304,15 +2874,37 @@ export class SettingsPanel {
       btn.disabled = false; btn.textContent = t('settingsPanel.data.export');
     });
 
+    // Import merges a backup file into the live config and RELAUNCHES, as
+    // Restore does: every component holds settings read at boot, and the
+    // DataService cache writes whole maps back, so an import that is not
+    // followed by a fresh boot gets overwritten by the next edit (V02).
+    // Say so before the file picker, not after the window disappears.
     panel.querySelector('#sp-import')?.addEventListener('click', async () => {
+      const ok = await Modal.confirm(
+        t('settingsPanel.data.importConfirmTitle'),
+        t('settingsPanel.data.importConfirmBody'),
+        { confirmText: t('settingsPanel.data.import') },
+      );
+      if (!ok) return;
       const btn = panel.querySelector('#sp-import');
       btn.disabled = true; btn.textContent = t('settingsPanel.data.importing');
       try {
         const result = await window.funsync.importData();
-        if (result.success) showToast(t('settingsPanel.data.importDone', { count: result.funscriptCount || 0 }), 'info');
-        else showToast(t('settingsPanel.data.importCancelled'), 'info');
+        // On success the main process relaunches the app, so this renderer
+        // is about to be torn down; only the failure paths need UI.
+        if (!result?.success) this._showImportFailure(result);
       } catch { showToast(t('settingsPanel.data.importFailed'), 'error'); }
       btn.disabled = false; btn.textContent = t('settingsPanel.data.import');
     });
+  }
+
+  /**
+   * Toast for an import that did not happen. Says why, as Restore does, so
+   * the user can tell a file that is not a backup from a broken one.
+   */
+  _showImportFailure(result) {
+    if (result?.error === 'Cancelled') showToast(t('settingsPanel.data.importCancelled'), 'info');
+    else if (result?.error) showToast(t('settingsPanel.data.importFailedReason', { error: result.error }), 'error');
+    else showToast(t('settingsPanel.data.importFailed'), 'error');
   }
 }

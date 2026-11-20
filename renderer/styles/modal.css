@@ -17,6 +17,18 @@
   z-index: 1000;
 }
 
+/* While the backend banner shows, a dialog centres in the space under it and
+   gets that much less height, so the banner (above the backdrop, z-index
+   9000) never covers its title or its close button (V80). Child of body
+   only: a dialog opened in fullscreen lives in the fullscreen element, where
+   the banner is not drawn. */
+html.backend-banner-shown body > .modal-overlay {
+  padding-top: var(--backend-banner-bottom, 0px);
+}
+html.backend-banner-shown body > .modal-overlay > .modal-panel {
+  max-height: calc(85vh - var(--backend-banner-bottom, 0px));
+}
+
 /* Settings Panel */
 /* Modal tabs — canonical style. Underline-on-active accent indicator
    (lightweight, appropriate for modal/panel contexts) at a 36-px
@@ -183,6 +195,65 @@
   }
 }
 
+/* Settings' own dialog layout (FT-039; Modal.open panelClass). A plain
+   dialog body scrolls (.modal-body overflow-y: auto) and the content column
+   scrolls too, so whenever the rail plus the Done button were taller than
+   the body could hold (the rail is ~430 px with Playback's section links;
+   the content column is capped at 60vh, 384 px at 1280x800 and 125%),
+   Settings showed one scrollbar inside another. Here the body never
+   scrolls: it is a flex column inside the panel's 85vh, the two-column
+   layout takes what is left after the Done button, the content column
+   scrolls inside that, and the rail scrolls on its own only when it really
+   cannot fit. Other dialogs keep the plain body.
+   92vh, not 85vh: at 1280x800 and 125% that is the 40 px the rail needs
+   with Playback's section links open, so nothing scrolls but the content.
+   (With the backend banner showing, the V80 rule above still wins.) */
+.modal-panel.modal-panel--settings {
+  max-height: 92vh;
+}
+
+.modal-panel--settings .modal-body {
+  display: flex;
+  flex-direction: column;
+  /* Longhands: they override .modal-body's overflow-y: auto one for one. */
+  overflow-x: hidden;
+  overflow-y: hidden;
+  min-height: 0;
+}
+
+.modal-panel--settings .settings-panel__layout {
+  flex: 0 1 auto;
+  /* The 320 px floor holds while the window has room for it, so a short
+     area does not shrink the dialog, but it never pushes the Done button
+     out of a short window: at most the smaller panel height (85vh, less the
+     backend banner when it shows) minus the header, body padding and Done. */
+  min-height: min(320px, calc(85vh - 170px - var(--backend-banner-bottom, 0px)));
+  grid-template-rows: minmax(0, 1fr);
+  align-items: stretch;
+}
+
+.modal-panel--settings .settings-panel__rail {
+  /* Nothing scrolls behind it any more, so there is nothing to stick to. */
+  position: static;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.modal-panel--settings .settings-panel__content {
+  min-height: 0;
+}
+
+.modal-panel--settings .settings-panel__done-btn {
+  flex: none;
+}
+
+@media (max-width: 620px) {
+  /* Stacked: the rail is a row of its own above the content. */
+  .modal-panel--settings .settings-panel__layout {
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+}
+
 .settings-panel__field {
   display: flex;
   align-items: center;
@@ -241,6 +312,17 @@
   cursor: pointer;
 }
 
+/* A select in a field row must be allowed to shrink. Its min-content width
+   is its LONGEST option, and a flex item's default min-width:auto will not
+   go below that, so a long translated option (de Edge Hold: "Drücken zum
+   Anhalten (erneut drücken zum Fortsetzen)") pushed the row past the content
+   column and gave the whole panel a horizontal scrollbar (app test V52).
+   The open list still shows every option in full. */
+.settings-panel__field > .settings-panel__input--select {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .settings-panel__input--checkbox {
   width: 18px;
   height: 18px;
@@ -250,6 +332,215 @@
   cursor: pointer;
   accent-color: var(--accent);
   flex: 0 0 auto;
+}
+
+/* Settings > Gap Filler / Orgasm Switch / Edge Hold: the ONE shared Pattern
+   block (pattern-source-rows.js, Dave 2026-11-19: "laid out the same way").
+   Its rows are the panel's own .settings-panel__field rows, so they line up
+   with each feature's "when" rows above it; only the preview, the range's
+   own rows and the Test row need anything here. Semantic tokens only, so
+   light and dark each paint it (the canvas reads --accent / --border-strong /
+   --text-primary in filler-preview.js previewColors). */
+.pattern-block__preview {
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 320px;
+  height: 60px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  background: var(--surface-overlay);
+}
+
+/* The stats line belongs to the preview above it. */
+.pattern-block__stats {
+  margin-top: -4px;
+  padding-left: 88px;
+}
+
+/* Exact (Lowest / Highest) and Follow the script (Depth / Centre) are parts
+   of "Range": indented under it with a quiet rule (Norman: conceptual
+   model), the rows themselves unchanged. */
+.pattern-block__sub {
+  margin: 0 0 8px 4px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border-subtle);
+}
+
+/* Test / Stop: a real button at the 36 px floor, not the full-width
+   dashed "add" bar it borrows its look from. */
+.pattern-block__test-row .settings-panel__add-btn {
+  width: auto;
+  min-width: 96px;
+  min-height: 36px;
+  flex: 0 0 auto;
+}
+
+.pattern-block__test-row .settings-panel__add-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.pattern-block__test-hint {
+  margin: 0;
+  min-width: 0;
+}
+
+/* A narrow window (800 px: the rail is still beside the content, so the
+   column is ~420 px): a row's value text wraps under its slider instead of
+   squeezing the slider to nothing, and the stats line drops its indent. */
+@media (max-width: 900px) {
+  .pattern-block .settings-panel__field {
+    flex-wrap: wrap;
+  }
+  .pattern-block .settings-panel__input--range {
+    min-width: 120px;
+  }
+  .pattern-block__stats {
+    padding-left: 0;
+  }
+}
+
+/* Settings > Gap Filler / Orgasm Switch / Edge Hold since Dave's "rather
+   big" (2026-11-19 ~14:20): each section keeps its "when" rows and ONE
+   summary row (pattern-drawer.js createPatternSummaryRow): the applied
+   choice in a line, "Set pattern…", and under the line a small still graph
+   of what it plays (decorative; the line says it in words). */
+.pattern-summary__line {
+  margin-bottom: 4px;
+}
+
+/* One line in every language and size (pf-verify 2026-11-19: German at
+   1280x800 and English at 800x600 / 150 % wrapped it, "%" or "range" alone
+   on a second line): cut with an ellipsis, the whole line in its title. */
+.pattern-summary__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pattern-summary__text--none {
+  color: var(--text-secondary);
+}
+
+.pattern-summary .pattern-summary__set {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 36px;
+  padding: 8px 14px;
+}
+
+.pattern-summary__graph {
+  display: block;
+  width: 100%;
+  max-width: 240px;
+  height: 32px;
+  margin: 0 0 8px 88px;
+  border-radius: 4px;
+  background: var(--surface-overlay);
+}
+
+/* "Set pattern…" opens the drawer over the whole Settings dialog: the
+   dimmed dialog around it (a click there cancels), the sheet from the right.
+   Inside the dialog, so it can never leave the window (the docked Fill
+   drawer's lesson): at 800x600 and 150 % the dialog is ~480 x 368 CSS px,
+   the sheet takes all of it and its body scrolls between a fixed title and
+   a fixed Apply. */
+.modal-panel--settings {
+  position: relative;
+}
+
+.pattern-drawer {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: flex-end;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--surface-base) 55%, transparent);
+}
+
+.pattern-drawer__sheet {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  height: 100%;
+  min-height: 0;
+  background: var(--surface-card);
+  border-left: 1px solid var(--border-strong);
+  border-radius: 0 12px 12px 0;
+  box-shadow: var(--shadow-modal);
+}
+
+.pattern-drawer__head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.pattern-drawer__title {
+  margin: 0;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow-wrap: anywhere;
+}
+
+.pattern-drawer__close {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.pattern-drawer__close:hover {
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+}
+
+.pattern-drawer__close:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.pattern-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 16px;
+}
+
+.pattern-drawer__foot {
+  flex: none;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.pattern-drawer__foot .modal-btn {
+  min-height: 36px;
+}
+
+@media (max-width: 900px) {
+  .pattern-summary__graph {
+    margin-left: 0;
+  }
 }
 
 .settings-panel__input--range {
@@ -899,6 +1190,10 @@
   color: var(--text-secondary);
   line-height: 1.5;
   margin-bottom: 16px;
+  /* Keep a message's own line breaks (the overlapping-source questions'
+     two paragraphs are "\n\n"); spaces still collapse as before. Every
+     caller sets the text with textContent (FT-080). */
+  white-space: pre-line;
 }
 
 .modal-message--muted {
@@ -1698,6 +1993,33 @@
   color: var(--text-muted);
 }
 
+/* Settings > Playback > Global hotkeys: one row per action. A shared label
+   width lines the three capture boxes up under each other. */
+.global-hotkeys__label {
+  min-width: 130px;
+}
+
+/* A saved binding that takes an everyday key from other apps (V73): kept
+   and registered, with the reason under its row. */
+.global-hotkeys__warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: -4px 0 8px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--state-warning);
+}
+
+.global-hotkeys__warning[hidden] {
+  display: none;
+}
+
+.global-hotkeys__warning svg {
+  flex: none;
+  margin-top: 1px;
+}
+
 
 /* === Remote Video ("Load from URL") modal === */
 .remote-video-modal { display: flex; flex-direction: column; gap: 10px; min-width: 380px; }
@@ -1988,4 +2310,194 @@
 .categories__icon-emoji-input {
   font-family: "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji",
                "Twemoji Mozilla", "Segoe UI Symbol", sans-serif;
+}
+
+/* ---------------------------------------------------------------------------
+   Duplicate finder (pallokala2 #330)
+
+   A delete UI, so the visual job is to make the evidence obvious and the
+   irreversible-looking action feel proportionate. Tier badges are colour-coded
+   AND worded; the keeper row is visually settled rather than shouting, because
+   it is the safe default, not the alarming one.
+--------------------------------------------------------------------------- */
+
+.duplicates__status,
+.duplicates__empty {
+  padding: 32px 8px;
+  text-align: center;
+  color: var(--text-secondary);
+}
+.duplicates__empty-title {
+  font-size: 15px;
+  color: var(--text-primary);
+  margin-bottom: 6px;
+}
+.duplicates__empty-hint { font-size: 13px; }
+
+.duplicates__summary {
+  font-size: 15px;
+  color: var(--text-primary);
+  margin-bottom: 4px;
+}
+/* Says out loud what this cannot find. A tool that quietly misses re-encodes
+   is one people over-trust. */
+.duplicates__caveat {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.duplicates__batch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.duplicates__batch-btn {
+  background: var(--bg-tertiary, #2a2a3e);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color, #3a3a4e);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.duplicates__batch-btn:hover { border-color: var(--accent-color, #e0245e); }
+.duplicates__batch-btn--clear { margin-left: auto; }
+
+.duplicates__list {
+  max-height: 46vh;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.duplicates__tier-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 14px 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.duplicates__tier-badge {
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+/* Green = act on it. Amber = look first. Grey = a guess, and styled as the
+   weakest thing on screen so it never borrows authority from the others. */
+.duplicates__tier-badge--identical { background: rgba(76, 175, 80, 0.18); color: #7bd07f; }
+.duplicates__tier-badge--likely    { background: rgba(255, 152, 0, 0.18);  color: #ffb74d; }
+/* Stash's judgement of the picture (phash): Stash's one colour (the seek bar's markers). */
+.duplicates__tier-badge--stash     { background: rgba(127, 216, 255, 0.16); color: #7fd8ff; }
+.duplicates__tier-badge--possible  { background: rgba(255, 255, 255, 0.08); color: var(--text-secondary); }
+.duplicates__tier-why {
+  font-weight: 400;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.duplicates__group {
+  border: 1px solid var(--border-color, #3a3a4e);
+  border-radius: 8px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+.duplicates__group-head {
+  background: rgba(255, 255, 255, 0.03);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.duplicates__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-top: 1px solid var(--border-color, #3a3a4e);
+  cursor: pointer;
+}
+.duplicates__item:hover { background: rgba(255, 255, 255, 0.03); }
+.duplicates__item--keeper { cursor: default; background: rgba(76, 175, 80, 0.06); }
+.duplicates__item--keeper:hover { background: rgba(76, 175, 80, 0.06); }
+
+.duplicates__check { flex-shrink: 0; }
+/* The keeper's checkbox is disabled, not hidden — the row must visibly be
+   part of the same choice, just not selectable. */
+.duplicates__check:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.duplicates__item-main { flex: 1; min-width: 0; }
+.duplicates__item-name {
+  display: block;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The folder is what tells two identically-named files apart, so it is always
+   shown, and truncated from the LEFT so the distinguishing tail survives. */
+.duplicates__item-folder {
+  display: block;
+  font-size: 11px;
+  color: var(--text-secondary);
+  direction: rtl;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.duplicates__item-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.duplicates__item-script {
+  background: rgba(224, 36, 94, 0.15);
+  color: var(--accent-color, #e0245e);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 11px;
+}
+.duplicates__keeper-badge {
+  background: rgba(76, 175, 80, 0.18);
+  color: #7bd07f;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.duplicates__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-color, #3a3a4e);
+}
+.duplicates__selection { flex: 1; font-size: 13px; color: var(--text-secondary); }
+.duplicates__remove-btn {
+  background: #c62828;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.duplicates__remove-btn:hover:not(:disabled) { background: #d32f2f; }
+/* Disabled until something is selected — the destructive button should never
+   be live when pressing it would do nothing. */
+.duplicates__remove-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+@media (prefers-reduced-motion: reduce) {
+  .duplicates__item, .duplicates__batch-btn, .duplicates__remove-btn { transition: none; }
 }

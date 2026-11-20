@@ -1,0 +1,25 @@
+{
+  "data": {
+    "a": {
+      "id": "3",
+      "title": "Synthetic Scene Mid",
+      "files": [
+        {
+          "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_mid.mp4",
+          "oshash": "69577801585835d2"
+        }
+      ]
+    },
+    "b": {
+      "id": "1",
+      "title": "Synthetic Scene Small",
+      "files": [
+        {
+          "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+          "oshash": "6b3f3b3ee9e8c31a"
+        }
+      ]
+    },
+    "c": null
+  }
+}

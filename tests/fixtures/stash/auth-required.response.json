@@ -1,0 +1,9 @@
+{
+  "note": "POST /graphql with no session and no ApiKey header, after a username and password were set. Recorded from a local Stash v0.32.0 test install, 2026-11-17.",
+  "status": 401,
+  "headers": {
+    "www-authenticate": "FormBased",
+    "content-type": null
+  },
+  "body": ""
+}

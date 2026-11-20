@@ -43,6 +43,13 @@ export class ActionGraph {
     this._beatMarkers = null; // Float64Array of beat timestamps in ms
     this._showBeatMarkers = false;
 
+    // Fill with pattern preview (pattern library, Round 2): a dashed line
+    // drawn over the real one while the drawer is open. Never in the script.
+    this._ghost = null; // { points: [{at, pos}] sorted, from, to } | null
+    // A time range marked for a fill (a rubber band over 0 or 1 points): a
+    // shaded band over the whole height while it holds. Never in the script.
+    this._timeRange = null; // { from, to, isLive } | null
+
     // Auto-follow playback cursor
     this._autoFollow = true;
 
@@ -87,6 +94,15 @@ export class ActionGraph {
       rubberBandBorder: 'rgba(3, 252, 207, 0.5)',
       waveform: 'rgba(100, 180, 255, 0.35)',
       beatMarker: 'rgba(255, 140, 50, 0.5)',
+      // Fill with pattern preview. The graph keeps its OFS purple in both
+      // themes, so one light dashed line over a dark edge reads in either.
+      ghostBand: 'rgba(255, 255, 255, 0.07)',
+      ghostEdge: 'rgba(255, 255, 255, 0.35)',
+      ghostUnder: 'rgba(0, 0, 0, 0.6)',
+      ghostLine: 'rgba(255, 255, 255, 0.95)',
+      // A marked fill range: the rubber band's cyan, fainter, dashed edges.
+      timeRange: 'rgba(3, 252, 207, 0.10)',
+      timeRangeEdge: 'rgba(3, 252, 207, 0.65)',
     };
   }
 
@@ -98,8 +114,17 @@ export class ActionGraph {
 
   setVideoDuration(durationMs) {
     this._videoDurationMs = durationMs;
-    if (this._viewEndMs > durationMs) {
-      this._viewEndMs = durationMs;
+    // Keep the window's WIDTH when the duration changes (Dave, 2026-11-18:
+    // "if you use it on a video and leave it open when the video closes and
+    // open another one it moves wayyyyy faster than the video"). One graph
+    // outlives each video, and this used to clamp only the END: a 5 s window
+    // left at 7-12 s became 7-8 s for an 8 s video, so the next video
+    // scrolled a 1 s window five times too fast, and it shrank further with
+    // every video. Slide the window back inside the new duration instead;
+    // setViewport narrows it only when the video itself is shorter.
+    if (durationMs > 0 && this._viewEndMs > durationMs) {
+      const width = this.viewDurationMs;
+      this.setViewport(durationMs - width, durationMs);
     }
   }
 
@@ -233,6 +258,93 @@ export class ActionGraph {
 
   get showBeatMarkers() { return this._showBeatMarkers; }
 
+  // --- Ghost layer (Fill with pattern preview) ---
+
+  /**
+   * Show a preview line over the real one: the Fill with pattern drawer's
+   * live result. `points` ({at, pos}, any order) are drawn as a dashed path;
+   * `window` ({ from, to } in ms) gets a faint band so the filled stretch
+   * reads at a glance. A copy is kept: the script, its selection and undo
+   * history are never touched. Empty or null clears it. Call draw() after.
+   * @param {Array<{at:number,pos:number}>|null} points
+   * @param {{from:number,to:number}|null} [window]
+   */
+  setGhost(points, window = null) {
+    if (!Array.isArray(points) || points.length === 0) {
+      this._ghost = null;
+      return;
+    }
+    const pts = points
+      .filter((p) => p && Number.isFinite(p.at) && Number.isFinite(p.pos))
+      .map((p) => ({ at: p.at, pos: p.pos }))
+      .sort((a, b) => a.at - b.at);
+    const from = Number(window?.from);
+    const to = Number(window?.to);
+    this._ghost = {
+      points: pts,
+      from: Number.isFinite(from) ? from : (pts[0]?.at ?? 0),
+      to: Number.isFinite(to) ? to : (pts[pts.length - 1]?.at ?? 0),
+    };
+  }
+
+  clearGhost() {
+    this._ghost = null;
+  }
+
+  /** The preview on show (a copy of what setGhost got), or null. */
+  get ghost() { return this._ghost; }
+
+  // --- Marked time range (Fill with pattern on a plain time range) ---
+
+  /**
+   * Shade a time range the user marked for a fill ({ from, to } in ms) over
+   * the whole height, behind the line. `isLive` (optional) is asked on every
+   * draw: once it says false the band is gone, so it never outlives the
+   * selection or the script it was marked on. Null clears it. Call draw() after.
+   * @param {{from:number,to:number}|null} range
+   * @param {() => boolean} [isLive]
+   */
+  setTimeRange(range, isLive = null) {
+    const from = Number(range?.from);
+    const to = Number(range?.to);
+    this._timeRange = range && Number.isFinite(from) && Number.isFinite(to) && to > from
+      ? { from, to, isLive: typeof isLive === 'function' ? isLive : null }
+      : null;
+  }
+
+  clearTimeRange() {
+    this._timeRange = null;
+  }
+
+  /** The marked range on show ({ from, to }), or null. */
+  get timeRange() {
+    const r = this._timeRange;
+    return r ? { from: r.from, to: r.to } : null;
+  }
+
+  _drawTimeRange(ctx, area) {
+    const r = this._timeRange;
+    const x1 = Math.max(area.x, this.timeToX(r.from));
+    const x2 = Math.min(area.x + area.w, this.timeToX(r.to));
+    if (!(x2 > x1)) return;
+    ctx.save();
+    ctx.fillStyle = this._colors.timeRange;
+    ctx.fillRect(x1, area.y, x2 - x1, area.h);
+    ctx.strokeStyle = this._colors.timeRangeEdge;
+    ctx.lineWidth = 1;
+    ctx.setLineDash?.([4, 3]);
+    for (const t of [r.from, r.to]) {
+      const x = this.timeToX(t);
+      if (x < area.x || x > area.x + area.w) continue;
+      ctx.beginPath();
+      ctx.moveTo(x, area.y);
+      ctx.lineTo(x, area.y + area.h);
+      ctx.stroke();
+    }
+    ctx.setLineDash?.([]);
+    ctx.restore();
+  }
+
   // --- Coordinate mapping ---
 
   /** Canvas drawing area (excludes padding). Cached — invalidated on resize. */
@@ -361,9 +473,20 @@ export class ActionGraph {
   // --- Cursor ---
 
   setCursorTime(ms) {
+    const moved = Math.abs(ms - this._cursorMs) > 0.5;
     this._cursorMs = ms;
+    if (!this._autoFollow) return;
     // During playback, center viewport on cursor (OFS centered playhead)
-    if (this._autoFollow && this._animating) {
+    if (this._animating) {
+      this.centerOnTime(ms);
+    } else if (moved && (ms < this._viewStartMs || ms > this._viewEndMs)) {
+      // Paused, a seek that lands OFF the view brings the view to it: a click
+      // on the seek bar left the playhead off-screen until playback started,
+      // docked and popped out (verify-1, 2026-11-07), and the editor opened
+      // paused at 0:30 showed 0:00-0:10 (TODO, D-01 repro). A step or seek
+      // inside the view leaves it where the user put it, and a tick that does
+      // not move the playhead (the pop-out's, every 33 ms) never pulls a view
+      // the user panned away back.
       this.centerOnTime(ms);
     }
   }
@@ -564,11 +687,18 @@ export class ActionGraph {
     // 5. Bookmark lines (gold dashed, before connections so they're behind)
     this._drawBookmarks(ctx, area);
 
+    // 5b. A time range marked for a fill, behind the line (gone once it no longer holds)
+    if (this._timeRange && this._timeRange.isLive && !this._timeRange.isLive()) this._timeRange = null;
+    if (this._timeRange) this._drawTimeRange(ctx, area);
+
     // 6. Connection lines (speed-colored, OFS style)
     this._drawConnections(ctx, area);
 
     // 7. Action dots
     this._drawDots(ctx, area);
+
+    // 7b. Fill with pattern preview, over the real line and its dots
+    if (this._ghost) this._drawGhost(ctx, area);
 
     // 8. Playback cursor (centered during playback)
     this._drawCursor(ctx, area);
@@ -796,6 +926,7 @@ export class ActionGraph {
 
     // Compute tangents only for spline mode
     const tangents = this._splineMode ? this._monotoneTangents(xs, ys) : null;
+    const [yLo, yHi] = this._curveYBounds();
 
     // Draw each visible segment
     for (let si = 0; si < sliceLen - 1; si++) {
@@ -831,7 +962,7 @@ export class ActionGraph {
           const h10 = t3 - 2 * t2 + t;
           const h01 = -2 * t3 + 3 * t2;
           const h11 = t3 - t2;
-          path.lineTo(x1 + dx * t, h00 * y1 + h10 * m1 + h01 * y2 + h11 * m2);
+          path.lineTo(x1 + dx * t, Math.min(yHi, Math.max(yLo, h00 * y1 + h10 * m1 + h01 * y2 + h11 * m2)));
         }
       } else {
         // Linear mode — straight line
@@ -901,6 +1032,19 @@ export class ActionGraph {
     }
 
     return tangents;
+  }
+
+  /**
+   * The drawn curve's y range: the 0 and 100 lines. With Curves on, the
+   * Hermite curve can swing past an end stop between two points in range
+   * (at a turn the tangent above is the mean of the two slopes, not 0), so
+   * every curve point is held to these lines. Drawing only: the script is
+   * never touched (fixup-2, 2026-11-17).
+   * @returns {[number, number]} [top y, bottom y]
+   */
+  _curveYBounds() {
+    const a = this.posToY(100), b = this.posToY(0);
+    return [Math.min(a, b), Math.max(a, b)];
   }
 
   _drawDots(ctx) {
@@ -1055,6 +1199,87 @@ export class ActionGraph {
     }
 
     ctx.setLineDash([]);
+    ctx.restore();
+  }
+
+  /**
+   * The Fill with pattern preview (setGhost): a faint band over the filled
+   * stretch, then the fill as a dashed light line on a dark underlay, curved
+   * like the real line when Curves is on, with small hollow dots once they
+   * are far enough apart to tell. Only the visible slice is drawn.
+   */
+  _drawGhost(ctx, area) {
+    const g = this._ghost;
+    const pts = g.points;
+    ctx.save();
+
+    const bx1 = Math.max(area.x, this.timeToX(g.from));
+    const bx2 = Math.min(area.x + area.w, this.timeToX(g.to));
+    if (bx2 > bx1) {
+      ctx.fillStyle = this._colors.ghostBand;
+      ctx.fillRect(bx1, area.y, bx2 - bx1, area.h);
+      ctx.strokeStyle = this._colors.ghostEdge;
+      ctx.lineWidth = 1;
+      for (const t of [g.from, g.to]) {
+        const x = this.timeToX(t);
+        if (x < area.x || x > area.x + area.w) continue;
+        ctx.beginPath();
+        ctx.moveTo(x, area.y);
+        ctx.lineTo(x, area.y + area.h);
+        ctx.stroke();
+      }
+    }
+
+    const { first, last } = this._visibleRange(pts);
+    if (last > first) {
+      const n = last - first + 1;
+      const xs = new Array(n);
+      const ys = new Array(n);
+      for (let i = 0; i < n; i++) {
+        xs[i] = this.timeToX(pts[first + i].at);
+        ys[i] = this.posToY(pts[first + i].pos);
+      }
+      const tangents = this._splineMode ? this._monotoneTangents(xs, ys) : null;
+      const [yLo, yHi] = this._curveYBounds();
+      const path = new Path2D();
+      path.moveTo(xs[0], ys[0]);
+      for (let i = 0; i < n - 1; i++) {
+        const x1 = xs[i], y1 = ys[i], x2 = xs[i + 1], y2 = ys[i + 1];
+        if (!tangents) { path.lineTo(x2, y2); continue; }
+        const dx = x2 - x1;
+        const m1 = tangents[i] * dx;
+        const m2 = tangents[i + 1] * dx;
+        for (let s = 1; s <= 12; s++) {
+          const t = s / 12, t2 = t * t, t3 = t2 * t;
+          path.lineTo(
+            x1 + dx * t,
+            Math.min(yHi, Math.max(yLo, (2 * t3 - 3 * t2 + 1) * y1 + (t3 - 2 * t2 + t) * m1 + (-2 * t3 + 3 * t2) * y2 + (t3 - t2) * m2)),
+          );
+        }
+      }
+      ctx.strokeStyle = this._colors.ghostUnder;
+      ctx.lineWidth = 4;
+      ctx.setLineDash?.([]);
+      ctx.stroke(path);
+      ctx.strokeStyle = this._colors.ghostLine;
+      ctx.lineWidth = 2;
+      ctx.setLineDash?.([6, 4]);
+      ctx.stroke(path);
+      ctx.setLineDash?.([]);
+
+      // Dots once the points are at least 6 px apart on average.
+      if (n > 1 && (xs[n - 1] - xs[0]) / (n - 1) >= 6) {
+        ctx.fillStyle = this._colors.ghostUnder;
+        ctx.strokeStyle = this._colors.ghostLine;
+        ctx.lineWidth = 1.5;
+        for (let i = 0; i < n; i++) {
+          ctx.beginPath();
+          ctx.arc(xs[i], ys[i], 3, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+      }
+    }
     ctx.restore();
   }
 

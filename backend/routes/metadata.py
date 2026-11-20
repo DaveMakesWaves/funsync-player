@@ -2,12 +2,15 @@
 
 from fastapi import APIRouter, HTTPException, Query
 
+from routes.desktop_gate import DESKTOP_ONLY
 from services.ffmpeg import get_metadata
 
 router = APIRouter()
 
 
-@router.get("/")
+# Desktop-only (FT-009, routes/desktop_gate.py): runs ffprobe on any path the
+# request names. Only Electron main calls it (`fetch-metadata`).
+@router.get("/", dependencies=DESKTOP_ONLY)
 def metadata(video_path: str = Query(..., description="Absolute path to video file")):
     """Extract metadata from a video file using ffprobe.
 

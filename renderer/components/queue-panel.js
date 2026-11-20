@@ -10,7 +10,7 @@
 // surface.
 
 import { createCategoryMark } from '../js/category-icon.js';
-import { icon, X, Trash2, GripVertical, FileCheck, Captions, Gauge, Layers2, Cable, Shuffle } from '../js/icons.js';
+import { icon, X, Trash2, GripVertical, FileCheck, Captions, Gauge, Layers2, Cable, Shuffle, Columns2 } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 
@@ -37,12 +37,43 @@ function formatDuration(seconds) {
   return `${m}:${String(r).padStart(2, '0')}`;
 }
 
+/**
+ * The queue toggle a browse view puts in its header (Playlists, Categories),
+ * the same control the Library header has: same class, so it looks and
+ * behaves the same in both styles, and `data-queue-toggle`, which is how
+ * app.js finds every toggle to keep aria-pressed in step with the panel.
+ * Rendered with the panel's CURRENT state: a header rebuilt while the panel
+ * is open must not read "closed" (V26, V27).
+ *
+ * @param {Object} opts
+ * @param {Function} opts.onToggle — () => void
+ * @param {boolean} [opts.open] — is the panel open right now
+ * @returns {HTMLButtonElement}
+ */
+export function createQueueToggleButton({ onToggle, open = false }) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'library__queue-toggle';
+  btn.dataset.queueToggle = '';
+  btn.setAttribute('aria-label', t('queuePanel.toggleAria'));
+  btn.title = t('queuePanel.toggleTooltip');
+  btn.setAttribute('aria-controls', 'queue-panel');
+  btn.setAttribute('aria-pressed', String(!!open));
+  btn.setAttribute('aria-expanded', String(!!open));
+  btn.appendChild(icon(Columns2, { width: 16, height: 16 }));
+  btn.addEventListener('click', () => { if (onToggle) onToggle(); });
+  return btn;
+}
+
 export class QueuePanel {
   /**
    * @param {Object} opts
    * @param {HTMLElement} opts.element — root container (#queue-panel)
    * @param {Object} opts.library — library reference for getVideoByPath / capture
-   * @param {Function} opts.onJump — (path) => void; play this video, current → history
+   * @param {Function} opts.onJump — (path, { kind, idx }) => void; play this
+   *        video, current → history. `kind` is the row's section
+   *        ('history' | 'now-playing' | 'user-queue' | 'upcoming'), `idx`
+   *        its place in that section (R4-02).
    * @param {Function} opts.onRemoveFromQueue — (path) => void; remove from user queue
    * @param {Function} opts.onReorderQueue — (fromIdx, toIdx) => void
    * @param {Function} opts.onClearQueue — () => void
@@ -206,8 +237,31 @@ export class QueuePanel {
   }
 
   _patchAutoAdvanceCount() {
-    const el = this._el?.querySelector('[data-queue-auto-count]');
-    if (el) el.textContent = `${this._autoAdvance.seconds}s`;
+    // Every chip, not the first: querySelector updated whichever came first
+    // in the DOM, which was a History row when one also matched (V26).
+    for (const el of this._el?.querySelectorAll('[data-queue-auto-count]') || []) {
+      el.textContent = `${this._autoAdvance.seconds}s`;
+    }
+  }
+
+  /**
+   * Which row carries the countdown chip: `{ kind, idx }` or null.
+   *
+   * The engine's next is your queue's head when you have one, otherwise the
+   * context's next, so look in the User queue, then Up next, and mark only
+   * the FIRST match. Matching by path alone put a second chip on a History
+   * row (a looping playlist's next is something already watched) and on Now
+   * playing (a playlist with the same video twice in a row) (V26).
+   */
+  _autoAdvanceSlot() {
+    const path = this._autoAdvance.path;
+    if (!path) return null;
+    const { userQueue, upcoming, hasContext } = this._state;
+    let idx = userQueue.indexOf(path);
+    if (idx >= 0) return { kind: 'user-queue', idx };
+    idx = hasContext ? upcoming.indexOf(path) : -1;
+    if (idx >= 0) return { kind: 'upcoming', idx };
+    return null;
   }
 
   // --- Internal ---
@@ -222,6 +276,9 @@ export class QueuePanel {
 
   _render() {
     if (!this._el) return;
+    // The region's own label, on every render: set only in _buildShell, it
+    // stayed in the boot language after a live switch (app test V50).
+    this._el.setAttribute('aria-label', t('queuePanel.title'));
     const { history, nowPlaying, userQueue, upcoming, hasContext } = this._state;
 
     const sections = [];
@@ -410,7 +467,8 @@ export class QueuePanel {
     // Auto-advance countdown chip — only on the row UpNextEngine will
     // jump to next. Pill with live count + × to dismiss; click outside
     // the × still falls through to the row's normal jump-to handler.
-    const isAutoAdvance = !!this._autoAdvance.path && path === this._autoAdvance.path;
+    const slot = this._autoAdvanceSlot();
+    const isAutoAdvance = !!slot && slot.kind === kind && slot.idx === idx;
     const autoAdvanceChip = isAutoAdvance
       ? `<button type="button" class="queue-panel__auto-chip" data-queue-auto-cancel
               aria-label="${_esc(t('queuePanel.cancelAutoAdvance') || 'Cancel auto-play')}"
@@ -451,17 +509,20 @@ export class QueuePanel {
     rows.forEach((row) => {
       const path = row.dataset.queuePath;
       const kind = row.dataset.queueKind;
+      // Which row: an "Up next" row plays where it sits in the Play All or
+      // the play context, not as a library click (R4-02).
+      const where = { kind, idx: parseInt(row.dataset.queueIdx, 10) };
 
       // Click to jump (excluding clicks on remove + drag handle)
       row.addEventListener('click', (e) => {
         if (e.target.closest('[data-queue-remove], [data-queue-drag-handle]')) return;
-        this.onJump?.(path);
+        this.onJump?.(path, where);
       });
 
       row.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          this.onJump?.(path);
+          this.onJump?.(path, where);
         }
       });
 
@@ -610,7 +671,9 @@ export class QueuePanel {
       name: video.name || fallback.name,
       durationLabel: formatDuration(video.duration || 0),
       hasFunscript: !!video.hasFunscript,
-      fsManual: !!video._manualAssociation,
+      // Same rule as the library card: an auto-promoted multi-axis pairing
+      // is FunSync's, not the user's (V41).
+      fsManual: !!video._manualAssociation && !video._autoAssigned,
       hasSubtitle: !!video.hasSubtitle,
       subManual: !!video._manualSubtitle,
       vrOverride,

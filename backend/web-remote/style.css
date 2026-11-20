@@ -351,6 +351,16 @@ body::-webkit-scrollbar {
   transition: border-color 120ms;
 }
 .search-bar__input:focus { border-color: var(--accent); }
+/* One clear button only: ours (#searchClear). `appearance: none` on the
+   input does not remove the native cancel cross Chromium and Safari draw
+   inside a type="search" field, so the field showed two (CB-22). The
+   decoration rule stops Safari reserving space for its own magnifier. */
+.search-bar__input::-webkit-search-cancel-button,
+.search-bar__input::-webkit-search-decoration {
+  -webkit-appearance: none;
+  appearance: none;
+  display: none;
+}
 .search-bar__clear {
   position: absolute;
   top: 50%;
@@ -731,6 +741,51 @@ body::-webkit-scrollbar {
   flex: 0 1 auto;
   border-radius: 999px;
   padding: 8px 14px;
+}
+
+/* Tags (P1 tags, 2026-11-18): one pill per tag, a checkbox each (any number
+   on), grouped by facet under a small heading. The count says how many
+   videos have the tag. Same pill as tab/vr, so a picked tag reads the same. */
+.sheet__tag-facet { margin-top: 10px; }
+.sheet__tag-facet:first-child { margin-top: 0; }
+.sheet__tag-facet-title {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  margin: 0 0 6px;
+}
+.sheet__option--tag { gap: 8px; }
+.sheet__option input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+  margin: 0;
+}
+.sheet__option-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.sheet__option--tag span:not(.sheet__option-count) {
+  overflow-wrap: anywhere;
+}
+.sheet__tag-find { margin-bottom: 10px; }
+.sheet__tag-find-input {
+  width: 100%;
+  min-height: var(--tap-min);
+  padding: 0 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 16px; /* 16 px: iOS does not zoom the page on focus */
+}
+.sheet__tag-find-input:focus { border-color: var(--accent); outline: none; }
+.sheet__tag-empty {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
 }
 
 /* ============================================================
@@ -1440,6 +1495,29 @@ body::-webkit-scrollbar {
   overflow: hidden;
   text-overflow: ellipsis;
   min-width: 0;
+  /* The name, then the "main" mark of the script the video opens on
+     (FN-03). The name gives way first. */
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.player__variant-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.player__variant-row-main {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+/* The playing row's name in bold too, so it is not told by colour alone. */
+.player__variant-row:has(input:checked) .player__variant-row-name {
+  font-weight: 600;
 }
 .player__variant-row-preview {
   width: 100%;
@@ -2004,6 +2082,44 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
 }
 @media (prefers-reduced-motion: reduce) {
   .player__orgasm-btn--active { animation: none; }
+}
+
+/* Edge Hold hold-pill (next major), next to the Orgasm pill: one row,
+   equal halves; a calm neutral pill, so the two are never confused. The
+   row keeps the device pill's 16 px side margins (fixup-2: it ran edge to
+   edge on the phone). */
+.player__hold-row {
+  display: flex;
+  gap: 10px;
+  margin: 0 16px;
+}
+.player__hold-row > button {
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+}
+.player__edge-btn {
+  display: block;
+  margin-top: 10px;
+  min-height: 56px;
+  padding: 0 12px;
+  border: 1px solid var(--text-secondary);
+  border-radius: var(--radius-pill);
+  background: var(--control-hover);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  touch-action: none;          /* a hold must never start a scroll */
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background var(--dur-1), color var(--dur-1), transform var(--dur-1);
+}
+.player__edge-btn:active { transform: scale(0.985); }
+.player__edge-btn--active {
+  background: var(--text-primary);
+  color: var(--bg-primary);
 }
 
 /* Offset sliders inside the sync-pill dropdown (F4). */

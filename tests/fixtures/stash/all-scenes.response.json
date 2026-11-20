@@ -1,0 +1,559 @@
+{
+  "data": {
+    "findScenes": {
+      "count": 9,
+      "duration": 27.02,
+      "filesize": 8199129,
+      "scenes": [
+        {
+          "id": "2",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": true,
+          "interactive_speed": 320,
+          "created_at": "2026-11-17T20:29:54Z",
+          "updated_at": "2026-11-17T20:30:38Z",
+          "files": [
+            {
+              "id": "2",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_large.mkv",
+              "basename": "synthetic_large.mkv",
+              "size": 7427628,
+              "duration": 12.02,
+              "width": 1280,
+              "height": 720,
+              "frame_rate": 30,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:27:13Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "60f7da65ec8d5d1d"
+                },
+                {
+                  "type": "phash",
+                  "value": "ab63cd1cc33c3343"
+                }
+              ],
+              "oshash": "60f7da65ec8d5d1d",
+              "phash": "ab63cd1cc33c3343"
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/2/screenshot?t=1794947438",
+            "stream": "http://127.0.0.1:9999/scene/2/stream",
+            "funscript": "http://127.0.0.1:9999/scene/2/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/2/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "3",
+          "title": "Synthetic Scene Mid",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": true,
+          "interactive_speed": 320,
+          "created_at": "2026-11-17T20:29:54Z",
+          "updated_at": "2026-11-17T20:32:20Z",
+          "files": [
+            {
+              "id": "3",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_mid.mp4",
+              "basename": "synthetic_mid.mp4",
+              "size": 97200,
+              "duration": 3,
+              "width": 320,
+              "height": 240,
+              "frame_rate": 24,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:27:10Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "69577801585835d2"
+                },
+                {
+                  "type": "phash",
+                  "value": "aa51aa2af70abf0a"
+                }
+              ],
+              "oshash": "69577801585835d2",
+              "phash": "aa51aa2af70abf0a"
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/3/screenshot?t=1794947540",
+            "stream": "http://127.0.0.1:9999/scene/3/stream",
+            "funscript": "http://127.0.0.1:9999/scene/3/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/3/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [
+            {
+              "id": "1",
+              "name": "Synthetic Tag A",
+              "aliases": [
+                "synthetic-a"
+              ],
+              "parents": []
+            }
+          ],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "4",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": true,
+          "interactive_speed": 320,
+          "created_at": "2026-11-17T20:29:54Z",
+          "updated_at": "2026-11-17T20:30:39Z",
+          "files": [
+            {
+              "id": "4",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_tiny.mp4",
+              "basename": "synthetic_tiny.mp4",
+              "size": 2146,
+              "duration": 1,
+              "width": 64,
+              "height": 48,
+              "frame_rate": 10,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:26:46Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "18c7ca0d119137f4"
+                }
+              ],
+              "oshash": "18c7ca0d119137f4",
+              "phash": null
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/4/screenshot?t=1794947439",
+            "stream": "http://127.0.0.1:9999/scene/4/stream",
+            "funscript": "http://127.0.0.1:9999/scene/4/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/4/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "7",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": false,
+          "interactive_speed": null,
+          "created_at": "2026-11-17T20:31:33Z",
+          "updated_at": "2026-11-17T20:37:23Z",
+          "files": [
+            {
+              "id": "7",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65535.mp4",
+              "basename": "synthetic_edge_65535.mp4",
+              "size": 65535,
+              "duration": 1,
+              "width": 64,
+              "height": 48,
+              "frame_rate": 10,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:37:23Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "e011589d0eb6a3b1"
+                }
+              ],
+              "oshash": "e011589d0eb6a3b1",
+              "phash": null
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/7/screenshot?t=1794947843",
+            "stream": "http://127.0.0.1:9999/scene/7/stream",
+            "funscript": "http://127.0.0.1:9999/scene/7/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/7/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "8",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": false,
+          "interactive_speed": null,
+          "created_at": "2026-11-17T20:31:33Z",
+          "updated_at": "2026-11-17T20:37:23Z",
+          "files": [
+            {
+              "id": "8",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65536.mp4",
+              "basename": "synthetic_edge_65536.mp4",
+              "size": 65536,
+              "duration": 1,
+              "width": 64,
+              "height": 48,
+              "frame_rate": 10,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:37:23Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "1e7fd6b1fad8ae46"
+                }
+              ],
+              "oshash": "1e7fd6b1fad8ae46",
+              "phash": null
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/8/screenshot?t=1794947843",
+            "stream": "http://127.0.0.1:9999/scene/8/stream",
+            "funscript": "http://127.0.0.1:9999/scene/8/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/8/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "9",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": false,
+          "interactive_speed": null,
+          "created_at": "2026-11-17T20:31:33Z",
+          "updated_at": "2026-11-17T20:37:23Z",
+          "files": [
+            {
+              "id": "9",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65543.mp4",
+              "basename": "synthetic_edge_65543.mp4",
+              "size": 65543,
+              "duration": 1,
+              "width": 64,
+              "height": 48,
+              "frame_rate": 10,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:37:23Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "3fdde031d5e4cf6e"
+                }
+              ],
+              "oshash": "3fdde031d5e4cf6e",
+              "phash": null
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/9/screenshot?t=1794947843",
+            "stream": "http://127.0.0.1:9999/scene/9/stream",
+            "funscript": "http://127.0.0.1:9999/scene/9/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/9/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "5",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": false,
+          "interactive_speed": null,
+          "created_at": "2026-11-17T20:31:33Z",
+          "updated_at": "2026-11-17T20:37:23Z",
+          "files": [
+            {
+              "id": "5",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_131072.mp4",
+              "basename": "synthetic_edge_131072.mp4",
+              "size": 131072,
+              "duration": 1,
+              "width": 64,
+              "height": 48,
+              "frame_rate": 10,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:37:23Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "6fc1fac03dfade66"
+                }
+              ],
+              "oshash": "6fc1fac03dfade66",
+              "phash": null
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/5/screenshot?t=1794947843",
+            "stream": "http://127.0.0.1:9999/scene/5/stream",
+            "funscript": "http://127.0.0.1:9999/scene/5/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/5/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "6",
+          "title": "",
+          "code": "",
+          "date": null,
+          "details": "",
+          "director": "",
+          "urls": [],
+          "rating100": null,
+          "organized": false,
+          "interactive": false,
+          "interactive_speed": null,
+          "created_at": "2026-11-17T20:31:33Z",
+          "updated_at": "2026-11-17T20:37:23Z",
+          "files": [
+            {
+              "id": "6",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_131079.mp4",
+              "basename": "synthetic_edge_131079.mp4",
+              "size": 131079,
+              "duration": 1,
+              "width": 64,
+              "height": 48,
+              "frame_rate": 10,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:37:23Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "69198e60fe9f0678"
+                }
+              ],
+              "oshash": "69198e60fe9f0678",
+              "phash": null
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/6/screenshot?t=1794947843",
+            "stream": "http://127.0.0.1:9999/scene/6/stream",
+            "funscript": "http://127.0.0.1:9999/scene/6/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/6/interactive_heatmap"
+          },
+          "studio": null,
+          "performers": [],
+          "tags": [],
+          "scene_markers": [],
+          "stash_ids": []
+        },
+        {
+          "id": "1",
+          "title": "Synthetic Scene Small",
+          "code": "SYN-001",
+          "date": "2026-11-17",
+          "details": "Synthetic test scene.",
+          "director": "Synthetic Director",
+          "urls": [
+            "https://example.invalid/scene/1"
+          ],
+          "rating100": 80,
+          "organized": true,
+          "interactive": true,
+          "interactive_speed": 320,
+          "created_at": "2026-11-17T20:29:54Z",
+          "updated_at": "2026-11-17T20:32:20Z",
+          "files": [
+            {
+              "id": "1",
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+              "basename": "Synthetic Clip Small.mp4",
+              "size": 213390,
+              "duration": 6,
+              "width": 320,
+              "height": 240,
+              "frame_rate": 24,
+              "video_codec": "h264",
+              "mod_time": "2026-11-17T20:26:46Z",
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "6b3f3b3ee9e8c31a"
+                },
+                {
+                  "type": "phash",
+                  "value": "8a7da502fa0aeb6a"
+                }
+              ],
+              "oshash": "6b3f3b3ee9e8c31a",
+              "phash": "8a7da502fa0aeb6a"
+            }
+          ],
+          "paths": {
+            "screenshot": "http://127.0.0.1:9999/scene/1/screenshot?t=1794947540",
+            "stream": "http://127.0.0.1:9999/scene/1/stream",
+            "funscript": "http://127.0.0.1:9999/scene/1/funscript",
+            "interactive_heatmap": "http://127.0.0.1:9999/scene/1/interactive_heatmap"
+          },
+          "studio": {
+            "id": "2",
+            "name": "Synthetic Studio",
+            "parent_studio": {
+              "id": "1",
+              "name": "Synthetic Network"
+            },
+            "stash_ids": [
+              {
+                "endpoint": "https://stash-box.invalid/graphql",
+                "stash_id": "00000000-0000-4000-8000-0000000000aa",
+                "updated_at": "2026-11-17T20:32:20.5944581Z"
+              }
+            ]
+          },
+          "performers": [
+            {
+              "id": "1",
+              "name": "Synthetic Performer One",
+              "disambiguation": "test",
+              "alias_list": [
+                "Synth One"
+              ],
+              "gender": "FEMALE",
+              "stash_ids": [
+                {
+                  "endpoint": "https://stash-box.invalid/graphql",
+                  "stash_id": "00000000-0000-4000-8000-000000000001",
+                  "updated_at": "2026-11-17T20:32:20.581996Z"
+                }
+              ]
+            },
+            {
+              "id": "2",
+              "name": "Synthetic Performer Two",
+              "disambiguation": "",
+              "alias_list": [],
+              "gender": null,
+              "stash_ids": []
+            }
+          ],
+          "tags": [
+            {
+              "id": "1",
+              "name": "Synthetic Tag A",
+              "aliases": [
+                "synthetic-a"
+              ],
+              "parents": []
+            },
+            {
+              "id": "2",
+              "name": "Synthetic Tag B",
+              "aliases": [],
+              "parents": [
+                {
+                  "id": "3",
+                  "name": "Synthetic Parent Tag"
+                }
+              ]
+            }
+          ],
+          "scene_markers": [
+            {
+              "id": "1",
+              "title": "Synthetic marker one",
+              "seconds": 1.5,
+              "end_seconds": 3.25,
+              "primary_tag": {
+                "id": "4",
+                "name": "Synthetic Marker Tag"
+              },
+              "tags": [
+                {
+                  "id": "1",
+                  "name": "Synthetic Tag A"
+                }
+              ]
+            },
+            {
+              "id": "2",
+              "title": "",
+              "seconds": 4,
+              "end_seconds": null,
+              "primary_tag": {
+                "id": "2",
+                "name": "Synthetic Tag B"
+              },
+              "tags": []
+            }
+          ],
+          "stash_ids": [
+            {
+              "endpoint": "https://stash-box.invalid/graphql",
+              "stash_id": "00000000-0000-4000-8000-000000000101",
+              "updated_at": "2026-11-17T20:32:20.6029455Z"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

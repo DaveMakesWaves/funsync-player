@@ -17,10 +17,12 @@
  *
  * Only when actively playing: a paused or ended video means the user is
  * done watching, so the normal teardown is the right call. Gated by the
- * `player.miniPlayer` setting (default on) so it can be turned off.
+ * `player.miniPlayer` setting, which is OFF by default since 0.9.3
+ * (promised to lr_x3) and must be switched on explicitly.
  *
  * @param {Object} s
- * @param {boolean} s.enabled  — the `player.miniPlayer` setting (default true)
+ * @param {boolean} s.enabled  — the `player.miniPlayer` setting (default false;
+ *                               callers pass `=== true`, so a missing key is off)
  * @param {boolean} s.hasVideo — a video is loaded (has a src)
  * @param {boolean} s.paused   — video.paused
  * @param {boolean} s.ended    — video.ended

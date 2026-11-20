@@ -46,7 +46,7 @@ export async function openSessionHistory(tracker) {
       clearBtn.className = 'session-history__clear';
       clearBtn.textContent = t('session.history.clear');
       clearBtn.addEventListener('click', async () => {
-        const ok = await Modal.confirm(t('session.history.clearTitle'), t('session.history.clearConfirm'));
+        const ok = await Modal.confirm(t('session.history.clearTitle'), t('session.history.clearConfirm'), { confirmText: t('common.delete') });
         if (ok) {
           tracker.clearHistory();
           close();

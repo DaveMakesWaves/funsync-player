@@ -1,0 +1,121 @@
+{
+  "note": "The light scene list, page 1 of 1 (1,000 per page), sorted by id. Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by stage s1-1a-client, with the document from electron/stash-queries.js. The next lot (2026-11-19) changed this document: this answer is kept as the S1 tests' data (the fake Stash serves it) and its sha256 moved to s1DocumentSha256; the current document is pinned by the sn-* recording of the same operation.",
+  "operationName": "FunSyncSceneList",
+  "s1DocumentSha256": "d01a12077a1f29596a8a65af0fcc27d726c0c8d308795c3414622c4002ab4b42",
+  "variables": {
+    "page": 1,
+    "perPage": 1000
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/graphql-response+json"
+  },
+  "body": {
+    "data": {
+      "findScenes": {
+        "count": 9,
+        "scenes": [
+          {
+            "id": "1",
+            "updated_at": "2026-11-17T20:32:20Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+                "size": 213390,
+                "oshash": "6b3f3b3ee9e8c31a"
+              }
+            ]
+          },
+          {
+            "id": "2",
+            "updated_at": "2026-11-17T20:30:38Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_large.mkv",
+                "size": 7427628,
+                "oshash": "60f7da65ec8d5d1d"
+              }
+            ]
+          },
+          {
+            "id": "3",
+            "updated_at": "2026-11-17T20:32:20Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_mid.mp4",
+                "size": 97200,
+                "oshash": "69577801585835d2"
+              }
+            ]
+          },
+          {
+            "id": "4",
+            "updated_at": "2026-11-17T20:30:39Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_tiny.mp4",
+                "size": 2146,
+                "oshash": "18c7ca0d119137f4"
+              }
+            ]
+          },
+          {
+            "id": "5",
+            "updated_at": "2026-11-17T20:37:23Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_131072.mp4",
+                "size": 131072,
+                "oshash": "6fc1fac03dfade66"
+              }
+            ]
+          },
+          {
+            "id": "6",
+            "updated_at": "2026-11-17T20:37:23Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_131079.mp4",
+                "size": 131079,
+                "oshash": "69198e60fe9f0678"
+              }
+            ]
+          },
+          {
+            "id": "7",
+            "updated_at": "2026-11-17T20:37:23Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65535.mp4",
+                "size": 65535,
+                "oshash": "e011589d0eb6a3b1"
+              }
+            ]
+          },
+          {
+            "id": "8",
+            "updated_at": "2026-11-17T20:37:23Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65536.mp4",
+                "size": 65536,
+                "oshash": "1e7fd6b1fad8ae46"
+              }
+            ]
+          },
+          {
+            "id": "9",
+            "updated_at": "2026-11-17T20:37:23Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65543.mp4",
+                "size": 65543,
+                "oshash": "3fdde031d5e4cf6e"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

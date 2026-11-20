@@ -29,6 +29,12 @@ const SCHEMA_VERSION = 1;
 // etc.) into one snapshot. SCOPE-data-backup.md §10 locked this at 60 s.
 const DEBOUNCE_MS = 60_000;
 
+// ...but never later than this after the first write it covers. Writes that
+// never pause (the resume position is saved every 15 s while anything plays)
+// would otherwise push the debounce back forever, and nothing edited during
+// playback would be snapshotted until playback stopped.
+const DEBOUNCE_MAX_WAIT_MS = 5 * 60_000;
+
 // Retention pyramid — "many recent, fewer old, never zero." Numbers
 // locked in SCOPE §10. Total worst-case ~32 MB for typical configs.
 const RETENTION = {
@@ -115,16 +121,40 @@ function sha256Of(payload) {
  */
 function computeSummary(config) {
   const lib = config?.settings?.library || {};
+  const videoCategories = config?.videoCategories && typeof config.videoCategories === 'object'
+    ? config.videoCategories : {};
   return {
     sources: Array.isArray(lib.sources) ? lib.sources.length : 0,
     collections: Array.isArray(lib.collections) ? lib.collections.length : 0,
     playlists: Array.isArray(config?.playlists) ? config.playlists.length : 0,
     categories: Array.isArray(config?.categories) ? config.categories.length : 0,
+    // Total video→category links, not videos with a category: losing one
+    // category from a video in two must still change the count. Without
+    // this field a snapshot taken before a V01-style loss and one taken
+    // after it summarised identically in the restore list (V58).
+    categoryAssignments: Object.values(videoCategories)
+      .reduce((n, ids) => n + (Array.isArray(ids) ? ids.length : 0), 0),
     customRoutings: Object.keys(lib.customRouting || {}).length,
     manualAssociations: Object.keys(lib.associations || {}).length,
     manualVariants: Object.keys(lib.manualVariants || {}).length,
+    // Tags (DESIGN-video-options.md (e)), for the same V58 reason: every
+    // video→tag link of your own (like categoryAssignments, so losing one
+    // tag from a video with two still changes it), and every EroScripts post
+    // record. A snapshot from before a tag loss must not read like one after.
+    tagAssignments: _sumValues(lib.userTags, (v) => (Array.isArray(v) ? v.length : 0)),
+    eroscriptsLinks: _sumValues(lib.scriptTags, (v) => (v && typeof v === 'object' && !Array.isArray(v) ? 1 : 0)),
   };
 }
+
+// Sum of `count(value)` over a path-keyed map; 0 for anything not a map.
+function _sumValues(map, count) {
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return 0;
+  return Object.values(map).reduce((n, v) => n + count(v), 0);
+}
+
+// Summary fields added after v0.9.2. A manifest row missing any of them is
+// recomputed once from its snapshot file (backfillSummaries).
+const SUMMARY_FIELDS_ADDED = Object.freeze(['categoryAssignments', 'tagAssignments', 'eroscriptsLinks']);
 
 /**
  * Build the snapshot file payload (metadata + config). Pure — no I/O.
@@ -376,6 +406,46 @@ async function saveManifest(backupDir, manifest) {
   await atomicWriteFile(manifestPath, JSON.stringify(manifest, null, 2));
 }
 
+/**
+ * Give manifest entries written before a summary field existed the current
+ * summary, by reading each such snapshot once. Saves the manifest only when
+ * something changed, so the cost is paid once per old snapshot, ever. An
+ * unreadable snapshot keeps its old summary. Used by the restore list,
+ * where the counts are how the user picks a snapshot (V58).
+ *
+ * @param {string} backupDir
+ * @param {{snapshots: Array<object>}} manifest — mutated in place
+ * @returns {Promise<object>} the same manifest
+ */
+async function backfillSummaries(backupDir, manifest) {
+  const updated = new Map();
+  for (const entry of manifest.snapshots || []) {
+    if (entry.summary && SUMMARY_FIELDS_ADDED.every((field) => field in entry.summary)) continue;
+    try {
+      const raw = await fsp.readFile(path.join(backupDir, entry.subdir, entry.filename), 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed?.config) continue;
+      entry.summary = computeSummary(parsed.config);
+      updated.set(`${entry.subdir}/${entry.filename}`, entry.summary);
+    } catch {
+      // Missing or corrupt snapshot: leave its row as it was.
+    }
+  }
+  if (updated.size > 0) {
+    // Re-read before writing: a snapshot taken while the files above were
+    // being read must not drop out of the manifest.
+    try {
+      const latest = await loadManifest(backupDir);
+      for (const s of latest.snapshots) {
+        const summary = updated.get(`${s.subdir}/${s.filename}`);
+        if (summary) s.summary = summary;
+      }
+      await saveManifest(backupDir, latest);
+    } catch { /* listing still works; the backfill is retried next time */ }
+  }
+  return manifest;
+}
+
 
 // === Public API ===========================================================
 
@@ -483,10 +553,12 @@ async function pruneOld({ userDataDir, now } = {}) {
  *     copy to config.json, return {recovered: true, fromSnapshot: ...}
  *   - no valid snapshot exists → return {recovered: false, fellBack: true}
  *     (caller falls through to defaults; toast warns user)
+ *   - config.json missing AND no backups folder → first launch →
+ *     return {recovered: false, fresh: true} (no toast)
  *
  * @param {object} opts
  * @param {string} opts.userDataDir
- * @returns {Promise<{recovered: boolean, fellBack?: boolean, fromSnapshot?: object, reason?: string}>}
+ * @returns {Promise<{recovered: boolean, fellBack?: boolean, fresh?: boolean, fromSnapshot?: object, reason?: string}>}
  */
 async function verifyAndRecover({ userDataDir } = {}) {
   const paths = resolvePaths(userDataDir);
@@ -546,19 +618,45 @@ async function verifyAndRecover({ userDataDir } = {}) {
   }
 
   // 3. No valid snapshot found. Caller falls through to defaults.
+  //
+  // A missing config with no backup history at all is a FIRST LAUNCH, not
+  // a loss: say so, and the renderer shows nothing. It used to come back as
+  // fellBack, so every new user's first sight of the app was a red 15 s
+  // "Settings could not be recovered" toast (V06). Any trace of a backups
+  // folder means the app ran here before, so a missing config then is a
+  // real loss and still warns, as do an empty, unparseable or unreadable
+  // config.json.
+  if (liveReason === 'file missing' && !(await _hasBackupHistory(paths))) {
+    return { recovered: false, fresh: true, reason: liveReason };
+  }
   return { recovered: false, fellBack: true, reason: liveReason };
+}
+
+/** Does anything under userData/backups show this app ran here before? */
+async function _hasBackupHistory(paths) {
+  try {
+    await fsp.access(paths.backupDir);
+    return true;
+  } catch (err) {
+    // Only a definite ENOENT counts as "never ran". Anything else (EACCES,
+    // EBUSY...) cannot prove that, so it keeps the warning.
+    return err?.code !== 'ENOENT';
+  }
 }
 
 
 // === Debounced scheduler ==================================================
 
 let _debounceTimer = null;
+let _maxWaitTimer = null;
 let _scheduledOpts = null;
 
 /**
  * Schedule a "debounced" snapshot. Coalesces rapid mutations into one
  * snapshot at most once per DEBOUNCE_MS. Subsequent calls during the
- * window reset the timer (classic debounce). Caller passes the
+ * window reset the timer (classic debounce), but the first call also arms
+ * a DEBOUNCE_MAX_WAIT_MS timer that is never reset, so a stream of writes
+ * with no 60 s gap in it still gets snapshotted. Caller passes the
  * userDataDir + a getConfig callback that returns the current config
  * at the moment the timer fires (NOT the moment it was scheduled),
  * so the snapshot reflects the latest state.
@@ -576,16 +674,32 @@ function scheduleSnapshot({ userDataDir, getConfig, onSnapshot } = {}) {
   // Don't keep the event loop alive just for the backup timer — if the
   // app is otherwise idle and ready to quit, let it.
   if (_debounceTimer.unref) _debounceTimer.unref();
+  if (!_maxWaitTimer) {
+    _maxWaitTimer = setTimeout(_fireScheduled, DEBOUNCE_MAX_WAIT_MS);
+    if (_maxWaitTimer.unref) _maxWaitTimer.unref();
+  }
+}
+
+function _clearScheduledTimers() {
+  if (_debounceTimer) clearTimeout(_debounceTimer);
+  if (_maxWaitTimer) clearTimeout(_maxWaitTimer);
+  _debounceTimer = null;
+  _maxWaitTimer = null;
 }
 
 async function _fireScheduled() {
   const opts = _scheduledOpts;
-  _debounceTimer = null;
+  // Whichever timer fired, the other one is for the same snapshot.
+  _clearScheduledTimers();
   _scheduledOpts = null;
   if (!opts) return;
   try {
     const config = opts.getConfig();
     if (!config) return;
+    // Every store write arms this timer, including writes to the derived
+    // caches a snapshot strips (thumbnails, durations, speed stats), so a
+    // library scan alone would otherwise mint a copy of the last snapshot.
+    if (await _sameAsNewestSnapshot(opts.userDataDir, config)) return;
     const entry = await takeSnapshot({
       userDataDir: opts.userDataDir,
       config,
@@ -602,15 +716,34 @@ async function _fireScheduled() {
 }
 
 /**
+ * True when `config`, as a snapshot would store it, hashes the same as the
+ * newest rolling snapshot and that file is still on disk. Lets the debounced
+ * trigger skip a snapshot that would change nothing.
+ */
+async function _sameAsNewestSnapshot(userDataDir, config) {
+  const paths = resolvePaths(userDataDir);
+  const manifest = await loadManifest(paths.backupDir);
+  let newest = null;
+  for (const s of manifest.snapshots) {
+    if (s.subdir !== 'snapshots' || !s.sha256) continue;
+    if (!newest || new Date(s.timestamp).getTime() > new Date(newest.timestamp).getTime()) newest = s;
+  }
+  if (!newest || newest.sha256 !== sha256Of(stripBlacklist(config))) return false;
+  try {
+    await fsp.access(path.join(paths.backupDir, newest.subdir, newest.filename));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Cancel any pending scheduled snapshot. Used on graceful quit so the
  * quit-time snapshot supersedes the pending debounced one without a
  * race. The caller is expected to take a final snapshot afterwards.
  */
 function cancelScheduled() {
-  if (_debounceTimer) {
-    clearTimeout(_debounceTimer);
-    _debounceTimer = null;
-  }
+  _clearScheduledTimers();
   _scheduledOpts = null;
 }
 
@@ -623,6 +756,7 @@ module.exports = {
   // same blacklist.
   SCHEMA_VERSION,
   DEBOUNCE_MS,
+  DEBOUNCE_MAX_WAIT_MS,
   RETENTION,
   BACKUP_BLACKLIST,
   TRIGGER,
@@ -638,6 +772,7 @@ module.exports = {
   atomicWriteFile,
   loadManifest,
   saveManifest,
+  backfillSummaries,
   rebuildManifestFromFs,
   resolvePaths,
 

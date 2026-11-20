@@ -28,6 +28,7 @@ extraResources:
     to: backend
     filter:
       - "**/*"
+      - "!**/*.bak"
 
 win:
   icon: assets/icons/icon.ico

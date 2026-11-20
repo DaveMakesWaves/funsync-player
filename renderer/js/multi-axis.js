@@ -171,6 +171,64 @@ export function detectCompanionFiles(primaryPath, allFiles) {
 }
 
 /**
+ * Build a reusable base-name → companions index over a whole script list.
+ *
+ * `detectCompanionFiles` re-walks the ENTIRE list for every primary it is
+ * asked about, lower-casing and splitting each path as it goes. One call is
+ * cheap; a call per video is not. `_countAutoPromotionEligible` did exactly
+ * that from a `change` handler on the settings dropdown, so on stingray's
+ * library it blocked the renderer long enough to look like a hang before the
+ * confirmation dialog appeared at all (2026-08-24: "the app freezes for a few
+ * seconds"). 104 videos × 135 scripts is only 14k, but the same loop runs on
+ * every scan, and libraries an order of magnitude larger are normal.
+ *
+ * Build once, look up per video: O(F) instead of O(V × F).
+ *
+ * @param {string[]} allFiles — every known funscript path
+ * @returns {Map<string, Array<{path: string, axis: AxisInfo}>>} keyed by
+ *   lowercase base name (suffix and extension stripped)
+ */
+export function buildCompanionIndex(allFiles) {
+  const index = new Map();
+  if (!allFiles) return index;
+
+  for (const file of allFiles) {
+    if (!file) continue;
+    const filename = file.split(/[\\/]/).pop() || '';
+    const axis = parseAxisSuffix(filename);
+    // Primary files and non-funscripts carry no axis, and only companions
+    // are ever looked up here — skipping them keeps the index small and
+    // means a hit is already the answer, with no filtering at lookup time.
+    if (!axis) continue;
+
+    const base = getBaseName(filename).toLowerCase();
+    if (!base) continue;
+
+    const bucket = index.get(base);
+    if (bucket) bucket.push({ path: file, axis });
+    else index.set(base, [{ path: file, axis }]);
+  }
+
+  return index;
+}
+
+/**
+ * Companion lookup against a prebuilt index. Same return shape and same
+ * matching rule as `detectCompanionFiles` — pinned by a test that runs both
+ * over the same inputs — so the two cannot quietly diverge.
+ *
+ * @param {string} primaryPath — path to the primary .funscript file
+ * @param {Map<string, Array<{path: string, axis: AxisInfo}>>} index
+ * @returns {Array<{path: string, axis: AxisInfo}>}
+ */
+export function detectCompanionFilesIndexed(primaryPath, index) {
+  if (!primaryPath || !index || index.size === 0) return [];
+  const primaryBase = getBaseName(primaryPath).toLowerCase();
+  if (!primaryBase) return [];
+  return index.get(primaryBase) || [];
+}
+
+/**
  * Build a display path for a companion axis file.
  * Given a video path, returns the expected funscript path for a given axis.
  *

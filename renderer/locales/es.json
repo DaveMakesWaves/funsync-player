@@ -95,6 +95,8 @@
       "testBuzzAll": "Probar todos",
       "testBuzzAllTitle": "Vibrar cada dispositivo conectado para una comprobación rápida",
       "testBuzz": "Probar vibración",
+      "resend": "Reenviar",
+      "resendTitle": "Volver a conectar el Handy de este espectador si se ha desconectado y luego enviarle el script actual",
       "mute": "Silenciar",
       "unmute": "Activar",
       "remove": "Quitar espectador",
@@ -111,13 +113,23 @@
       "statusSynced": "Sincronizado",
       "statusPlaying": "Reproduciendo",
       "statusPlayingWithRtd": "Reproduciendo · {rtd}ms RTD",
+      "statusWaiting": "Esperando el script",
+      "statusReady": "Listo",
+      "statusRemoteHeld": "Detenido · los espectadores no siguen a un móvil ni a un visor",
+      "statusNoScript": "Este vídeo no tiene script",
+      "statusSpeed": "Detenido · velocidad {rate}×",
+      "statusScriptFailed": "No se pudo cargar el script",
+      "errorStopFailed": "No se pudo detener. Es posible que el dispositivo siga moviéndose.",
+      "errorSetupFailed": "El dispositivo no aceptó el script.",
+      "errorPlayFailed": "El dispositivo no empezó a reproducir.",
       "statusPaused": "Pausado",
       "statusMuted": "Silenciado",
       "statusError": "Error",
       "statusDisconnected": "Desconectado"
     },
     "toast": {
-      "selfKey": "Es tu propio Handy — ya está controlado por la pestaña Handy."
+      "selfKey": "Es tu propio Handy — ya está controlado por la pestaña Handy.",
+      "uploadFailed": "No se pudo enviar el nuevo script a tus espectadores. Sus dispositivos están detenidos."
     },
     "popoutWindowTitle": "Sala de audiencia"
   },
@@ -157,7 +169,8 @@
     "sourceDisconnected": "Fuente desconectada",
     "edit": "Editar",
     "addSourceFolder": "+ Añadir carpeta de origen...",
-    "newCollection": "+ Nueva colección..."
+    "newCollection": "+ Nueva colección...",
+    "notResponding": "No responde"
   },
   "common": {
     "ok": "Aceptar",
@@ -198,6 +211,7 @@
     "scriptEditor": "Editor de scripts (E)",
     "inlineTimeline": "Línea de tiempo del script",
     "inlineHeatmap": "Barra de mapa de calor",
+    "deviceSimulator": "Simulador de dispositivo",
     "screenshot": "Captura",
     "pictureInPicture": "Imagen en imagen",
     "miniPlayPause": "Reproducir / pausar",
@@ -229,6 +243,8 @@
     "replayTitle": "Reproducir de nuevo (K)",
     "playTitle": "Reproducir (K)",
     "pauseTitle": "Pausar (K)",
+    "muteTitle": "Silenciar (M)",
+    "unmuteTitle": "Activar sonido (M)",
     "infoResolution": "Resolución",
     "infoDuration": "Duración",
     "infoCurrent": "Actual",
@@ -245,7 +261,13 @@
     "windowWaiting": "Ventana del reproductor conectada. La reproducción de vídeo se moverá aquí en una próxima actualización.",
     "popOutUnavailableRemote": "No disponible mientras haya un teléfono o visor de RV conectado.",
     "popOutUnavailableSrc": "La ventana separada admite por ahora vídeos de la biblioteca local.",
-    "popOutOpening": "Abriendo la ventana del reproductor…"
+    "popOutOpening": "Abriendo la ventana del reproductor…",
+    "windowCrashed": "La ventana del reproductor se cerró inesperadamente. El vídeo ha vuelto a esta ventana.",
+    "windowHung": "La ventana del reproductor no responde. Tus dispositivos están detenidos. Espera a que responda, o ciérrala y sigue viendo aquí.",
+    "windowHungClose": "Cerrar la ventana del reproductor",
+    "windowRecovered": "La ventana del reproductor vuelve a responder. Está en pausa: pulsa Reproducir para volver a poner en marcha tus dispositivos.",
+    "stashMarker": "Marcador de Stash: {title}",
+    "stashMarkerUntitled": "Marcador de Stash"
   },
   "backend": {
     "title": "El backend no responde",
@@ -291,16 +313,26 @@
     "filterVR": "VR",
     "filterVROnly": "Solo VR",
     "filterNonVR": "Sin VR",
-    "kebabResetVRCurrentlyVR": "Restablecer VR (actualmente: VR)",
-    "kebabResetVRCurrentlyFlat": "Restablecer VR (actualmente: plano)",
-    "kebabMarkFlat": "Marcar como plano",
-    "kebabMarkVR": "Marcar como VR",
+    "filterTags": "Etiquetas",
+    "filterTagsFind": "Buscar una etiqueta",
+    "filterTagsFindAria": "Buscar en etiquetas y categorías",
+    "filterTagsEmpty": "Tus vídeos aún no tienen etiquetas ni categorías.",
+    "filterTagsNoMatch": "Nada coincide con «{query}».",
+    "filterTagsShowAll": "Mostrar todas ({count})",
+    "filterTagsShowFewer": "Mostrar menos",
+    "filterCategory": "Categoría",
+    "filterTagSource": "Origen de las etiquetas",
+    "filterTagSourceEroscripts": "EroScripts",
+    "filterTagSourceFile": "El archivo del script",
+    "filterTagSourceUser": "Tú",
+    "filterTagOptionAria": "{label}, {count, plural, one {# vídeo} other {# vídeos}}",
+    "filterChipFacet": "{facet}: {value}",
+    "filterChipFacetNot": "{facet}: sin {value}",
+    "cardTagsMore": "+{count}",
     "kebabVRFormat": "Formato VR…",
-    "kebabRemoveFunscript": "Eliminar funscript",
-    "kebabChangeSubtitle": "Cambiar subtítulo",
+    "kebabRemoveFunscript": "Desvincular funscript",
     "kebabAssociateSubtitle": "Asociar subtítulo",
-    "kebabRemoveSubtitle": "Eliminar subtítulo",
-    "kebabOptions": "Opciones",
+    "kebabRemoveSubtitle": "Desvincular subtítulo",
     "kebabFolderOptions": "Opciones de carpeta",
     "clearFolderScope": "Limpiar alcance de carpeta",
     "funscriptManual": "Funscript (manual)",
@@ -311,6 +343,7 @@
     "subtitlesAuto": "Subtítulos (detectados automáticamente)",
     "multiAxis": "Multi-eje",
     "multiAxisCount": "{count, plural, one {Multi-eje (# script)} other {Multi-eje (# scripts)}}",
+    "multiAxisEmbedded": "{count, plural, one {Multi-eje — # eje incrustado en el script: {axes}} other {Multi-eje — # ejes incrustados en el script: {axes}}}",
     "vrBadge": "VR",
     "flatBadge": "FLAT",
     "limitToFolder": "Limitar a esta carpeta",
@@ -324,6 +357,8 @@
     "select": "Seleccionar",
     "cancelSelect": "Cancelar",
     "noSourcesEmpty": "Añade una carpeta de origen para explorar tu biblioteca de vídeos",
+    "noVideoTrack": "Sin pista de vídeo",
+    "sourcesAllOff": "Todas tus carpetas de origen están desactivadas. Activa una en {settings} > {tab} para explorarla.",
     "addSourceFolder": "+ Añadir carpeta de origen",
     "gridView": "Vista de cuadrícula",
     "listView": "Vista de lista",
@@ -333,6 +368,13 @@
     "shuffleAll": "Reproducir al azar",
     "shuffleAllTitle": "Reproduce todos los vídeos mostrados en orden aleatorio y sin repeticiones",
     "shuffleEmpty": "No hay vídeos para reproducir al azar aquí",
+    "playOptions": {
+      "openTitle": "Opciones de reproducción",
+      "title": "Opciones de reproducción de la biblioteca y las categorías",
+      "loopLabel": "Repetir",
+      "loopWhy": "Volver a empezar desde el primer vídeo después del último.",
+      "shuffleNote": "El mismo turno y «Priorizar no vistos» solo cambian la reproducción al azar. «Reproducir todo» en una categoría mantiene el orden. Las listas de reproducción tienen sus propios ajustes."
+    },
     "selectionCount": "{count} seleccionados",
     "vrType": "Tipo VR",
     "loading": "Cargando…",
@@ -355,10 +397,6 @@
     "variantDefault": "Predeterminado",
     "assignScriptBulk": "Asignar script",
     "bulkScriptAssigned": "{name} asignado a {count} vídeos",
-    "kebabGroupOrganize": "Organizar",
-    "kebabGroupScripts": "Scripts y subtítulos",
-    "kebabGroupThumbnail": "Miniatura",
-    "kebabGroupVR": "VR",
     "kebabExtractAxes": "Extraer ejes integrados ({count})…",
     "kebabExtractAxesTitle": "Guarda {axes} como archivos .funscript adicionales",
     "customThumbTitle": "Elegir fotograma de miniatura",
@@ -379,7 +417,6 @@
     "resetVRClassification": "Restablecer a auto",
     "pinAsCollection": "Fijar como colección",
     "selectAllInFolder": "Seleccionar todo en esta carpeta",
-    "changeFunscriptBtn": "Cambiar funscript",
     "associateFunscriptBtn": "Asociar funscript",
     "noSourcesToRefresh": "No hay carpetas de origen para actualizar",
     "refreshedNoChanges": "Biblioteca actualizada — sin cambios",
@@ -443,6 +480,7 @@
       "changeTo": "Cambiar a:",
       "selectScript": "Seleccionar script:",
       "noFunscripts": "No se encontraron funscripts en el directorio. Usa Examinar.",
+      "noNameMatch": "Ningún script de aquí se llama como este vídeo. Estos son todos los scripts de su carpeta:",
       "browse": "Examinar…",
       "save": "Guardar",
       "variations": "Variaciones",
@@ -469,11 +507,24 @@
       "selectScriptBtn": "Seleccionar",
       "addRoute": "+ Añadir ruta",
       "variantSearchTitle": "Seleccionar script para variación",
+      "routeScriptSearchTitle": "Seleccionar script para la ruta",
       "searchEroScripts": "Buscar en EroScripts..."
     },
     "heatmapUnavailable": "Mapa de calor no disponible",
     "sortSwitchTo": "Cambiar a {order}",
-    "selectedAll": "{count, plural, one {# vídeo seleccionado} other {# vídeos seleccionados}}"
+    "selectedAll": "{count, plural, one {# vídeo seleccionado} other {# vídeos seleccionados}}",
+    "contextAllOptions": "Todas las opciones…",
+    "filterTagIncludesSubTags": "incluye {count, plural, one {# subetiqueta} other {# subetiquetas}}",
+    "sortStashRatingDesc": "Valoración de Stash alta-baja",
+    "sortStashRatingAsc": "Valoración de Stash baja-alta",
+    "sortStashLastPlayedDesc": "Reproducidos recientemente en Stash",
+    "sortStashLastPlayedAsc": "Reproducidos hace más tiempo en Stash",
+    "filterStash": "Stash",
+    "filterStashRating": "Valoración de Stash",
+    "filterStashRatingAny": "Cualquier valoración",
+    "filterStashRatingAtLeast": "{count, plural, one {Valorados con # estrella o más} other {Valorados con # estrellas o más}}",
+    "filterStashOrganised": "Organizados en Stash",
+    "filterChipStashRating": "{count, plural, one {Stash: # estrella o más} other {Stash: # estrellas o más}}"
   },
   "playlists": {
     "title": "Listas de reproducción",
@@ -492,6 +543,8 @@
     "moveDown": "Bajar",
     "moveUpNamed": "Subir {name}",
     "moveDownNamed": "Bajar {name}",
+    "moveToTop": "Mover al principio",
+    "moveToBottom": "Mover al final",
     "reorderAnnounce": "{name} movido a la posición {pos} de {total}",
     "renamePlaylist": "Renombrar lista",
     "deletePlaylist": "Eliminar lista",
@@ -502,7 +555,7 @@
     "gridView": "Vista de cuadrícula",
     "listView": "Vista de lista",
     "detailEmpty": "No hay vídeos en esta lista",
-    "detailEmptyHint": "Añade vídeos desde la Biblioteca usando el menú de tres puntos",
+    "detailEmptyHint": "Añade vídeos desde la Biblioteca: abre las opciones de un vídeo (⋮) y marca esta lista en «Organizar».",
     "advanced": {
       "openTitle": "Ajustes avanzados de la lista",
       "title": "Ajustes avanzados de la lista",
@@ -528,7 +581,36 @@
     "unavailableCount": "{count, plural, one {# vídeo no está disponible} other {# vídeos no están disponibles}}",
     "unavailableOnVolume": "{count, plural, one {# vídeo en {volume} no está disponible} other {# vídeos en {volume} no están disponibles}}",
     "unavailableHint": "Vuelve a conectar la unidad para reproducirlos. Siguen en la lista.",
-    "unavailableTooltip": "No disponible ahora mismo: {path}"
+    "unavailableTooltip": "No disponible ahora mismo: {path}",
+    "sortAzTitle": "Ordenar por nombre, A-Z",
+    "sortZaTitle": "Ordenar por nombre, Z-A",
+    "sortedAz": "Lista «{name}» ordenada por nombre, A-Z",
+    "sortedZa": "Lista «{name}» ordenada por nombre, Z-A",
+    "selectModeTitle": "Seleccionar vídeos para mover o quitar varios a la vez",
+    "selectVideoNamed": "Seleccionar {name}",
+    "movedSelection": "{count, plural, one {# vídeo movido en «{name}»} other {# vídeos movidos en «{name}»}}",
+    "removedSelection": "{count, plural, one {# vídeo quitado de «{name}»} other {# vídeos quitados de «{name}»}}. Tus archivos de vídeo no se tocan.",
+    "confirmRemoveSelection": "{count, plural, one {¿Quitar # vídeo de «{name}»?} other {¿Quitar # vídeos de «{name}»?}} Tus archivos de vídeo no se tocan.",
+    "stashGroups": {
+      "sectionTitle": "De Stash",
+      "sectionHint": "Grupos de tu Stash, al día cada vez que FunSync se sincroniza con Stash. Para cambiar uno, cámbialo en Stash.",
+      "name": "Stash: {name}",
+      "unnamed": "Grupo sin nombre",
+      "readOnly": "Solo lectura",
+      "readOnlyReason": "Se mantiene sincronizado con este grupo de tu Stash. FunSync no puede cambiar sus vídeos ni su orden: cambia el grupo en Stash y luego sincroniza.",
+      "missingCount": "{count, plural, one {# escena no está en tu biblioteca} other {# escenas no están en tu biblioteca}}",
+      "missingScene": "No está en tu biblioteca de FunSync",
+      "missingSceneTooltip": "Esta escena de Stash no tiene ningún vídeo vinculado en tu biblioteca de FunSync, así que se omite al reproducir el grupo.",
+      "untitledScene": "Escena de Stash sin título",
+      "playOptionsNote": "Estas opciones se comparten con la Biblioteca y las categorías. El mismo turno y «Priorizar no vistos» solo cambian la reproducción al azar; «Reproducir todo» mantiene el orden de Stash.",
+      "addToQueue": "Añadir a la cola",
+      "addToQueueTitle": "Añadir los vídeos de este grupo al final de tu cola",
+      "addedToQueue": "{count, plural, one {Se añadió # vídeo a tu cola} other {Se añadieron # vídeos a tu cola}}",
+      "copy": "Copiar a mis listas",
+      "copyTitle": "Crea tu propia lista con estos vídeos. Puedes editarla y no sigue a Stash.",
+      "copied": "Se añadió «{name}» a tus listas",
+      "copyFailed": "No se pudo crear la lista. Inténtalo de nuevo."
+    }
   },
   "categories": {
     "title": "Categorías",
@@ -548,7 +630,8 @@
     "gridView": "Vista de cuadrícula",
     "listView": "Vista de lista",
     "detailEmpty": "No hay vídeos en esta categoría",
-    "detailEmptyHint": "Asigna vídeos desde la Biblioteca usando el menú de tres puntos",
+    "unavailableHint": "Vuelve a conectar la unidad para reproducirlos. Siguen en la categoría.",
+    "detailEmptyHint": "Asigna vídeos desde la Biblioteca: abre las opciones de un vídeo (⋮) y marca esta categoría en «Organizar».",
     "iconLabel": "Icono",
     "iconModeColor": "Color",
     "iconModeShape": "Forma",
@@ -570,6 +653,8 @@
     "removeAria": "Quitar filtro: {label}"
   },
   "collectionModal": {
+    "titleCreate": "Crear colección",
+    "titleEdit": "Editar — {name}",
     "sourceLabel": "Fuente:",
     "allSources": "Todas las fuentes",
     "sourceDisconnected": "{name} (desconectada)",
@@ -600,8 +685,11 @@
     "tcodePrecision4": "4 dígitos (TCode-0.3)"
   },
   "toast": {
+    "tcodeGoHomePauseFirst": "Pausa primero el vídeo en tu móvil o visor: es el que está moviendo tu dispositivo.",
     "dismissAria": "Descartar notificación",
     "tryAgain": "Reintentar",
+    "vrTimestampServerHint": "El compañero VR no puede alcanzar el servidor de marcas de tiempo de HereSphere. En tu Quest: HereSphere → Settings → Timestamp Server. Asegúrate de que esté habilitado y luego pulsa el botón de auto-detección junto al campo IP — la IP de tu Quest es {ip} y el puerto debe ser 23554. Si eso no ayuda, apaga el servidor de marcas de tiempo y vuelve a encenderlo para forzar una reinicialización.",
+    "vrQuestIpUnknown": "la que aparece en la configuración de Wi-Fi de tu Quest",
     "connecting": "Conectando…",
     "undo": "Deshacer",
     "getScript": "Obtener script",
@@ -633,7 +721,8 @@
     "syncPaused": "Sincronización pausada — la velocidad de reproducción cambió",
     "vrFlattenLabel": "VR plano: {label}",
     "noVRDetected": "No se detectó empaquetado estéreo VR en este vídeo",
-    "vrLooksLikeVR": "Parece VR. Usa el menu del reproductor para elegir el formato",
+    "vrLooksLikeVR": "Parece VR. Usa el menú del reproductor para elegir el formato",
+    "vrSetFormatInMenu": "Este vídeo aún no tiene un formato VR. Elige uno en el menú del reproductor (⋮), en Formato VR.",
     "noVideoLoaded": "Sin vídeo cargado",
     "tcodePort": "Selecciona un puerto",
     "tcodeHost": "Introduce un host",
@@ -641,6 +730,7 @@
     "tcodeWsUrlInvalid": "La URL debe empezar con ws:// o wss://",
     "scriptLoadFailed": "No se pudo cargar el funscript: {error}",
     "handyUploadFailed": "No se pudo subir el script a Handy",
+    "handyStopFailed": "No se pudo detener el Handy: puede seguir en movimiento. Pulsa el botón del dispositivo.",
     "variantSwitchFailed": "No se pudo cambiar la variante del script",
     "noPlaylists": "Aún no hay listas — crea una desde la vista de Listas",
     "addNoPath": "No se puede añadir — el vídeo no tiene ruta de archivo",
@@ -654,6 +744,8 @@
     "remoteDisconnected": "Remoto desconectado",
     "remoteTakenOver": "Remoto tomado por {ip}",
     "funscriptUnreadable": "No se pudo leer el funscript de {name} — reproduciendo sin sincronización",
+    "scriptAccessDenied": "No se puede leer {name}: acceso denegado. Reproduciendo sin sincronización.",
+    "scriptUnreadableNow": "No se puede leer {name} en este momento. Reproduciendo sin sincronización.",
     "playlistNoPlayable": "No hay vídeos reproducibles en esta lista",
     "fullscreenBlocked": "Pantalla completa bloqueada: {error}",
     "fullscreenUnavailable": "Pantalla completa no disponible en este contexto.",
@@ -662,7 +754,7 @@
     "pipFailed": "Imagen en imagen falló.",
     "nameSourcePrompt": "Nombrar esta fuente",
     "nameSourcePlaceholder": "Nombre de la fuente",
-    "deleteCollectionTitle": "Eliminar biblioteca",
+    "deleteCollectionTitle": "Eliminar colección",
     "deleteCollectionConfirm": "¿Eliminar \"{name}\"? Tus vídeos no se verán afectados.",
     "renameVariationTitle": "Renombrar variación",
     "renameVariationLabel": "Nombre",
@@ -676,12 +768,17 @@
     "vrScriptLoadFailed": "No se pudo cargar el script VR",
     "remoteNoScript": "Remoto reproduciendo {name} — sin script",
     "vrReconnected": "Compañero VR reconectado — sincronizando dispositivos",
+    "settingSaveFailed": "No se pudo guardar ese ajuste — se ha restaurado",
+    "globalShortcutTaken": "{key} ya lo usa otra aplicación — elige otro atajo",
+    "globalShortcutInvalid": "{key} no es una combinación de teclas válida — elige otro atajo",
     "vrConnected": "Compañero VR conectado — sincronizando dispositivos",
     "restartFailed": "Reinicio fallido: {error}",
     "logsOpenFailed": "No se pudo abrir el archivo de registro: {error}",
     "handyAutoFailed": "Auto-conexión de Handy fallida — pulsa H para conectar manualmente",
     "sourceDisconnectedFile": "Fuente desconectada — el archivo ya no está disponible",
+    "videoFileMissing": "No se encuentra {name}. Puede que se haya movido o cambiado de nombre, o que su unidad esté desconectada.",
     "multiAxisFailed": "Multi-eje: el script {suffix} no se pudo cargar ({error})",
+    "extractKeptExisting": "{count, plural, one {Se conservó el archivo compañero existente, sin sobrescribir: {names}} other {Se conservaron # archivos compañeros existentes, sin sobrescribir: {names}}}",
     "queueReadFailed": "Elemento de cola {name}: no se pudo leer el script {script} — reproduciendo sin sincronización",
     "queueReadError": "Elemento de cola {name}: lectura del script falló ({error}) — reproduciendo sin sincronización",
     "handyUploadTimeout": "La subida del script a Handy expiró — el vídeo se está reproduciendo pero Handy no estará sincronizado. Verifica tu conexión e intenta recargar el vídeo.",
@@ -690,7 +787,10 @@
     "videoUnavailable": "Este vídeo no está disponible ahora mismo. Vuelve a conectar la unidad donde está guardado.",
     "playlistAllUnavailable": "Ninguno de estos vídeos está disponible ahora mismo. Vuelve a conectar la unidad.",
     "playlistSkippedUnavailable": "{count, plural, one {Se omitió # vídeo no disponible} other {Se omitieron # vídeos no disponibles}}",
-    "nextAllUnavailable": "No hay más vídeos disponibles en esa dirección. Vuelve a conectar la unidad para reproducir el resto."
+    "nextAllUnavailable": "No hay más vídeos disponibles en esa dirección. Vuelve a conectar la unidad para reproducir el resto.",
+    "settingsRecovered": "La configuración se ha recuperado de una copia reciente. Abre Configuración → Datos para ver el historial de copias.",
+    "settingsNotRecovered": "No se pudo recuperar la configuración. Se empieza de cero — usa Configuración → Datos → Importar archivo de copia para restaurar desde un archivo de copia.",
+    "patternTestHandyFailed": "El Handy no pudo reproducir la prueba. Comprueba la conexión y vuelve a intentarlo."
   },
   "modal": {
     "noItemsAvailable": "Sin elementos disponibles",
@@ -730,7 +830,9 @@
       "clear": "Borrar búsqueda"
     },
     "filterChips": {
-      "aria": "Filtros activos"
+      "aria": "Filtros activos",
+      "removeAria": "Quitar filtro: {label}",
+      "tag": "{facet}: {label}"
     },
     "actions": {
       "sort": "Ordenar",
@@ -762,7 +864,12 @@
       "vrAria": "Filtro VR",
       "vrAll": "Todos",
       "vrOnly": "Solo VR",
-      "vrFlat": "No VR"
+      "vrFlat": "No VR",
+      "tagsHeader": "Etiquetas",
+      "tagsFindLabel": "Buscar una etiqueta",
+      "tagsFindPlaceholder": "Buscar una etiqueta…",
+      "tagsNoMatch": "Ninguna etiqueta coincide con «{query}».",
+      "tagAria": "{label}, {count, plural, one {# vídeo} other {# vídeos}}"
     },
     "sortSheet": {
       "title": "Ordenar por",
@@ -849,7 +956,12 @@
       "avg": "Med",
       "max": "Máx",
       "speedUnit": "u/s",
-      "speedTooltip": "Med {avg} u/s • Máx {max} u/s"
+      "speedTooltip": "Med {avg} u/s • Máx {max} u/s",
+      "variantListAria": "Variante del funscript",
+      "edgeHold": "Edge - mantener",
+      "edgeRelease": "Suelta para reanudar",
+      "edgeTap": "Edge - tocar",
+      "edgeResume": "Toca para reanudar"
     }
   },
   "hevc": {
@@ -874,11 +986,18 @@
     "browse": "Examinar…",
     "noManualVariations": "Sin variaciones manuales",
     "defaultLabel": "Predeterminado",
+    "mainTag": "principal",
     "addScriptVariation": "Añadir variación de script",
     "setDefault": "Establecer como predeterminado para este vídeo",
     "unsetDefault": "Quitar como predeterminado para este vídeo",
     "defaultSet": "«{label}» establecido como predeterminado para este vídeo",
-    "defaultCleared": "Variante predeterminada borrada"
+    "defaultCleared": "Variante predeterminada borrada",
+    "bulkNamingTitle": "{count, plural, one {Nombrar # variación} other {Nombrar # variaciones}}",
+    "bulkNamingHint": "Cada script recibe un nombre en el menú de variaciones. Cambia cualquier nombre o haz clic en una sugerencia que aparece debajo.",
+    "bulkSkipped": "{count, plural, one {Ya está en la lista, omitido: {names}} other {# ya están en la lista, omitidos: {names}}}",
+    "bulkAddButton": "{count, plural, one {Añadir # variación} other {Añadir # variaciones}}",
+    "bulkAdded": "{count, plural, one {# variación añadida} other {# variaciones añadidas}}",
+    "alreadyListed": "{count, plural, one {{names} ya está en la lista de variaciones} other {Ya están en la lista de variaciones: {names}}}"
   },
   "syncChip": {
     "noDevices": "Sin dispositivos",
@@ -980,7 +1099,10 @@
       "alreadyAdded": "Ya añadida como \"{name}\"",
       "childOverlapTitle": "Carpeta ya cubierta",
       "childOverlapBody": "\"{path}\" está dentro de \"{parentName}\" ({parentPath}). Los archivos aquí ya se escanean — añadirla contará cada vídeo dos veces.\n\n¿Añadir de todos modos?",
+      "addAnyway": "Añadir de todos modos",
       "parentOverlapTitle": "Fuente superpuesta",
+      "parentOverlapBody": "\"{path}\" contiene {count, plural, one {una fuente que ya añadiste} other {# fuentes que ya añadiste}}: {names}. Sus archivos se escanearían dos veces.\n\n¿Quitar {count, plural, one {esa fuente} other {esas fuentes}} y añadir esta carpeta en su lugar?",
+      "parentOverlapConfirm": "Quitar y añadir",
       "convertedCollections": "{count, plural, one {# colección sincronizada} other {# colecciones sincronizadas}} ahora rastrea la carpeta directamente. Vuelve a añadir la carpeta como fuente para ver vídeos.",
       "added": "Fuente \"{name}\" añadida",
       "removed": "Fuente \"{name}\" eliminada",
@@ -1001,6 +1123,7 @@
       "title": "¿Cambiar a multi-eje predeterminado?",
       "bodyUnknown": "FunSync asignará automáticamente reproducción multi-eje a cada vídeo con archivos compañeros detectados.",
       "bodyNone": "Actualmente ningún vídeo en tu biblioteca tiene archivos compañeros detectados. Los nuevos vídeos con compañeros se asignarán automáticamente cuando aparezcan.",
+      "bodyAllAssigned": "Todos los vídeos de tu biblioteca con archivos compañeros detectados ya tienen un modo de reproducción asignado, así que ahora no cambia nada. Los nuevos vídeos con compañeros se asignarán automáticamente cuando aparezcan.",
       "bodyCount": "FunSync asignará automáticamente reproducción multi-eje a {count, plural, one {# vídeo} other {# vídeos}} con archivos compañeros detectados.",
       "warning": "Cambiar de nuevo a Único más tarde no revertirá estas asignaciones. Usa Cambiar funscript en vídeos individuales para deshacer.",
       "confirm": "Cambiar a multi-eje"
@@ -1030,9 +1153,9 @@
       "autoplayOnAdvanceResetAria": "Restablecer reproducción automática al predeterminado",
       "multiHeader": "Multi-eje",
       "fieldDefaultPlayback": "Reproducción predeterminada",
-      "preferSingle": "Eje único (predeterminado)",
-      "preferMulti": "Multi-eje cuando esté disponible",
-      "preferResetTitle": "Restablecer al valor predeterminado (Eje único)",
+      "preferSingle": "Eje único",
+      "preferMulti": "Multi-eje cuando esté disponible (predeterminado)",
+      "preferResetTitle": "Restablecer al valor predeterminado (Multi-eje)",
       "preferResetAria": "Restablecer reproducción predeterminada al predeterminado",
       "multiHint": "Cuando se establece en Multi-eje, FunSync asigna automáticamente reproducción multi-eje a los vídeos con archivos compañeros detectados (twist, surge, etc.). Los vídeos ya configurados mantienen su selección actual. Cambiar de nuevo a Único no revertirá las asignaciones automáticas — usa Cambiar funscript en vídeos individuales para deshacer.",
       "smoothingHeader": "Suavizado de movimiento",
@@ -1052,6 +1175,10 @@
       "rangeExtenderHint": "Cuando las posiciones de un script se mantienen en un rango estrecho (p. ej. 30–70), las estira para usar el rango completo del dispositivo. Se aplica a todos los dispositivos al cargar el siguiente vídeo.",
       "rangeExtenderResetTitle": "Restablecer al predeterminado (desactivado)",
       "rangeExtenderResetAria": "Restablecer Estirar scripts al predeterminado",
+      "rangeLivePreviewLabel": "Previsualizar el rango en el dispositivo",
+      "rangeLivePreviewHint": "Sin nada en reproducción, arrastrar un control de rango en el panel de conexión mueve el dispositivo hasta ese límite, para que veas dónde queda — útil al cambiar de funda. Solo dispositivos de posición; en silencio durante la reproducción.",
+      "rangeLivePreviewResetTitle": "Restablecer al valor predeterminado (activado)",
+      "rangeLivePreviewResetAria": "Restablecer Previsualizar el rango en el dispositivo",
       "orgasmScriptLabel": "Script del interruptor de orgasmo",
       "orgasmScriptChoose": "Configurar…",
       "orgasmScriptClear": "Quitar script de orgasmo",
@@ -1061,11 +1188,29 @@
       "orgasmModeHold": "Mantener para reproducir (vuelve al soltar)",
       "orgasmModeToggle": "Pulsar para terminar (se detiene después)",
       "orgasmModeHint": "Mantener para reproducir: mantén X para reproducir el script en bucle; al soltar vuelve al script principal. Pulsar para terminar: pulsa X para iniciar el bucle, pulsa otra vez para detener el dispositivo — no vuelve al script principal.",
+      "orgasmSourceLabel": "Origen",
+      "orgasmSourceFile": "Archivo de script",
+      "orgasmSourcePattern": "Patrón generado",
+      "orgasmPatternHint": "Repite en bucle un patrón generado en lugar de un archivo de script. Tu elección de script se conserva para cuando vuelvas.",
+      "orgasmSummaryGenerated": "Generado: {shape}, {bpm} BPM",
       "edgeHeader": "Edge",
       "edgeModeLabel": "Comportamiento de la tecla Z",
-      "edgeModeHold": "Mantener para edging (reanuda al soltar)",
-      "edgeModeToggle": "Pulsar para parar (pulsa otra vez para reanudar)",
+      "edgeModeHold": "Mantener (soltar = reanudar)",
+      "edgeModeToggle": "Pulsar: parar / reanudar",
       "edgeModeHint": "Mantener para edging: mantén Z para detener los dispositivos mientras el vídeo sigue; al soltar, el script vuelve sincronizado. Pulsar para parar: pulsa Z para detenerlos, pulsa otra vez para reanudar — más cómodo en un edging largo.",
+      "globalHotkeysHeader": "Atajos globales",
+      "globalHotkeysHint": "Funcionan aunque FunSync esté minimizado o haya otra aplicación en primer plano, y una tecla asignada aquí deja de llegar a las demás aplicaciones. Haz clic en una casilla y pulsa una tecla junto con dos de Ctrl, Alt y Mayús, o F13–F24 o una tecla multimedia sola. Ctrl+Alt necesita también Mayús, porque en muchos teclados Ctrl+Alt es AltGr, que escribe caracteres como @. Se rechazan los atajos de uso diario (copiar, pegar, deshacer, guardar…), F1–F12 con menos de dos modificadores y las teclas de cursor y edición. Desde un atajo global, Orgasm Switch y Edge siempre se alternan (pulsa para empezar, pulsa otra vez para parar).",
+      "globalHotkeyPlayPause": "Reproducir / Pausa",
+      "globalHotkeyOrgasm": "Orgasm Switch",
+      "globalHotkeyEdge": "Edge",
+      "globalHotkeyClear": "Quitar el atajo de {action}",
+      "globalHotkeyNeedsModifier": "Con {key} esa tecla deja de escribir en todas las demás aplicaciones — prueba con Ctrl+Alt+Mayús",
+      "globalHotkeyAppShortcut": "{key} es un atajo que usan otras aplicaciones (copiar, pegar, deshacer, guardar, recargar…) y deja de funcionar en todas ellas — prueba con Ctrl+Alt+Mayús o usa F13–F24",
+      "globalHotkeyAltGr": "En muchos teclados Ctrl+Alt es AltGr, así que {key} puede impedir escribir un carácter como @ o € en todas las aplicaciones — añade Mayús",
+      "globalHotkeyCursorKey": "{key} es una tecla de cursor, edición o captura de pantalla que otras aplicaciones usan con cualquier modificador — elige una letra, un número o una tecla F",
+      "globalHotkeyKeptRisky": "Sigue activa tal como se guardó. {reason}",
+      "globalHotkeyNotActiveTaken": "No está activa: el sistema u otra aplicación ya usa {key}. Elige otro atajo.",
+      "globalHotkeyNotActiveInvalid": "No está activa: {key} no es una combinación de teclas válida. Elige otro atajo.",
       "randomVariantLabel": "Variación de script aleatoria",
       "randomVariantHint": "Cuando un vídeo tiene varias variaciones de script, se elige una al azar en cada reproducción. Anula las variaciones predeterminadas fijadas mientras está activo.",
       "bpHeader": "Salida lineal de Buttplug (BLE)",
@@ -1086,15 +1231,23 @@
       "inlineVizOpacityLabel": "Opacidad de las superposiciones",
       "inlineVizOpacityResetTitle": "Restaurar opacidad predeterminada",
       "deviceSimOpacityLabel": "Opacidad del simulador de dispositivo",
-      "deviceSimOpacityHint": "Que tan solido se ve el indicador de movimiento sobre el video. Muestralo con la tecla D.",
+      "deviceSimOpacityHint": "Qué tan sólido se ve el indicador de movimiento sobre el vídeo. Muéstralo con la tecla D o desde el menú ⋮ del reproductor.",
       "deviceSimOpacityResetTitle": "Restaurar opacidad predeterminada",
       "inlineVizOpacityHint": "Qué tan sólidas se ven la línea de tiempo del script y la barra de mapa de calor sobre el vídeo. Actívalas desde el menú ⋮ del reproductor.",
+      "heatmapPlayheadLabel": "Cursor de reproducción en la barra de mapa de calor",
+      "heatmapPlayheadHint": "Dibuja una línea en la barra de mapa de calor en la posición actual, como el cursor de la línea de tiempo. Activa la barra desde el menú ⋮ del reproductor.",
       "orgasmScriptMissing": "(archivo no encontrado)",
       "playbackHeader": "Reproducción",
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "Vídeo y rendimiento",
       "rememberSpeedLabel": "Recordar la velocidad",
       "rememberSpeedHint": "Mantiene la velocidad actual al cargar otro vídeo. Desactivado por defecto: cada vídeo empieza a 1x.",
+      "openFullscreenLabel": "Abrir vídeos en pantalla completa",
+      "openFullscreenHint": "Empieza en pantalla completa al reproducir un vídeo desde la biblioteca. Escape sale como siempre.",
+      "autoplayOnOpenLabel": "Reproducir al abrir",
+      "autoplayOnOpenHint": "Reproduce el vídeo en cuanto lo abres desde la biblioteca, en lugar de cargarlo en pausa. Desactivado por defecto, para que un solo clic nunca ponga un dispositivo en movimiento.",
+      "autoplayOnOpenResetTitle": "Restablecer al valor predeterminado (desactivado)",
+      "autoplayOnOpenResetAria": "Restablecer Reproducir al abrir",
       "fillerHeader": "Relleno de huecos",
       "fillerEnable": "Rellenar huecos con movimiento",
       "fillerResetEnable": "Restablecer relleno de huecos",
@@ -1110,7 +1263,19 @@
       "fillerDepth": "Profundidad",
       "fillerAbsolute": "Definir rango exacto",
       "fillerAbsMin": "Mínimo",
-      "fillerAbsMax": "Máximo"
+      "fillerAbsMax": "Máximo",
+      "orgasmSourceLibrary": "Patrón de la biblioteca",
+      "orgasmSummaryLibrary": "Patrón: {name}",
+      "orgasmLibraryHint": "Repite en bucle un patrón de la biblioteca integrada en lugar de un archivo de script. Tu elección de script se conserva para cuando vuelvas.",
+      "edgeActionLabel": "Mientras Edge está activo",
+      "edgeActionStop": "Detener los dispositivos",
+      "edgeActionPattern": "Reproducir un patrón",
+      "edgeActionHint": "Detener los dispositivos: descansan mientras el vídeo sigue. Reproducir un patrón: reproducen el patrón de abajo en su lugar, incluso con el vídeo en pausa. En ambos casos, al terminar, el script vuelve sincronizado; con el vídeo en pausa, espera hasta que pulses reproducir.",
+      "patternRangeWidened": "Este rango es demasiado estrecho para el patrón, así que se reproduce un poco más amplio: de {lo} a {hi}.",
+      "orgasmLibraryNone": "Aún no has elegido ningún patrón. Hasta que elijas uno, X reproduce tu archivo de script como antes.",
+      "edgePatternNone": "Aún no has elegido ningún patrón, así que Z detiene los dispositivos, como con «Detener los dispositivos». Elige un patrón arriba.",
+      "fillerThreshold": "Rellenar huecos de más de",
+      "fillerResetThresholdAria": "Restablecer el umbral del relleno de huecos al predeterminado (10s)"
     },
     "appearance": {
       "themeHeader": "Tema",
@@ -1127,6 +1292,10 @@
       "styleClassicDesc": "El diseño original de FunSync",
       "styleModern": "Moderno",
       "styleModernDesc": "Profundidad, espaciado y movimiento más suaves",
+      "scaleHeader": "Tamaño de la interfaz",
+      "scaleHint": "Agranda o reduce todo en la ventana principal. Ctrl+= y Ctrl+- también lo cambian, y Ctrl+0 vuelve al 100 %. Mientras haya un vídeo VR abierto, esas teclas hacen zoom en el vídeo.",
+      "scaleOption": "{percent} %",
+      "scaleOptionDefault": "{percent} % (predeterminado)",
       "languageHeader": "Idioma",
       "languageHint": "Cambia el idioma de la interfaz. Los cambios se aplican de inmediato.",
       "libraryHeader": "Biblioteca",
@@ -1141,10 +1310,16 @@
       "hwDecodeRestart": "Reinicia FunSync para aplicar el cambio de decodificación de vídeo.",
       "cardHeatmapLabel": "Mapa de calor en las tarjetas",
       "cardHeatmapHint": "Muestra un mapa de calor de velocidad bajo cada miniatura. Usa el script principal del vídeo. Desactivado por defecto porque lee un script por tarjeta.",
+      "tagsOnCardsLabel": "Etiquetas en las tarjetas de la biblioteca",
+      "tagsOnCardsHint": "Muestra algunas etiquetas de cada vídeo bajo su nombre. Las opciones del vídeo (⋮ y luego Etiquetas) las muestran todas.",
       "resumeProgressLabel": "Progreso en las listas",
       "resumeProgressHint": "Muestra hasta dónde llegaste, como una barra en las tarjetas y filas de la lista. Solo en listas de reproducción — la biblioteca principal queda sin marcar.",
       "hideDupesLabel": "Ocultar nombres duplicados",
-      "hideDupesHint": "Muestra una sola entrada cuando varios vídeos comparten el mismo nombre de archivo, por ejemplo el mismo archivo en dos carpetas de origen. Se conserva la copia con script."
+      "hideDupesHint": "Muestra una sola entrada cuando varios vídeos comparten el mismo nombre de archivo, por ejemplo el mismo archivo en dos carpetas de origen. Se conserva la copia con script.",
+      "folderScriptsAsVariantsLabel": "Carpetas con un solo vídeo: ofrecer cada script de la carpeta como variante",
+      "folderScriptsAsVariantsHint": "Para journeys y rondas de FapLand: cuando una carpeta contiene un solo vídeo, todos los demás scripts que haya en ella se ofrecen en el menú de scripts de ese vídeo, también en el móvil. Su propio script sigue siendo el predeterminado y los archivos de eje siguen siendo archivos de eje. No se cambia nada en el disco, así que al desactivarlo simplemente dejan de ofrecerse.",
+      "navHeader": "Barra de navegación",
+      "navHint": "Desmarca un botón para quitarlo de la barra. Biblioteca y Configuración siempre se quedan. La tecla H sigue abriendo Dispositivos, pero Mando web y VR no tienen otra forma de abrirse, así que vuelve a marcarlos cuando los necesites."
     },
     "data": {
       "backupHeader": "Copia de seguridad y recuperación",
@@ -1162,6 +1337,7 @@
       "restoreModalTitle": "Restaurar desde copia",
       "restoreConfirmTitle": "¿Restaurar esta instantánea?",
       "restoreConfirmBody": "Tu configuración actual se guardará primero como instantánea de emergencia, para que puedas deshacer si es necesario. La app se relanzará para aplicar el estado restaurado.",
+      "restoreConfirmBtn": "Restaurar",
       "restoreFailed": "Restauración fallida",
       "restoreFailedReason": "Restauración fallida: {error}",
       "noBackupsList": "No se pudo cargar la lista de copias",
@@ -1169,7 +1345,7 @@
       "openFolder": "Abrir carpeta de copias",
       "openFolderFailed": "No se pudo abrir la carpeta",
       "exportHeader": "Exportar e importar",
-      "exportBlurb": "Guarda tu configuración, listas, categorías y asociaciones en un archivo portable — útil para mover a otra máquina o como respaldo adicional fuera del host.",
+      "exportBlurb": "Guarda tu configuración, listas, categorías, asociaciones y miniaturas personalizadas en un archivo portable — útil para mover a otra máquina o como respaldo adicional fuera del host.",
       "export": "Exportar archivo de copia",
       "exporting": "Exportando…",
       "exportSaved": "Copia guardada: {path}",
@@ -1179,6 +1355,9 @@
       "importDone": "Importado ({count} scripts)",
       "importCancelled": "Importación cancelada",
       "importFailed": "Importación fallida",
+      "importFailedReason": "Importación fallida: {error}",
+      "importConfirmTitle": "¿Importar un archivo de copia?",
+      "importConfirmBody": "A continuación elige un archivo de copia de FunSync. Sus listas, categorías y asociaciones se añaden a las tuyas (una lista que ya tienes se queda como está), y su configuración sustituye a la actual. Las claves y los inicios de sesión que ya tienes aquí se conservan. Primero se detienen la reproducción y todos los dispositivos. Tu estado actual se guarda como instantánea, así que puedes deshacerlo con «Restaurar desde copia». La app se relanzará para cargar el resultado.",
       "triggerStartup": "Inicio",
       "triggerDebounced": "Auto-guardado",
       "triggerPreAction": "Antes de {label}",
@@ -1192,7 +1371,12 @@
       "summarySources": "{count, plural, one {# fuente} other {# fuentes}}",
       "summaryCollections": "{count, plural, one {# colección} other {# colecciones}}",
       "summaryPlaylists": "{count, plural, one {# lista} other {# listas}}",
+      "summaryCategories": "{count, plural, one {# categoría} other {# categorías}}",
+      "summaryCategoryAssignments": "{count, plural, one {# asignación de categoría} other {# asignaciones de categoría}}",
+      "summaryAssociations": "{count, plural, one {# asociación} other {# asociaciones}}",
       "summaryRoutings": "{count, plural, one {# enrutamiento} other {# enrutamientos}}",
+      "summaryTagAssignments": "{count, plural, one {# etiqueta añadida por ti} other {# etiquetas añadidas por ti}}",
+      "summaryEroscriptsLinks": "{count, plural, one {# enlace a una publicación de EroScripts} other {# enlaces a publicaciones de EroScripts}}",
       "relJustNow": "Justo ahora",
       "relMinutesAgo": "{count, plural, one {hace # minuto} other {hace # minutos}}",
       "relHoursAgo": "{count, plural, one {hace # hora} other {hace # horas}}",
@@ -1217,7 +1401,201 @@
       "logsHeader": "Privacidad del registro",
       "logsBlurb": "El registro guarda qué vídeos has abierto. Es útil para diagnosticar problemas, pero conviene pensarlo antes de compartirlo públicamente.",
       "hideFileNames": "Ocultar nombres de archivo en el registro",
-      "hideFileNamesHint": "Sustituye los nombres de vídeos, scripts y subtítulos por [hidden] en el registro. Se conservan la carpeta y el tipo de archivo, así que el registro sigue siendo útil. Desactivado por defecto."
+      "hideFileNamesHint": "Sustituye los nombres de vídeos, scripts y subtítulos por [hidden] en el registro. Se conservan la carpeta y el tipo de archivo, así que el registro sigue siendo útil. Al activarlo también se ocultan los nombres que ya están en el registro, y no vuelven aunque lo desactives. Desactivado por defecto."
+    },
+    "duplicates": {
+      "sectionHeader": "Duplicados",
+      "findBtn": "Buscar duplicados…",
+      "sectionBlurb": "Busca vídeos de los que tengas más de una copia y envía los sobrantes a la {os, select, win {papelera de reciclaje} other {papelera}} para recuperar espacio.",
+      "title": "Vídeos duplicados",
+      "scanning": "Comprobando tu biblioteca…",
+      "noneTitle": "No se encontraron duplicados",
+      "noneHint": "Nada en tu biblioteca parece una copia de otra cosa.",
+      "summary": "{groups, plural, one {# grupo} other {# grupos}}, hasta {size} recuperables",
+      "caveat": "Compara tamaño, duración, contenido y nombres parecidos. No detecta el mismo vídeo recodificado con una calidad muy distinta.",
+      "tierIdentical": "Idénticos",
+      "tierLikely": "Probables",
+      "tierPossible": "Posibles",
+      "whyIdentical": "Mismo tamaño, duración y contenido",
+      "whyLikely": "Misma duración, distinto tamaño, probablemente recodificado",
+      "whyPossible": "Solo nombres parecidos, revísalos tú",
+      "groupHead": "{count, plural, one {# copia} other {# copias}}, {size} recuperables",
+      "keep": "Conservar",
+      "hasScript": "Tiene funscript",
+      "scriptBadge": "script",
+      "selectTier": "Seleccionar sobrantes en {tier} ({count})",
+      "clearSelection": "Borrar selección",
+      "nothingSelected": "Nada seleccionado",
+      "selectedCount": "{count, plural, one {# archivo} other {# archivos}} seleccionados, {size}",
+      "remove": "Mover a la {os, select, win {papelera de reciclaje} other {papelera}}",
+      "confirmTitle": "¿Mover a la {os, select, win {papelera de reciclaje} other {papelera}}?",
+      "confirmBody": "¿Mover {count, plural, one {# archivo} other {# archivos}} ({size}) a la {os, select, win {papelera de reciclaje} other {papelera}}? Podrás recuperarlos desde allí. La copia marcada como Conservar no se toca.",
+      "confirmBtn": "Mover a la {os, select, win {papelera de reciclaje} other {papelera}}",
+      "removedToast": "{count, plural, one {# archivo} other {# archivos}} a la {os, select, win {papelera de reciclaje} other {papelera}}, {size} recuperados",
+      "removeSomeFailed": "No se pudieron mover {count, plural, one {# archivo} other {# archivos}}, pueden estar abiertos o ser de solo lectura",
+      "removeFailed": "No se pudieron eliminar los archivos: {error}",
+      "tierStash": "Se ve igual (Stash)",
+      "whyStash": "Tu Stash les da la misma huella de imagen (phash), probablemente recodificado",
+      "selectTierStash": "Seleccionar sobrantes que se ven iguales en Stash ({count})"
+    },
+    "support": {
+      "header": "Apoya el proyecto",
+      "blurb": "FunSync es gratis y siempre lo será. Si quieres hablar con otros usuarios, informar de algo o ayudar a mantenerlo, estos son los sitios.",
+      "discord": "Únete al Discord",
+      "kofi": "Invítame a un café",
+      "footnote": "Sin cuenta, sin muro de pago, nada queda bloqueado detrás de esto."
+    },
+    "stash": {
+      "header": "Stash",
+      "intro": "Vincula tu propio servidor Stash para traer sus etiquetas, intérpretes y estudios a FunSync. Solo lectura: FunSync nunca cambia nada en Stash.",
+      "addressLabel": "Dirección",
+      "keyLabel": "Clave de API",
+      "keyHint": "Solo si tu Stash tiene usuario y contraseña. En Stash: Settings > Security > API Key.",
+      "keyNotePlain": "Este FunSync guarda la clave sin cifrar en su carpeta de datos.",
+      "keyNotePortable": "FunSync portable guarda la clave sin cifrar en su carpeta de datos portable, como la clave de Handy.",
+      "keyNoteNoEncryption": "Este equipo no puede cifrar la clave, así que FunSync la guarda sin cifrar en su carpeta de datos.",
+      "keyNoteMemory": "La clave se conserva hasta que FunSync se cierre (aquí no se puede vincular a tu cuenta).",
+      "keySavedEncrypted": "Clave de API guardada, cifrada en este PC",
+      "keySavedPlain": "Clave de API guardada, sin cifrar en la carpeta de datos de FunSync",
+      "keySavedMemory": "Clave de API conservada hasta que FunSync se cierre",
+      "noKey": "Sin clave de API",
+      "replaceKey": "Reemplazar",
+      "removeKey": "Quitar",
+      "addKey": "Añadir clave",
+      "removeKeyTitle": "¿Quitar la clave de API?",
+      "removeKeyBody": "FunSync olvida la clave de API de Stash guardada. Si tu Stash tiene contraseña, tendrás que pegarla de nuevo.",
+      "keyRemoved": "Clave de API quitada.",
+      "test": "Probar conexión",
+      "testing": "Probando…",
+      "connected": "Conectado a Stash {version}. {count, plural, one {Tiene # escena.} other {Tiene # escenas.}}",
+      "help": "Stash escucha en todas las direcciones de red a menos que le digas lo contrario. Si se ejecuta en este PC, usa 127.0.0.1 (y pon el host de Stash en 127.0.0.1), o configura un usuario y una contraseña en Stash y pega aquí su clave de API.",
+      "keyInClear": "La clave viaja sin cifrar por tu red hasta {host}. Mantén Stash en este PC o usa https.",
+      "link": "Vincular Stash",
+      "linkNeedsTest": "Primero prueba la conexión. Vincular Stash funciona tras una prueba correcta.",
+      "linkedDone": "Stash vinculado. Pulsa Sincronizar ahora para traer sus etiquetas, intérpretes y estudios.",
+      "linked": "Vinculado a {address}",
+      "linkedVersion": "Vinculado a {address} · Stash {version}",
+      "change": "Cambiar…",
+      "turnOff": "Desactivar",
+      "turnOn": "Activar",
+      "turnedOff": "Stash desactivado. Sus datos se conservan.",
+      "turnedOn": "Stash activado.",
+      "offText": "Stash está desactivado: nada de Stash aparece en FunSync y sus datos se conservan. Vinculado a {address}.",
+      "neverSynced": "Aún no se ha sincronizado.",
+      "lastSync": "Última sincronización {date}: {counts}",
+      "lastSyncPartial": "Se detuvo antes de terminar. No se quitó nada.",
+      "countMatched": "{count, plural, one {# emparejado} other {# emparejados}}",
+      "countMatchedVideos": "{count, plural, one {# vídeo emparejado} other {# vídeos emparejados}}",
+      "countCheck": "{count, plural, one {# necesita revisión} other {# necesitan revisión}}",
+      "countNotInStash": "{count, plural, one {# no está en Stash} other {# no están en Stash}}",
+      "countGone": "{count, plural, one {# ya no está en Stash} other {# ya no están en Stash}}",
+      "countChanged": "{count, plural, one {# archivo cambiado} other {# archivos cambiados}}",
+      "countSkipped": "{count, plural, one {# omitido} other {# omitidos}}",
+      "syncNow": "Sincronizar ahora",
+      "syncing": "Sincronizando con Stash…",
+      "progressLabel": "Progreso de la sincronización",
+      "stepStart": "Iniciando…",
+      "stepHash": "Leyendo huellas de archivo, {done, number} de {total, number}.",
+      "stepList": "Leyendo la lista de escenas de Stash, página {done, number} de {total, number}.",
+      "stepMatch": "Emparejando.",
+      "stepDetails": "Obteniendo detalles, {done, number} de {total, number}.",
+      "stepWrite": "Guardando.",
+      "cancelling": "Cancelando…",
+      "syncDone": "Sincronización terminada: {counts}",
+      "syncCancelled": "Sincronización cancelada. No se quitó nada.",
+      "syncFailed": "Sincronización detenida: {reason} No se quitó nada.",
+      "syncPartial": "Sincronización detenida tras {done, number} de {total, number} escenas: {reason} Lo terminado se guardó; no se quitó nada.",
+      "errorBusy": "Ya hay una sincronización con Stash en curso.",
+      "errorNotLinked": "Primero vincula Stash y actívalo.",
+      "errorOther": "Algo salió mal ({code}).",
+      "syncOnStart": "Sincronizar con Stash al iniciar FunSync",
+      "syncOnStartHint": "Una sincronización tras el primer escaneo de la biblioteca. Si no, FunSync solo sincroniza cuando pulsas Sincronizar ahora.",
+      "checkHeader": "Por revisar ({count, number})",
+      "checkSeveral": "{count, plural, one {# escena de Stash tiene este archivo} other {# escenas de Stash tienen este archivo}}",
+      "checkPathChanged": "Misma ruta en Stash, otro archivo",
+      "choose": "Elegir…",
+      "chooseAria": "Elegir la escena de Stash para {name}",
+      "checkVideoMissing": "Ese vídeo no está en la biblioteca ahora mismo.",
+      "showAll": "Mostrar todo ({count, number})",
+      "pathRules": "Reglas de ruta (avanzado)",
+      "pathRulesHint": "Solo hacen falta si Stash ve tus vídeos con otros nombres de carpeta, por ejemplo en Docker o en un NAS. FunSync empareja primero por la huella del archivo; las reglas de ruta solo ayudan en una segunda comprobación.",
+      "ruleLocal": "Carpeta de FunSync",
+      "ruleStash": "Carpeta de Stash",
+      "addRule": "Añadir regla",
+      "removeRule": "Quitar",
+      "removeRuleAria": "Quitar la regla de ruta de {folder}",
+      "ruleIncomplete": "Una regla necesita las dos carpetas. Rellena ambas o quítala.",
+      "remove": "Quitar datos de Stash…",
+      "removeTitle": "¿Quitar los datos de Stash?",
+      "removeConfirm": "¿Quitar los datos de Stash de {count, plural, one {# vídeo} other {# vídeos}} y la clave guardada? Nada cambia en Stash. Tus propias etiquetas y ocultaciones se mantienen.",
+      "removeConfirmNoKey": "¿Quitar los datos de Stash de {count, plural, one {# vídeo} other {# vídeos}}? Nada cambia en Stash. Tus propias etiquetas y ocultaciones se mantienen.",
+      "removed": "Datos de Stash quitados.",
+      "removeUndone": "Datos de Stash restaurados.",
+      "removeFailed": "FunSync no pudo quitar los datos de Stash. No se cambió nada.",
+      "undoFailed": "No se pudieron restaurar los datos de Stash.",
+      "undoRemoveAria": "Deshacer la eliminación de los datos de Stash",
+      "damaged": "FunSync no pudo leer sus datos de Stash. Se apartaron como {name}. Sincroniza para reconstruirlos.",
+      "certTitle": "Este equipo no confía en el certificado https de este Stash.",
+      "certChanged": "Este Stash muestra ahora un certificado distinto del que marcaste como de confianza.",
+      "certSubject": "Emitido para",
+      "certFingerprint": "Huella SHA-256",
+      "certExplain": "Confía en él solo si es tu propio Stash (por ejemplo, un NAS con un certificado autofirmado) y la huella coincide con la que muestra tu servidor. FunSync confiará en este certificado solo para {address}.",
+      "certTrust": "Confiar en este certificado",
+      "certTrusted": "Certificado de confianza para {address}.",
+      "certTrustFailed": "FunSync no pudo confiar en ese certificado. Vuelve a probar la conexión.",
+      "certPinned": "Certificado de confianza para {address}",
+      "certForget": "Dejar de confiar",
+      "certForgetAria": "Dejar de confiar en el certificado de {address}",
+      "certForgotten": "El certificado ya no es de confianza.",
+      "certForgetFailed": "FunSync no pudo quitar el certificado de confianza.",
+      "keyElsewhere": "La clave de API guardada pertenece a {address}, así que FunSync no la envía a esta dirección. Pega la clave de este Stash o quita la guardada.",
+      "damagedRecovered": "FunSync no pudo leer sus datos de Stash. Se apartaron como {name} y se usó la copia anterior.",
+      "recoveredMissing": "Faltaba el archivo de datos de Stash de FunSync. Se usó la copia anterior.",
+      "removeUndoneMerged": "Datos de Stash restaurados, junto con lo sincronizado desde entonces.",
+      "undoFailedKept": "No se pudieron restaurar los datos de Stash. Se conservan aparte en la carpeta de datos de FunSync; puedes volver a intentar Deshacer.",
+      "syncRelinked": "{count, plural, one {# vídeo se volvió a vincular a otra escena de Stash.} other {# vídeos se volvieron a vincular a otra escena de Stash.}}",
+      "relinkHeader": "Vueltos a vincular ({count, number})",
+      "relinkHint": "Una sincronización vinculó estos vídeos a otra escena de Stash (por ejemplo, escenas fusionadas en Stash). Deshacer restaura el vínculo anterior.",
+      "relinkTo": "ahora vinculado a {name}",
+      "relinkToUntitled": "ahora vinculado a otra escena de Stash",
+      "relinkUndoAria": "Deshacer el nuevo vínculo de {name}",
+      "relinkUndoAll": "Deshacer todo",
+      "relinkUndoAllAria": "Deshacer los {count, number} nuevos vínculos",
+      "undoRelinksAria": "{count, plural, one {Deshacer el nuevo vínculo} other {Deshacer los # nuevos vínculos}}",
+      "relinkUndone": "{name} vuelve a estar vinculado a su escena de Stash anterior.",
+      "relinksUndone": "{count, plural, one {Se deshizo # nuevo vínculo.} other {Se deshicieron # nuevos vínculos.}}",
+      "relinkUndoFailed": "No se pudo deshacer el nuevo vínculo de {name}. Sus datos de Stash cambiaron desde entonces o FunSync no pudo guardarlos.",
+      "relinksUndonePartial": "Se deshicieron {done, number} de {total, number} nuevos vínculos. Los demás cambiaron desde entonces o no se pudieron guardar.",
+      "keyElsewhereNoAddress": "La clave de API guardada pertenece a otra dirección, así que FunSync no la envía a esta. Pega la clave de este Stash o quita la guardada.",
+      "useTagRules": "Usar los alias de etiquetas y las subetiquetas de Stash",
+      "useTagRulesHint": "Las etiquetas de todas las fuentes se muestran con el nombre de Stash cuando Stash tiene su forma escrita como alias, y al elegir una etiqueta en el filtro Etiquetas también se encuentran sus subetiquetas. Las etiquetas que ocultaste siguen ocultas. Se aplica al instante, con la lista de etiquetas de la última sincronización. Desactivado: todas las etiquetas se muestran como antes."
+    },
+    "patternBlock": {
+      "quickPicks": "Ajustes rápidos",
+      "preview": "Vista previa",
+      "previewAria": "Vista previa del patrón tal como se reproducirá, 8 segundos",
+      "rangeExact": "Exacto",
+      "rangeScript": "Seguir el script",
+      "depthValue": "{pct} %",
+      "centre": "Centro",
+      "centreOwn": "El del script",
+      "centreReset": "Volver al centro propio del script",
+      "rangeScriptHint": "Profundidad: cuánto del rango propio del script usa el patrón, alrededor de donde se reproduce. Centro: dónde se sitúa dentro de ese rango.",
+      "testHint": "Reproduce la vista previa en tus dispositivos conectados",
+      "groupAria": "{feature}: patrón",
+      "oneShotHintGap": "Un final: se reproduce una vez al comienzo de cada hueco y luego mantiene su última posición hasta que el hueco termina.",
+      "setPattern": "Elegir patrón…",
+      "setPatternAria": "Elegir el patrón de {feature}",
+      "drawerTitle": "Patrón de {feature}",
+      "apply": "Aplicar",
+      "summary": "{name}, {speed} unidades/s, {range}",
+      "summaryReversed": "{name}, {speed} unidades/s, invertido, {range}",
+      "summaryRangeOwn": "su propio rango",
+      "summaryRangeExact": "de {lo} a {hi}",
+      "summaryRangeScript": "sigue el script al {pct} %",
+      "summaryNone": "Aún no hay patrón elegido",
+      "statsWithInstant": "Media {avg} unidades/s, pico {max} unidades/s, más saltos instantáneos",
+      "statsInstantOnly": "Saltos instantáneos, tan rápido como pueda moverse el dispositivo"
     }
   },
   "feedback": {
@@ -1265,6 +1643,8 @@
     "searching": "Buscando…",
     "noResultsTitle": "No se encontraron scripts para \"{query}\"",
     "noResultsHint": "Prueba con un término de búsqueda más corto o general — los títulos parciales suelen coincidir mejor que los nombres de archivo completos.",
+    "fewerWords": "Buscar con menos palabras",
+    "fewerWordsTitle": "Buscar «{query}»",
     "likes": "{count, plural, one {# me gusta} other {# me gusta}}",
     "views": "{count, plural, one {# vista} other {# vistas}}",
     "getScript": "Obtener script",
@@ -1272,10 +1652,32 @@
     "fetching": "Obteniendo…",
     "savingScript": "Guardando script…",
     "scriptSaved": "Script guardado",
+    "upToDate": "Ya al día",
     "noAttachments": "No se encontraron archivos funscript adjuntos en este tema",
     "downloadFailed": "Descarga fallida",
+    "downloadFailedStatus": "Descarga fallida (HTTP {status})",
+    "saveNotAFile": "No se puede guardar {name}: ya hay una carpeta con ese nombre.",
+    "unusableName": "No se puede guardar «{name}»: ese nombre de archivo no se puede usar en este equipo.",
     "savedToast": "Script guardado: {name}",
+    "savedFileToast": "Guardado: {name}",
+    "alreadyUpToDate": "Ya al día: {name}",
+    "replaceTitle": "¿Reemplazar {name}?",
+    "replaceMessage": "Ya hay otro archivo guardado con este nombre. ¿Reemplazarlo por la descarga? El archivo antiguo va a la {os, select, win {papelera de reciclaje} other {papelera}}, así que podrás recuperarlo.",
+    "replaceBtn": "Reemplazar",
+    "replaceManyTitle": "¿Reemplazar {count, plural, one {# archivo} other {# archivos}}?",
+    "replaceManyMessage": "Ya hay otros archivos guardados con estos nombres: {names}. ¿Reemplazarlos por la descarga? Los archivos antiguos van a la {os, select, win {papelera de reciclaje} other {papelera}}, así que podrás recuperarlos.",
+    "notReplaced": "No se guardó {name}: ya hay otro archivo ahí.",
+    "notDownloaded": "No se guardó {name}: no se pudo descargar.",
+    "trashFailed": "No se pudo mover {name} a la {os, select, win {papelera de reciclaje} other {papelera}}, así que la descarga no se guardó encima.",
     "sessionExpired": "Sesión de EroScripts expirada — inicia sesión de nuevo desde el panel EroScripts",
+    "error": {
+      "rateLimited": "EroScripts está limitando las solicitudes. Inténtalo de nuevo en un momento.",
+      "accessDenied": "Acceso denegado. Intenta iniciar sesión de nuevo.",
+      "searchFailed": "La búsqueda falló (HTTP {status}). Cierra sesión y vuelve a iniciarla.",
+      "topicFailed": "No se pudo cargar esa publicación (HTTP {status}).",
+      "noPosts": "Ese tema no tiene publicaciones.",
+      "network": "No se pudo conectar con EroScripts. Comprueba tu conexión e inténtalo de nuevo."
+    },
     "inline": {
       "title": "Buscar un script en EroScripts",
       "axesLine": "Principal + {count} ejes ({list})",
@@ -1288,7 +1690,8 @@
       "noMain": "Solo archivos de eje, sin script principal",
       "zipNote": "{count} archivo(s) zip aún no se pueden abrir",
       "loadingPost": "Cargando publicación..."
-    }
+    },
+    "loginToSearch": "Inicia sesión en EroScripts para buscar."
   },
   "upNext": {
     "regionAria": "A continuación",
@@ -1302,7 +1705,8 @@
     "funscriptChip": "Funscript",
     "endLabel": "FIN DE LA LISTA",
     "endDismissAria": "Cerrar",
-    "endText": "No hay más vídeos en esta {source}.",
+    "endText": "No hay más vídeos en «{source}».",
+    "endTextGeneric": "No hay más vídeos en esta lista.",
     "endCta": "Volver a {source}",
     "endSourceFallback": "lista",
     "sourcePlaylist": "lista de reproducción",
@@ -1390,17 +1794,25 @@
     "hostHint": "Consejo: deja el campo de host con la IP de tu Quest — FunSync la recuerda y se reconecta automáticamente al siguiente arranque.",
     "subnetWarning": "⚠ {host} está en una red distinta a la de este PC ({pcIp}). La IP de tu Quest debería ser como {pcNet}.x. Consíguela en la misma Wi-Fi y desactiva cualquier VPN — una VPN le da a tu Quest una dirección que este PC no puede alcanzar.",
     "playing": "Reproduciendo",
-    "offset": "Offset",
+    "offset": "Offset (todos los vídeos)",
     "offsetHint": "Compensa el lag de la pantalla VR. Se suma al offset propio de cada dispositivo — ve la pestaña Sync para el valor efectivo combinado por dispositivo.",
     "backendNotRunning": "Backend no en ejecución"
+  },
+  "videoSyncOffset": {
+    "label": "Este vídeo",
+    "earlier": "{ms} ms antes",
+    "later": "{ms} ms después",
+    "reset": "Restablecer",
+    "hint": "Se suma al offset de cada dispositivo mientras se reproduce este vídeo, también en VR. Negativo dispara antes. Solo se guarda para este vídeo."
   },
   "editor": {
     "toolbarAria": "Herramientas del editor de scripts",
     "mainAxisLabel": "Principal (L0)",
+    "embeddedAxisLabel": "{axis} (integrado): extraer para editar…",
     "btn": {
       "undo": "Deshacer (Ctrl+Z)",
       "redo": "Rehacer (Ctrl+Y)",
-      "delete": "Eliminar selección (Del)",
+      "delete": "Eliminar selección (Supr)",
       "invert": "Invertir selección (Ctrl+I)",
       "simplify": "Simplificar selección",
       "cut": "Cortar selección (Ctrl+X)",
@@ -1410,11 +1822,17 @@
       "waveform": "Alternar forma de onda (W)",
       "beats": "Generar desde beats",
       "zoomIn": "Acercar (+)",
-      "zoomOut": "Alejar (-)",
+      "zoomOut": "Alejar (Ctrl+-)",
       "fitAll": "Ajustar todo",
       "save": "Guardar (Ctrl+S)",
       "stacked": "Vista apilada — mostrar todos los ejes",
-      "popout": "Abrir editor en ventana aparte"
+      "popout": "Abrir editor en ventana aparte",
+      "dock": "Devolver el editor a la ventana principal"
+    },
+    "unsaved": {
+      "title": "¿Guardar los cambios en {name}?",
+      "message": "Tus cambios en este script no están guardados. Si no los guardas, se perderán.",
+      "dontSave": "No guardar"
     },
     "modify": {
       "title": "Modificar script",
@@ -1427,7 +1845,21 @@
       "removePauses": "Eliminar pausas…",
       "rangeExtend": "Extender/comprimir rango…",
       "generatePattern": "Generar patrón…",
+      "fillPattern": "Rellenar con patrón…",
       "exportHeatmap": "Exportar PNG del heatmap…"
+    },
+    "select": {
+      "title": "Seleccionar puntos",
+      "placeholder": "Seleccionar…",
+      "all": "Seleccionar todo (Ctrl+A)",
+      "beforePlayhead": "Seleccionar antes del cabezal (Ctrl+Alt+Flecha izquierda)",
+      "afterPlayhead": "Seleccionar después del cabezal (Ctrl+Alt+Flecha derecha)",
+      "topThird": "Tercio superior (Ctrl+1)",
+      "middleThird": "Tercio medio (Ctrl+2)",
+      "bottomThird": "Tercio inferior (Ctrl+3)",
+      "everyNth": "Uno de cada N puntos…",
+      "created": "Solo puntos nuevos (N)",
+      "none": "Deseleccionar todo (Esc)"
     },
     "speedLabel": "Velocidad:",
     "autosaveLabel": "Auto-guardado",
@@ -1454,6 +1886,14 @@
     "extendTitle": "Extender / comprimir rango",
     "extendFactor": "Factor de escala temporal",
     "extendHint": "1.0 = sin cambios, 2.0 = doble duración, 0.5 = mitad de duración",
+    "everyNthTitle": "Seleccionar uno de cada N puntos",
+    "everyNthEvery": "Cada",
+    "everyNthStart": "Empezar en el punto",
+    "everyNthScopeSelected": "Cuenta {count, plural, one {el # punto seleccionado} other {los # puntos seleccionados}} en orden temporal.",
+    "everyNthScopeAll": "Cuenta {count, plural, one {# punto} other {los # puntos}} en orden temporal.",
+    "everyNthResult": "Selecciona {count, plural, one {# punto} other {# puntos}}.",
+    "everyNthTooFew": "Se necesitan al menos 2 puntos para contar.",
+    "everyNthSelect": "Seleccionar",
     "patternTitle": "Generar patrón",
     "patternStyle": "Patrón",
     "patternBpm": "BPM",
@@ -1509,7 +1949,16 @@
       "offsetBy": "Desplazado {ms}ms",
       "pausesRemoved": "Pausas eliminadas",
       "selectToExtend": "Selecciona 2+ acciones para extender/comprimir",
+      "selectionChanged": "La selección cambió mientras el diálogo estaba abierto. No se ha aplicado nada.",
       "timeScaled": "Tiempo escalado por {factor}x",
+      "needsContinuous": "{name} necesita una selección continua. Las selecciones con huecos, como uno de cada N puntos, funcionan con mover, ajustar, invertir y remapear.",
+      "nothingChanged": "No ha cambiado nada",
+      "selectToEqualize": "Selecciona 3+ acciones para igualar",
+      "equalized": "Igualadas {count, plural, one {# acción} other {# acciones}}",
+      "everyNthSelected": "Seleccionados {count, number} de {total, plural, one {# punto} other {# puntos}}.",
+      "everyNthNone": "Nada que seleccionar: uno de cada N puntos necesita al menos 2 puntos.",
+      "newPointsSelected": "{count, plural, one {Seleccionado # punto nuevo} other {Seleccionados # puntos nuevos}}.",
+      "newPointsNone": "No hay puntos nuevos que seleccionar. Aplica antes un modificador o un generador.",
       "recordingOn": "Modo grabación ACTIVADO — las teclas numéricas insertan en el playhead en vivo",
       "recordingOff": "Modo grabación DESACTIVADO",
       "patternInserted": "Insertadas {count, plural, one {# acción} other {# acciones}} ({type})",
@@ -1527,7 +1976,9 @@
       "gapsFilled": "Rellenados {gaps, plural, one {# hueco} other {# huecos}} con {actions, plural, one {# acción} other {# acciones}}",
       "saved": "Funscript guardado",
       "saveFailed": "Fallo al guardar: {error}",
-      "created": "{name} creado"
+      "created": "{name} creado",
+      "remoteScriptNotShown": "Tu teléfono o visor de RV está reproduciendo su propio script, por eso el editor no lo muestra. El editor edita el vídeo de esta ventana.",
+      "popoutUnavailable": "El editor no se puede abrir en ventana aparte: falta la conexión entre la ventana y la app."
     },
     "extractingWaveform": "Extrayendo forma de onda…",
     "extractingWaveformPct": "Extrayendo forma de onda… {pct}%",
@@ -1535,7 +1986,7 @@
     "detectingBeatsPct": "Detectando beats… {pct}%",
     "customKeysTitle": "Teclas de posición",
     "customKeysDefaultsHeader": "Predeterminadas",
-    "customKeysDefaultsBody": "0–9 (o Numpad) → 0, 10, 20 … 90. Mayús+0 / - / Numpad- → 100.",
+    "customKeysDefaultsBody": "0–9 (o teclado numérico) → 0, 10, 20 … 90. Mayús+0 / - / Teclado num. - → 100.",
     "customKeysCustomHeader": "Asignaciones personalizadas",
     "customKeysEmpty": "Aún no hay asignaciones personalizadas.",
     "customKeysAddBtn": "Añadir asignación",
@@ -1549,7 +2000,60 @@
     "customKeysDuplicateWarn": "{key} ya está asignada a la posición {pos}",
     "customKeysMidiHint": "Los usuarios de teclados MIDI suelen combinar esto con un traductor MIDI a teclas (p. ej. MIDIKey2Key).",
     "customKeysHelpGroup": "Teclas de posición personalizadas",
-    "popoutWindowTitle": "Editor de scripts"
+    "popoutWindowTitle": "Editor de scripts",
+    "popout": {
+      "dock": "Acoplar",
+      "waveformTitle": "Alternar forma de onda en la ventana principal (W)"
+    },
+    "patternFill": {
+      "title": "Rellenar con patrón",
+      "menu": "Rellenar con patrón…",
+      "contextMenu": "Acciones de la línea de tiempo",
+      "needSelection": "Selecciona al menos dos puntos o arrastra sobre un tramo vacío de la línea de tiempo. El patrón rellena el tiempo intermedio.",
+      "search": "Buscar patrones",
+      "family": "Grupo",
+      "allFamilies": "Todos",
+      "patterns": "Patrones",
+      "noMatch": "Ningún patrón coincide con «{query}».",
+      "speed": "Velocidad",
+      "speedValue": "{speed} unidades/s",
+      "ownSpeed": "Propia del patrón: {speed} unidades/s",
+      "rampTo": "Rampa hasta",
+      "rampOff": "Desactivada",
+      "reverse": "Invertir",
+      "range": "Rango",
+      "rangeOwn": "El del patrón",
+      "rangeMin": "Abajo",
+      "rangeMax": "Arriba",
+      "variation": "Variación",
+      "seed": "Semilla",
+      "reroll": "Volver a tirar",
+      "rerollTitle": "Probar otra variación (nueva semilla)",
+      "join": "Suavidad de las uniones",
+      "endFit": "Final",
+      "endFitStretch": "Estirar hasta el último punto",
+      "endFitPartial": "Golpe parcial",
+      "mode": "Rellenar",
+      "modeReplace": "Reemplazar los puntos",
+      "modeGap": "Solo los huecos vacíos",
+      "selection": "Selección: {seconds} s, {count, plural, one {# punto} other {# puntos}}",
+      "rangeSelection": "Intervalo de tiempo: {seconds} s, {count, plural, =0 {ningún punto} one {# punto} other {# puntos}}",
+      "stats": "{points, plural, one {# punto nuevo} other {# puntos nuevos}}, media {mean} unidades/s, máx. {max} unidades/s.",
+      "replaces": "Reemplaza {count, plural, one {# punto} other {# puntos}}.",
+      "apply": "Aplicar",
+      "applied": "Rellenado con «{name}»: {count, plural, one {# punto} other {# puntos}}.",
+      "noGap": "Ningún hueco vacío es lo bastante largo. Un hueco necesita al menos 1 segundo y dos golpes.",
+      "tooShort": "La selección es demasiado corta para rellenar. Selecciona un tramo más largo.",
+      "endFitFallback": "El patrón no pudo estirarse hasta el último punto, así que termina con un golpe parcial.",
+      "joinTooFast": "Los dos extremos están demasiado separados para este tiempo: las uniones se limitan a la velocidad máxima.",
+      "speedCapped": "Algunos movimientos se limitaron a {max} unidades/s, la velocidad máxima de un patrón.",
+      "speedUnreachable": "Este patrón no puede alcanzar esa velocidad aquí. Se acerca todo lo que puede.",
+      "rangeAdjusted": "El rango se amplió para que quepan los golpes del patrón.",
+      "failed": "No se pudo crear este relleno. Prueba otro patrón u otro ajuste.",
+      "changed": "El script o la selección cambió desde esta vista previa. No se rellenó nada.",
+      "editingPaused": "Las teclas de edición se pausan hasta que apliques o canceles.",
+      "updating": "Actualizando la vista previa…"
+    }
   },
   "connection": {
     "vibeHelp": {
@@ -1570,7 +2074,18 @@
       "connectedToIntiface": "Conectado a Intiface",
       "disconnected": "Desconectado",
       "failed": "Conexión fallida",
-      "failedIntiface": "Conexión fallida — ¿está Intiface en ejecución?"
+      "failedIntiface": "Conexión fallida — ¿está Intiface en ejecución?",
+      "notResponding": "Conectado, no responde",
+      "respondingSlowly": "Conectado, responde con lentitud"
+    },
+    "failure": {
+      "tcodePortNotFound": "Puerto no encontrado. Revisa el cable y vuelve a elegir el puerto.",
+      "tcodePortBusy": "El puerto está ocupado o se denegó el acceso. Cierra cualquier otro programa que lo esté usando y vuelve a intentarlo.",
+      "tcodeWsRefused": "No se pudo conectar con esa dirección WebSocket. Compruébala y asegúrate de que el dispositivo o el programa esté en marcha.",
+      "autoblowOffline": "Dispositivo no conectado. Comprueba que esté encendido y conectado al WiFi.",
+      "autoblowRateLimited": "Demasiadas solicitudes. Espera un momento y vuelve a intentarlo.",
+      "generic": "Conexión fallida: {detail}",
+      "withDetail": "{reason} ({detail})"
     },
     "btn": {
       "connect": "Conectar",
@@ -1585,7 +2100,9 @@
       "test": "Probar",
       "measure": "Medir",
       "measuring": "Midiendo…",
-      "applyLatency": "Aplicar"
+      "applyLatency": "Aplicar",
+      "reconnect": "Reconectar",
+      "reconnectHint": "Cierra la conexión y vuelve a establecerla con tu clave guardada."
     },
     "handy": {
       "connectionKey": "Código de conexión",
@@ -1607,9 +2124,13 @@
       "cutoffMinAria": "Suelo mínimo de salida",
       "cutoffMaxAria": "Techo máximo de salida",
       "cutoffHint": "Límite estricto: las posiciones por debajo del suelo o por encima del techo se fijan a ese valor; el resto se reproduce sin cambios. Se aplica al cargar el siguiente vídeo.",
+      "invert": "Invertir dirección",
+      "invertHint": "Invierte cada stroke: 0 pasa a ser 100. Úsalo si el Handy se mueve al revés que el vídeo. Se aplica al instante en la reproducción normal; si no, al cargar el siguiente vídeo.",
       "syncing": "Sincronizando…",
       "syncFailed": "Sincronización fallida",
-      "rtdResult": "RTD: {rtd}ms"
+      "rtdResult": "RTD: {rtd}ms",
+      "showKey": "Mostrar código de conexión",
+      "hideKey": "Ocultar código de conexión"
     },
     "buttplug": {
       "axisMainStroke": "Principal / Estocada (L0)",
@@ -1637,7 +2158,8 @@
       "safetyCap": "Límite de seguridad:",
       "vibScriptOverride": "La vibración se controla por script dedicado — los ajustes de modo e invertir no tienen efecto.",
       "highIntensityTitle": "Intensidad alta",
-      "highIntensityBody": "Estableciendo la intensidad de e-stim al {percent}% — los niveles altos pueden causar incomodidad. ¿Continuar?",
+      "highIntensityBody": "Esto permite que el dispositivo funcione hasta un {percent}% de intensidad. Los niveles altos pueden causar incomodidad, sobre todo con e-stim o una máquina. ¿Poner el límite de seguridad al {percent}%?",
+      "highIntensityConfirm": "Poner al {percent}%",
       "vibrationModeTitle": "Modo de vibración",
       "rotationModeTitle": "Modo de rotación",
       "estimModeTitle": "Modo e-stim",
@@ -1681,6 +2203,8 @@
       "motionHalfTop": "Mitad superior",
       "motionHalfBottom": "Mitad inferior",
       "motionSpeed": "Velocidad",
+      "motionBlend": "Mezcla",
+      "motionBlendHint": "Mezcla el eje principal en este eje: 0 % es solo el movimiento generado, 100 % sigue al principal.",
       "type": {
         "linear": "lineal",
         "rotate": "rotación",
@@ -1705,6 +2229,8 @@
       "wsUrl": "URL WebSocket",
       "wsUrlAria": "URL WebSocket",
       "wsHint": "Compatible con consumidores del protocolo MultiFunPlayer (restim, Howl, etc.) — apunta a su URL de escucha.",
+      "goHome": "Volver al centro",
+      "goHomeTitle": "Lleva cada eje despacio de vuelta al centro y apaga la vibración y la succión. Antes pausa el vídeo.",
       "precision": "Precisión TCode",
       "precisionAria": "Precisión TCode",
       "updateRate": "Frecuencia de actualización",
@@ -1741,7 +2267,9 @@
       "latencyToast": "Latencia Autoblow: {ms} ms",
       "latencyFailed": "Medición de latencia fallida: {error}",
       "latencyNoReading": "Sin lectura de latencia. Comprueba que el dispositivo esté conectado.",
-      "latencyApplied": "Desfase de sincronización ajustado a {ms} ms"
+      "latencyApplied": "Desfase de sincronización ajustado a {ms} ms",
+      "showToken": "Mostrar token del dispositivo",
+      "hideToken": "Ocultar token del dispositivo"
     },
     "sync": {
       "experimental": "EXPERIMENTAL",
@@ -1753,14 +2281,15 @@
       "vrTransport": "Transporte VR",
       "noVrSession": "sin sesión VR",
       "handyNotConnected": "Handy no conectado",
-      "perDeviceOffsets": "Offsets por dispositivo",
-      "perDeviceHint": "Cada dispositivo tiene su propio offset para compensar la latencia de comandos. Los valores negativos disparan los comandos antes. El control deslizante aquí refleja el offset en la pestaña propia del dispositivo — cambia cualquiera y ambos se actualizan.",
+      "perDeviceOffsets": "Offsets por dispositivo (todos los vídeos)",
+      "perDeviceHint": "Cada dispositivo tiene su propio offset para compensar la latencia de comandos. En los dispositivos Buttplug y T-Code, los valores negativos disparan los comandos antes; en el Handy y el Autoblow son los valores positivos los que disparan antes, así funcionan sus propias API. La línea del total de VR cuenta negativo = antes para todos los dispositivos. El control deslizante aquí refleja el offset en la pestaña propia del dispositivo — cambia cualquiera y ambos se actualizan.",
       "connectDeviceHint": "Conecta un dispositivo para ver sus controles de offset.",
       "deviceHandy": "The Handy (WiFi)",
       "deviceButtplug": "Dispositivos Buttplug.io",
       "deviceTcode": "TCode (serie)",
       "suggested": "Sugerido: {ms} ms",
       "vrModeTotal": "Modo VR: {device} (dispositivo) {vr} (VR) = {total} ms efectivo",
+      "vrModeTotalVideo": "Modo VR: {device} (dispositivo) {vr} (VR) {thisVideo} (este vídeo) = {total} ms efectivo",
       "latencyRefreshed": "Latencia actualizada",
       "refreshFailed": "Actualización fallida: {error}"
     }
@@ -1769,7 +2298,9 @@
     "connectionFailed": "Conexión fallida",
     "uploadFailed": "Carga fallida",
     "handyConnectionFailed": "Conexión fallida — verifica tu clave de conexión",
-    "connectionKeyTooShort": "La clave de conexión debe tener al menos 5 caracteres"
+    "handyStopFailed": "El Handy no confirmó que se detuvo. Puede seguir en movimiento: pulsa el botón del dispositivo.",
+    "connectionKeyTooShort": "La clave de conexión debe tener al menos 5 caracteres",
+    "handyNotAnswering": "El Handy no responde. Comprueba su WiFi y la pantalla del dispositivo."
   },
   "deviceTest": {
     "handyNotConnected": "Handy no conectado",
@@ -1820,8 +2351,8 @@
     "cycleAspect": "Cambiar relación de aspecto",
     "vrFlatten": "Aplanar VR (apagado / ojo izquierdo / ojo derecho)",
     "vrPan": "Desplazar proyección VR (con modo esférico activo)",
-    "vrZoom": "Ampliar video VR (o pellizcar / Ctrl +-)",
-    "vrZoomReset": "Restablecer zoom VR",
+    "vrZoom": "Ampliar video VR (o pellizcar / Ctrl +-). Sin un video VR abierto, Ctrl +- amplía la interfaz",
+    "vrZoomReset": "Restablecer zoom VR (el zoom de la interfaz si no hay un video VR abierto)",
     "speedDown": "Disminuir velocidad de reproducción",
     "speedUp": "Aumentar velocidad de reproducción",
     "toggleInfo": "Mostrar/Ocultar superposición de información",
@@ -1846,7 +2377,6 @@
     "prevBookmark": "Marcador anterior",
     "nextBookmark": "Siguiente marcador",
     "openFile": "Abrir archivo (diálogo nativo)",
-    "backToLibrary": "Volver del reproductor a la biblioteca",
     "showHelp": "Mostrar esta ayuda",
     "editorSelection": "Selección y navegación",
     "editorEdit": "Editar selección",
@@ -1858,6 +2388,7 @@
     "editorFastFrame": "Paso rápido de fotograma (configurable; por defecto 6)",
     "editorSelectAll": "Seleccionar todo",
     "editorSelectThird": "Seleccionar tercio superior / medio / inferior",
+    "editorSelectCreated": "Seleccionar solo los puntos que creó el último modificador o generador",
     "editorClearSelection": "Borrar selección / cerrar editor",
     "editorNudgeCoarse": "Ajustar posición ±5 (grueso)",
     "editorNudgeFine": "Ajustar posición ±1 (fino)",
@@ -1865,6 +2396,7 @@
     "editorMoveFrames": "Mover acción(es) ±N fotogramas",
     "editorDelete": "Eliminar selección",
     "editorInvert": "Invertir posiciones",
+    "editorFillPattern": "Rellenar la selección con un patrón",
     "editorPlaceNumpad": "Colocar acción en 0 / 10 / 20 / … / 90",
     "editorPlaceTop": "Colocar acción en 100 (arriba)",
     "editorInsertAtClick": "Insertar acción en la posición del clic",
@@ -1881,13 +2413,16 @@
     "editorZoom": "Acercar / alejar",
     "editorAlternatingInsert": "Inserción alterna (invierte la anterior)",
     "editorRepeatLastStroke": "Repetir el último golpe de dos acciones",
-    "editorBookmarkNav": "Saltar al siguiente/anterior marcador",
+    "editorBookmarkNav": "Saltar al marcador anterior/siguiente",
     "editorMultiBand": "Alternar onda multibanda (bajo/medio/alto)",
     "editorVAD": "Alternar pista de actividad de voz",
     "editorSpeedStep": "Bajar/subir velocidad de reproducción",
     "editorSelectLeftRightOfCursor": "Seleccionar todo antes/después del cabezal",
     "editorEqualize": "Igualar — redistribuir acciones intermedias en el tiempo",
-    "editorMoveToPlayhead": "Mover acción única seleccionada al cabezal"
+    "editorMoveToPlayhead": "Mover acción única seleccionada al cabezal",
+    "edgeHoldPattern": "Edge — reproducir el patrón de edge, el vídeo sigue",
+    "edgeHoldPatternToggle": "Edge (alternar) — reproducir el patrón de edge, el vídeo sigue",
+    "videoOptions": "Opciones del vídeo (en una tarjeta enfocada)"
   },
   "orgasmConfig": {
     "title": "Configurar Orgasm Switch",
@@ -1932,6 +2467,870 @@
       "activity": "Actividad",
       "objects": "Objetos",
       "travel": "Viajes y lugares"
+    }
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Mayús",
+    "space": "Espacio",
+    "enter": "Intro",
+    "tab": "Tab",
+    "backspace": "Retroceso",
+    "delete": "Supr",
+    "insert": "Insert",
+    "home": "Inicio",
+    "end": "Fin",
+    "pageUp": "Re Pág",
+    "pageDown": "Av Pág",
+    "printScreen": "Impr Pant",
+    "escape": "Esc",
+    "arrowLeft": "Flecha izquierda",
+    "arrowRight": "Flecha derecha",
+    "arrowUp": "Flecha arriba",
+    "arrowDown": "Flecha abajo",
+    "arrows": "Flechas",
+    "mediaPlayPause": "Reproducir/Pausa",
+    "mediaNext": "Pista siguiente",
+    "mediaPrevious": "Pista anterior",
+    "mediaStop": "Detener",
+    "volumeUp": "Subir volumen",
+    "volumeDown": "Bajar volumen",
+    "volumeMute": "Silenciar",
+    "scroll": "Rueda",
+    "click": "Clic",
+    "dragPoint": "Arrastrar punto",
+    "numpad": "Teclado num. {key}"
+  },
+  "patterns": {
+    "family": {
+      "full-strokes": {
+        "name": "Golpes completos y medios",
+        "desc": "Golpes sencillos por todo el recorrido o por el centro, solos, en pares o de tres en tres."
+      },
+      "tip-work": {
+        "name": "Trabajo en la punta",
+        "desc": "Golpes y toques rápidos arriba, en la punta, que nunca llegan hondo."
+      },
+      "base-grind": {
+        "name": "Base y roce",
+        "desc": "Golpes y roce apretado abajo, en la base, que se quedan al fondo."
+      },
+      "buzz": {
+        "name": "Zumbido y vibración",
+        "desc": "Vibración rápida, sola o sobre los golpes."
+      },
+      "climbs": {
+        "name": "Subidas y escaleras",
+        "desc": "Golpes que van subiendo o bajando por el recorrido sobre la marcha."
+      },
+      "holds": {
+        "name": "Pausas y bajadas",
+        "desc": "Pausas arriba, abajo o a medio camino, y una bajada antes de una pausa."
+      },
+      "waves": {
+        "name": "Olas y crecidas",
+        "desc": "Golpes que crecen, se apagan, aceleran o frenan sobre la marcha."
+      },
+      "stutters": {
+        "name": "Tartamudeos y sacudidas",
+        "desc": "Golpes que se enganchan, se detienen o dan un tirón atrás por el camino."
+      },
+      "endings": {
+        "name": "Finales y remates",
+        "desc": "Formas de terminar: un último golpe hacia abajo, una frenada, un sprint, una caída o una vibración."
+      },
+      "flutters": {
+        "name": "Aleteos y réplicas",
+        "desc": "Golpes con aleteos muy rápidos donde giran, y un final que sigue vibrando en la base."
+      },
+      "simple-shapes": {
+        "name": "Formas simples",
+        "desc": "Las ondas generadas clásicas: seno, triángulo, sierra, cuadrada, ascendente y aleatoria."
+      }
+    },
+    "quick-full-strokes": {
+      "name": "Golpes completos ágiles",
+      "desc": "Golpes ágiles por todo el recorrido."
+    },
+    "uneven-long-strokes": {
+      "name": "Golpes largos irregulares",
+      "desc": "Golpes largos y tranquilos por el centro cuyo ritmo y profundidad varían y nunca se repiten del todo."
+    },
+    "full-strokes-slow-up-quick-down": {
+      "name": "Golpes completos, subida lenta, bajada rápida",
+      "desc": "Golpes constantes por todo el recorrido, lentos al subir y rápidos al bajar."
+    },
+    "frantic-long-strokes": {
+      "name": "Golpes largos frenéticos",
+      "desc": "Golpes largos a toda velocidad por el centro."
+    },
+    "slow-long-strokes-top-linger": {
+      "name": "Golpes largos lentos, se demoran arriba",
+      "desc": "Golpes largos, lentos y pausados por el centro que se demoran arriba."
+    },
+    "full-strokes-long-short-top": {
+      "name": "Golpes completos, largo-corto desde arriba",
+      "desc": "Golpes constantes por todo el recorrido: uno largo y luego otro de la mitad de profundidad que vuelve antes del fondo."
+    },
+    "long-strokes-long-short-top": {
+      "name": "Golpes largos, largo-corto desde arriba",
+      "desc": "Golpes largos y constantes por el centro: uno largo y luego otro algo más corto que vuelve antes del fondo."
+    },
+    "slow-full-strokes-slow-up-quick-down": {
+      "name": "Golpes completos lentos, subida lenta, bajada rápida",
+      "desc": "Golpes lentos y pausados por todo el recorrido, lentos al subir y rápidos al bajar, demorándose arriba."
+    },
+    "fast-full-stroke-pairs": {
+      "name": "Golpes completos rápidos en pares",
+      "desc": "Golpes rápidos por todo el recorrido en pares; el segundo vuelve un poco antes que el primero."
+    },
+    "fast-full-strokes-bottom-bump": {
+      "name": "Golpes completos rápidos, rebote abajo",
+      "desc": "Golpes rápidos por todo el recorrido, cada golpe largo seguido de un pequeño rebote abajo."
+    },
+    "slow-full-strokes-slow-quick": {
+      "name": "Golpes completos lentos, lento-rápido",
+      "desc": "Golpes lentos y pausados por todo el recorrido: uno más lento y luego otro más rápido."
+    },
+    "quick-full-strokes-threes": {
+      "name": "Golpes completos ágiles de tres en tres",
+      "desc": "Golpes ágiles por todo el recorrido en un ciclo de tres que se siente casi como golpes sencillos."
+    },
+    "uneven-tip-strokes": {
+      "name": "Golpes irregulares en la punta",
+      "desc": "Golpes cortos y tranquilos arriba, en la punta, cuyo ritmo y profundidad varían y nunca se repiten del todo."
+    },
+    "fast-tip-flicks": {
+      "name": "Toques rápidos en la punta",
+      "desc": "Pequeños toques rápidos arriba, en la punta, sin llegar nunca hondo."
+    },
+    "slow-tip-strokes": {
+      "name": "Golpes lentos en la punta",
+      "desc": "Golpes largos, lentos y pausados alrededor de la punta, sin llegar nunca hondo."
+    },
+    "tip-strokes-slow-up-quick-down": {
+      "name": "Golpes en la punta, subida lenta, bajada rápida",
+      "desc": "Golpes constantes de medio recorrido en la punta, lentos al subir y rápidos al bajar."
+    },
+    "quick-tip-strokes-long-short-high": {
+      "name": "Golpes ágiles en la punta, largo-corto, arriba",
+      "desc": "Golpes ágiles de medio recorrido, arriba en la punta: uno largo y luego otro de la mitad de profundidad."
+    },
+    "frantic-tip-strokes": {
+      "name": "Golpes frenéticos en la punta",
+      "desc": "Golpes de medio recorrido a toda velocidad arriba, en la punta."
+    },
+    "tip-strokes-long-short": {
+      "name": "Golpes en la punta, largo-corto",
+      "desc": "Golpes constantes de medio recorrido en la punta: uno largo y luego otro de la mitad de profundidad."
+    },
+    "quick-tip-strokes-long-short-low": {
+      "name": "Golpes ágiles en la punta, largo-corto, más abajo",
+      "desc": "Golpes largos y ágiles alrededor de la punta que llegan más abajo: uno largo y luego otro más corto."
+    },
+    "tip-strokes-slow-quick": {
+      "name": "Golpes en la punta, lento-rápido",
+      "desc": "Golpes constantes de medio recorrido en la punta: uno más lento y luego otro mucho más rápido."
+    },
+    "frantic-tip-strokes-top-dip": {
+      "name": "Golpes frenéticos en la punta, caída arriba",
+      "desc": "Golpes de medio recorrido a toda velocidad en la punta, cada golpe largo seguido de una pequeña caída arriba."
+    },
+    "fast-base-strokes": {
+      "name": "Golpes rápidos en la base",
+      "desc": "Golpes rápidos de medio recorrido abajo, en la base, que se quedan al fondo."
+    },
+    "uneven-base-strokes": {
+      "name": "Golpes irregulares en la base",
+      "desc": "Golpes cortos y ágiles en la base cuyo ritmo y profundidad varían y nunca se repiten del todo."
+    },
+    "slow-base-grind": {
+      "name": "Roce lento en la base",
+      "desc": "Un roce lento y apretado justo abajo, en la base, lento al subir y rápido al bajar."
+    },
+    "base-strokes-slow-up-quick-down": {
+      "name": "Golpes en la base, subida lenta, bajada rápida",
+      "desc": "Golpes ágiles de medio recorrido en la base, lentos al subir y rápidos al bajar."
+    },
+    "fast-base-strokes-long-short": {
+      "name": "Golpes rápidos en la base, largo-corto",
+      "desc": "Golpes rápidos de medio recorrido en la base: uno largo y luego otro más corto que vuelve antes de arriba."
+    },
+    "frantic-base-grind": {
+      "name": "Roce frenético en la base",
+      "desc": "Un roce apretado a toda velocidad justo abajo, en la base, lento al subir y rápido al bajar."
+    },
+    "base-strokes-high-low": {
+      "name": "Golpes en la base, alto-bajo",
+      "desc": "Golpes ágiles de medio recorrido en la base: uno sube alto y el siguiente menos."
+    },
+    "frantic-base-strokes-bottom-bump": {
+      "name": "Golpes frenéticos en la base, rebote abajo",
+      "desc": "Golpes de medio recorrido a toda velocidad en la base, cada golpe largo seguido de un pequeño rebote abajo."
+    },
+    "buzz-uneven-short-base-strokes": {
+      "name": "Vibración sobre golpes cortos irregulares en la base",
+      "desc": "Golpes cortos, ágiles e irregulares en la base con vibración sobre la mayoría."
+    },
+    "buzz-uneven-half-base-strokes": {
+      "name": "Vibración sobre medios golpes irregulares en la base",
+      "desc": "Golpes de medio recorrido irregulares y constantes en la base con vibración sobre la mayoría."
+    },
+    "buzz-uneven-long-strokes": {
+      "name": "Vibración sobre golpes largos irregulares",
+      "desc": "Golpes largos, rápidos e irregulares por el centro con vibración sobre la mayoría."
+    },
+    "steady-buzz-base": {
+      "name": "Vibración fija en la base",
+      "desc": "Una vibración en la base que se queda en su sitio, sin golpes reales debajo."
+    },
+    "buzz-long-strokes": {
+      "name": "Vibración sobre golpes largos",
+      "desc": "Golpes largos y constantes por el centro con una vibración encima."
+    },
+    "steady-buzz-tip-high": {
+      "name": "Vibración fija en la punta, arriba",
+      "desc": "Una vibración muy arriba, en la punta, que se queda en su sitio, sin golpes reales debajo."
+    },
+    "buzz-frantic-base-strokes": {
+      "name": "Vibración sobre golpes frenéticos en la base",
+      "desc": "Golpes cortos e irregulares a toda velocidad en la base con vibración sobre la mayoría."
+    },
+    "buzz-uneven-tip-strokes": {
+      "name": "Vibración sobre golpes irregulares en la punta",
+      "desc": "Golpes de medio recorrido irregulares y constantes en la punta con vibración sobre la mayoría."
+    },
+    "buzz-tiny-base-strokes": {
+      "name": "Vibración sobre golpes diminutos en la base",
+      "desc": "Golpes diminutos a toda velocidad en la base con una vibración encima."
+    },
+    "steady-buzz-tip-low": {
+      "name": "Vibración fija en la punta, más abajo",
+      "desc": "Una vibración más abajo en la punta que se queda en su sitio, sin golpes reales debajo."
+    },
+    "buzz-short-tip-strokes": {
+      "name": "Vibración sobre golpes cortos en la punta",
+      "desc": "Golpes cortos a toda velocidad en la punta con una vibración encima."
+    },
+    "climbing-long-strokes": {
+      "name": "Golpes largos que suben",
+      "desc": "Golpes largos y rápidos que empiezan a media altura y van subiendo hacia la punta."
+    },
+    "sinking-full-strokes": {
+      "name": "Golpes completos que bajan",
+      "desc": "Golpes lentos que empiezan a media altura y van bajando hacia la base."
+    },
+    "climbing-half-strokes-from-low": {
+      "name": "Medios golpes que suben desde abajo",
+      "desc": "Golpes de medio recorrido a toda velocidad que empiezan abajo y van subiendo hacia la punta."
+    },
+    "ladder-stepping-up": {
+      "name": "Escalera, subiendo",
+      "desc": "Golpes constantes cuyo punto más bajo sube un nivel cada vez, y luego vuelve a empezar."
+    },
+    "pause-at-top": {
+      "name": "Pausa arriba",
+      "desc": "Sube, espera cerca de la punta unos dos segundos y luego vuelve a bajar."
+    },
+    "pause-at-bottom": {
+      "name": "Pausa abajo",
+      "desc": "Descansa justo abajo, en la base, unos dos segundos antes del siguiente golpe hacia arriba."
+    },
+    "pause-halfway": {
+      "name": "Pausa a medio camino",
+      "desc": "Se queda quieto a mitad de un golpe unos dos segundos y luego sigue."
+    },
+    "dip-climb-hold-top": {
+      "name": "Bajada, subida, pausa arriba",
+      "desc": "Una bajada, una subida lenta hasta la punta y luego una espera de un par de segundos."
+    },
+    "fading-long-strokes-bottoms-rising": {
+      "name": "Golpes largos que se apagan, el fondo sube",
+      "desc": "Golpes largos y ágiles que se vuelven más cortos y rápidos a medida que el fondo sube."
+    },
+    "swelling-long-strokes-deeper": {
+      "name": "Golpes largos que crecen, más hondos",
+      "desc": "Golpes largos y constantes que se alargan a medida que llegan más hondo."
+    },
+    "slowing-full-strokes": {
+      "name": "Golpes completos que frenan",
+      "desc": "Golpes constantes por todo el recorrido que se van frenando."
+    },
+    "swelling-long-strokes-higher": {
+      "name": "Golpes largos que crecen, más altos",
+      "desc": "Golpes largos y ágiles que se alargan a medida que llegan más alto."
+    },
+    "fading-long-strokes-tops-falling": {
+      "name": "Golpes largos que se apagan, el tope baja",
+      "desc": "Golpes largos y ágiles que se vuelven más cortos y rápidos a medida que el tope baja."
+    },
+    "speeding-up-low-strokes": {
+      "name": "Golpes bajos que aceleran",
+      "desc": "Golpes largos y ágiles abajo que van acelerando, lentos al subir y rápidos al bajar."
+    },
+    "fading-half-strokes-tops-falling": {
+      "name": "Medios golpes que se apagan, el tope baja",
+      "desc": "Golpes rápidos de medio recorrido en la base que se acortan a medida que el tope baja."
+    },
+    "fading-tip-strokes-bottoms-rising": {
+      "name": "Golpes en la punta que se apagan, el fondo sube",
+      "desc": "Golpes constantes de medio recorrido en la punta que se vuelven más cortos y rápidos a medida que el fondo sube."
+    },
+    "stuttering-middle-strokes": {
+      "name": "Golpes entrecortados en el centro",
+      "desc": "Golpes constantes de medio recorrido por el centro que se enganchan una y otra vez, con pequeños tirones atrás."
+    },
+    "stuttering-tip-strokes": {
+      "name": "Golpes entrecortados en la punta",
+      "desc": "Golpes constantes de medio recorrido en la punta que se enganchan una y otra vez, con pequeños tirones atrás."
+    },
+    "stuttering-base-strokes": {
+      "name": "Golpes entrecortados en la base",
+      "desc": "Golpes cortos y ágiles en la base que se enganchan una y otra vez, con pequeños tirones atrás."
+    },
+    "mixed-flutters-tip": {
+      "name": "Aleteos mezclados en la punta",
+      "desc": "Pequeños aleteos mezclados con movimientos más amplios y lentos en la punta, suaves y nunca regulares."
+    },
+    "long-strokes-catch-up": {
+      "name": "Golpes largos, enganche al subir",
+      "desc": "Golpes largos y constantes que retroceden un poco a mitad de subida y luego siguen hasta arriba."
+    },
+    "full-strokes-stall-down": {
+      "name": "Golpes completos, parada al bajar",
+      "desc": "Golpes ágiles por todo el recorrido que se detienen un momento al bajar."
+    },
+    "fast-full-strokes-catch-up": {
+      "name": "Golpes completos rápidos, enganche al subir",
+      "desc": "Golpes rápidos por todo el recorrido que retroceden un poco a mitad de subida, lentos al subir y rápidos al bajar."
+    },
+    "half-strokes-catch-down": {
+      "name": "Medios golpes, enganche al bajar",
+      "desc": "Golpes constantes de medio recorrido en la punta que rebotan un poco hacia arriba a mitad de bajada."
+    },
+    "long-strokes-stall-up": {
+      "name": "Golpes largos, parada al subir",
+      "desc": "Golpes largos y constantes que se detienen un momento al subir: uno lento y luego uno rápido."
+    },
+    "last-stroke-then-still": {
+      "name": "Último golpe abajo, luego quieto",
+      "desc": "Los golpes paran: un último golpe hasta el fondo, y ahí se queda."
+    },
+    "slow-down-finish": {
+      "name": "Frenada hasta el final",
+      "desc": "Los golpes siguen pero se calman, cada vez más lentos hasta que paran."
+    },
+    "sprint-finish": {
+      "name": "Sprint hasta el final",
+      "desc": "Más rápido que antes y sostenido hasta el final; luego se detiene."
+    },
+    "plunge-finish": {
+      "name": "La caída",
+      "desc": "Una última caída rápida desde muy arriba hasta el fondo, y ahí se queda."
+    },
+    "buzz-finish": {
+      "name": "Final con vibración",
+      "desc": "El último tramo se convierte sobre todo en vibración en lugar de golpes."
+    },
+    "finishing-fast-strokes-long-short": {
+      "name": "Golpes rápidos finales, largo-corto",
+      "desc": "Golpes rápidos por todo el recorrido: uno largo y luego otro más corto, lentos al subir y rápidos al bajar."
+    },
+    "full-strokes-base-flutter": {
+      "name": "Golpes completos, aleteo en la base",
+      "desc": "Golpes amplios que llegan al fondo, aletean ahí un momento y vuelven a subir directamente."
+    },
+    "drop-buzzing-aftershocks": {
+      "name": "Caída y réplicas vibrantes",
+      "desc": "Los golpes bajan hasta el fondo y siguen vibrando y temblando ahí unos segundos."
+    },
+    "fast-strokes-flutter-both-ends": {
+      "name": "Golpes rápidos, aleteo en ambos extremos",
+      "desc": "Golpes ágiles que aletean arriba, bajan disparados, aletean abajo y vuelven a subir disparados."
+    },
+    "fast-full-strokes-long-short-bottom": {
+      "name": "Golpes completos rápidos, largo-corto desde abajo",
+      "desc": "Golpes rápidos por todo el recorrido: uno largo y luego otro de la mitad de profundidad que vuelve antes de arriba."
+    },
+    "frantic-base-strokes-long-short": {
+      "name": "Golpes frenéticos en la base, largo-corto",
+      "desc": "Golpes largos a toda velocidad en la base: uno largo y luego otro más corto que vuelve antes de arriba."
+    },
+    "full-strokes-bottom-linger": {
+      "name": "Golpes completos, se demoran abajo",
+      "desc": "Golpes constantes por todo el recorrido que se demoran abajo."
+    },
+    "ui": {
+      "pattern": "Patrón",
+      "family": "Grupo",
+      "allFamilies": "Todos los grupos",
+      "choose": "Elegir…",
+      "pickerTitle": "Elegir un patrón",
+      "search": "Buscar patrones",
+      "noMatch": "Ningún patrón coincide.",
+      "speed": "Velocidad",
+      "speedValue": "{speed} unidades por segundo",
+      "reverse": "Invertir",
+      "range": "Rango",
+      "rangeOwn": "Rango propio del patrón",
+      "rangeMin": "Mínimo",
+      "rangeMax": "Máximo",
+      "reset": "Volver a la velocidad propia del patrón",
+      "speedLimited": "Limitado a {max} unidades por segundo",
+      "tooShort": "Demasiado corto para este patrón.",
+      "choosePattern": "Elige un patrón…",
+      "oneShotName": "{name} (suena una vez y luego se mantiene)",
+      "oneShotHint": "Un final: se reproduce una vez desde que pulsas la tecla y luego mantiene su última posición hasta que la sueltas."
+    },
+    "shape-sine": {
+      "name": "Seno",
+      "desc": "Golpes suaves y regulares que entran con suavidad en cada giro."
+    },
+    "shape-triangle": {
+      "name": "Triángulo",
+      "desc": "Golpes regulares a velocidad constante que giran en seco en cada extremo."
+    },
+    "shape-sawtooth": {
+      "name": "Sierra",
+      "desc": "Una subida constante y luego una caída instantánea hasta abajo."
+    },
+    "shape-square": {
+      "name": "Cuadrada",
+      "desc": "Se mantiene arriba y abajo, con un salto rápido entre ambos."
+    },
+    "shape-escalating": {
+      "name": "Ascendente",
+      "desc": "Golpes que empiezan cortos y se hacen más profundos hasta usar todo el recorrido."
+    },
+    "shape-random": {
+      "name": "Aleatorio",
+      "desc": "Golpes hasta una nueva profundidad aleatoria cada medio golpe."
+    }
+  },
+  "videoOptions": {
+    "openAria": "Opciones de {name}",
+    "openTitle": "Opciones del vídeo (Alt+Intro)",
+    "railAria": "Secciones de opciones del vídeo",
+    "rail": {
+      "organise": "Organizar",
+      "tags": "Etiquetas",
+      "script": "Script",
+      "subtitles": "Subtítulos",
+      "playback": "Reproducción",
+      "thumbnail": "Miniatura",
+      "vr": "VR",
+      "file": "Archivo"
+    },
+    "header": {
+      "script": "Script: {how}",
+      "vrAuto": "VR (automático)",
+      "vrYours": "VR (definido por ti)",
+      "flatYours": "Plano (definido por ti)"
+    },
+    "organise": {
+      "libraries": "Bibliotecas",
+      "noPlaylists": "Todavía no hay listas.",
+      "noCategories": "Todavía no hay categorías.",
+      "newPlaylist": "Nueva lista…",
+      "newCategory": "Nueva categoría…",
+      "synced": "(sincronizada con su origen)"
+    },
+    "tags": {
+      "heading": "Etiquetas de este vídeo ({count})",
+      "empty": "Este vídeo aún no tiene etiquetas. Añade una abajo u obtén las etiquetas de la publicación desde EroScripts.",
+      "noMatch": "Ninguna etiqueta coincide con «{query}».",
+      "filter": {
+        "placeholder": "Buscar una etiqueta…",
+        "label": "Buscar una etiqueta en este vídeo"
+      },
+      "showAll": "Mostrar todas ({count})",
+      "showFewer": "Mostrar menos",
+      "removeAria": "Quitar {name} de este vídeo",
+      "add": {
+        "placeholder": "Añadir una etiqueta…",
+        "label": "Añadir una etiqueta a este vídeo",
+        "button": "Añadir",
+        "hint": "Para poner una etiqueta en un grupo, escribe primero el grupo, por ejemplo device:the handy o performer:Jane Doe.",
+        "suggestionsAria": "Etiquetas sugeridas"
+      },
+      "sourcesHeading": "De dónde vienen",
+      "source": {
+        "post": "«{title}» de {creator}",
+        "postNoCreator": "«{title}»",
+        "postId": "Publicación {id}",
+        "got": "obtenidas el {date}",
+        "stale": "ya no está en EroScripts",
+        "fileRow": "Archivo del script",
+        "tagCount": "{count, plural, one {# etiqueta} other {# etiquetas}}",
+        "notRead": "etiquetas aún no obtenidas",
+        "stashRow": "{tags, plural, one {# etiqueta} other {# etiquetas}}, {performers, plural, one {# intérprete} other {# intérpretes}}, {studios, plural, one {# estudio} other {# estudios}}",
+        "stashGone": "ya no está en Stash",
+        "stashHidden": "este archivo cambió; sus etiquetas de Stash están ocultas hasta la próxima sincronización"
+      },
+      "viewPost": "Ver publicación",
+      "pasteLink": "Pegar un enlace de publicación…",
+      "findPost": "Buscar la publicación en EroScripts…",
+      "paste": {
+        "title": "Vincular una publicación de EroScripts",
+        "label": "Enlace de la publicación",
+        "hint": "Pega la dirección de la publicación, por ejemplo https://discuss.eroscripts.com/t/scene-name/12345. No se envía nada hasta que obtengas las etiquetas.",
+        "invalid": "Ese no es un enlace de publicación de EroScripts. Empieza por https://discuss.eroscripts.com/t/",
+        "ok": "Vincular"
+      },
+      "find": {
+        "title": "Buscar la publicación en EroScripts",
+        "hint": "Busca y elige la publicación de la que viene el script de este vídeo. No se descarga nada.",
+        "prompt": "Escribe el nombre de la publicación y busca.",
+        "pick": "Vincular esta publicación",
+        "pickAria": "Vincular la publicación {title}"
+      },
+      "hiddenHeading": "Ocultas en este vídeo ({count})",
+      "showAgain": "Volver a mostrar",
+      "showAgainAria": "Volver a mostrar {name} en este vídeo",
+      "undoAria": "Deshacer: {message}",
+      "menu": {
+        "aria": "Opciones de la etiqueta {name}",
+        "showVideos": "Mostrar vídeos con esta etiqueta",
+        "makeCategory": "Crear una categoría con esta etiqueta…",
+        "remove": "Quitar de este vídeo"
+      },
+      "category": {
+        "title": "Crear una categoría con esta etiqueta",
+        "nameLabel": "Nombre de la categoría",
+        "count": "{count, plural, =0 {Ningún vídeo de la biblioteca tiene esta etiqueta.} one {# vídeo tiene esta etiqueta.} other {# vídeos tienen esta etiqueta.}}",
+        "exists": "Ya existe una categoría llamada {name}. Los vídeos se añadirán a ella.",
+        "create": "Crear categoría",
+        "addTo": "Añadir a {name}",
+        "emptyName": "Escribe un nombre para la categoría."
+      },
+      "live": {
+        "added": "Se añadió {name}.",
+        "addedShown": "Se añadió {name}. Vuelve a mostrarse en este vídeo.",
+        "already": "{name} ya está en este vídeo.",
+        "removed": "Se quitó {name} de este vídeo.",
+        "shownAgain": "{name} vuelve a mostrarse en este vídeo.",
+        "undone": "Deshecho.",
+        "undoPartial": "Deshecho. Se conservó un cambio que hiciste después.",
+        "linked": "Publicación vinculada. No se envía nada hasta que obtengas sus etiquetas.",
+        "categoryMade": "Se creó la categoría {name} con {count, plural, one {# vídeo} other {# vídeos}}.",
+        "categoryAdded": "Se añadieron {count, plural, one {# vídeo} other {# vídeos}} a {name}.",
+        "categoryNothing": "Todos los vídeos con esta etiqueta ya están en {name}.",
+        "categoryFailed": "No se pudo crear la categoría.",
+        "categoryRemoved": "Deshecho. Se eliminó la categoría {name}.",
+        "categoryUnassigned": "Deshecho. Los vídeos se quitaron de nuevo de {name}.",
+        "reason": {
+          "empty": "Escribe primero una etiqueta.",
+          "tooLong": "Esa etiqueta es demasiado larga ({max} caracteres como máximo).",
+          "badStore": "Las etiquetas guardadas de este vídeo están dañadas, así que no se cambió nada.",
+          "noPath": "Este vídeo no tiene ruta de archivo, así que sus etiquetas no se pueden guardar."
+        },
+        "postChanged": "Publicación cambiada. Sus etiquetas llegan cuando pulses Obtener etiquetas.",
+        "samePost": "Esa ya es la publicación de este vídeo. No cambió nada.",
+        "undoChangedSince": "No se deshizo: la publicación de este vídeo se cambió otra vez después.",
+        "getTagsUndone": "Deshecho: las etiquetas están como antes de «Obtener etiquetas».",
+        "getTagsUndoChanged": "No se deshizo: las etiquetas de EroScripts de este vídeo cambiaron otra vez desde entonces."
+      },
+      "fetch": {
+        "button": "Obtener etiquetas de EroScripts",
+        "loginButton": "Inicia sesión para obtener etiquetas…",
+        "running": "Obteniendo etiquetas…",
+        "success": "Se obtuvieron {count, plural, one {# etiqueta} other {# etiquetas}} de EroScripts (nuevas: {newCount}).",
+        "successEmpty": "Esta publicación no tiene etiquetas en EroScripts.",
+        "unknown": "EroScripts no indicó qué etiquetas tiene esta publicación.",
+        "gone": "Esta publicación ya no está en EroScripts. Sus etiquetas se conservan.",
+        "loginAgain": "Vuelve a iniciar sesión en EroScripts",
+        "loginAction": "Iniciar sesión…",
+        "loginRequired": "Para obtener etiquetas necesitas iniciar sesión en EroScripts. No se envió nada.",
+        "cooldown": "EroScripts pidió esperar. Vuelve a intentarlo en {seconds} s",
+        "otherScript": "La publicación vinculada es de otro script ({name})",
+        "noPost": "El script de este vídeo no tiene ninguna publicación de EroScripts vinculada",
+        "noScript": "Este vídeo no tiene script, así que no hay ninguna publicación de EroScripts vinculada.",
+        "superseded": "La publicación de este vídeo cambió mientras se obtenían sus etiquetas. No se guardó nada.",
+        "hub": "Esa publicación es el índice de scripts de su creador, no la publicación de este vídeo, así que no se usaron sus etiquetas. Busca la publicación de este vídeo para obtener sus etiquetas.",
+        "hubNote": "El script enlaza al índice de scripts de su creador, no a la publicación de este vídeo"
+      },
+      "changePost": "Cambiar publicación…",
+      "change": {
+        "title": "Cambiar la publicación de EroScripts",
+        "message": "Las etiquetas de {post} dejan de mostrarse en este vídeo ahora. Las de la nueva publicación llegan cuando pulses Obtener etiquetas."
+      }
+    },
+    "script": {
+      "heading": "Funscript",
+      "none": "Este vídeo todavía no tiene script.",
+      "change": "Cambiar…",
+      "findOnEroScripts": "Buscar en EroScripts…",
+      "fallback": "No se puede leer {name} ahora mismo, así que este vídeo reproduce mientras tanto su propio script. Tu emparejamiento se conserva.",
+      "modeHeading": "Modo",
+      "modeSingle": "Script único",
+      "modeMulti": "Multi-eje ({count, plural, one {# eje} other {# ejes}})",
+      "modeCustom": "Enrutamiento personalizado ({count, plural, one {# ruta} other {# rutas}})",
+      "modeHint": "«Cambiar…» edita el modo.",
+      "slotsHeading": "Emparejamientos guardados",
+      "slot": {
+        "single": "Script único: {name}",
+        "multi": "Conjunto multi-eje ({count, plural, one {# eje} other {# ejes}})",
+        "plays": "en uso",
+        "saved": "guardado, sin usar",
+        "unpairRemoves": "Desvincular lo quita",
+        "unpairKeeps": "Desvincular lo conserva"
+      },
+      "playFirst": "Reproducir primero",
+      "playFirstSet": "Ahora {name} se reproduce primero.",
+      "variation": {
+        "folder": "de la carpeta",
+        "added": "añadida por ti",
+        "removeAria": "Quitar {name} de las variaciones de este vídeo",
+        "removed": "{name} quitado de las variaciones."
+      },
+      "addVariation": "Añadir variación…",
+      "randomHint": "«Variación de script aleatoria» está activada en Ajustes, así que se reproduce una al azar. Esta elección se aplica cuando la desactives.",
+      "embeddedHeading": "Ejes incrustados",
+      "unpairHeading": "Desvincular",
+      "pairing": {
+        "none": "Sin script",
+        "byName": "Emparejado por nombre",
+        "folder": "Primer script de su carpeta",
+        "autoMulti": "Emparejado por nombre, con sus archivos de ejes",
+        "single": "Elegido por ti",
+        "multi": "Multi-eje, elegido por ti",
+        "custom": "Enrutamiento personalizado, elegido por ti"
+      },
+      "status": {
+        "missing": "Script no encontrado",
+        "unknown": "No se puede comprobar el script ahora mismo"
+      },
+      "unpair": {
+        "byName": "Emparejado por nombre de archivo. Cambia el nombre del .funscript o muévelo para desvincularlo.",
+        "autoMulti": "Emparejado por nombre de archivo, con sus archivos de ejes. Cambia el nombre del .funscript o muévelo para desvincularlo.",
+        "folder": "Se reproduce el primer script de la carpeta de este vídeo. Mueve el .funscript a otra carpeta para evitarlo.",
+        "ownScript": "El script principal es el propio de este vídeo (mismo nombre de archivo). Usa «Cambiar…» para editar el resto.",
+        "noMain": "Este emparejamiento no tiene script principal. Usa «Cambiar…» para editarlo.",
+        "confirmTitle": "Desvincular funscript",
+        "confirmQuestion": "¿Desvincular {name}? El archivo se queda en el disco.",
+        "nextOwn": "Este vídeo usará su propio script, {name}.",
+        "nextNone": "Este vídeo se quedará sin script.",
+        "confirmButton": "Desvincular",
+        "removesMulti": "También se elimina el conjunto multi-eje que creaste ({count, plural, one {# eje} other {# ejes}}).",
+        "removesCustom": "También se elimina el enrutamiento personalizado que creaste ({count, plural, one {# ruta} other {# rutas}}).",
+        "keepsSingle": "Se conserva: {name}, el script único que guardaste. «Cambiar…» puede volver a usarlo.",
+        "keepsMulti": "Se conserva: el conjunto multi-eje que guardaste ({count, plural, one {# eje} other {# ejes}}). «Cambiar…» puede volver a usarlo.",
+        "keepsCustom": "Se conserva: el enrutamiento personalizado que guardaste ({count, plural, one {# ruta} other {# rutas}}). «Cambiar…» puede volver a usarlo.",
+        "done": "{name} desvinculado.",
+        "undone": "{name} vinculado de nuevo.",
+        "undoChanged": "No se puede deshacer: el script de este vídeo ha cambiado desde entonces."
+      },
+      "removeSet": {
+        "multiTitle": "Quitar el conjunto multi-eje",
+        "customTitle": "Quitar el enrutamiento personalizado",
+        "multiQuestion": "¿Quitar el conjunto multi-eje que creaste ({count, plural, one {# eje} other {# ejes}})? Los archivos de script se quedan en el disco.",
+        "customQuestion": "¿Quitar el enrutamiento personalizado que creaste ({count, plural, one {# ruta} other {# rutas}})? Los archivos de script se quedan en el disco.",
+        "playsSame": "Ahora no se usa, así que lo que reproduce este vídeo no cambia.",
+        "multiDone": "Conjunto multi-eje quitado.",
+        "customDone": "Enrutamiento personalizado quitado.",
+        "multiUndone": "El conjunto multi-eje ha vuelto.",
+        "customUndone": "El enrutamiento personalizado ha vuelto.",
+        "singleTitle": "Quitar el script único guardado",
+        "singleQuestion": "¿Quitar {name}, el script único que guardaste? El archivo se queda en el disco.",
+        "singleDone": "{name} quitado de las vinculaciones guardadas.",
+        "singleUndone": "{name} vuelve a estar guardado."
+      },
+      "locate": {
+        "aria": "Script no encontrado: elige dónde está ahora {name}",
+        "done": "Ahora se reproduce {newName} en lugar de {name}.",
+        "undone": "De nuevo {name}."
+      }
+    },
+    "subtitles": {
+      "heading": "Subtítulo",
+      "none": "Este vídeo no tiene subtítulo.",
+      "byName": "Emparejado por nombre de archivo. Cambia el nombre del archivo de subtítulos o muévelo para desvincularlo."
+    },
+    "playback": {
+      "progressHeading": "Progreso",
+      "watchedTo": "Visto hasta {position} de {duration} ({percent} %)",
+      "notStarted": "Sin empezar",
+      "progressReset": "Progreso restablecido."
+    },
+    "thumbnail": {
+      "auto": "Generada a partir del vídeo",
+      "frame": "Un fotograma que elegiste",
+      "image": "Una imagen que subiste"
+    },
+    "vr": {
+      "legend": "Este vídeo es",
+      "auto": "Automático (detecta: {detected, select, vr {VR} other {Plano}})",
+      "vr": "VR",
+      "flat": "Plano",
+      "formatAuto": "Detectado a partir del archivo"
+    },
+    "file": {
+      "path": "Ruta",
+      "folder": "Carpeta",
+      "size": "Tamaño",
+      "source": "Origen",
+      "unknown": "Desconocido",
+      "copyPath": "Copiar ruta",
+      "copied": "Ruta copiada.",
+      "copyFailed": "No se pudo copiar la ruta."
+    },
+    "live": {
+      "addedTo": "Añadido a {name}.",
+      "removedFrom": "Quitado de {name}.",
+      "undone": "Deshecho.",
+      "undoGone": "No se puede deshacer: se eliminó después.",
+      "undoChanged": "No se puede deshacer: se cambió después."
+    },
+    "stash": {
+      "heading": "Stash",
+      "sceneTitle": "«{title}»",
+      "untitled": "Escena {id}",
+      "studioOf": "{studio} ({parent})",
+      "code": "código {code}",
+      "rated": "valoración {rating}/100",
+      "organised": "organizada",
+      "director": "dirigida por {name}",
+      "markerCount": "{count, plural, one {# marcador} other {# marcadores}}",
+      "by": {
+        "oshash": "emparejada por la huella del archivo",
+        "chosen": "elegida por ti",
+        "manual": "vinculada por ti"
+      },
+      "synced": "sincronizada el {date}",
+      "verify": "movida desde entonces; se comprobará en la próxima sincronización",
+      "performers": "Intérpretes",
+      "markers": "Marcadores",
+      "moreMarkers": "{count, plural, one {# más} other {# más}}",
+      "urls": "Enlaces",
+      "copyUrl": "Copiar",
+      "copyUrlAria": "Copiar {url}",
+      "urlCopied": "Enlace copiado.",
+      "urlCopyFailed": "No se pudo copiar el enlace.",
+      "showDescription": "Mostrar descripción",
+      "copy": "Otro archivo de tu biblioteca es el mismo vídeo: {path}",
+      "open": "Abrir en Stash",
+      "openAria": "Abrir en Stash (abre tu navegador)",
+      "syncVideo": "Sincronizar este vídeo",
+      "syncing": "Sincronizando…",
+      "notThis": "No es esta escena…",
+      "unlink": "Desvincular",
+      "find": "Buscar en Stash…",
+      "notSynced": "FunSync aún no se ha sincronizado con Stash.",
+      "notFound": "No se encontró en Stash.",
+      "changed": "Este archivo cambió desde que se emparejó. Sus datos de Stash están ocultos hasta la próxima sincronización.",
+      "gone": "Esta escena ya no está en Stash. Sus datos se conservan.",
+      "refused": "Indicaste que este archivo no es {name}.",
+      "refusedSome": "{count, plural, =1 {Indicaste que este archivo no es la escena de Stash ofrecida.} other {Indicaste que este archivo no es ninguna de las # escenas de Stash ofrecidas.}}",
+      "otherServer": "De tu otro Stash ({address}).",
+      "check": {
+        "several": "{count, plural, =2 {Dos escenas de Stash tienen exactamente este archivo.} other {# escenas de Stash tienen exactamente este archivo.}} ¿Cuál es?",
+        "pathChanged": "Stash tiene un archivo en esta ruta, pero no es el mismo archivo. Cambió después de que Stash lo escaneara por última vez.",
+        "keptLink": "Vinculada ahora: {name}.",
+        "legend": "¿Qué escena de Stash es?",
+        "use": "Usar esta escena",
+        "none": "Ninguna de estas",
+        "useAnyway": "Usarla de todos modos",
+        "ignore": "Ignorar",
+        "durationDiff": "la duración difiere en {seconds} s"
+      },
+      "notThisConfirm": {
+        "title": "¿No es esta escena?",
+        "message": "FunSync desvinculará este vídeo de {name} y no volverá a vincular este archivo con ella. Nada cambia en Stash.",
+        "button": "No es esta escena"
+      },
+      "live": {
+        "syncing": "Sincronizando este vídeo con Stash…",
+        "synced": "Sincronizado con Stash.",
+        "syncedLinked": "Sincronizado. Este vídeo es {name} en Stash.",
+        "syncedCheck": "Sincronizado. Stash no pudo decidir qué escena es este vídeo: elige abajo.",
+        "syncedNotFound": "Sincronizado. Este vídeo no se encontró en Stash.",
+        "syncedGone": "Sincronizado. {name} ya no está en Stash; sus datos se conservan.",
+        "syncedChanged": "Sincronizado. Este archivo sigue siendo distinto del emparejado; sus datos de Stash siguen ocultos.",
+        "relinked": "Este archivo ahora está vinculado a {name}.",
+        "linked": "Este vídeo se vinculó a {name}.",
+        "unlinked": "Se desvinculó este vídeo de {name}.",
+        "noneOfThese": "Ninguna de estas escenas se volverá a ofrecer para este archivo.",
+        "ignored": "Esa escena de Stash no se volverá a ofrecer para este archivo.",
+        "undoFailed": "No se puede deshacer: FunSync no pudo cambiar sus datos de Stash.",
+        "refusedLinkChanged": "Ahora está vinculado a {name}, que se dejó tal como estaba."
+      },
+      "error": {
+        "fileOffline": "FunSync no pudo leer el archivo de este vídeo (puede que su unidad esté desconectada). No se cambió nada.",
+        "busy": "Stash ya se está sincronizando. Inténtalo de nuevo cuando termine.",
+        "cancelled": "Detenido. No se cambió nada.",
+        "changedMeanwhile": "Los datos de Stash de este vídeo cambiaron mientras tanto. No se cambió nada.",
+        "saveFailed": "FunSync no pudo guardar sus datos de Stash. No se cambió nada.",
+        "generic": "No se pudo consultar a Stash. No se cambió nada."
+      },
+      "sceneChanged": "La escena de Stash con este id ya no tiene este archivo (puede que Stash se haya restablecido o vuelto a escanear). Sus datos están ocultos. Desvincúlala o vuelve a vincularla con Buscar en Stash…",
+      "plays": "Reproducciones",
+      "lastPlayed": "Última reproducción",
+      "lastPlayedNever": "nunca",
+      "oCount": "Contador O"
+    }
+  },
+  "tags": {
+    "facet": {
+      "vr": "VR",
+      "display": "Visualización",
+      "length": "Duración",
+      "device": "Dispositivo",
+      "axis": "Eje",
+      "scriptType": "Tipo de script",
+      "sexuality": "Sexualidad",
+      "threesome": "Trío",
+      "content": "Contenido",
+      "performer": "Intérprete",
+      "creator": "Creador",
+      "studio": "Estudio"
+    },
+    "lengthMinutes": "{range} min",
+    "source": {
+      "user": "tú",
+      "stash": "Stash",
+      "stashbox": "StashDB",
+      "funscript": "archivo",
+      "eroscripts": "EroScripts"
+    }
+  },
+  "stash": {
+    "error": {
+      "unreachable": "No se puede conectar con Stash en {address}. ¿Está en marcha?",
+      "timeout": "Stash no respondió a tiempo.",
+      "badKey": "Stash rechazó la clave de API. Si tu Stash no tiene contraseña, quita la clave.",
+      "needsKey": "Este Stash tiene contraseña. Pega su clave de API (Stash: Settings > Security).",
+      "forbidden": "Stash rechazó este equipo. Establece una contraseña en Stash y pega su clave de API.",
+      "tooOld": "Este Stash ({version}) es demasiado antiguo. FunSync necesita la v{minVersion} o posterior.",
+      "tooOldNoVersion": "Este Stash es demasiado antiguo. FunSync necesita la v{minVersion} o posterior.",
+      "notStash": "Esa dirección respondió, pero no como Stash.",
+      "redirect": "Stash redirigió a FunSync a otra dirección, y FunSync no sigue redirecciones. Comprueba la dirección.",
+      "certificate": "Este equipo no confía en el certificado https de Stash. Comprueba la dirección.",
+      "graphql": "Stash no pudo responder a la solicitud de FunSync.",
+      "http": "Stash respondió con un error (HTTP {status}).",
+      "tooLarge": "La respuesta de Stash era demasiado grande para leerla.",
+      "cancelled": "Cancelado.",
+      "badAddress": "Escribe una dirección que empiece por http:// o https://, como http://127.0.0.1:9999.",
+      "badInput": "FunSync no pudo enviar esa solicitud a Stash.",
+      "invalidKey": "Eso no es una clave de API de Stash. Cópiala en Stash: Settings > Security > API Key.",
+      "writeFailed": "FunSync no pudo guardar la clave de API. Se conservará hasta que cierres FunSync.",
+      "removeFailed": "FunSync no pudo eliminar el archivo de la clave de API guardada.",
+      "keyUnreadable": "La clave de API guardada no se puede leer en este equipo. Pégala de nuevo."
+    },
+    "picker": {
+      "title": "Buscar en Stash",
+      "label": "Buscar en tu Stash",
+      "placeholder": "Título de la escena, código o nombre de archivo",
+      "search": "Buscar",
+      "hint": "Elige la escena que corresponde a este vídeo. FunSync solo la vincula; nada cambia en Stash.",
+      "prompt": "Escribe y pulsa Buscar. No se envía nada antes.",
+      "searching": "Buscando…",
+      "none": "No se encontraron escenas para «{query}».",
+      "found": "{count, plural, one {# escena encontrada.} other {# escenas encontradas.}}",
+      "someOf": "Se muestran las primeras {shown} de {count}. Añade palabras para acotar la búsqueda.",
+      "link": "Vincular",
+      "linkAria": "Vincular este vídeo a {name}",
+      "resultsAria": "Escenas de Stash"
     }
   }
 }

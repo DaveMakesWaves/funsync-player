@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, globalShortcut, shell, webContents } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -49,17 +49,26 @@ if (PORTABLE_DIR) {
 }
 
 const log = require('./logger');
-const { setRedactionEnabled } = require('./log-redact');
+const {
+  setRedactionEnabled, applyRedactionSetting, ensureLogFilesRedacted, rotatedLogPath,
+  redactSecrets, noteSecretSetting, SECRET_SETTING_PATHS,
+} = require('./log-redact');
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState, getHealthDetail } = require('./python-bridge');
 const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
 const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
-const { EroScriptsAPI } = require('./eroscripts-api');
+const { EroScriptsAPI, EROSCRIPTS_USER_AGENT, installForumUserAgent } = require('./eroscripts-api');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
+const { askRendererToStop, holdCloseForStop, QUIT_STOP_TIMEOUT_MS } = require('./relaunch-stop');
+const { createUnsavedEditsGuard, bringToFront, resetUnlessQuitStarts } = require('./unsaved-edits-guard');
+const { scanLibrary, rootListable } = require('./library-scan');
+const { createStashService, STASH_IPC_CHANNELS } = require('./stash-ipc');
+const { createStashSecret } = require('./stash-secret');
+const { createStashLibraryFile } = require('./stash-library-file');
 
 const eroScripts = new EroScriptsAPI();
 
@@ -109,11 +118,25 @@ if (process.platform === 'linux') {
 }
 
 let mainWindow = null;
+
+// Settings > Appearance > Interface size, kept in step with the View menu's
+// zoom keys (Pudknocker #372, V79). Main window only; see electron/ui-scale.js.
+const uiScale = require('./ui-scale').createUiScale({
+  store,
+  getMainWindow: () => mainWindow,
+  getFocusedWebContents: () => webContents.getFocusedWebContents(),
+  fromWebContents: (wc) => BrowserWindow.fromWebContents(wc),
+  titleBarHeight: require('./window-bg').TITLE_BAR_HEIGHT,
+  log,
+});
+
 // Per-window poll handles for holding the caption buttons visible while the
 // cursor is over them (see the update-window-chrome handler). Keyed by
 // BrowserWindow id — the pop-outs run the same chrome, so a single shared
 // handle would let one window cancel another's hold.
 const _captionHoverPolls = new Map();
+// Per-window: is a dialog's backdrop up (FT-100)? Keyed like the polls.
+const _captionDimmed = new Map();
 
 // Result of the boot-time auto-recovery check, held so the renderer
 // can pick it up via IPC and surface a toast on the first paint. Null
@@ -139,9 +162,72 @@ async function _preActionSnapshot(label) {
   }
 }
 
-// Disposer for the electron-conf onDidAnyChange subscription. Held so
-// before-quit can clean up the listener before the app exits.
+// Disposer for the store-change subscription that arms debounced
+// snapshots. Held so before-quit can clean up the listener before the
+// app exits.
 let _unsubscribeFromStore = null;
+
+// Relaunch after config.json was replaced underneath the running app
+// (Restore From Backup, Import Backup File). Every in-memory copy of the
+// old config, above all the renderer's DataService cache, would otherwise
+// keep writing the old state back over the new one.
+//
+// Skips the QUIT snapshot by marking the guard: the file on disk IS the
+// desired state. Kills the backend BEFORE app.exit(0), because app.exit
+// skips both will-quit and before-quit, so the standard stopBackend()
+// hooks don't fire, leaving an orphan backend racing the relaunched
+// instance for port 5123. The next-startup port sweep would eventually
+// catch it, but killing it here means the relaunch hits a clean port.
+function _relaunchWithConfigOnDisk() {
+  _finalSnapshotDone = true;
+  // Callers stop playback and devices first (_stopPlaybackBeforeRelaunch):
+  // app.exit skips the renderer's beforeunload, which is where that
+  // normally happens.
+  if (_unsubscribeFromStore) {
+    try { _unsubscribeFromStore(); } catch { /* ignore */ }
+    _unsubscribeFromStore = null;
+  }
+  dataBackup.cancelScheduled();
+  stopBackend();
+  app.relaunch();
+  app.exit(0);
+}
+
+// Have the main window pause playback and stop every device (Handy HSSP,
+// Buttplug, T-Code, Autoblow, audience room) before a relaunch, and wait
+// for it, bounded. Without this a Handy kept playing the script on its own
+// after Import or Restore. See electron/relaunch-stop.js.
+async function _stopPlaybackBeforeRelaunch() {
+  const startedAt = Date.now();
+  const outcome = await askRendererToStop({
+    webContents: mainWindow && !mainWindow.isDestroyed() ? mainWindow.webContents : null,
+    ipcMain,
+  });
+  const line = `[Backup] Stop playback and devices before relaunch: ${outcome} (${Date.now() - startedAt} ms)`;
+  if (outcome === 'stopped') log.info(line);
+  else log.warn(line);
+}
+
+// Closing the main window with an audience room open (its pop-out is open
+// exactly while a room is): stop every viewer's device first, bounded. The
+// window X never reaches before-quit while this window is alive, so this is
+// the quit path that matters most (#361). See relaunch-stop.js. Installed
+// after each createWindow().
+function _holdMainWindowCloseForAudienceStop() {
+  if (!mainWindow) return;
+  _quitStopGuard = holdCloseForStop({
+    win: mainWindow,
+    ipcMain,
+    // Not while the unsaved-edits question holds this close (R3-19): a
+    // Cancel there must not have stopped the room's devices.
+    shouldStop: () => audiencePopout.isOpen() && !_unsavedEdits.asking(),
+    onOutcome: (outcome, ms) => {
+      const line = `[Audience] Stop devices before closing with a room open: ${outcome} (${ms} ms)`;
+      if (outcome === 'stopped') log.info(line);
+      else log.warn(line);
+    },
+  });
+}
 
 // Resolves when the Python backend has booted (or startBackend gave up —
 // it always resolves within 10s). fetchWithTimeout awaits this so backend
@@ -153,6 +239,17 @@ let _backendReadyPromise = null;
 // we e.preventDefault() to take a final snapshot, and a second time
 // after we re-call app.quit(). The flag prevents an infinite loop.
 let _finalSnapshotDone = false;
+
+// Holds the main window's close for a device stop while an audience room is
+// open; before-quit marks it stopped so a quit is never held twice.
+let _quitStopGuard = null;
+
+// Unsaved script-editor edits (autosave off): asked about before the main
+// window closes, the app quits, a window reloads, an update installs or
+// Import / Restore relaunches; they were dropped without a word (R3-19, also
+// in v0.9.2). The renderer answers with the CB-01 question. See
+// electron/unsaved-edits-guard.js.
+const _unsavedEdits = createUnsavedEditsGuard({ ipcMain, log });
 
 // Single instance lock — prevent multiple copies running at once.
 // Also handles the installer/updater trying to relaunch the app.
@@ -192,6 +289,9 @@ function createWindow() {
   // the title bar (drag region + caption-button inset in nav-bar.css).
   // Linux keeps the native frame (WCO overlay is Windows-only in Electron).
   const winColors = resolveWindowColors();
+  // The saved interface size (V79), applied by Electron when the page
+  // commits, before its first paint: no frame at 100% before a jump.
+  const scaleOpts = uiScale.windowOptions();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 800,
@@ -207,7 +307,9 @@ function createWindow() {
         // background — the caption buttons live inside the nav bar.
         color: winColors.chrome,
         symbolColor: winColors.symbol,
-        height: 48, // matches .nav-bar height so caption buttons align with it
+        // matches .nav-bar height (48 CSS px) at the window's zoom, so the
+        // caption buttons align with it at any interface size (V79)
+        height: scaleOpts.titleBarHeight,
       },
     } : {}),
     webPreferences: {
@@ -215,6 +317,7 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
+      zoomFactor: scaleOpts.zoomFactor,
       // The device sync-engine timers (setInterval) live in this window.
       // When the detached player window is open, the user foregrounds THAT
       // window and backgrounds this one — Chromium would otherwise throttle
@@ -230,12 +333,18 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => {
     splash.destroy();
+    // What the first frame was drawn at, so a report of a wrong size can
+    // be told apart from a late apply.
+    if (scaleOpts.scale !== 100) {
+      log.info(`[UI scale] Window shown at ${Math.round(mainWindow.webContents.getZoomFactor() * 100)}% (saved ${scaleOpts.scale}%)`);
+    }
     mainWindow.show();
     // electron-builder's auto-updater doesn't support the portable target
     // (no latest.yml is published for it), so skip it entirely in portable
     // mode — the user updates by replacing the exe. See SCOPE-portable-install.
     if (app.isPackaged && !IS_PORTABLE) {
-      initAutoUpdater(mainWindow);
+      // The detached player window shows the update notices too (FT-101).
+      initAutoUpdater(mainWindow, { getExtraWindows: () => [playerPopout.getWindow()] });
     }
   });
 
@@ -267,14 +376,27 @@ function createWindow() {
   });
 }
 
+// View > Reload / Force Reload (Ctrl+R / Ctrl+Shift+R) in the focused
+// window. The main window's page holds the script editor, so a reload of it
+// asks about unsaved edits first; Cancel keeps the page (R3-19). Pop-outs
+// hold no edits of their own and reload at once, as with the roles.
+async function _reloadWindow(win, ignoreCache) {
+  if (!win || win.isDestroyed()) return;
+  if (win === mainWindow && !(await _unsavedEdits.confirm('reloading the window'))) return;
+  if (win.isDestroyed()) return;
+  if (ignoreCache) win.webContents.reloadIgnoringCache();
+  else win.webContents.reload();
+}
+
 // Custom application menu. Mirrors Electron's default role-based menu
  // but overrides the zoomIn accelerator: the default is
  // `CommandOrControl+Plus`, which Electron parses as the literal `+`
  // character — and on US/UK keyboards that requires Shift+=, so users
  // were forced to press Ctrl+Shift+= to zoom in. Browsers (Chrome,
  // Firefox, Edge) bind to the physical `=` key instead, so Ctrl+= just
- // works without Shift. Match that. Kept Plus as a secondary accelerator
- // for muscle memory; both fire the same role.
+ // works without Shift. Match that. The zoom items now come from
+ // electron/ui-scale.js, which keeps them in step with the saved interface
+ // size (V79).
 function buildAppMenu() {
   const isMac = process.platform === 'darwin';
   const template = [
@@ -284,13 +406,17 @@ function buildAppMenu() {
     {
       label: 'View',
       submenu: [
-        { role: 'reload' },
-        { role: 'forceReload' },
+        // Not the built-in roles: a reload of the main window asks about
+        // unsaved editor edits first, as a close does (R3-19). Same labels
+        // and keys as the roles.
+        { label: 'Reload', accelerator: 'CmdOrCtrl+R', click: (_item, win) => _reloadWindow(win, false) },
+        { label: 'Force Reload', accelerator: 'Shift+CmdOrCtrl+R', click: (_item, win) => _reloadWindow(win, true) },
         { role: 'toggleDevTools' },
         { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn', accelerator: 'CommandOrControl+=' },
-        { role: 'zoomOut' },
+        // Actual Size / Zoom In / Zoom Out. Not the built-in roles: in the
+        // main window each press steps Settings > Appearance > Interface
+        // size and saves it (V79); in a pop-out they still zoom that window.
+        ...uiScale.menuItems(),
         { type: 'separator' },
         { role: 'togglefullscreen' },
       ],
@@ -326,6 +452,8 @@ app.whenReady().then(async () => {
       );
     } else if (_recoveryResult.fellBack) {
       log.warn(`[Backup] No valid snapshot to recover from (${_recoveryResult.reason}). Falling back to defaults.`);
+    } else if (_recoveryResult.fresh) {
+      log.info('[Backup] No config.json and no backup history: first launch, starting with defaults.');
     }
   } catch (err) {
     log.error('[Backup] verifyAndRecover threw — continuing with defaults:', err.message);
@@ -336,17 +464,30 @@ app.whenReady().then(async () => {
   const _tStore = Date.now();
   await store.initStore();
   log.info(`[Timing main] store.initStore: ${Date.now() - _tStore}ms`);
+  // A one-time migration rewrote a stored value (store.js MIGRATIONS), e.g.
+  // T-Code 25 Hz → 60 Hz. Logged so a changed setting can be explained.
+  const _migrationsApplied = store.appliedMigrations();
+  if (_migrationsApplied.length > 0) {
+    log.info(`[Store] One-time migrations applied: ${_migrationsApplied.join(', ')}`);
+  }
 
   // Apply the saved log-redaction preference now the store is readable.
   // logger.js is required long before this point, so it starts with
   // redaction off and picks up the user's choice here.
   setRedactionEnabled(store.getSetting('security.hideLogFileNames'));
+  // The stored keys, token and cookie, masked on every log line (FT-010).
+  for (const p of SECRET_SETTING_PATHS) noteSecretSetting(p, store.getSetting(p));
+  // Stash: read its data file and key file (masked from here on). No request.
+  stash.init();
 
-  // Wire snapshot scheduling: every settings write debounces a 60 s
-  // snapshot. The blacklist filter inside data-backup keeps high-churn
-  // caches (thumbnail/duration/speed) out of the snapshot bytes — but
-  // the timer still arms on those writes, which is fine; the snapshot
-  // strips them and dedupe-by-hash handles "no real change".
+  // Wire snapshot scheduling: every store write debounces a 60 s
+  // snapshot. store.subscribe() hears the store's own writes rather than
+  // electron-conf's onDidAnyChange, which missed nested and in-place
+  // writes, i.e. almost all of them (V05). The blacklist filter inside
+  // data-backup keeps high-churn caches (thumbnail/duration/speed) out of
+  // the snapshot bytes; the timer still arms on those writes, which is
+  // fine: the snapshot strips them, and a debounced snapshot whose hash
+  // matches the newest one is skipped.
   _unsubscribeFromStore = store.subscribe(() => {
     dataBackup.scheduleSnapshot({
       userDataDir,
@@ -397,8 +538,21 @@ app.whenReady().then(async () => {
     startHealthMonitor();
   });
 
+  // Forum images the windows load themselves (search thumbnails, avatars)
+  // send the EroScripts User-Agent too, on the session every window uses;
+  // other hosts keep theirs (review-b RB-3). Before the first window.
+  try {
+    const { session } = require('electron');
+    installForumUserAgent(session.defaultSession);
+  } catch (err) {
+    log.warn('[EroScripts] forum User-Agent hook not set:', err?.message || err);
+  }
+
   const _tWindow = Date.now();
   createWindow();
+  // Before the audience hold: the unsaved-edits question decides first (R3-19).
+  _unsavedEdits.attach(mainWindow);
+  _holdMainWindowCloseForAudienceStop();
   log.info(`[Timing main] createWindow: ${Date.now() - _tWindow}ms`);
 
   log.info(`[Timing main] total before window opens: ${Date.now() - _t0}ms`);
@@ -406,6 +560,8 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
       createWindow();
+      _unsavedEdits.attach(mainWindow);
+      _holdMainWindowCloseForAudienceStop();
     }
   });
 });
@@ -426,7 +582,31 @@ app.on('before-quit', async (event) => {
     return;
   }
   event.preventDefault();
+  // Unsaved editor edits are asked about first (R3-19): Cancel, or a
+  // question already open (a second Ctrl+Q, a close), keeps the app running,
+  // with nothing below done yet. A renderer that cannot ask lets it go.
+  if (!(await _unsavedEdits.confirm('quitting'))) return;
   _finalSnapshotDone = true;
+
+  // An audience room is open: stop every viewer's device before quitting,
+  // bounded (#361, research §4.11). Their Handys play on their own clocks,
+  // and beforeunload alone may never get the stops out.
+  if (audiencePopout.isOpen() && mainWindow && !mainWindow.isDestroyed() && !_quitStopGuard?.stopped()) {
+    _quitStopGuard?.markStopped();
+    const startedAt = Date.now();
+    const outcome = await askRendererToStop({
+      webContents: mainWindow.webContents,
+      ipcMain,
+      timeoutMs: QUIT_STOP_TIMEOUT_MS,
+    });
+    const line = `[Audience] Stop devices before quitting with a room open: ${outcome} (${Date.now() - startedAt} ms)`;
+    if (outcome === 'stopped') log.info(line);
+    else log.warn(line);
+  }
+
+  // Stash: stop a running sync (it writes what finished), finish a pending
+  // Remove Stash data, wait for the last write. Bounded.
+  await Promise.race([stash.shutdown(), new Promise((resolve) => setTimeout(resolve, 3000))]).catch(() => {});
 
   // Drop the listener and any pending debounced snapshot — the QUIT
   // snapshot we're about to take supersedes both.
@@ -447,6 +627,10 @@ app.on('before-quit', async (event) => {
   }
 
   stopBackend();
+  // The page never answered the unsaved-edits question (hung): its window
+  // would hold the quit until the page recovered, frozen and with no backend
+  // (R3 fix-up, verifier 1: open 26 s after a 25 s busy loop). Closed for good.
+  if (_unsavedEdits.rendererHung() && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   // Re-trigger quit; the guard above lets it through this time.
   app.quit();
 });
@@ -462,6 +646,48 @@ process.on('uncaughtException', (err) => log.error('Uncaught exception:', err));
 process.on('unhandledRejection', (reason) => log.error('Unhandled rejection:', reason));
 
 // --- IPC Handlers: App Info ---
+
+// --- Global hotkeys -------------------------------------------------------
+//
+// Opt-in OS-wide accelerators for play/pause, Orgasm Switch and Edge Hold
+// (Eroto, EroScripts #316). See electron/global-shortcuts.js for why they
+// live here and how a failure is reported (taken vs invalid, V48).
+const { createGlobalShortcuts } = require('./global-shortcuts');
+const globalHotkeys = createGlobalShortcuts({
+  globalShortcut,
+  log,
+  onFire: (action) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('global-shortcut', action);
+    }
+  },
+});
+
+ipcMain.handle('set-global-shortcuts', (_e, bindings) => globalHotkeys.apply(bindings || {}));
+
+// --- Stash S1 (notes/features/DESIGN-stash-s1.md) ---------------------------
+// Every `stash-*` channel is answered by electron/stash-ipc.js, and only
+// there (no reply ever carries the API key: secret-settings-parity.test.js).
+// The data file and the key live under userData/stash, main their only
+// writer. Nothing is sent to Stash at start-up: init() reads two local files.
+const stashLibrary = createStashLibraryFile({ dir: path.join(app.getPath('userData'), 'stash'), log });
+const stash = createStashService({
+  userDataDir: app.getPath('userData'),
+  store,
+  secret: createStashSecret({ userDataDir: app.getPath('userData') }),
+  library: stashLibrary,
+  send: (channel, payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, payload);
+  },
+  openExternal: (url) => shell.openExternal(url),
+  log,
+});
+for (const channel of STASH_IPC_CHANNELS) {
+  ipcMain.handle(channel, (_event, ...args) => stash.handlers[channel](...args));
+}
+
+// Electron does not release these on quit by itself.
+app.on('will-quit', () => globalHotkeys.unregisterAll());
 
 ipcMain.handle('get-backend-port', () => {
   const { getBackendPort } = require('./python-bridge');
@@ -482,6 +708,7 @@ ipcMain.handle('get-backend-health', () => {
 // User-initiated restart from the disconnected banner.
 ipcMain.handle('restart-backend', async () => {
   log.info('[Backend] user-initiated restart');
+  _thumbFailed.clear(); // a fixed backend gets every thumbnail asked again
   try {
     await restartBackend();
     return { success: true };
@@ -491,13 +718,42 @@ ipcMain.handle('restart-backend', async () => {
   }
 });
 
+// The log files a user can be handed: the live main.log and the one rotated
+// copy electron-log keeps beside it (main.old.log).
+function _logFilePaths() {
+  const current = log.transports?.file?.getFile?.()?.path;
+  return current ? [current, rotatedLogPath(current)] : [];
+}
+
+// After "Hide file names in logs" rewrote the files on disk (V56).
+function _reportLogRewrite(results, t0) {
+  if (!results) return;
+  // electron-log tracks main.log's size as its first stat plus the bytes it
+  // has written since. A rewrite makes that stale, so make it stat again,
+  // or the next rotation fires early.
+  try { log.transports.file.getFile().reset(); } catch { /* best effort */ }
+  const failed = results.filter((r) => !r.ok);
+  if (failed.length) {
+    log.warn(`[Logs] Could not hide file names in ${failed.length} existing log file(s): ${failed.map((r) => r.error).join('; ')}`);
+  } else {
+    const changed = results.filter((r) => r.changed).length;
+    log.info(`[Logs] Hid file names in the existing log (${changed} file(s) rewritten, ${Date.now() - t0}ms)`);
+  }
+}
+
 // "View logs" affordance — opens the electron-log file in the OS's
 // default editor. Path resolved at runtime (depends on app userData
 // directory which differs between dev and packaged builds).
+//
+// With "Hide file names in logs" on, the files are swept first (once per
+// session), so the log the user is about to read or paste holds no name
+// written before the toggle, or by an older version (V56).
 ipcMain.handle('open-log-file', async () => {
   const { shell } = require('electron');
   const logPath = log.transports?.file?.getFile?.()?.path;
   if (!logPath) return { success: false, error: 'Log file path not available' };
+  const t0 = Date.now();
+  _reportLogRewrite(ensureLogFilesRedacted(_logFilePaths()), t0);
   const err = await shell.openPath(logPath);
   return err ? { success: false, error: err } : { success: true, path: logPath };
 });
@@ -515,6 +771,8 @@ ipcMain.handle('open-log-folder', async () => {
   const { shell } = require('electron');
   const logPath = log.transports?.file?.getFile?.()?.path;
   if (!logPath) return { success: false, error: 'Log file path not available' };
+  const t0 = Date.now();
+  _reportLogRewrite(ensureLogFilesRedacted(_logFilePaths()), t0);
   const folderPath = path.dirname(logPath);
   const err = await shell.openPath(folderPath);
   return err ? { success: false, error: err, path: folderPath } : { success: true, path: folderPath };
@@ -526,6 +784,87 @@ ipcMain.handle('get-app-version', () => {
 
 // Portable-mode status for the About section (Nielsen #1 — let the user see
 // where their data lives). dataDir is the portable `data/` folder when active.
+// --- Duplicate finder -----------------------------------------------------
+//
+// pallokala2 (#330) wants duplicates found so he can get disk space back, so
+// the renderer needs real byte sizes, and the end of the flow deletes files.
+// Both halves live here because the renderer has no filesystem access.
+
+/**
+ * Stat a batch of video paths. Missing/unreadable files come back with
+ * `size: null` rather than throwing — a library always has a few dead paths
+ * and one of them must not abort the whole scan.
+ */
+ipcMain.handle('stat-video-files', async (_event, paths) => {
+  const list = Array.isArray(paths) ? paths : [];
+  const out = {};
+  for (const p of list) {
+    if (typeof p !== 'string' || !p) continue;
+    try {
+      const st = await fs.promises.stat(p);
+      out[p] = st.isFile() ? { size: st.size, mtimeMs: st.mtimeMs } : { size: null };
+    } catch {
+      out[p] = { size: null };
+    }
+  }
+  return out;
+});
+
+/**
+ * Sampled content hash for the "Identical" tier (FT-B01): same size and
+ * runtime is not proof of the same bytes. READ-ONLY (electron/content-hash.js
+ * opens with 'r' and only reads); unreadable files come back `hash: null`.
+ * The renderer sends only files that share an exact size with another one.
+ */
+ipcMain.handle('hash-video-files', async (_event, paths) => {
+  const { hashFilesSampled } = require('./content-hash');
+  return hashFilesSampled(Array.isArray(paths) ? paths : []);
+});
+
+/**
+ * Move files to the OS Recycle Bin / Trash.
+ *
+ * `shell.trashItem`, never `fs.unlink`. This is the only destructive action in
+ * the app and it is driven by a heuristic, so it MUST be recoverable by the
+ * user without us: a wrong batch is undone from the Recycle Bin. Permanent
+ * deletion is deliberately not implemented.
+ *
+ * Guards, in order of what they prevent:
+ *   - non-strings and empties, which would throw
+ *   - anything that is not a regular FILE, so a bad path can never take a
+ *     directory with it
+ *   - per-file try/catch, so one locked or missing file does not abandon the
+ *     rest of the batch half-done with no report of what happened
+ *
+ * Returns a per-path result so the UI can say exactly what did and did not go.
+ */
+ipcMain.handle('trash-video-files', async (_event, paths) => {
+  const list = Array.isArray(paths) ? paths : [];
+  const results = [];
+  for (const p of list) {
+    if (typeof p !== 'string' || !p) {
+      results.push({ path: String(p), ok: false, error: 'invalid path' });
+      continue;
+    }
+    try {
+      const st = await fs.promises.stat(p);
+      if (!st.isFile()) {
+        results.push({ path: p, ok: false, error: 'not a file' });
+        continue;
+      }
+      await shell.trashItem(p);
+      log.info(`[Duplicates] Moved to trash: ${p}`);
+      results.push({ path: p, ok: true, size: st.size });
+    } catch (err) {
+      log.warn(`[Duplicates] Could not trash ${p}: ${err.message}`);
+      results.push({ path: p, ok: false, error: err.message });
+    }
+  }
+  const failed = results.filter((r) => !r.ok).length;
+  log.info(`[Duplicates] Trash batch: ${results.length - failed} moved, ${failed} failed`);
+  return results;
+});
+
 ipcMain.handle('get-portable-info', () => {
   return { portable: IS_PORTABLE, dataDir: app.getPath('userData') };
 });
@@ -544,18 +883,26 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
   const logPath = log.transports?.file?.getFile?.()?.path;
   let logTail = '(log unavailable)';
   if (logPath) {
+    // The tail can reach back into lines from before the toggle (V56).
+    const t0 = Date.now();
+    _reportLogRewrite(ensureLogFilesRedacted(_logFilePaths()), t0);
     try {
       const raw = await fs.promises.readFile(logPath, 'utf8');
       // Tolerate CRLF (Windows) and LF (Linux/Mac). Without the regex,
       // Windows log lines would carry a trailing \r into the GitHub
       // issue body — cosmetic, but worth fixing.
       const lines = raw.trim().split(/\r?\n/);
-      logTail = lines.slice(-80).join('\n');
+      // Goes into a GitHub issue body. Lines written before this version, or
+      // before a key was registered, are masked here too (FT-010).
+      logTail = redactSecrets(lines.slice(-80).join('\n'));
     } catch (err) {
       logTail = `(log read failed: ${err.message})`;
     }
   }
-  const health = getHealthState?.() || {};
+  // getHealthState() is a string ('unknown' | 'running' | 'down' |
+  // 'restarting'). This read `.healthy` off it, so every report said
+  // "Backend: not running" (R3-07, also in v0.9.2).
+  const healthState = getHealthState?.();
   return {
     app: {
       name: 'FunSync Player',
@@ -572,7 +919,7 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
       node: process.versions.node,
     },
     backend: {
-      running: !!health.healthy,
+      running: healthState === 'running',
       port: 5123,
     },
     devices: {
@@ -660,15 +1007,29 @@ ipcMain.handle('get-setting', (_event, path) => {
 });
 
 ipcMain.handle('set-setting', (_event, path, value) => {
+  // settings.stash: main owns the address and the trusted certificate
+  // (electron/stash-ipc.js checks and writes the block, then tells the page).
+  if (stash.ownsSetting(path)) {
+    stash.applySettingWrite(path, value);
+    return;
+  }
   store.setSetting(path, value);
+  // A new Handy key, Autoblow token, EroScripts login or Audience viewer is
+  // masked in the log from this write on (FT-010).
+  noteSecretSetting(path, value);
   // Keep the log redactor in step the moment the toggle moves, so a user who
   // enables it before grabbing a log does not have to restart first.
   // NB: store.setSetting prefixes 'settings.' itself, so the path that
   // arrives here is unprefixed. Getting this wrong makes the toggle a no-op
   // that still looks saved in the UI.
   if (path === 'security.hideLogFileNames') {
-    setRedactionEnabled(value);
+    // Switching it ON also rewrites the lines already in main.log and
+    // main.old.log, not just the ones written from now on (V56).
+    const t0 = Date.now();
+    _reportLogRewrite(applyRedactionSetting(value, _logFilePaths()), t0);
   }
+  // Settings > Appearance > Interface size zooms the main window at once (V79).
+  uiScale.onSettingWritten(path, value);
 });
 
 ipcMain.handle('add-recent-file', (_event, filePath) => {
@@ -739,15 +1100,17 @@ function _cursorOverCaption(win, rect) {
     const { screen } = require('electron'); // lazily: unavailable before ready
     const b = win.getContentBounds();
     const p = screen.getCursorScreenPoint();
-    return p.x >= b.x + rect.x && p.x <= b.x + rect.x + rect.width
-        && p.y >= b.y + rect.y && p.y <= b.y + rect.y + rect.height;
+    // CSS px are screen px times the window's zoom (interface size, V79).
+    const z = win.webContents?.getZoomFactor?.() || 1;
+    return p.x >= b.x + rect.x * z && p.x <= b.x + (rect.x + rect.width) * z
+        && p.y >= b.y + rect.y * z && p.y <= b.y + (rect.y + rect.height) * z;
   } catch {
     return false;
   }
 }
 
 ipcMain.handle('update-window-chrome', (event, theme, opts = {}) => {
-  const { colorsForTheme, TITLE_BAR_HEIGHT } = require('./window-bg');
+  const { colorsForTheme } = require('./window-bg');
   const colors = colorsForTheme(theme);
   // Target the window that ASKED, not mainWindow — the pop-outs run the same
   // themed overlay and each retints itself (a hardcoded mainWindow here made
@@ -768,17 +1131,28 @@ ipcMain.handle('update-window-chrome', (event, theme, opts = {}) => {
   // top-bar gradient uses it would sit at exactly 3.0:1, i.e. borderline on
   // the worst-case frame.
   const HOVER_SCRIM = '#000000CC';
+  // Under a dialog's backdrop (FT-100, also in v0.9.2): the backdrop dims the
+  // page, but the OS draws the caption buttons above it, so they stayed
+  // bright over a dimmed window. Dimmed, the strip is transparent (the
+  // dimmed nav bar shows through) and the symbols are blended as the
+  // backdrop blends the page. Remembered per window, so a call that does not
+  // say (the theme manager's retint while Settings is open) keeps it.
+  if (typeof opts.dimmed === 'boolean') _captionDimmed.set(win.id, opts.dimmed);
+  const dimmed = _captionDimmed.get(win.id) === true;
+  const symbol = (c) => (dimmed ? require('./window-bg').dimColor(c) : c);
   const apply = (hideSymbols, scrim = false) => {
     if (win.isDestroyed()) return;
     try {
       win.setTitleBarOverlay?.({
         color: opts.overVideo
           ? (scrim ? HOVER_SCRIM : TRANSPARENT)
-          : colors.chrome, // else nav-bar surface, see window-bg.js
+          : (dimmed ? TRANSPARENT : colors.chrome), // else nav-bar surface, see window-bg.js
         symbolColor: hideSymbols
           ? TRANSPARENT
-          : (opts.overVideo ? '#ffffff' : colors.symbol),
-        height: TITLE_BAR_HEIGHT,
+          : symbol(opts.overVideo ? '#ffffff' : colors.symbol),
+        // At the window's zoom, or this reset a scaled caption strip to
+        // 48 px on every view change (V79).
+        height: uiScale.titleBarHeightFor(win),
       });
     } catch { /* overlay not active (e.g. frame fallback) */ }
   };
@@ -814,7 +1188,8 @@ ipcMain.handle('update-window-chrome', (event, theme, opts = {}) => {
 });
 
 ipcMain.handle('set-playlist-video-paths', (_event, id, videoPaths) => {
-  store.setPlaylistVideoPaths(id, videoPaths);
+  // The order stored (unchanged when refused): the renderer's cache follows it (CB-14).
+  return store.setPlaylistVideoPaths(id, videoPaths);
 });
 
 ipcMain.handle('delete-playlist', async (_event, id) => {
@@ -828,6 +1203,16 @@ ipcMain.handle('add-video-to-playlist', (_event, id, videoPath) => {
 
 ipcMain.handle('remove-video-from-playlist', (_event, id, videoPath) => {
   store.removeVideoFromPlaylist(id, videoPath);
+});
+
+// Several at once, one config.json write (a playlist's Select-mode Remove
+// and its Undo, FT-104).
+ipcMain.handle('add-videos-to-playlist', (_event, id, videoPaths) => {
+  store.addVideosToPlaylist(id, videoPaths);
+});
+
+ipcMain.handle('remove-videos-from-playlist', (_event, id, videoPaths) => {
+  store.removeVideosFromPlaylist(id, videoPaths);
 });
 
 // Categories
@@ -989,7 +1374,81 @@ ipcMain.handle('generate-thumbnails', async (_event, videoPath, interval) => {
  *
  * Returns { dataUrl, duration, width, height } or null on failure.
  */
+/**
+ * Pull FastAPI's `detail` off a failed response so the log says WHY.
+ *
+ * The backend already knows exactly what went wrong — "ffmpeg not found",
+ * "Video has no duration", the raw ffmpeg stderr — and puts it in the body.
+ * This end used to log only the status code, so Sylvain-Et-Un's log carried
+ * 103 identical `Backend returned 500` lines and not one word of the reason
+ * (2026-08-24). Best-effort by design: a body that isn't JSON must never turn
+ * an already-failed request into a second failure.
+ *
+ * @returns {Promise<string>} ` — <detail>`, or '' if there is nothing to add
+ */
+async function _errorDetail(resp) {
+  try {
+    const body = await resp.json();
+    // One log line: a detail with line breaks (ffmpeg's stderr is several
+    // lines) split the warning, and its later lines carried no timestamp or
+    // level, so a grep for [warn] missed the cause (E2-04). The backend sends
+    // one line since E-11 (ffmpeg.py `_one_line`); this holds for any detail.
+    const detail = typeof body?.detail === 'string' ? body.detail.replace(/\s+/g, ' ').trim() : '';
+    if (!detail) return '';
+    // Keep the END: ffmpeg prints the cause last. Keeping the first 400
+    // characters logged its version/build banner and never the error (app
+    // test V32). The backend now sends only the stderr tail; this is the
+    // belt to that brace.
+    return ` — ${detail.length > 400 ? `…${detail.slice(-400)}` : detail}`;
+  } catch {
+    return '';
+  }
+}
+
+// One escalated line per session when thumbnails are failing WHOLESALE, so a
+// total outage does not have to be inferred by counting warnings. Sylvain's
+// log had 103 failures and 0 successes and still read as routine.
+// "Wholesale" means not one success this session: ten failures in a row
+// after hundreds of good thumbnails (a folder of clips ffmpeg cannot read)
+// is per-file trouble, and the per-file warnings already say so. Claiming
+// "no successes" there sent the reader after the wrong cause (app test V33).
+let _thumbFailStreak = 0;
+let _thumbSuccessCount = 0;
+let _thumbOutageLogged = false;
+const THUMB_OUTAGE_STREAK = 10;
+
+// A clip whose thumbnail the BACKEND failed (a 500: ffmpeg / ffprobe cannot
+// read the file) is not asked again for THUMB_FAIL_TTL_MS while its size and
+// mtime are the same. The library asks again on every grid render, so a
+// corrupt sandbox clip went to ffprobe 11 times in 6 minutes, each a 500 and a
+// warning (verify-2, 2026-11-07; also in v0.9.2; FT-085 covered only the
+// backend's /api/media/thumb). Not remembered: a backend that did not answer
+// (timeout, not running) and a user-picked frame (`exact`). An edited or
+// replaced file, the TTL and a backend restart all try again. Nothing is
+// written or deleted: the card shows its placeholder.
+const THUMB_FAIL_TTL_MS = 10 * 60 * 1000;
+const _thumbFailed = new Map(); // key -> { size, mtimeMs, at }
+
+async function _thumbFileStamp(p) {
+  try {
+    const s = await fs.promises.stat(p);
+    return { size: s.size, mtimeMs: s.mtimeMs };
+  } catch {
+    return null;
+  }
+}
+
 ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {}) => {
+  const failKey = opts.exact ? null : `${videoPath}|${opts.seekPct ?? 0.1}|${opts.width ?? 320}`;
+  const known = failKey ? _thumbFailed.get(failKey) : null;
+  if (known) {
+    const stamp = await _thumbFileStamp(videoPath);
+    if (stamp && stamp.size === known.size && stamp.mtimeMs === known.mtimeMs
+        && Date.now() - known.at < THUMB_FAIL_TTL_MS) {
+      return null;
+    }
+    _thumbFailed.delete(failKey);
+  }
   const { getBackendPort } = require('./python-bridge');
   const port = getBackendPort();
   const params = new URLSearchParams({
@@ -1006,16 +1465,36 @@ ipcMain.handle('generate-single-thumbnail', async (_event, videoPath, opts = {})
     // 15s: a single fast-seek thumbnail is ~50-500ms; ceiling protects
     // against a hung ffmpeg.
     const resp = await fetchWithTimeout(url, { method: 'POST' }, 15000);
-    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+    if (!resp.ok) {
+      const failed = new Error(`Backend returned ${resp.status}${await _errorDetail(resp)}`);
+      failed.backendStatus = resp.status;
+      throw failed;
+    }
     const meta = await resp.json();
     if (!meta?.path || !fs.existsSync(meta.path)) {
       throw new Error('Backend returned no thumbnail file');
     }
     const bytes = fs.readFileSync(meta.path);
     const dataUrl = `data:image/jpeg;base64,${bytes.toString('base64')}`;
+    _thumbFailStreak = 0;
+    _thumbSuccessCount++;
+    if (failKey) _thumbFailed.delete(failKey);
     return { dataUrl, duration: meta.duration, width: meta.width, height: meta.height };
   } catch (err) {
     log.warn(`Single thumbnail failed for ${videoPath}: ${err.message}`);
+    if (failKey && err.backendStatus === 500) {
+      const stamp = await _thumbFileStamp(videoPath);
+      if (stamp) _thumbFailed.set(failKey, { ...stamp, at: Date.now() });
+    }
+    _thumbFailStreak++;
+    if (_thumbFailStreak >= THUMB_OUTAGE_STREAK && _thumbSuccessCount === 0 && !_thumbOutageLogged) {
+      _thumbOutageLogged = true;
+      log.error(`[Thumbnails] ${_thumbFailStreak} consecutive failures with no successes — `
+        + 'thumbnail generation is broken for this whole library, not for one file. '
+        + 'Check the [ffmpeg] line near the top of this log: if it says bundled=false, '
+        + 'the backend is relying on ffmpeg being on PATH and cannot find it. '
+        + `Last error: ${err.message}`);
+    }
     return null;
   }
 });
@@ -1086,452 +1565,51 @@ ipcMain.handle('select-directory', async () => {
   return result.filePaths[0];
 });
 
-/**
- * Hand the main process's event loop back for one turn.
- *
- * The library scan does the directory walk asynchronously, but then runs a
- * dozen SYNCHRONOUS passes over the full entry list. On a large or networked
- * library that is one long block on the main thread, which freezes everything
- * the main process owns — including modal dialogs, which is how Dave hit it
- * (2026-08-11: "everything just freezes, on the modal as well").
- *
- * `setImmediate` yields after I/O callbacks, so pending IPC and window paints
- * get serviced between passes. It converts one long freeze into several short
- * ones; it does not make the scan faster, and it cannot help WITHIN a single
- * pass over a huge list — see the chunked loop below for that.
- */
-const yieldTick = () => new Promise((resolve) => setImmediate(resolve));
-
 ipcMain.handle('scan-directory', async (_event, dirPathOrPaths, sourceMap) => {
-  // Accept a single path or array of paths (multi-source)
-  // sourceMap: optional { path: sourceName } mapping for VR content server grouping
-  const dirPaths = Array.isArray(dirPathOrPaths) ? dirPathOrPaths : [dirPathOrPaths];
-  const dirPath = dirPaths[0]; // for backward compat logging
-  const _sourceMap = sourceMap || {};
-  const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
-  const FUNSCRIPT_EXT = '.funscript';
-  const SUBTITLE_EXTS = ['.srt', '.vtt'];
-  const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
-
-  // Canonicalise a path for cross-source dedup: forward slashes, lowercased
-  // drive letter. Matches renderer/js/path-utils.js::canonicalPath so the
-  // settings overlap warning and the scan dedup agree on identity.
-  const canonicalise = (p) => {
-    if (!p) return '';
-    let out = String(p).replace(/\\/g, '/');
-    while (out.length > 1 && out.endsWith('/')) out = out.slice(0, -1);
-    if (/^[A-Za-z]:/.test(out)) out = out[0].toLowerCase() + out.slice(1);
-    return out;
-  };
-
-  let entries = [];
-  const seenPaths = new Set(); // canonical full paths — drops dupes when sources overlap
-  const failedPaths = [];
-  let rawEntryCount = 0;
-  const scanStart = Date.now();
-  for (const dp of dirPaths) {
-    if (!dp) continue;
-    try {
-      const dirEntries = await fs.promises.readdir(dp, { withFileTypes: true, recursive: true });
-      rawEntryCount += dirEntries.length;
-      for (const entry of dirEntries) {
-        const parent = entry.parentPath || entry.path || dp;
-        const full = canonicalise(path.join(parent, entry.name));
-        if (seenPaths.has(full)) continue;
-        seenPaths.add(full);
-        entries.push(entry);
-      }
-    } catch (err) {
-      log.warn(`[Library] Failed to scan ${dp}: ${err.message}`);
-      failedPaths.push(dp);
-    }
-  }
-  const dupesDropped = rawEntryCount - entries.length;
-  if (dupesDropped > 0) {
-    log.info(`[Library] Scanned ${entries.length} unique entries (${dupesDropped} duplicates dropped from overlapping sources) in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
-  } else {
-    log.info(`[Library] Scanned ${entries.length} entries in ${Date.now() - scanStart}ms from ${dirPaths.length} source(s)`);
-  }
-
-  // Normalize a basename for matching: lowercase, replace separators with spaces, collapse
-  const normalizeName = (name) => name.toLowerCase().replace(/[_.\-]/g, ' ').replace(/\s+/g, ' ').trim();
-
-  // Helper: get the full path for a recursive dirent
-  const entryPath = (entry) => {
-    // Node recursive dirent: entry.parentPath or entry.path contains the parent directory
-    const parent = entry.parentPath || entry.path || dirPath;
-    return path.join(parent, entry.name);
-  };
-
-  // Helper: get the directory of an entry (for same-directory matching)
-  const entryDir = (entry) => {
-    return entry.parentPath || entry.path || dirPath;
-  };
-
-  // Pre-compute the set of video basenames (full, including any
-  // parenthetical) so funscript classification can distinguish a
-  // real-title parenthetical from a variant suffix. Example:
-  //   "Title (Nude).mp4" + "Title (Nude).funscript"  → the "(Nude)" is
-  //      part of the title; the funscript is that video's PRIMARY.
-  //   "Title.mp4" + "Title (Soft).funscript"         → no "Title (Soft)"
-  //      video exists; "(Soft)" is a variant label of "Title".
-  // Without this, "Title (Nude).funscript" was always classified as a
-  // "(Nude)" variant of "Title" and absorbed into "Title.mp4", leaving
-  // "Title (Nude).mp4" script-less and hidden under the Matched tab.
-  const videoBaseLocal = new Set();  // dir + '\0' + normalizedBase
-  const videoBaseGlobal = new Set(); // normalizedBase
-  await yieldTick();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const vext = path.extname(entry.name).toLowerCase();
-    if (!VIDEO_EXTS.includes(vext)) continue;
-    const vbase = normalizeName(path.basename(entry.name, vext));
-    videoBaseLocal.add(entryDir(entry) + '\0' + vbase);
-    videoBaseGlobal.add(vbase);
-  }
-
-  // Collect all funscripts with variant/axis classification
-  const funscriptList = [];
-  await yieldTick();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const ext = path.extname(entry.name).toLowerCase();
-    if (ext !== FUNSCRIPT_EXT) continue;
-
-    const nameNoExt = path.basename(entry.name, ext);
-    const fullPath = entryPath(entry);
-
-    // Check for axis suffix: "video.vib" -> suffix "vib"
-    const dotIdx = nameNoExt.lastIndexOf('.');
-    const dotSuffix = dotIdx >= 0 ? nameNoExt.slice(dotIdx + 1).toLowerCase() : null;
-    const isAxis = dotSuffix && AXIS_SUFFIXES.has(dotSuffix);
-
-    // Check for parenthesized variant: "video (Soft)" -> label "Soft"
-    const parenMatch = nameNoExt.match(/^(.+?)\s*\(([^)]+)\)\s*$/);
-
-    let videoBase, variantLabel;
-    let isAmbiguousDotVariant = false;
-    if (isAxis) {
-      videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
-      variantLabel = null; // axis, not a variant
-    } else if (parenMatch) {
-      const fullBase = normalizeName(nameNoExt);
-      const fsDir = entryDir(entry);
-      if (videoBaseLocal.has(fsDir + '\0' + fullBase) || videoBaseGlobal.has(fullBase)) {
-        // A video whose real title includes the parenthetical exists
-        // (e.g. "Title (Nude).mp4"). The parens are part of the title,
-        // not a variant suffix — treat this funscript as that video's
-        // primary so the video isn't left script-less and hidden.
-        videoBase = fullBase;
-        variantLabel = null;
-      } else {
-        // Parenthesized variant — `"Title (Soft).funscript"` with only
-        // "Title.mp4" present. Unambiguous user intent; treat as variant.
-        videoBase = normalizeName(parenMatch[1]);
-        variantLabel = parenMatch[2].trim();
-      }
-    } else if (dotSuffix && dotIdx > 0) {
-      // AMBIGUOUS — could be a real variant ("video.intense.funscript")
-      // OR just a filename that happens to contain a dot ("S01.E03.funscript",
-      // "Title.2024.funscript"). We can't tell from the name in isolation.
-      // Classify provisionally as a variant and let the post-pass below
-      // demote it to primary if no sibling funscript exists with the
-      // dot-stripped base (i.e., nothing for it to be a "variant of").
-      videoBase = normalizeName(nameNoExt.slice(0, dotIdx));
-      variantLabel = dotSuffix;
-      isAmbiguousDotVariant = true;
-    } else {
-      videoBase = normalizeName(nameNoExt);
-      variantLabel = null; // default/primary
-    }
-
-    funscriptList.push({
-      name: entry.name,
-      path: fullPath,
-      dir: entryDir(entry),
-      videoBase,
-      variantLabel,
-      isAxis,
-      axisSuffix: isAxis ? dotSuffix : null,
-      // Set for funscripts whose variant-ness was inferred from a dot
-      // in the filename. Post-pass below demotes to primary when no
-      // matching primary sibling exists.
-      isAmbiguousDotVariant,
-      // Cache the full-name normalisation for the demotion path so we
-      // don't recompute it after the maps are built.
-      fullNormalisedBase: normalizeName(nameNoExt),
-      _used: false,
-    });
-  }
-
-  // Post-pass: demote ambiguous dot-variants to primaries when no
-  // sibling exists with the dot-stripped base. This rescues filenames
-  // like "S01.E03.funscript" and "Title.2024.funscript" that the
-  // classifier above would otherwise route to a non-existent base.
-  // A sibling counts if it's a non-axis funscript in the same dir
-  // (preferred) or anywhere (fallback) whose `videoBase` matches the
-  // ambiguous variant's `videoBase`.
-  const siblingBasesLocal = new Set();
-  const siblingBasesGlobal = new Set();
-  await yieldTick();
-  for (const fs of funscriptList) {
-    if (fs.isAxis || fs.isAmbiguousDotVariant) continue;
-    siblingBasesLocal.add(fs.dir + '\0' + fs.videoBase);
-    siblingBasesGlobal.add(fs.videoBase);
-  }
-  await yieldTick();
-  for (const fs of funscriptList) {
-    if (!fs.isAmbiguousDotVariant) continue;
-    const localKey = fs.dir + '\0' + fs.videoBase;
-    if (siblingBasesLocal.has(localKey) || siblingBasesGlobal.has(fs.videoBase)) {
-      // Confirmed variant — a real primary exists. Clear the flag so
-      // downstream code can treat the classification as settled.
-      fs.isAmbiguousDotVariant = false;
-      continue;
-    }
-    // Demote to primary using the full normalised name. "Title.2024"
-    // becomes its own thing, matching "Title.2024.mp4".
-    fs.videoBase = fs.fullNormalisedBase;
-    fs.variantLabel = null;
-    fs.isAmbiguousDotVariant = false;
-  }
-
-  // Build two maps: same-directory (preferred) and global (fallback)
-  const funscriptMapLocal = new Map(); // dir+base → fs
-  const funscriptMapGlobal = new Map(); // base → fs
-  await yieldTick();
-  for (const fs of funscriptList) {
-    const localKey = fs.dir + '\0' + fs.videoBase;
-    const globalKey = fs.videoBase;
-    if (!fs.isAxis && !fs.variantLabel) {
-      if (!funscriptMapLocal.has(localKey)) funscriptMapLocal.set(localKey, fs);
-      if (!funscriptMapGlobal.has(globalKey)) funscriptMapGlobal.set(globalKey, fs);
-    }
-  }
-  // Fallback: if no default variant, use first matching
-  await yieldTick();
-  for (const fs of funscriptList) {
-    const localKey = fs.dir + '\0' + fs.videoBase;
-    const globalKey = fs.videoBase;
-    if (!fs.isAxis) {
-      if (!funscriptMapLocal.has(localKey)) funscriptMapLocal.set(localKey, fs);
-      if (!funscriptMapGlobal.has(globalKey)) funscriptMapGlobal.set(globalKey, fs);
-    }
-  }
-
-  // Collect subtitle basenames — local (same-dir) and global maps
-  const subtitleMapLocal = new Map();
-  const subtitleMapGlobal = new Map();
-  await yieldTick();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const ext = path.extname(entry.name).toLowerCase();
-    if (SUBTITLE_EXTS.includes(ext)) {
-      const baseName = normalizeName(path.basename(entry.name, ext));
-      const dir = entryDir(entry);
-      const localKey = dir + '\0' + baseName;
-      const sub = { name: entry.name, path: entryPath(entry), dir, _used: false };
-      if (!subtitleMapLocal.has(localKey)) subtitleMapLocal.set(localKey, sub);
-      if (!subtitleMapGlobal.has(baseName)) subtitleMapGlobal.set(baseName, sub);
-    }
-  }
-
-  // Build video list with funscript + subtitle + variant pairing
-  const videos = [];
-  await yieldTick();
-  for (const entry of entries) {
-    if (!entry.isFile()) continue;
-    const ext = path.extname(entry.name).toLowerCase();
-    if (!VIDEO_EXTS.includes(ext)) continue;
-
-    const baseName = normalizeName(path.basename(entry.name, ext));
-    const dir = entryDir(entry);
-    const localKey = dir + '\0' + baseName;
-
-    // Funscript: prefer same directory, fall back to global
-    const fsEntry = funscriptMapLocal.get(localKey) || funscriptMapGlobal.get(baseName) || null;
-    const funscriptPath = fsEntry ? fsEntry.path : null;
-    if (fsEntry) fsEntry._used = true;
-
-    // Subtitle: prefer same directory, fall back to global
-    const subEntry = subtitleMapLocal.get(localKey) || subtitleMapGlobal.get(baseName) || null;
-    const subtitlePath = subEntry ? subEntry.path : null;
-    if (subEntry) subEntry._used = true;
-
-    // Collect variants: same directory first, then global matches
-    const variants = [];
-    const seenVariantPaths = new Set();
-    // Pass 1: same directory
-    for (const fs of funscriptList) {
-      if (fs.videoBase !== baseName || fs.isAxis || fs.dir !== dir) continue;
-      fs._used = true;
-      seenVariantPaths.add(fs.path);
-      variants.push({ label: fs.variantLabel || 'Default', path: fs.path, name: fs.name });
-    }
-    // Pass 2: global (other directories) — only if not already found locally
-    if (variants.length === 0) {
-      for (const fs of funscriptList) {
-        if (fs.videoBase !== baseName || fs.isAxis || seenVariantPaths.has(fs.path)) continue;
-        fs._used = true;
-        variants.push({ label: fs.variantLabel || 'Default', path: fs.path, name: fs.name });
-      }
-    }
-    // Sort: Default first, then alphabetical
-    variants.sort((a, b) => {
-      if (a.label === 'Default') return -1;
-      if (b.label === 'Default') return 1;
-      return a.label.localeCompare(b.label);
-    });
-
-    // Resolve source name from sourceMap (match longest prefix)
-    const fullPath = entryPath(entry);
-    let sourceName = '';
-    for (const [srcPath, srcName] of Object.entries(_sourceMap)) {
-      if (fullPath.startsWith(srcPath) && srcPath.length > sourceName.length) {
-        sourceName = srcName;
-      }
-    }
-
-    videos.push({
-      name: entry.name,
-      path: fullPath,
-      ext,
-      hasFunscript: funscriptPath !== null,
-      funscriptPath,
-      hasSubtitle: subtitlePath !== null,
-      subtitlePath,
-      // Pass ALL detected variants through, even a single one. The
-      // renderer decides whether to SHOW the switcher (it hides the
-      // dropdown when the combined auto+manual count is < 2), and it
-      // combines these with manually-associated variants — so dropping a
-      // lone auto variant here used to hide the switcher for a video that
-      // had 1 auto script + 1 manual variant (2 real scripts). It also
-      // preserved the real label/path instead of a synthesised "Default".
-      variants,
-      sourceName: sourceName || path.basename(path.dirname(fullPath)) || 'Library',
-      // `dateAdded` is populated in a batched stat pass below. Using `mtimeMs`
-      // as a pragmatic "date added" proxy — cross-platform reliable (unlike
-      // birthtimeMs on Linux ext4). Users typically want "recently appeared
-      // in my folder", which matches mtime for fresh-dropped files.
-      dateAdded: 0,
-    });
-  }
-
-  // Batched stat pass to fill `dateAdded`. Runs all stats in parallel
-  // (libuv's thread pool naturally caps concurrency). Typical cost for
-  // 1000 videos: ~10-50ms on SSD, ~100-500ms on HDD. Failures fall back
-  // to 0 which sorts to the "oldest" end of the list.
-  await Promise.all(videos.map(async (v) => {
-    try {
-      const st = await fs.promises.stat(v.path);
-      v.dateAdded = st.mtimeMs || 0;
-    } catch {
-      v.dateAdded = 0;
-    }
-  }));
-
-  // Fuzzy match pass: pair unmatched videos with high-confidence funscript matches
-  // Uses token overlap (Jaccard index) — same logic as renderer fuzzy-match.js
-  const fuzzyTokenize = (s) => s.toLowerCase().replace(/[_.\-()[\]{}]/g, ' ').replace(/\s+/g, ' ').trim().split(' ').filter(Boolean);
-  const fuzzyScore = (a, b) => {
-    const tokA = new Set(fuzzyTokenize(a));
-    const tokB = new Set(fuzzyTokenize(b));
-    if (tokA.size === 0 || tokB.size === 0) return 0;
-    let inter = 0;
-    for (const t of tokA) if (tokB.has(t)) inter++;
-    const union = new Set([...tokA, ...tokB]).size;
-    return Math.round((inter / union) * 100);
-  };
-
-  for (const video of videos) {
-    if (video.hasFunscript) continue; // already matched
-    const videoBase = path.basename(video.name, path.extname(video.name));
-    let bestFs = null;
-    let bestScore = 0;
-    for (const fs of funscriptList) {
-      if (fs._used || fs.isAxis) continue;
-      const fsBase = path.basename(fs.name, '.funscript');
-      const score = fuzzyScore(videoBase, fsBase);
-      if (score > bestScore) { bestScore = score; bestFs = fs; }
-    }
-    if (bestFs && bestScore >= 98) {
-      video.hasFunscript = true;
-      video.funscriptPath = bestFs.path;
-      video._fuzzyMatched = true;
-      bestFs._used = true;
-
-      // Also collect variants for this fuzzy match
-      const fuzzyVariants = [];
-      const seenPaths = new Set();
-      for (const fs of funscriptList) {
-        if (fs.isAxis) continue;
-        const fsBase = path.basename(fs.name, '.funscript');
-        const s = fuzzyScore(videoBase, fsBase);
-        if (s >= 98 && !seenPaths.has(fs.path)) {
-          seenPaths.add(fs.path);
-          fuzzyVariants.push({ label: fs.variantLabel || 'Default', path: fs.path, name: fs.name });
-        }
-      }
-      if (fuzzyVariants.length > 1) {
-        fuzzyVariants.sort((a, b) => a.label === 'Default' ? -1 : b.label === 'Default' ? 1 : a.label.localeCompare(b.label));
-        video.variants = fuzzyVariants;
-      }
-    }
-  }
-
-  // Collect unmatched funscripts (not paired to any video)
-  const unmatchedFunscripts = [];
-  await yieldTick();
-  for (const fs of funscriptList) {
-    if (!fs._used) {
-      unmatchedFunscripts.push({ name: fs.name, path: fs.path });
-    }
-  }
-  unmatchedFunscripts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-
-  // Collect unmatched subtitles
-  const unmatchedSubtitles = [];
-  for (const subEntry of subtitleMapGlobal.values()) {
-    if (!subEntry._used) {
-      unmatchedSubtitles.push({ name: subEntry.name, path: subEntry.path });
-    }
-  }
-  unmatchedSubtitles.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-
-  // Collect all funscripts for multi-axis dropdowns
-  const allFunscripts = [];
-  await yieldTick();
-  for (const fs of funscriptList) {
-    allFunscripts.push({ name: fs.name, path: fs.path });
-  }
-  allFunscripts.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-
-  // Sort alphabetically
-  videos.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  log.info(`[Library] Result: ${videos.length} videos, ${unmatchedFunscripts.length} unmatched fs, ${allFunscripts.length} total fs (${Date.now() - scanStart}ms total)`);
-
-  // Register videos with backend for VR content server (fire-and-forget)
-  try {
-    const { app } = require('electron');
-    const thumbDir = path.join(app.getPath('userData'), 'thumb-cache');
-    fetch('http://127.0.0.1:5123/api/media/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ videos, thumbCacheDir: thumbDir }),
-    }).catch(() => {}); // ignore if backend not running
-  } catch { /* ignore */ }
-
-  return { videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts, failedPaths };
+  // The walk and every pairing pass live in library-scan.js, where tests can
+  // run them against real folders. Only the backend registration stays here.
+  // Settings > Library "One-video folders" (FT-102) is read here, not passed
+  // by each caller, so every scan (the library, a folder rescan for the
+  // variant menu, an opened file) pairs the same way.
+  // No backend registration here (block E2 verify-2, also in v0.9.2). A
+  // registration REPLACES the backend's whole video list, and this handler
+  // also answers partial scans: the player's variant menu rescans one
+  // folder on every open, the collection dialog one source. Each of those
+  // left the phone, its playlists and DeoVR / HereSphere with that folder's
+  // videos only (40 -> 1 for a one-video folder) until the next full
+  // registration. The library registers its own full scan, with the user's
+  // associations applied and a retry while the backend boots
+  // (library.js `_registerWithBackend`), and the backend has its thumb-cache
+  // folder from `--user-data-dir` at startup (main.py).
+  return scanLibrary(dirPathOrPaths, sourceMap, {
+    log,
+    folderScriptsAsVariants: store.getSetting('library.folderScriptsAsVariants') === true,
+  });
 });
 
-ipcMain.handle('select-funscript', async () => {
+// `{ multiple: true }` (N-04, the variation pickers' Browse...): several
+// files, answered as a list. Every other caller asks for one file and gets
+// one `{ name, path }`, as before. null when cancelled either way.
+// `{ defaultPath }` (Locate, 2026-11-18): the stored path of a script that is
+// not found; the picker opens in its folder, or the nearest parent folder
+// that exists (dialog-default-path.js: read-only, a plain absolute path
+// string only, nothing is created). Anything else opens where it always did.
+ipcMain.handle('select-funscript', async (_event, opts) => {
+  const multiple = opts?.multiple === true;
+  let defaultPath;
+  if (opts && Object.prototype.hasOwnProperty.call(opts, 'defaultPath')) {
+    const { nearestExistingFolder } = require('./dialog-default-path');
+    defaultPath = (await nearestExistingFolder(opts.defaultPath)) || undefined;
+  }
   const result = await dialog.showOpenDialog(mainWindow, {
-    properties: ['openFile'],
+    properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
     filters: [
       { name: 'Funscript Files', extensions: ['funscript'] },
     ],
+    ...(defaultPath ? { defaultPath } : {}),
   });
   if (result.canceled || result.filePaths.length === 0) return null;
+  if (multiple) return result.filePaths.map((p) => ({ name: path.basename(p), path: p }));
   const filePath = result.filePaths[0];
   return { name: path.basename(filePath), path: filePath };
 });
@@ -1639,7 +1717,22 @@ ipcMain.handle('read-funscript', async (_event, filePath) => {
     // gets clean content automatically.
     return raw.charCodeAt(0) === 0xFEFF ? raw.slice(1) : raw;
   } catch (err) {
-    log.error('read-funscript failed:', err.message);
+    // A missing file is usually not a failure. Renderers PROBE with this:
+    // playlist, category and library cards read the sibling `<video>.funscript`
+    // of every entry to decide on a badge, so every scriptless video and every
+    // video on an unplugged drive missed here, and each miss went to the log
+    // as an error. Opening one playlist wrote a screenful of `[error]` lines
+    // that were all expected (V57, app test 2026-11-02), and logs are triaged
+    // by grepping for `[error]`. This handler cannot tell a probe from a read
+    // that expected a script, so a miss is logged at debug: still in the file
+    // for a "my script didn't load" report, just not dressed as a failure.
+    // Any other failure (permissions, a locked or unreadable file) is still
+    // an error.
+    if (err && err.code === 'ENOENT') {
+      log.debug('read-funscript: no file:', err.message);
+    } else {
+      log.error('read-funscript failed:', err.message);
+    }
     return null;
   }
 });
@@ -1651,6 +1744,9 @@ ipcMain.handle('save-funscript', async (_event, content, suggestedName) => {
     filters: [
       { name: 'Funscript Files', extensions: ['funscript'] },
     ],
+    // Windows and macOS always ask before an existing file is replaced;
+    // Linux (GTK) only when told to (R3-01).
+    properties: ['showOverwriteConfirmation'],
   });
   if (result.canceled || !result.filePath) return null;
   try {
@@ -1660,6 +1756,36 @@ ipcMain.handle('save-funscript', async (_event, content, suggestedName) => {
     log.error('save-funscript failed:', err.message);
     return null;
   }
+});
+
+// Where should an EroScripts download go? The dialog ONLY: nothing is
+// written here (R3-01, the empty write also in v0.9.2). The panel used
+// save-funscript('') to pick, which wrote an empty file at the chosen path at
+// once: an existing script there was emptied before the download started, and
+// a failed download left a 0-byte file. The download IPC writes only after it
+// has the bytes, and the panel's own "Replace <name>?" (old file to the
+// Recycle Bin) decides about a file already there.
+// Returns the chosen absolute path (ending in the download's extension), or
+// null when cancelled.
+ipcMain.handle('pick-download-save-path', async (_event, suggestedName) => {
+  const name = typeof suggestedName === 'string' && suggestedName.trim()
+    ? suggestedName.split(/[\\/]/).pop()
+    : 'script.funscript';
+  const ext = /\.zip$/i.test(name) ? 'zip' : 'funscript';
+  const result = await dialog.showSaveDialog(mainWindow, {
+    defaultPath: name || 'script.funscript',
+    filters: [ext === 'zip'
+      ? { name: 'Zip archive', extensions: ['zip'] }
+      : { name: 'Funscript Files', extensions: ['funscript'] }],
+    properties: ['showOverwriteConfirmation'],
+  });
+  if (result.canceled || !result.filePath) return null;
+  // GTK does not add the filter's extension to a typed name; a download keeps
+  // its type (the download IPC accepts only .funscript / .zip paths). The
+  // path as the OS spells it (R4-11): `shell.trashItem` rejects a
+  // forward-slash Windows path, so Replace would fail on one.
+  const picked = path.normalize(result.filePath);
+  return picked.toLowerCase().endsWith(`.${ext}`) ? picked : `${picked}.${ext}`;
 });
 
 // Write funscript directly to a known path (for autosave — no dialog)
@@ -1692,6 +1818,39 @@ ipcMain.handle('get-speed-stats', async () => {
   } catch (err) {
     log.warn(`get-speed-stats failed: ${err.message}`);
     return {};
+  }
+});
+
+/**
+ * The funscript metadata harvest (P1 tags, Round 3, 2026-11-18): each paired
+ * script's own metadata block, which the backend's speed pass reads from the
+ * files it already parses (backend/services/script_meta.py). The renderer's
+ * store (renderer/js/script-meta-store.js) asks for all of it after a scan,
+ * then only for what changed (`since` + `cache`, both from the last answer),
+ * and the video options dialog asks for one script (`paths`). Through
+ * fetchWithTimeout, so a question asked while the backend boots waits for
+ * it. Null when the backend does not answer: the store then keeps what it
+ * has (absence is never destructive).
+ */
+ipcMain.handle('get-script-meta', async (_event, query = {}) => {
+  const { getBackendPort } = require('./python-bridge');
+  const port = getBackendPort();
+  const params = new URLSearchParams();
+  const paths = Array.isArray(query?.paths) ? query.paths : [];
+  for (const p of paths.slice(0, 50)) {
+    if (typeof p === 'string' && p) params.append('path', p);
+  }
+  if (Number.isSafeInteger(query?.since) && query.since > 0) params.set('since', String(query.since));
+  if (typeof query?.cache === 'string' && /^[0-9a-f]{1,64}$/.test(query.cache)) params.set('cache', query.cache);
+  const qs = params.toString();
+  const url = `http://localhost:${port}/api/media/script-meta${qs ? `?${qs}` : ''}`;
+  try {
+    const resp = await fetchWithTimeout(url, {}, 10000);
+    if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
+    return await resp.json();
+  } catch (err) {
+    log.warn(`get-script-meta failed: ${err.message}`);
+    return null;
   }
 });
 
@@ -1750,11 +1909,16 @@ ipcMain.handle('export-data', async () => {
   if (result.canceled || !result.filePath) return { success: false, error: 'Cancelled' };
 
   const configData = store.getAll();
-  return exportData(configData, result.filePath);
+  // customThumbsDir: uploaded poster images ride along in the zip (V59).
+  // stashDir: the Stash data file only (never the key or the fingerprints).
+  return exportData(configData, result.filePath, {
+    customThumbsDir: customThumbsDir(),
+    stashDir: path.join(app.getPath('userData'), 'stash'),
+  });
 });
 
 ipcMain.handle('import-data', async () => {
-  const { importData, mergeConfig } = require('./data-export');
+  const { applyImport } = require('./data-export');
 
   const result = await dialog.showOpenDialog(mainWindow, {
     title: 'Import FunSync Backup',
@@ -1764,27 +1928,47 @@ ipcMain.handle('import-data', async () => {
 
   if (result.canceled || result.filePaths.length === 0) return { success: false, error: 'Cancelled' };
 
-  const importResult = await importData(result.filePaths[0], 'merge');
-  if (!importResult.success) return importResult;
+  // The import ends in a relaunch (app.exit, which skips before-quit):
+  // unsaved editor edits are asked about first; Cancel imports nothing
+  // (R3-19).
+  if (!(await _unsavedEdits.confirm('importing a backup'))) return { success: false, error: 'Cancelled' };
 
-  // Snapshot the pre-import state — merging an arbitrary backup file
-  // can mutate sources, collections, playlists, categories, and even
-  // the encrypted Handy key. If the user picks the wrong file, this
-  // is the snapshot they'll roll back to.
-  await _preActionSnapshot('pre-import');
-
-  // Merge imported config into existing
-  const existing = store.getAll();
-  const merged = mergeConfig(existing, importResult.config, 'merge');
-
-  // Apply merged settings
-  if (merged.settings) {
-    for (const [key, value] of Object.entries(merged.settings)) {
-      store.setSetting(key, value);
-    }
+  // Merges the backup into the live config (settings, playlists,
+  // categories, category assignments, custom thumbnail images), writes it
+  // in one go, then relaunches. The relaunch is what makes the import
+  // stick: the renderer answers every read from a boot-time cache and
+  // writes whole maps back from it, so without a fresh boot the next
+  // association edit would write the pre-import map over the import (V02).
+  // An import that fails stays in this app with the edits as they were: the
+  // next close or quit asks again (R4-17).
+  let imported;
+  try {
+    imported = await applyImport({
+      filePath: result.filePaths[0],
+      store,
+      customThumbsDir: customThumbsDir(),
+      // The backup's Stash data is merged through main's own instance (its
+      // only writer); a backup never brings an API key in.
+      stashLibrary,
+      // Once the file is known to be a backup, before anything is read or
+      // written: the relaunch below would otherwise leave devices running.
+      stopPlayback: _stopPlaybackBeforeRelaunch,
+      // Snapshot the pre-import state — merging an arbitrary backup file
+      // can mutate sources, collections, playlists, categories, and even
+      // the encrypted Handy key. If the user picks the wrong file, this
+      // is the snapshot they'll roll back to.
+      beforeWrite: () => _preActionSnapshot('pre-import'),
+      relaunch: () => {
+        log.info('[Backup] Imported a backup file; relaunching');
+        _relaunchWithConfigOnDisk();
+      },
+    });
+  } catch (err) {
+    _unsavedEdits.reset('Importing a backup');
+    throw err;
   }
-
-  return { success: true, funscriptCount: (importResult.funscripts || []).length };
+  if (!imported?.success) _unsavedEdits.reset('Importing a backup');
+  return imported;
 });
 
 // --- IPC Handlers: Backup & Recovery ---
@@ -1803,6 +1987,9 @@ ipcMain.handle('backup:list', async () => {
     const userDataDir = app.getPath('userData');
     const paths = dataBackup.resolvePaths(userDataDir);
     const manifest = await dataBackup.loadManifest(paths.backupDir);
+    // Snapshots from before the category-assignment count existed get it
+    // now (one read each, once), so every row can show it (V58).
+    await dataBackup.backfillSummaries(paths.backupDir, manifest);
     // Sort newest first so the UI shows the freshest entry at the top.
     const sorted = [...manifest.snapshots].sort(
       (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
@@ -1849,6 +2036,12 @@ ipcMain.handle('backup:restore', async (_event, { subdir, filename }) => {
   if (subdir !== 'snapshots' && subdir !== 'pre-action') {
     return { success: false, error: 'invalid subdir' };
   }
+  // The restore ends in a relaunch (app.exit, which skips before-quit):
+  // unsaved editor edits are asked about first; Cancel restores nothing
+  // (R3-19).
+  if (!(await _unsavedEdits.confirm('restoring a backup'))) {
+    return { success: false, error: 'Cancelled', cancelled: true };
+  }
   try {
     const userDataDir = app.getPath('userData');
     const paths = dataBackup.resolvePaths(userDataDir);
@@ -1865,7 +2058,10 @@ ipcMain.handle('backup:restore', async (_event, { subdir, filename }) => {
     const snapshotPath = path.join(paths.backupDir, subdir, filename);
     const raw = await fs.promises.readFile(snapshotPath, 'utf8');
     const parsed = JSON.parse(raw);
+    // A restore that stops here stays in this app with the edits as they
+    // were: the next close or quit asks again (R4-17).
     if (!parsed?.config || !parsed?.metadata) {
+      _unsavedEdits.reset('Restoring a backup');
       return { success: false, error: 'snapshot missing config or metadata' };
     }
     if (parsed.metadata.sha256) {
@@ -1877,9 +2073,15 @@ ipcMain.handle('backup:restore', async (_event, { subdir, filename }) => {
         .update(JSON.stringify(parsed.config))
         .digest('hex');
       if (expected !== actual) {
+        _unsavedEdits.reset('Restoring a backup');
         return { success: false, error: 'snapshot SHA-256 mismatch — refusing restore' };
       }
     }
+
+    // The snapshot is good, so the relaunch below will happen: stop
+    // playback and every device now. app.exit skips the renderer's
+    // beforeunload, which would otherwise have done it.
+    await _stopPlaybackBeforeRelaunch();
 
     // Step 3: atomically replace config.json.
     await dataBackup.atomicWriteFile(
@@ -1887,26 +2089,13 @@ ipcMain.handle('backup:restore', async (_event, { subdir, filename }) => {
       JSON.stringify(parsed.config, null, 2)
     );
 
-    // Step 4: relaunch. Skip the QUIT snapshot path on the way out by
-    // marking the guard — the file we just wrote IS the desired state.
+    // Step 4: relaunch.
     log.info(`[Backup] Restored from ${subdir}/${filename}; relaunching`);
-    _finalSnapshotDone = true;
-    if (_unsubscribeFromStore) {
-      try { _unsubscribeFromStore(); } catch { /* ignore */ }
-      _unsubscribeFromStore = null;
-    }
-    dataBackup.cancelScheduled();
-    // Kill the backend BEFORE app.exit(0). app.exit skips both will-quit
-    // and before-quit, so the standard stopBackend() hooks don't fire —
-    // leaving an orphan backend racing the relaunched instance for port
-    // 5123. The next-startup port sweep would eventually catch it, but
-    // killing it here means the relaunch hits a clean port immediately.
-    stopBackend();
-    app.relaunch();
-    app.exit(0);
+    _relaunchWithConfigOnDisk();
     return { success: true };
   } catch (err) {
     log.error('[Backup] restore failed:', err.message);
+    _unsavedEdits.reset('Restoring a backup');
     return { success: false, error: err.message };
   }
 });
@@ -2019,6 +2208,12 @@ ipcMain.handle('player-popout:status', () => {
   return { open: playerPopout.isOpen() };
 });
 
+// Restore + raise the pop-out for a video the user just asked for (V16),
+// without taking keyboard focus from the main window.
+ipcMain.handle('player-popout:reveal', () => {
+  return { success: playerPopout.reveal() };
+});
+
 ipcMain.handle('player-popout:relay', (_event, direction, payload) => {
   playerPopout.relay(direction, payload);
   return { success: true };
@@ -2034,54 +2229,29 @@ ipcMain.handle('backup:open-folder', async () => {
 
 // --- File existence check ---
 
-/**
- * Default budget for an existence check, in ms.
- *
- * A DEAD MAPPED NETWORK DRIVE is the case this exists for. Windows keeps the
- * drive letter after a NAS goes offline, so the path looks real and the OS
- * blocks on an SMB round trip that can take seconds. lnlytrckr (EroScripts
- * #251/#255) saw the whole app freeze for ~5s every 20-30s because of it.
- *
- * External drives do NOT hit this: Windows removes the letter entirely, so the
- * check fails immediately.
- */
-const EXISTS_TIMEOUT_MS = 800;
-
-/**
- * Async, time-boxed existence check.
- *
- * Two deliberate changes from the old `fs.existsSync`:
- *
- *  1. ASYNC. `existsSync` runs on the main process's JS thread, so a blocking
- *     network stat froze the entire UI, not just the library. `fs.promises`
- *     work happens on libuv's threadpool and leaves the app responsive.
- *
- *  2. TIME-BOXED. We stop WAITING after the budget and report "not reachable".
- *     Note this does not cancel the underlying syscall — it cannot be
- *     cancelled — so the threadpool slot stays occupied until the OS gives up.
- *     That is acceptable because callers now skip disabled sources and cache
- *     results, so we issue few of these. If that ever changes, watch the
- *     4-slot default threadpool.
- */
-async function pathReachable(filePath, timeoutMs = EXISTS_TIMEOUT_MS) {
-  if (typeof filePath !== 'string' || filePath.length === 0) return false;
-  let timer;
-  try {
-    return await Promise.race([
-      fs.promises.access(filePath).then(() => true, () => false),
-      new Promise((resolve) => {
-        timer = setTimeout(() => resolve(false), timeoutMs);
-      }),
-    ]);
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
-  }
-}
+// The check itself is `pathReachable` in path-status.js, where tests run it on
+// real folders and a real deny ACL (FT-002). Three answers: `true` present,
+// `false` definitely absent (ENOENT / ENOTDIR only), `null` unknown (timed
+// out, permission denied, busy, any other error). It used to fold every error
+// into `false`, so a script in a folder whose listing is denied (EPERM) read
+// as deleted and `library._safeToPrune` pruned its association. Required here
+// rather than at the top so tests/unit/path-status.test.js can lift this whole
+// section, require included, and run what main.js really runs.
+const { pathReachable, pathStatusDetail } = require('./path-status');
 
 ipcMain.handle('file-exists', async (_event, filePath, timeoutMs) => {
-  return pathReachable(filePath, Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined);
+  // Collapses the unknown/timeout case to `false` for backwards
+  // compatibility: every caller of this singular form treats the result as a
+  // plain boolean, and they are probing individual scripts and videos rather
+  // than deciding whether a whole library is reachable. The batch form below
+  // preserves the distinction, because that IS the library decision.
+  // Audited for FT-002 (2026-11-05), when a permission error joined the
+  // unknown case: every caller acts only on `true` (heal a script beside its
+  // video, offer an Orgasm axis file, an older bridge's display probe), so a
+  // collapsed unknown costs a missed heal, never data. Anything that may
+  // delete or lock must ask `files-exist`.
+  const r = await pathReachable(filePath, Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined);
+  return r === true;
 });
 
 /**
@@ -2089,15 +2259,43 @@ ipcMain.handle('file-exists', async (_event, filePath, timeoutMs) => {
  * one per video — a 500-entry playlist on an external drive was 500 invokes,
  * each of which can block on a spun-down or disconnected volume.
  *
- * Returns an array of booleans positionally matching the input. Never throws:
- * an unreadable path is `false`, which is exactly how callers treat it.
+ * Returns an array positionally matching the input, each entry `true`
+ * (present), `false` (definitely absent: ENOENT / ENOTDIR) or **`null`
+ * (unknown: timed out, permission denied, any other error)**. Never throws.
+ *
+ * The null is deliberate and every caller depends on it: the source
+ * reachability probe (locks only on `false`), `library._pathStatus` (which
+ * every prune asks), the playlist/category availability probe (greys only on
+ * `false`), the missing-video check on a load error and Extract's
+ * do-not-overwrite check. Collapsing a timeout to `false` here is what let a
+ * busy app declare every source unreachable and lock the whole library
+ * (2026-08-26); collapsing EPERM did the same to one association (FT-002).
+ *
+ * `opts.why` (R4-14): each entry is `{ status, why }` instead, `status` the
+ * same tri-state and `why` 'denied' / 'timeout' / 'error' for a null (null
+ * otherwise), so a notice can tell a slow share from a locked folder. Only
+ * a caller that words the answer asks for it; nothing acts on `why`.
  */
-ipcMain.handle('files-exist', async (_event, filePaths, timeoutMs) => {
+ipcMain.handle('files-exist', async (_event, filePaths, timeoutMs, opts) => {
   if (!Array.isArray(filePaths)) return [];
   const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined;
   // Concurrent, not sequential: one slow path must not delay the rest, and the
   // whole batch shares roughly one timeout rather than N of them in series.
+  if (opts?.why === true) return Promise.all(filePaths.map((p) => pathStatusDetail(p, budget)));
   return Promise.all(filePaths.map((p) => pathReachable(p, budget)));
+});
+
+/**
+ * Can each source folder still be LISTED (open it, read one entry)? Same
+ * shape as `files-exist`: positional, `true` / `false` / `null` (timed out),
+ * never throws. Recheck asks this for the sources the existence probe passed,
+ * because a folder whose listing is denied passes `fs.access` and fails only
+ * the scan (V04, V82). See `rootListable` in library-scan.js.
+ */
+ipcMain.handle('dirs-listable', async (_event, dirPaths, timeoutMs) => {
+  if (!Array.isArray(dirPaths)) return [];
+  const budget = Number(timeoutMs) > 0 ? Number(timeoutMs) : undefined;
+  return Promise.all(dirPaths.map((p) => rootListable(p, { timeoutMs: budget })));
 });
 
 // --- IPC Handlers: Shell ---
@@ -2234,145 +2432,27 @@ ipcMain.handle('tcode-status', () => {
 });
 
 // --- IPC Handlers: VR Bridge (TCP) ---
+//
+// The socket lifecycle lives in vr-socket.js so it can be tested without
+// Electron or a headset. See the header there: a dead connect attempt used to
+// be able to clear a LIVE connection's keep-alive timer, and three seconds of
+// keep-alive silence is how HereSphere drops a link.
 
-let vrSocket = null;
-let vrKeepAliveTimer = null;
+const { VRSocketLink } = require('./vr-socket.js');
 
-ipcMain.handle('vr-connect', async (_event, host, port) => {
-  const net = require('net');
-
-  // Clean up existing connection
-  if (vrSocket) {
-    vrSocket.removeAllListeners();
-    vrSocket.destroy();
-    vrSocket = null;
-  }
-  if (vrKeepAliveTimer) {
-    clearInterval(vrKeepAliveTimer);
-    vrKeepAliveTimer = null;
-  }
-
-  return new Promise((resolve) => {
-    const socket = new net.Socket();
-    let connected = false;
-    let buffer = Buffer.alloc(0);
-
-    socket.setTimeout(5000);
-
-    socket.connect(port || 23554, host || '127.0.0.1', () => {
-      connected = true;
-      resolved = true;
-      vrSocket = socket;
-      log.info(`[VR] Connected to ${host}:${port}`);
-
-      // Keep-alive: send zero-length packet every 1s (4 bytes of zeros)
-      // This matches MultiFunPlayer's protocol — DeoVR/HereSphere drop after 3s of silence
-      vrKeepAliveTimer = setInterval(() => {
-        if (vrSocket) {
-          try {
-            vrSocket.write(Buffer.alloc(4, 0)); // [0,0,0,0] = zero-length packet
-          } catch { /* ignore write errors */ }
-        }
-      }, 1000);
-
-      resolve({ success: true });
-    });
-
-    socket.on('data', (chunk) => {
-      buffer = Buffer.concat([buffer, chunk]);
-
-      // Parse packets: 4-byte LE length + JSON payload
-      while (buffer.length >= 4) {
-        const len = buffer.readUInt32LE(0);
-        if (buffer.length < 4 + len) break; // incomplete packet
-
-        const json = buffer.slice(4, 4 + len).toString('utf-8');
-        buffer = buffer.slice(4 + len);
-
-        try {
-          const data = JSON.parse(json);
-          // Attach a main-process arrival timestamp so the renderer can
-          // compute network jitter from the spread between consecutive
-          // arrivals. HereSphere/DeoVR send timestamp packets at a
-          // ~regular cadence; arrival jitter ≈ network jitter, the
-          // best proxy we can derive from a one-way protocol.
-          data._arrivalMs = Date.now();
-          BrowserWindow.getAllWindows().forEach(w =>
-            w.webContents.send('vr-state', data)
-          );
-        } catch (err) {
-          log.debug('[VR] Failed to parse JSON:', err.message);
-        }
-      }
-    });
-
-    let resolved = false;
-
-    socket.on('close', () => {
-      if (vrKeepAliveTimer) { clearInterval(vrKeepAliveTimer); vrKeepAliveTimer = null; }
-      // Only send disconnected event if we were previously connected
-      if (connected) {
-        log.info('[VR] Connection closed');
-        vrSocket = null;
-        BrowserWindow.getAllWindows().forEach(w => w.webContents.send('vr-disconnected'));
-      }
-      connected = false;
-    });
-
-    socket.on('error', (err) => {
-      // ECONNREFUSED is the EXPECTED state when HereSphere/DeoVR isn't
-      // listening on port 23554 (no video playing, headset asleep,
-      // timestamp server toggle off, etc.). Demoting to debug so the
-      // log isn't full of noise during normal use. Other errors stay
-      // at warn because those are genuine network issues users should
-      // see (firewall, host unreachable, connection reset, etc.).
-      if (err.code === 'ECONNREFUSED') {
-        log.debug('[VR] Socket error (expected when no VR app listening):', err.message);
-      } else {
-        log.warn('[VR] Socket error:', err.message);
-      }
-      if (!resolved) {
-        resolved = true;
-        vrSocket = null;
-        resolve({ success: false, error: err.message });
-      }
-    });
-
-    socket.on('timeout', () => {
-      if (!resolved) {
-        resolved = true;
-        socket.destroy();
-        vrSocket = null;
-        resolve({ success: false, error: 'Connection timed out' });
-      }
-    });
-  });
+const vrLink = new VRSocketLink({
+  createSocket: () => new (require('net').Socket)(),
+  broadcast: (channel, payload) => {
+    BrowserWindow.getAllWindows().forEach((w) => w.webContents.send(channel, payload));
+  },
+  log,
 });
 
-ipcMain.handle('vr-disconnect', () => {
-  if (vrSocket) {
-    vrSocket.removeAllListeners();
-    vrSocket.destroy();
-    vrSocket = null;
-  }
-  if (vrKeepAliveTimer) {
-    clearInterval(vrKeepAliveTimer);
-    vrKeepAliveTimer = null;
-  }
-  log.info('[VR] Disconnected');
-  return { success: true };
-});
+ipcMain.handle('vr-connect', (_event, host, port) => vrLink.connect(host, port));
 
-ipcMain.handle('vr-send', (_event, jsonStr) => {
-  if (!vrSocket) return false;
-  try {
-    const payload = Buffer.from(jsonStr);
-    const header = Buffer.alloc(4);
-    header.writeUInt32LE(payload.length, 0);
-    vrSocket.write(Buffer.concat([header, payload]));
-    return true;
-  } catch { return false; }
-});
+ipcMain.handle('vr-disconnect', () => vrLink.disconnect());
+
+ipcMain.handle('vr-send', (_event, jsonStr) => vrLink.send(jsonStr));
 
 // --- IPC Handlers: Autoblow ---
 
@@ -2453,8 +2533,32 @@ ipcMain.handle('updater-download', () => {
   downloadUpdate();
 });
 
-ipcMain.handle('updater-install', () => {
-  quitAndInstall();
+ipcMain.handle('updater-install', async () => {
+  // Restart Now quits to install. Unsaved editor edits are asked about
+  // BEFORE the installer starts: once it runs it closes the app whatever
+  // the answer (R3-19). Cancel leaves the update toast up for later.
+  if (!(await _unsavedEdits.confirm('installing the update'))) return { cancelled: true };
+  // An installer that does not start (nothing downloaded, a spawn error)
+  // leaves the app open with the edits as they were: when no quit begins,
+  // the next close or quit asks again (R4-17).
+  resetUnlessQuitStarts(_unsavedEdits, app);
+  try {
+    quitAndInstall();
+  } catch (err) {
+    log.warn('[Updater] quitAndInstall failed:', err?.message || err);
+    _unsavedEdits.reset('Installing the update');
+  }
+  return { cancelled: false };
+});
+
+// The renderer is about to ask the unsaved-edits question for an action that
+// came from another window (the detached player's N / P or Up Next, the
+// editor pop-out's script list) or while this window is minimised or behind:
+// bring it to the front so the question is seen (R3-21).
+ipcMain.on('main-window:bring-forward', (event) => {
+  if (mainWindow && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents) {
+    bringToFront(mainWindow);
+  }
 });
 
 // --- IPC Handlers: EroScripts ---
@@ -2477,15 +2581,16 @@ ipcMain.handle('eroscripts-login-window', async () => {
   const partition = 'persist:eroscripts-login';
   const sess = session.fromPartition(partition);
 
-  // Force a real Chrome UA on the partition so Cloudflare's bot
-  // scoring doesn't serve the "Server is currently experiencing high
-  // load" page (which it routes Electron's default UA to in some
-  // configs even when actual load is fine). Same UA we already use
-  // for our REST API client. Set on the session, not just the window,
-  // so the cookie/CSRF preflights also adopt it.
-  const CHROME_UA =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
-  sess.setUserAgent(CHROME_UA);
+  // A Chrome UA on the partition so Cloudflare's bot scoring doesn't
+  // serve the "Server is currently experiencing high load" page (which it
+  // routes Electron's default UA to in some configs even when actual load
+  // is fine). It is the SAME string the REST client sends (the real
+  // Chromium UA plus FunSyncPlayer/<version>, eroscripts-api.js; Dave,
+  // 2026-11-18): Cloudflare ties cf_clearance to the UA that earned it.
+  // Set once, on the session, before the window exists: the window's
+  // webContents takes it from there, and so does every later request of
+  // this session (the cookie/CSRF preflights too).
+  sess.setUserAgent(EROSCRIPTS_USER_AGENT);
 
   const win = new BrowserWindow({
     width: 520,
@@ -2502,7 +2607,6 @@ ipcMain.handle('eroscripts-login-window', async () => {
     },
   });
   win.setMenuBarVisibility(false);
-  win.webContents.setUserAgent(CHROME_UA);
 
   return new Promise((resolve) => {
     let settled = false;
@@ -2531,13 +2635,14 @@ ipcMain.handle('eroscripts-login-window', async () => {
           .map((c) => `${c.name}=${c.value}`)
           .join('; ');
 
+        // The same User-Agent as the window above and every request of
+        // eroscripts-api.js (Dave, 2026-11-18).
         const resp = await fetch(
           'https://discuss.eroscripts.com/session/current.json',
           {
             headers: {
               Cookie: cookieHeader,
-              'User-Agent':
-                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+              'User-Agent': EROSCRIPTS_USER_AGENT,
               Accept: 'application/json',
             },
           },
@@ -2663,6 +2768,16 @@ ipcMain.handle('eroscripts-validate', async () => {
   return eroScripts.validateSession();
 });
 
+// The session check (Dave, 2026-11-18): is the saved login cookie still good?
+// Asked when the EroScripts panel, the inline search or the Tags section
+// opens (a kept answer, so opening again sends nothing) and, with
+// `{force: true}`, after a request came back 401 / 403. Main only answers
+// ('valid' / 'expired' / 'unknown' / 'loggedOut'); the renderer acts on a
+// definite 'expired' (the panel's handleSessionExpired).
+ipcMain.handle('eroscripts-check-session', async (_event, opts) => {
+  return eroScripts.checkSession({ force: opts?.force === true });
+});
+
 ipcMain.handle('eroscripts-search', async (_event, query, page) => {
   return eroScripts.search(query, page);
 });
@@ -2671,10 +2786,37 @@ ipcMain.handle('eroscripts-topic', async (_event, topicId) => {
   return eroScripts.getTopicAttachments(topicId);
 });
 
+// "Get tags from EroScripts" for one video: one GET /t/{id}.json, logged in
+// only. Main fetches and returns; the renderer writes the record.
+ipcMain.handle('eroscripts-topic-meta', async (_event, topicId) => {
+  return eroScripts.getTopicMeta(topicId);
+});
+
 ipcMain.handle('eroscripts-topic-image', async (_event, topicId) => {
   return eroScripts.getTopicImage(topicId);
 });
 
-ipcMain.handle('eroscripts-download', async (_event, url, savePath) => {
-  return eroScripts.downloadFile(url, savePath);
+// An existing, different file is replaced only on `{ replace: true }`, and
+// then goes to the Recycle Bin first (shell.trashItem, as Find duplicates).
+// `{ checkOnly: true }` fetches and looks, writing nothing (R3-03).
+// The arguments are checked first (R3-04, like trash-video-files): the URL
+// must be on the EroScripts origin (or an attachment the forum gave us), the
+// path an absolute .funscript / .zip path; anything else writes nothing.
+ipcMain.handle('eroscripts-download', async (_event, url, savePath, opts) => {
+  const refused = eroScripts.checkDownloadRequest(url, savePath);
+  if (refused) {
+    log.warn(`[EroScripts] Download refused: ${refused}`);
+    return { success: false, refused: true, error: refused };
+  }
+  return eroScripts.downloadFile(url, savePath, {
+    replace: opts?.replace === true,
+    checkOnly: opts?.checkOnly === true,
+    trashItem: (p) => shell.trashItem(p),
+  });
+});
+
+// The user answered Cancel after a look: the bytes it fetched need not wait
+// in main for a write (R4-09). Writes nothing; an unknown URL is a no-op.
+ipcMain.handle('eroscripts-forget-download', async (_event, url) => {
+  return eroScripts.forgetDownload(url);
 });

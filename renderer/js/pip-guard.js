@@ -48,6 +48,15 @@ export function teardownPlayback(deps) {
   // Pause video first — stops playback immediately in the browser
   if (deps?.videoPlayer?.video) deps.videoPlayer.video.pause();
 
+  // A loop on its own clock (an Edge Hold pattern, the Orgasm Switch's
+  // finisher) drives Buttplug and T-Code itself, the video paused or not: it
+  // ends here with every device, as on a video change (FN-01), and a late
+  // key-up restores nothing. Buttplug played it on in the library until the
+  // key came up (live verifier 2026-11-17). The finisher ends as on a
+  // relaunch (its finish stop: no hand-back to the main script).
+  try { deps?._dropEdgePattern?.('the player was left'); } catch { /* best-effort */ }
+  try { if (deps?.orgasmSwitch?.active) deps._finishOrgasm?.(); } catch { /* best-effort */ }
+
   // Stop all sync engines (prevents any new commands from being queued)
   if (deps?.syncEngine) deps.syncEngine.stop();
   if (deps?.handyHdspSync?.active) deps.handyHdspSync.stop();

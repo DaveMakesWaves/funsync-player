@@ -17,12 +17,50 @@
   <link rel="stylesheet" href="styles/up-next.css">
   <link rel="stylesheet" href="styles/vr-format-panel.css">
   <link rel="stylesheet" href="styles/queue-panel.css">
+  <link rel="stylesheet" href="styles/video-options.css">
+  <link rel="stylesheet" href="styles/stash.css">
   <!-- Modern interface-style layer — MUST be last so its [data-style="modern"]
        rules win specificity ties. Inert unless <html data-style="modern">. -->
   <link rel="stylesheet" href="styles/modern.css">
 </head>
 <body>
   <div id="app">
+    <!-- Backend-disconnected banner — shown when the Python FastAPI
+         backend dies / fails to start / hangs. Most app features keep
+         working (playback uses file:// URLs, no backend dependency) but
+         library scans / thumbnails / metadata / VR / web-remote all
+         require the backend, so the user needs a clear signal + an
+         actionable fix when it's down. Hidden by default; main process
+         sends `backend-status` via IPC on state transitions and the
+         renderer toggles `hidden` accordingly.
+         In #app's flow, not fixed to the top of the window (V80): the
+         nav bar is prepended above it at startup, so it sits under the
+         title bar and moves the view down instead of covering the nav
+         and the caption buttons. In the player view (no nav) it is the
+         top row and the player fills what is left. -->
+    <div id="backend-banner" class="backend-banner" hidden role="alert" aria-live="polite">
+      <div class="backend-banner__inner">
+        <svg class="backend-banner__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="10"/>
+          <line x1="12" y1="8" x2="12" y2="12"/>
+          <line x1="12" y1="16" x2="12.01" y2="16"/>
+        </svg>
+        <div class="backend-banner__body">
+          <div class="backend-banner__title" id="backend-banner-title" data-i18n="backend.title">Backend is not responding</div>
+          <div class="backend-banner__detail" id="backend-banner-detail" data-i18n="backend.detail">Library scans, thumbnails, and VR features need it. Playback still works for already-open files.</div>
+        </div>
+        <div class="backend-banner__actions">
+          <button id="backend-banner-restart" class="backend-banner__btn backend-banner__btn--primary" type="button" data-i18n="backend.restart">Restart Backend</button>
+          <button id="backend-banner-logs" class="backend-banner__btn" type="button" data-i18n="backend.viewLogs">View Logs</button>
+          <button id="backend-banner-dismiss" class="backend-banner__close" type="button" data-i18n-aria-label="backend.dismiss" aria-label="Dismiss banner">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Library View (default landing page) -->
     <div id="library-container" class="library"></div>
 
@@ -146,7 +184,7 @@
                  [WINDOW cluster]    pip / fullscreen
           -->
           <div class="controls__right">
-            <span id="funscript-badge" class="funscript-badge" hidden data-i18n-title="player.funscriptLoaded" title="Funscript loaded"></span>
+            <span id="funscript-badge" class="funscript-badge" hidden></span>
             <div id="variant-selector" class="variant-selector" hidden>
               <button id="variant-btn" class="variant-selector__btn" data-i18n-title="player.scriptVariants" title="Script variants (V)">
                 <span id="variant-btn-label" class="variant-selector__label"></span>
@@ -273,6 +311,16 @@
                   <span data-i18n="player.inlineHeatmap">Heatmap strip</span>
                   <span class="controls-overflow__check" aria-hidden="true"></span>
                 </button>
+                <!-- Device simulator (zaikechi #381): the D key's toggle, here
+                     too. Ticked from the simulator's own visibility, so the
+                     D key and this item always agree. Session-only like the
+                     D key, and shown without a script (it shows 50 then).
+                     Not in the pop-out, which has no simulator. -->
+                <button id="btn-device-sim" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="player.deviceSimulator" aria-label="Device simulator">
+                  <i data-lucide="move-vertical"></i>
+                  <span data-i18n="player.deviceSimulator">Device simulator</span>
+                  <span class="controls-overflow__check" aria-hidden="true"></span>
+                </button>
                 <button id="btn-pip" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.pictureInPicture" aria-label="Picture in Picture">
                   <i data-lucide="picture-in-picture-2"></i>
                   <span data-i18n="player.pictureInPicture">Picture-in-Picture</span>
@@ -353,37 +401,6 @@
          hidden along with the player in non-player views (the queue toggle
          "did nothing" from the library). SCOPE-queue-panel.md. -->
     <aside id="queue-panel" hidden></aside>
-  </div>
-
-  <!-- Backend-disconnected banner — shown when the Python FastAPI
-       backend dies / fails to start / hangs. Most app features keep
-       working (playback uses file:// URLs, no backend dependency) but
-       library scans / thumbnails / metadata / VR / web-remote all
-       require the backend, so the user needs a clear signal + an
-       actionable fix when it's down. Hidden by default; main process
-       sends `backend-status` via IPC on state transitions and the
-       renderer toggles `hidden` accordingly. -->
-  <div id="backend-banner" class="backend-banner" hidden role="alert" aria-live="polite">
-    <div class="backend-banner__inner">
-      <svg class="backend-banner__icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <circle cx="12" cy="12" r="10"/>
-        <line x1="12" y1="8" x2="12" y2="12"/>
-        <line x1="12" y1="16" x2="12.01" y2="16"/>
-      </svg>
-      <div class="backend-banner__body">
-        <div class="backend-banner__title" id="backend-banner-title" data-i18n="backend.title">Backend is not responding</div>
-        <div class="backend-banner__detail" id="backend-banner-detail" data-i18n="backend.detail">Library scans, thumbnails, and VR features need it. Playback still works for already-open files.</div>
-      </div>
-      <div class="backend-banner__actions">
-        <button id="backend-banner-restart" class="backend-banner__btn backend-banner__btn--primary" type="button" data-i18n="backend.restart">Restart Backend</button>
-        <button id="backend-banner-logs" class="backend-banner__btn" type="button" data-i18n="backend.viewLogs">View Logs</button>
-        <button id="backend-banner-dismiss" class="backend-banner__close" type="button" data-i18n-aria-label="backend.dismiss" aria-label="Dismiss banner">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
-          </svg>
-        </button>
-      </div>
-    </div>
   </div>
 
   <!-- Drop-zone overlay — full-screen visual feedback during file drag.

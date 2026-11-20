@@ -41,9 +41,17 @@ function baseNameOf(p) {
  * @param {(path: string) => boolean} [o.isUnavailable] — true when the path
  *   sits under a configured-but-offline source. Those entries are NOT
  *   candidates: the drive may come back and the entry must still be there.
- * @returns {Array<{from: string, to: string}>}
+ * @param {(path: string) => boolean} [o.isProvablyGone] — true only when we
+ *   have POSITIVE evidence the original file is gone: its folder was scanned
+ *   successfully this pass and the file was not in it. Anything else — the
+ *   source was removed, never configured, or failed to scan — is absence
+ *   without evidence, and the move is then made as a COPY so the original
+ *   entry survives. Defaults to "never provable", i.e. always copy.
+ * @returns {Array<{from: string, to: string, keepSource: boolean}>}
  */
-export function planAssociationRehome({ storedPaths, scannedPaths, isUnavailable } = {}) {
+export function planAssociationRehome({
+  storedPaths, scannedPaths, isUnavailable, isProvablyGone,
+} = {}) {
   const stored = Array.isArray(storedPaths) ? storedPaths : [];
   const scanned = Array.isArray(scannedPaths) ? scannedPaths : [];
   if (stored.length === 0 || scanned.length === 0) return [];
@@ -51,6 +59,7 @@ export function planAssociationRehome({ storedPaths, scannedPaths, isUnavailable
   const scannedSet = new Set(scanned);
   const storedSet = new Set(stored);
   const offline = typeof isUnavailable === 'function' ? isUnavailable : () => false;
+  const provablyGone = typeof isProvablyGone === 'function' ? isProvablyGone : () => false;
 
   // Source side: entries whose video is no longer in the library at all.
   // A stored path that IS in the scan belongs to a live video — never a
@@ -83,7 +92,18 @@ export function planAssociationRehome({ storedPaths, scannedPaths, isUnavailable
     if (orphans.length !== 1) continue;      // ambiguous source
     const needy = needyByName.get(name);
     if (!needy || needy.length !== 1) continue; // missing or ambiguous target
-    moves.push({ from: orphans[0], to: needy[0] });
+    // Deleting the old key is only safe when we can show the old file is
+    // actually gone. When a SOURCE is removed rather than a file moved, its
+    // entries look identical from here — not in the scan, not offline — and
+    // deleting them means re-adding that source comes back with the
+    // association silently attached to a different video. Absence is never
+    // destructive: copy instead, and let the normal prune (gated on
+    // `library._safeToPrune`) deal with genuinely dead keys.
+    moves.push({
+      from: orphans[0],
+      to: needy[0],
+      keepSource: !provablyGone(orphans[0]),
+    });
   }
   return moves;
 }
@@ -138,7 +158,14 @@ export function findMovedFile(candidates, missingPath) {
  * @param {string} o.videoPath — the video being looked up
  * @param {(path: string) => boolean} [o.isLive] — true when a path is still
  *   a known library video. Defaults to "assume nothing is live", which is
- *   only safe when the caller has no library to ask.
+ *   only safe when the caller has no library to ask. Callers should ALSO
+ *   answer true for a path on a source that is offline right now: its video
+ *   is missing from the library only because the drive is unplugged, and
+ *   treating it as an orphan hands its entry to a same-named copy elsewhere.
+ *
+ * This only picks the candidate. Whether the original key may then be
+ * DELETED is a separate question with a stricter answer (proven absence,
+ * not just "not in the library") — see `App._planLazyRehome`.
  * @returns {string|null} the single safe candidate, or null
  */
 export function pickRehomeCandidate({ storedPaths, videoPath, isLive } = {}) {

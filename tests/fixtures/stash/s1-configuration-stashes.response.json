@@ -1,0 +1,20 @@
+{
+  "note": "configuration.general.stashes: the library roots, with FORWARD slashes, while file paths use backslashes (path rules compare separator-blind). S1 does not send this query; kept for the path-rule tests. Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by the design pass (stage design-stash, 12-configuration-stashes.json); copied by s1-1a-client.",
+  "document": "{ configuration { general { stashes { path excludeVideo excludeImage } } } }",
+  "status": 200,
+  "body": {
+    "data": {
+      "configuration": {
+        "general": {
+          "stashes": [
+            {
+              "path": "C:/Users/user/Desktop/Coding-Projects/stash-test/library",
+              "excludeVideo": false,
+              "excludeImage": true
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -36,6 +36,7 @@ export class RemoteBridge {
     this.onPhoneEnded = null;          // (ip) => {}
     this.onPhoneSwitchVariant = null;  // (label, ip) => {} — phone tapped a variant in the player view
     this.onPhoneOrgasmHold = null;     // (active, ip) => {} — phone orgasm button press/release (F2)
+    this.onPhoneEdgeHold = null;       // (active, ip) => {} — phone Edge button press/release (next major)
     this.onPhoneSetOffset = null;      // (device, ms, ip) => {} — phone offset slider (F4)
     this.onBridgeOpen = null;          // () => {}
     this.onBridgeClose = null;         // () => {}
@@ -175,6 +176,11 @@ export class RemoteBridge {
         // Orgasm Switch remote trigger (SCOPE-web-remote-2.md F2). The
         // phone's hold button — routed into the same keyboard-X handler.
         if (this.onPhoneOrgasmHold) this.onPhoneOrgasmHold(!!msg.active, ip);
+        break;
+      case 'edge-hold':
+        // Edge Hold remote trigger (next major): the phone's Edge button,
+        // routed into the same keyboard-Z handler.
+        if (this.onPhoneEdgeHold) this.onPhoneEdgeHold(msg.active === true, ip);
         break;
       case 'set-offset':
         // Per-device offset slider on the phone's sync pill (F4). Value

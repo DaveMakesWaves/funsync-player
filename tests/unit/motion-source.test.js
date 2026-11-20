@@ -15,6 +15,7 @@ import {
   noiseToPercent,
   patternValue,
   sampleMotion,
+  blendWithStroke,
   PATTERN_TYPES,
   DEFAULT_PATTERN,
   shapeGeneratedValue,
@@ -136,7 +137,7 @@ describe('normaliseMotionConfig', () => {
 
   it('fills defaults', () => {
     expect(normaliseMotionConfig({ mode: 'link' }))
-      .toEqual({ mode: 'link', depth: 100, half: 'off', speed: 1, pattern: DEFAULT_PATTERN });
+      .toEqual({ mode: 'link', depth: 100, half: 'off', speed: 1, pattern: DEFAULT_PATTERN, blend: 0 });
   });
 
   it('accepts pattern mode and keeps the chosen shape', () => {
@@ -294,5 +295,42 @@ describe('sampleMotion', () => {
     const vals = sampleMotion({ mode: 'link' }, { samples: 50 });
     expect(vals).toHaveLength(50);
     expect(Math.max(...vals) - Math.min(...vals)).toBeGreaterThan(50);
+  });
+});
+
+// Blending (dio_likes_jojo, EroScripts #320) — MFP's MotionProviderBlend.
+// Blended against the STROKE, because a generated axis has no script of its
+// own; that is why it is being generated.
+describe('blendWithStroke', () => {
+  it('is a no-op at 0, which is the default', () => {
+    expect(blendWithStroke(80, 20, 0)).toBe(80);
+    expect(blendWithStroke(80, 20)).toBe(80);
+  });
+
+  it('is the stroke at 100', () => {
+    expect(blendWithStroke(80, 20, 100)).toBe(20);
+  });
+
+  it('is halfway at 50', () => {
+    expect(blendWithStroke(80, 20, 50)).toBe(50);
+  });
+
+  it('ignores a stroke value it cannot use', () => {
+    expect(blendWithStroke(80, NaN, 50)).toBe(80);
+    expect(blendWithStroke(80, undefined, 50)).toBe(80);
+  });
+
+  it('stays inside the axis travel', () => {
+    for (const b of [0, 25, 50, 75, 100]) {
+      const v = blendWithStroke(100, 0, b);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThanOrEqual(100);
+    }
+  });
+
+  it('shows up in the preview curve', () => {
+    const pure = sampleMotion({ mode: 'random', blend: 0 }, { samples: 80 });
+    const blended = sampleMotion({ mode: 'random', blend: 60 }, { samples: 80 });
+    expect(blended).not.toEqual(pure);
   });
 });

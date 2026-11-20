@@ -13,8 +13,9 @@ duplication.
 
 import os
 import uuid
+from urllib.parse import quote
 
-from fastapi import APIRouter, Body
+from fastapi import APIRouter, Body, Query
 
 from routes.media import (
     get_video_registry,
@@ -23,7 +24,11 @@ from routes.media import (
     get_categories,
     get_video_categories,
     get_sources,
+    get_video_tags,
+    video_tags_seq,
+    registry_gen,
     bump_rescan_request,
+    TAG_FACETS,
     _path_to_id,
 )
 
@@ -36,6 +41,28 @@ router = APIRouter()
 # fresh URL per boot sidesteps them without asking the user to find a "clear
 # website data" button on a phone (Dave, 2026-08-21).
 _BOOT_TOKEN = uuid.uuid4().hex[:8]
+
+# The library scan's label for a script with no label of its own. Data only:
+# it is never shown (FN-03); renderer/js/variant-names.js has the same rule.
+_UNLABELLED_VARIANT = "Default"
+
+
+def _variant_text(variant: dict, label: str) -> str:
+    """The name the phone shows for one variation (FN-03).
+
+    The desktop sends it (`text`, the name its own menu shows). A registry
+    filled by an older desktop has none: then the label, or for the scan's
+    unlabelled script its file name without `.funscript`.
+    """
+    text = str(variant.get("text") or "").strip()
+    if text:
+        return text
+    if label != _UNLABELLED_VARIANT:
+        return label
+    file_name = str(variant.get("name") or "").strip() or os.path.basename(
+        str(variant.get("path") or "").replace("\\", "/"))
+    stem = file_name[:-len(".funscript")] if file_name.lower().endswith(".funscript") else file_name
+    return stem.strip() or label
 
 
 @router.post("/seek-timing")
@@ -106,6 +133,13 @@ async def list_videos():
         # render exactly as before. Each variant exposes a fetchable
         # `scriptUrl` so the phone can render mini-heatmap previews per
         # variant in the expanded list.
+        #
+        # FN-04 (2026-11-16): the desktop sends the list its menu shows, the
+        # hand-added variations included, in its order, and with each entry
+        # the name it shows (`text`, FN-03: an unlabelled script by its file,
+        # never "Default") and whether it is the script the video opens on
+        # (`main`). `label` stays what a switch matches on. The label is
+        # URL-quoted: a hand-added name is free text ("Soft & Slow", "A+B").
         variants_raw = v.get("variants") or []
         variants_out = []
         for variant in variants_raw:
@@ -114,7 +148,9 @@ async def list_videos():
                 continue
             variants_out.append({
                 "label": label,
-                "scriptUrl": f"/api/media/script/{vid_id}?variant={label}",
+                "text": _variant_text(variant, label),
+                "main": bool(variant.get("main")),
+                "scriptUrl": f"/api/media/script/{vid_id}?variant={quote(label, safe='')}",
             })
 
         out.append({
@@ -275,3 +311,59 @@ async def list_categories():
         })
     out.sort(key=lambda c: (c["name"] or "").lower())
     return {"categories": out}
+
+
+def tags_version() -> str:
+    """What /tags answers from: this process (the boot token), the slice the
+    desktop last sent and the registered video list. Any of them moving
+    moves it."""
+    return f"{_BOOT_TOKEN}.{video_tags_seq()}.{registry_gen()}"
+
+
+@router.get("/tags")
+async def list_tags(version: "str | None" = Query(None)):
+    """The phone's Tags filter (P1 tags, 2026-11-18): view only.
+
+    `version` (r3-fixup R3R-4): the phone asks again each time its filter
+    sheet opens, passing the version of the answer it holds. While nothing
+    changed the answer is just `{"version": v, "unchanged": true}` (a few
+    bytes, no slice), so a tag the desktop added, hid or harvested since
+    reaches the phone at the next sheet open without a polling loop.
+
+    `videoTags` is `{videoPath: [key, ...]}` for the registered videos, the
+    keys the desktop's own merge gave each one (hidden tags already removed),
+    for the phone's copy of the desktop filter (web-remote/tag-filter.js).
+    `tags` lists each key once, `{key, facet, label, count}`, with the label
+    the desktop shows and how many registered videos have it, for the filter
+    sheet's groups. Facet names and the length unit are translated on the
+    phone, from the shared locale bundles. Paths the registry does not hold
+    (a stale slice, a source gone offline) are left out. Nothing here is
+    searched: library search does not match tags (Dave, 2026-11-17).
+    """
+    current = tags_version()
+    if version is not None and version == current:
+        return {"version": current, "unchanged": True}
+    registry = get_video_registry()
+    registered = {v.get("path") for v in registry.values() if v.get("path")}
+    facet_rank = {f: i for i, f in enumerate(TAG_FACETS)}
+    video_tags: dict[str, list[str]] = {}
+    catalog: dict[str, dict] = {}
+    for path, tags in get_video_tags().items():
+        if path not in registered:
+            continue
+        keys = []
+        for tag in tags:
+            key = tag["key"]
+            keys.append(key)
+            known = catalog.get(key)
+            if known:
+                known["count"] += 1
+            else:
+                catalog[key] = {"key": key, "facet": tag["facet"], "label": tag["label"], "count": 1}
+        if keys:
+            video_tags[path] = keys
+    ordered = sorted(
+        catalog.values(),
+        key=lambda t: (facet_rank.get(t["facet"], len(TAG_FACETS)), t["label"].casefold(), t["key"]),
+    )
+    return {"videoTags": video_tags, "tags": ordered, "version": current}

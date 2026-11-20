@@ -159,12 +159,45 @@ describe('formatResumeTime', () => {
 });
 
 describe('makeResumeEntry', () => {
-  it('rounds to a tenth of a second and stamps the time', () => {
+  // Rewritten for E2-07: this pinned round-to-nearest (600.06 -> 600.1,
+  // 3600.04 -> 3600), which is what stored a pause just under the end
+  // threshold ON it and so never offered it. The position now rounds down
+  // and the duration up: never further through the video than recorded.
+  it('keeps a tenth of a second, the position rounded down and the duration up, and stamps the time', () => {
     expect(makeResumeEntry(600.06, 3600.04, 1754400000000)).toEqual({
-      position: 600.1,
-      duration: 3600,
+      position: 600,
+      duration: 3600.1,
       updatedAt: 1754400000000,
     });
+    expect(makeResumeEntry(52.3, 120, 1)).toMatchObject({ position: 52.3, duration: 120 });
+  });
+
+  it('E2-07: a pause just under the end threshold is stored under it, and offered', () => {
+    // Long Two: 100 s, threshold 70. Paused at 69.96 (verify-3's case).
+    expect(endThreshold(100)).toBe(70);
+    expect(shouldRecordPosition(69.96, 100)).toBe(true);
+    const entry = makeResumeEntry(69.96, 100, 1);
+    expect(entry.position).toBe(69.9);
+    expect(shouldOfferResume(entry)).toBe(true);
+    expect(shouldOfferResume(entry, 100)).toBe(true);
+  });
+
+  it('E2-07: whatever is recorded is offered back, at both ends of the window', () => {
+    // Every duration from 20.5 s to 2 h in uneven steps, every position in a
+    // tenth-wide band under the end threshold and just over the 10 s minimum.
+    let checked = 0;
+    for (let d = 20.5; d < 7200; d = d * 1.37 + 0.013) {
+      const end = endThreshold(d);
+      for (const p of [end - 0.001, end - 0.04, end - 0.05, end - 0.06, end - 0.099, 10, 10.01, 10.049, 10.05, 10.099]) {
+        if (!shouldRecordPosition(p, d)) continue;
+        const entry = makeResumeEntry(p, d, 1);
+        expect(shouldOfferResume(entry), `d=${d} p=${p} stored ${entry.position}/${entry.duration}`).toBe(true);
+        expect(shouldOfferResume(entry, d), `d=${d} p=${p} with the live duration`).toBe(true);
+        expect(entry.position).toBeLessThanOrEqual(p);
+        checked++;
+      }
+    }
+    expect(checked).toBeGreaterThan(100);
   });
 
   it('never stores a negative position', () => {

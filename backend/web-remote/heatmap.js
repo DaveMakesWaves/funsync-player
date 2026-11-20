@@ -17,6 +17,35 @@ function resolveFillColor(canvas) {
   return FALLBACK_COLOR;
 }
 
+/**
+ * Average and peak stroke speed in units/s, the numbers under the player's
+ * heatmap. Mirrors renderer/js/library-search.js `computeSpeedStats` (and the
+ * backend's port of it, routes/media.py `_compute_speed_stats`, which fills
+ * the library's `avgSpeed` / `maxSpeed`): zero-movement pairs are skipped so
+ * a held position does not drag the average down. The phone computes it for
+ * the script it SHOWS, so the stats follow a variant (E2-02).
+ */
+export function computeSpeedStats(actions) {
+  if (!actions || actions.length < 2) return { avgSpeed: 0, maxSpeed: 0 };
+  let total = 0;
+  let max = 0;
+  let count = 0;
+  for (let i = 1; i < actions.length; i++) {
+    const dt = actions[i].at - actions[i - 1].at;
+    if (dt <= 0) continue;
+    const dp = Math.abs(actions[i].pos - actions[i - 1].pos);
+    if (dp === 0) continue;
+    const speed = (dp / dt) * 1000;
+    total += speed;
+    if (speed > max) max = speed;
+    count++;
+  }
+  return {
+    avgSpeed: count > 0 ? Math.round(total / count) : 0,
+    maxSpeed: Math.round(max),
+  };
+}
+
 export function computeBins(actions, binCount = DEFAULT_BINS) {
   if (!actions || actions.length < 2 || binCount < 1) return new Float32Array(0);
 

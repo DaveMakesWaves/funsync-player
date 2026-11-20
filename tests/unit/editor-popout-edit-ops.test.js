@@ -7,76 +7,42 @@
 // relay, parent's `_applyPopoutEdit` dispatches to EditableScript.
 //
 // Doesn't mount the full ScriptEditor (DOM + canvas + IPC are
-// orthogonal to the dispatch logic we want to lock here). Instead we
-// extract a minimal harness that mimics `_applyPopoutEdit` exactly.
+// orthogonal to the dispatch logic we want to lock here). It runs THE
+// dispatch: `renderer/js/editor-popout-dispatch.js`, the module
+// `ScriptEditor._applyPopoutEdit` itself calls. This file used to run a
+// COPY of the switch, and the copy diverged: it had no OP_PASTE_ORIGINAL
+// case while the parent's called a method EditableScript never had, so
+// Ctrl+Shift+V in the pop-out did nothing and nothing failed (2026-11-04).
 // The matrix below is the contract — every protocol op must have a
 // dispatch path that mutates the EditableScript in the right way.
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { EditableScript } from '../../renderer/js/editable-script.js';
+import { applyPopoutEdit as dispatch } from '../../renderer/js/editor-popout-dispatch.js';
 import {
   OP_INSERT, OP_DELETE, OP_UPDATE, OP_SELECT, OP_SELECT_ALL, OP_CLEAR_SELECTION,
-  OP_INVERT, OP_UNDO, OP_REDO, OP_CUT, OP_PASTE,
+  OP_INVERT, OP_UNDO, OP_REDO, OP_CUT, OP_PASTE, OP_PASTE_ORIGINAL,
   OP_EQUALIZE, OP_SELECT_LEFT_OF, OP_SELECT_RIGHT_OF,
   OP_INSERT_ALTERNATING, OP_REPEAT_LAST_STROKE, OP_MOVE_SELECTED_TO,
   OP_ADD_BOOKMARK, OP_REMOVE_BOOKMARK,
   OP_BEGIN_BATCH, OP_END_BATCH,
   OP_COPY, OP_SELECT_BY_POSITION, OP_MOVE_ACTIONS, OP_APPLY_MODIFIER,
+  OP_SELECT_CREATED, OP_SELECT_EVERY_NTH, OP_PLACE_AT,
 } from '../../renderer/js/editor-popout-protocol.js';
-import { halfSpeed, doubleSpeed, reverseActions } from '../../renderer/js/script-modifiers.js';
+import { doubleSpeed } from '../../renderer/js/script-modifiers.js';
 
-// Copy of `_applyPopoutEdit` logic, isolated from ScriptEditor. Keep
-// this in sync with the parent — diverging silently would break the
-// pop-out's editing in production.
+// The host the parent editor passes, minus its toasts: the two selection
+// filters land on the same EditableScript methods the editor's own hooks
+// call (ScriptEditor._selectCreatedPoints / _selectEveryNth).
+const reported = [];
+const placed = []; // OP_PLACE_AT reaches the editor's place-or-tweak (FT-032)
 function applyPopoutEdit(es, payload) {
-  const op = payload.op;
-  switch (op) {
-    case OP_INSERT: es.insertAction(payload.at, payload.pos); break;
-    case OP_DELETE:
-      if (Array.isArray(payload.indices)) es.deleteActions(new Set(payload.indices));
-      else es.deleteActions(es.selectedIndices);
-      break;
-    case OP_UPDATE:
-      if (typeof payload.idx === 'number') es.updateAction(payload.idx, payload.fields || {});
-      break;
-    case OP_SELECT:
-      if (Array.isArray(payload.indices)) {
-        es._selectedIndices = new Set(payload.indices);
-        es._emit?.();
-      }
-      break;
-    case OP_SELECT_ALL: es.selectAll(); break;
-    case OP_CLEAR_SELECTION: es.clearSelection(); break;
-    case OP_INVERT: es.invertSelection(); break;
-    case OP_UNDO: es.undo(); break;
-    case OP_REDO: es.redo(); break;
-    case OP_CUT: es.cut?.(); break;
-    case OP_PASTE: es.paste?.(payload.at); break;
-    case OP_EQUALIZE: es.equalizeSelected?.(); break;
-    case OP_SELECT_LEFT_OF: es.selectLeftOfCursor?.(payload.time); break;
-    case OP_SELECT_RIGHT_OF: es.selectRightOfCursor?.(payload.time); break;
-    case OP_INSERT_ALTERNATING: es.insertAlternating?.(payload.at); break;
-    case OP_REPEAT_LAST_STROKE: es.repeatLastStroke?.(payload.at); break;
-    case OP_MOVE_SELECTED_TO: es.moveSelectedToTime?.(payload.time); break;
-    case OP_ADD_BOOKMARK: es.addBookmark?.(payload.at, payload.name); break;
-    case OP_REMOVE_BOOKMARK: es.removeBookmark?.(payload.at); break;
-    case OP_BEGIN_BATCH: es.beginBatch?.(); break;
-    case OP_END_BATCH: es.endBatch?.(); break;
-    case OP_COPY: es.copy?.(); break;
-    case OP_SELECT_BY_POSITION: es.selectByPositionRange?.(payload.minPos, payload.maxPos); break;
-    case OP_MOVE_ACTIONS:
-      es.moveActions?.(
-        Array.isArray(payload.indices) ? new Set(payload.indices) : es.selectedIndices,
-        payload.deltaAt || 0,
-        payload.deltaPos || 0,
-      );
-      break;
-    case OP_APPLY_MODIFIER: {
-      const mods = { halfSpeed, doubleSpeed, reverse: reverseActions };
-      if (mods[payload.name]) es.applyModifier?.(mods[payload.name]);
-      break;
-    }
-  }
+  dispatch(es, payload, {
+    reportModifierResult: (status, name) => reported.push({ status, name }),
+    selectCreated: () => es.selectCreated(),
+    selectEveryNth: (n, start) => es.selectEveryNth(n, start),
+    placeAt: (pos, at) => placed.push({ pos, at }),
+  });
 }
 
 describe('popout EDIT_OP routing', () => {
@@ -324,8 +290,59 @@ describe('popout EDIT_OP routing', () => {
     applyPopoutEdit(es, { op: OP_END_BATCH });
 
     expect(es.actions[0].pos).toBe(80);
-    // Critically: NO new undo entries were added during the batch.
-    // (Without OP_BEGIN_BATCH, the loop would push 30 entries.)
-    expect(es._undoStack.length).toBe(undoCountBeforeBatch);
+    // The whole drag is ONE undo entry (without OP_BEGIN_BATCH the loop
+    // would push 30). This used to assert NO entry at all, which pinned a
+    // bug (found with CB-02, also in v0.9.2): beginBatch set its flag before
+    // its own snapshot, so the drag could not be undone on its own and
+    // Ctrl+Z after it went back past the edit before it.
+    expect(es._undoStack.length).toBe(undoCountBeforeBatch + 1);
+    es.undo();
+    expect(es.actions[0].pos).toBe(50);
+    expect(es.actions[1].pos).toBe(75);
+  });
+
+  it('OP_APPLY_MODIFIER hands the status to the host (refusal reported, nothing changed)', () => {
+    reported.length = 0;
+    es.loadFromData({ actions: Array.from({ length: 13 }, (_, i) => ({ at: i * 500, pos: i % 2 ? 100 : 0 })) });
+    es.selectByPositionRange(0, 33); // the bottoms: a selection with gaps
+    const before = JSON.stringify(es.actions);
+    applyPopoutEdit(es, { op: OP_APPLY_MODIFIER, name: 'doubleSpeed' });
+    expect(JSON.stringify(es.actions)).toBe(before);
+    expect(reported).toEqual([{ status: { changed: false, refused: true, created: 0 }, name: 'doubleSpeed' }]);
+  });
+
+  it('OP_SELECT_CREATED selects what the last modifier created, with no undo step and dirty untouched', () => {
+    es.loadFromData({ actions: [{ at: 0, pos: 0 }, { at: 500, pos: 100 }, { at: 1000, pos: 0 }] });
+    es.selectAll();
+    es.applyModifier(doubleSpeed); // 0:0 250:100 500:0 750:100 1000:0 — 3 new
+    es.markSaved();
+    es.clearSelection();
+    const undoDepth = es._undoStack.length;
+    applyPopoutEdit(es, { op: OP_SELECT_CREATED });
+    expect([...es.selectedIndices].sort((a, b) => a - b)).toEqual([1, 2, 3]);
+    expect(es._undoStack.length).toBe(undoDepth);
+    expect(es.dirty).toBe(false);
+  });
+
+  it('OP_SELECT_EVERY_NTH {n, start} narrows the current selection, with no undo step and dirty untouched', () => {
+    es.loadFromData({ actions: Array.from({ length: 10 }, (_, i) => ({ at: i * 100, pos: i * 10 })) });
+    es.selectAll();
+    const undoDepth = es._undoStack.length;
+    applyPopoutEdit(es, { op: OP_SELECT_EVERY_NTH, n: 3, start: 2 });
+    expect([...es.selectedIndices].sort((a, b) => a - b)).toEqual([1, 4, 7]);
+    expect(es._undoStack.length).toBe(undoDepth);
+    expect(es.dirty).toBe(false);
+  });
+
+  it("OP_PLACE_AT {at, pos} goes to the host's place-or-tweak, the position clamped to 0-100, and touches nothing itself", () => {
+    placed.length = 0;
+    es.loadFromData({ actions: [{ at: 0, pos: 0 }] });
+    applyPopoutEdit(es, { op: OP_PLACE_AT, at: 1000, pos: 30 });
+    applyPopoutEdit(es, { op: OP_PLACE_AT, at: 1000, pos: 140.4 });
+    applyPopoutEdit(es, { op: OP_PLACE_AT, at: 1000, pos: -3 });
+    applyPopoutEdit(es, { op: OP_PLACE_AT, at: 1000 }); // no position: nothing
+    applyPopoutEdit(es, { op: OP_PLACE_AT, at: 1000, pos: 'x' });
+    expect(placed).toEqual([{ pos: 30, at: 1000 }, { pos: 100, at: 1000 }, { pos: 0, at: 1000 }]);
+    expect(es.actions).toEqual([{ at: 0, pos: 0 }]); // the parent's _placeOrTweakAt does the edit
   });
 });

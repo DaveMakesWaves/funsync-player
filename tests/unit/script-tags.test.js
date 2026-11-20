@@ -24,12 +24,20 @@ function makeSettings(initial = {}) {
 
 describe('makeScriptTagRecord', () => {
   it('captures the tags plus enough provenance to link back', () => {
+    // Record v2 (video options, 2026-11-18): title, creator, the script the
+    // tags describe, how the post was found, when its JSON was read, stale.
     expect(makeScriptTagRecord(TOPIC, 1754400000000)).toEqual({
       tags: ['osr2', 'multi-axis', 'blowjob', 'non-vr', 'len-2-5'],
       topicId: 75758,
       topicUrl: 'https://discuss.eroscripts.com/t/vesp-izzy-green/75758',
+      title: '[vESP] Izzy Green POV Onlyfans Blowjob [Multi-Axis]',
+      creator: null,
+      scriptPath: null,
+      match: 'download',
       source: 'eroscripts',
       savedAt: 1754400000000,
+      fetchedAt: null,
+      stale: false,
     });
   });
 
@@ -51,9 +59,13 @@ describe('makeScriptTagRecord', () => {
     expect(record.tags).toEqual(['vr', 'sr6']);
   });
 
-  it('tolerates a missing or malformed tags field', () => {
-    expect(makeScriptTagRecord({ id: 1 }, 1).tags).toEqual([]);
-    expect(makeScriptTagRecord({ id: 1, tags: 'osr2' }, 1).tags).toEqual([]);
+  it('makes no record when the tags are unknown (missing, null or malformed)', () => {
+    // FT-066: this used to coerce a missing field to [] and store "this post
+    // has no tags" — for posts whose tags the search simply didn't send.
+    // (Rewritten: the old test pinned that coercion as correct.)
+    expect(makeScriptTagRecord({ id: 1 }, 1)).toBeNull();
+    expect(makeScriptTagRecord({ id: 1, tags: null }, 1)).toBeNull();
+    expect(makeScriptTagRecord({ id: 1, tags: 'osr2' }, 1)).toBeNull();
   });
 });
 
@@ -93,6 +105,27 @@ describe('recordScriptTags', () => {
     expect(recordScriptTags(settings, 'D:/v/Clip.mp4', null, 1)).toBe(false);
     expect(recordScriptTags(null, 'D:/v/Clip.mp4', TOPIC, 1)).toBe(false);
     expect(settings._store[SCRIPT_TAGS_KEY]).toBeUndefined();
+  });
+
+  it('unknown tags never write, and never overwrite a good record (FT-066)', () => {
+    recordScriptTags(settings, 'D:/v/Clip.mp4', TOPIC, 1);
+    const before = getScriptTags(settings, 'D:/v/Clip.mp4');
+
+    // A later download whose search result carried no tags (null).
+    expect(recordScriptTags(settings, 'D:/v/Clip.mp4', { id: 999, tags: null }, 2)).toBe(false);
+    expect(recordScriptTags(settings, 'D:/v/Clip.mp4', { id: 999 }, 3)).toBe(false);
+
+    expect(getScriptTags(settings, 'D:/v/Clip.mp4')).toEqual(before);
+    expect(getScriptTags(settings, 'D:/v/Clip.mp4').tags).toContain('multi-axis');
+    // Nor does unknown create a record for a video that has none.
+    expect(recordScriptTags(settings, 'D:/v/Other.mp4', { id: 5, tags: null }, 4)).toBe(false);
+    expect(getScriptTags(settings, 'D:/v/Other.mp4')).toBeNull();
+  });
+
+  it('leaves an existing EMPTY record alone (absence rule: nothing is cleaned up)', () => {
+    settings = makeSettings({ [SCRIPT_TAGS_KEY]: { 'D:/v/Old.mp4': { tags: [], topicId: 3, topicUrl: null, source: 'eroscripts', savedAt: 1 } } });
+    expect(recordScriptTags(settings, 'D:/v/Old.mp4', { id: 3, tags: null }, 9)).toBe(false);
+    expect(getScriptTags(settings, 'D:/v/Old.mp4')).toEqual({ tags: [], topicId: 3, topicUrl: null, source: 'eroscripts', savedAt: 1 });
   });
 });
 

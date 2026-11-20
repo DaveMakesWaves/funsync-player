@@ -54,7 +54,7 @@ function buildLargeConfig() {
   }
   return {
     settings: {
-      handy: { connectionKey: 'eK6Qv3AH', defaultOffset: -50 },
+      handy: { connectionKey: 'FAKEKEY1', defaultOffset: -50 },
       library: { sources, collections, customRouting, associations,
         manualVariants: { '/media/library-0/v.mp4': ['Soft', 'Hard'] },
         // High-churn caches included intentionally — recovery must
@@ -111,7 +111,7 @@ describe('Scenario: the reporter\'s incident — power loss wipes config', () =>
     expect(Object.keys(restored.settings.library.associations)).toHaveLength(100);
     expect(restored.playlists).toHaveLength(6);
     expect(restored.categories).toHaveLength(4);
-    expect(restored.settings.handy.connectionKey).toBe('eK6Qv3AH');
+    expect(restored.settings.handy.connectionKey).toBe('FAKEKEY1');
 
     // Step 6: blacklisted caches are correctly stripped from the
     // recovered file (they get rebuilt for free on next scan).

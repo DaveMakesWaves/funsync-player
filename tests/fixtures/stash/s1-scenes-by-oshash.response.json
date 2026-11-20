@@ -1,0 +1,32 @@
+{
+  "note": "Every scene with a file of this exact oshash (EQUALS). Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by stage s1-1a-client, with the document from electron/stash-queries.js.",
+  "operationName": "FunSyncScenesByOshash",
+  "documentSha256": "284a1d6df586b71ac98b42b94a525fd8ea10c452ade528694763239423cbdd27",
+  "variables": {
+    "oshash": "6b3f3b3ee9e8c31a"
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/graphql-response+json"
+  },
+  "body": {
+    "data": {
+      "findScenes": {
+        "count": 1,
+        "scenes": [
+          {
+            "id": "1",
+            "updated_at": "2026-11-17T20:32:20Z",
+            "files": [
+              {
+                "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+                "size": 213390,
+                "oshash": "6b3f3b3ee9e8c31a"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  }
+}

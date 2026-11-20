@@ -1,0 +1,39 @@
+{
+  "note": "Page 2 of 2 of the tag list at 4 per page (sorted by id). Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library seeded for the next lot, no password) on 2026-11-19 by stage sn-main, with the document from electron/stash-queries.js.",
+  "operationName": "FunSyncTagList",
+  "documentSha256": "915706cde930b55a7c6836c912addfcd65bf3670665d7e835a33c1f4a6f735bd",
+  "variables": {
+    "page": 2,
+    "perPage": 4
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/graphql-response+json"
+  },
+  "body": {
+    "data": {
+      "findTags": {
+        "count": 6,
+        "tags": [
+          {
+            "id": "5",
+            "name": "Synthetic Grandparent Tag",
+            "aliases": [
+              "syn-gp",
+              "synthetic-grand"
+            ],
+            "parents": []
+          },
+          {
+            "id": "6",
+            "name": "Synthetic Tag C",
+            "aliases": [
+              "synthetic-c"
+            ],
+            "parents": []
+          }
+        ]
+      }
+    }
+  }
+}

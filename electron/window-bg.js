@@ -55,6 +55,28 @@ function resolveWindowColors() {
   return colorsForTheme(theme);
 }
 
+/**
+ * The page's dialog backdrop is black at 60% (modal.css `.modal-overlay`).
+ * The caption buttons are drawn by the OS above the page, so the backdrop
+ * never reaches them: they stayed full brightness over a dimmed window
+ * (FT-100). This is a colour as it looks under that backdrop.
+ */
+const BACKDROP_ALPHA = 0.6;
+
+/**
+ * `hex` (#rgb or #rrggbb) blended `amount` of the way toward black.
+ * @returns {string} #rrggbb
+ */
+function dimColor(hex, amount = BACKDROP_ALPHA) {
+  let h = String(hex || '').replace(/^#/, '');
+  if (h.length === 3) h = h.split('').map((c) => c + c).join('');
+  h = h.slice(0, 6);
+  if (!/^[0-9a-f]{6}$/i.test(h)) return hex;
+  const keep = 1 - Math.min(1, Math.max(0, amount));
+  const out = [0, 2, 4].map((i) => Math.round(parseInt(h.slice(i, i + 2), 16) * keep));
+  return `#${out.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+}
+
 /** Title-bar height. Matches `.nav-bar` so caption buttons align with it. */
 const TITLE_BAR_HEIGHT = 48;
 
@@ -88,5 +110,5 @@ function winChromeOptions(colors) {
 
 module.exports = {
   resolveWindowColors, colorsForTheme, winChromeOptions, TITLE_BAR_HEIGHT,
-  DARK_BG, LIGHT_BG, DARK_SYMBOL, LIGHT_SYMBOL,
+  DARK_BG, LIGHT_BG, DARK_SYMBOL, LIGHT_SYMBOL, dimColor, BACKDROP_ALPHA,
 };

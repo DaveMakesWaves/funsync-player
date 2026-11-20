@@ -42,6 +42,25 @@ function getParent() {
   return parentWindow;
 }
 
+/**
+ * Send to a window's renderer only while it can still take it. While the
+ * main window closes, `isDestroyed()` on the window can still be false
+ * after its webContents is gone. The pop-out (a child window) closes in
+ * that gap, and a bare send threw "Object has been destroyed" as an
+ * uncaught main-process exception.
+ */
+function sendTo(win, payload) {
+  if (!win || win.isDestroyed()) return false;
+  const wc = win.webContents;
+  if (!wc || (typeof wc.isDestroyed === 'function' && wc.isDestroyed())) return false;
+  try {
+    wc.send('audience-popout:event', payload);
+    return true;
+  } catch {
+    return false; // torn down between the check and the send
+  }
+}
+
 function getLastBounds() {
   if (!storeRef) return { ...DEFAULT_BOUNDS };
   const saved = storeRef.getSetting(POPOUT_BOUNDS_KEY);
@@ -116,22 +135,16 @@ function open(parent, store) {
 
   popoutWindow.on('closed', () => {
     popoutWindow = null;
-    if (parent && !parent.isDestroyed()) {
-      // Closing the window does NOT end the room (AB-19). Main renderer
-      // just updates its tab UI to show "Bring to front" instead of
-      // "Create Room". Room state stays in AudienceBridge.
-      parent.webContents.send('audience-popout:event', { type: 'closed' });
-    }
+    // Closing the window does NOT end the room (AB-19). Main renderer
+    // just updates its tab UI to show "Bring to front" instead of
+    // "Create Room". Room state stays in AudienceBridge.
+    sendTo(parent, { type: 'closed' });
   });
 
-  if (parent && !parent.isDestroyed()) {
-    parent.webContents.send('audience-popout:event', { type: 'opened' });
-  }
+  sendTo(parent, { type: 'opened' });
 
   popoutWindow.webContents.once('did-finish-load', () => {
-    if (isOpen()) {
-      popoutWindow.webContents.send('audience-popout:event', { type: 'opened' });
-    }
+    if (isOpen()) sendTo(popoutWindow, { type: 'opened' });
   });
 
   return popoutWindow;
@@ -150,9 +163,9 @@ function close() {
 function relay(direction, payload) {
   const wrapped = { type: 'message', payload };
   if (direction === 'to-popout' && isOpen()) {
-    popoutWindow.webContents.send('audience-popout:event', wrapped);
-  } else if (direction === 'to-parent' && parentWindow && !parentWindow.isDestroyed()) {
-    parentWindow.webContents.send('audience-popout:event', wrapped);
+    sendTo(popoutWindow, wrapped);
+  } else if (direction === 'to-parent') {
+    sendTo(parentWindow, wrapped);
   }
 }
 

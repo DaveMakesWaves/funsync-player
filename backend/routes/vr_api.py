@@ -15,7 +15,11 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from starlette.responses import Response
 
-from routes.media import get_video_registry, _path_to_id, record_vr_activity
+from routes.media import (
+    get_video_registry, _path_to_id, record_vr_activity,
+    get_categories, get_video_categories, get_playlists,
+    _regular_file_size,
+)
 from services.network import get_local_ip
 
 router = APIRouter()
@@ -33,13 +37,17 @@ VR_PATTERNS = [
     # 360° patterns (must be checked before 180° to avoid false matches)
     (rf'(?:^|{SEP})360(?:x180)?{SEP}(?:3dh|sbs|LR)(?={SEP}|$)', 'sphere', 'sbs'),
     (rf'(?:^|{SEP})360(?:x180)?{SEP}(?:3dv|TB)(?={SEP}|$)', 'sphere', 'tb'),
-    (rf'(?:^|{SEP})(?:mono360|360{SEP}mono)(?={SEP}|$)', 'sphere', 'off'),
-    # 180° TB (must be checked before generic 180° SBS)
-    (rf'(?:^|{SEP})(?:180(?:x180)?{SEP}(?:3dv|TB)|TB{SEP}180|3dv)(?={SEP}|$)', 'dome', 'tb'),
-    # 180° SBS
-    (rf'(?:^|{SEP})(?:180(?:x180)?(?:{SEP}3dh)?(?:{SEP}LR)?|LR{SEP}180|3dh)(?={SEP}|$)', 'dome', 'sbs'),
-    # 180° mono
-    (rf'(?:^|{SEP})(?:mono180|180{SEP}mono)(?={SEP}|$)', 'dome', 'off'),
+    (rf'(?:^|{SEP})(?:mono360|360{SEP}mono|mono{SEP}360)(?={SEP}|$)', 'sphere', 'off'),
+    # 180° TB (must be checked before generic 180° SBS). `TBF` / `OUF` are
+    # the full-resolution top-bottom suffixes (HereSphere convention).
+    (rf'(?:^|{SEP})(?:180(?:x180)?{SEP}(?:3dv|TBF|OUF|TB)|TB{SEP}180|3dv)(?={SEP}|$)', 'dome', 'tb'),
+    # 180° mono — before 180° SBS, whose `180` used to take `X_180_mono`
+    # first and serve a mono file as stereo (V61).
+    (rf'(?:^|{SEP})(?:mono180|180{SEP}mono|mono{SEP}180)(?={SEP}|$)', 'dome', 'off'),
+    # 180° SBS. `180` needs a stereo tag beside it (`180x180`, `_3dh`, `_LR`,
+    # or a full-SBS suffix `_LRF` / `_SBSF` / `_fullsbs` / `_sbs_full`): a
+    # bare `180` is not VR evidence on its own (see _BARE_180_RE).
+    (rf'(?:^|{SEP})(?:180x180(?:{SEP}3dh)?(?:{SEP}LR)?|180{SEP}(?:3dh(?:{SEP}LR)?|LRF|LR|SBSF|fullsbs|sbs{SEP}full)|LR{SEP}180|3dh)(?={SEP}|$)', 'dome', 'sbs'),
     # Fisheye types
     (rf'(?:^|{SEP})MKX200(?={SEP}|$)', 'mkx200', 'sbs'),
     (rf'(?:^|{SEP})MKX220(?={SEP}|$)', 'mkx220', 'sbs'),
@@ -183,6 +191,34 @@ _BARE_VR_RE = re.compile(
     re.IGNORECASE,
 )
 
+# A bare `180` token. On its own it is not evidence of VR: "Episode 180",
+# "Top 180 Moments" and "Room 180" are flat, and renderer/js/vr-detect.js
+# and the web remote never counted it, so the headset served those as a
+# 180° stereo dome while the desktop's VR filter left them out (V61). On a
+# file that IS VR by another signal ("Title VR 180", "SIVR-123 180", a
+# manual 'vr' override, a VR-shaped frame) it still names the projection,
+# a 180° dome, as it always did. See `_vr_projection`.
+_BARE_180_RE = re.compile(rf'(?:^|{SEP})180(?={SEP}|$)', re.IGNORECASE)
+
+
+def _stem(name):
+    """`name` without its trailing extension, so regex anchors see the stem."""
+    return re.sub(r'\.[^./\\]+$', '', name or '')
+
+
+def _vr_projection(stem, screen_type, stereo_mode):
+    """`(screenType, stereoMode, True)` for a file that is VR by a signal
+    that names no projection: a studio code, a VR tag, a bare "VR", a manual
+    'vr' override or VR-shaped dimensions. `screen_type` / `stereo_mode` are
+    that signal's own default; a bare `180` in the name beats it and says
+    180° dome, which is what such a file got before V61 (when the bare 180
+    itself matched the 180° SBS pattern). Without this, a bare-180 file the
+    user marked VR went to the headset as an MKX200 fisheye.
+    """
+    if _BARE_180_RE.search(stem):
+        return 'dome', 'sbs', True
+    return screen_type, stereo_mode, True
+
 # Token split (for studio-prefix lookup). Strips all separators.
 _SEP_SPLIT_RE = re.compile(rf'{SEP}+')
 
@@ -222,16 +258,22 @@ def detect_vr_format_for_video(video, dims=None):
     matches the renderer-side precedence in `renderer/js/vr-detect.js`.
 
       - `manualVRType == 'flat'` forces `('flat', 'off', False)`.
-      - `manualVRType == 'vr'`  uses the heuristic when it already matches a
-        VR pattern; otherwise falls back to a sensible default
-        (`mkx200` SBS) so HereSphere has a projection to play with.
+      - `manualVRType == 'vr'`  uses the heuristic when it already names a
+        projection; otherwise falls back to a sensible default
+        (`mkx200` SBS, or a 180° dome when the name has a bare `180`) so
+        HereSphere has a projection to play with.
 
-    `dims` is an optional `(width, height)` tuple. When the filename gives
-    no VR signal AND the user hasn't overridden, a conservative
+    `dims` is an optional `(width, height)` tuple. When the filename names
+    no projection AND the user hasn't overridden, a conservative
     resolution/aspect heuristic (`_dims_suggest_vr`) upgrades the video to
     VR SBS so an untagged VR master isn't served flat. Callers pass dims
     from cached ffprobe results — never triggering a probe just to group
     the library (see the library-listing loops, which use cached-only dims).
+
+    "Names a projection" is `screenType != 'flat'`, not `is3d`: a mono
+    file (`X_180_mono`, `X_mono360`) is VR with is3d False, and testing
+    is3d sent a mono 360 with a 2:1 frame, or a mono 180 marked VR, to the
+    headset as MKX200 side-by-side.
     """
     override = (video or {}).get('manualVRType')
     if override == 'flat':
@@ -239,15 +281,14 @@ def detect_vr_format_for_video(video, dims=None):
 
     name = (video or {}).get('name', '') or ''
     screen, stereo, is_3d = detect_vr_format(name)
+    if screen != 'flat':
+        return screen, stereo, is_3d
 
-    if override == 'vr' and not is_3d:
-        return 'mkx200', 'sbs', True
-
-    # Resolution/aspect fallback — only when filename said flat and the
-    # user hasn't set an override either way. Matches the manual 'vr'
-    # default projection (mkx200 SBS).
-    if not is_3d and override is None and dims and _dims_suggest_vr(*dims):
-        return 'mkx200', 'sbs', True
+    # The filename named no projection. A manual 'vr' override makes it VR;
+    # so does the resolution/aspect fallback, but only when the user hasn't
+    # set an override either way. Both guess the projection the same way.
+    if override == 'vr' or (override is None and dims and _dims_suggest_vr(*dims)):
+        return _vr_projection(_stem(name), 'mkx200', 'sbs')
 
     return screen, stereo, is_3d
 
@@ -271,12 +312,17 @@ def detect_vr_format(filename):
         return 'flat', 'off', False
 
     # Strip trailing file extension so regex anchors work on the stem.
-    stem = re.sub(r'\.[^./\\]+$', '', name)
+    stem = _stem(name)
 
     # 1. Explicit projection / stereo tags — most accurate defaults.
     for pattern, screen_type, stereo_mode in VR_PATTERNS:
         if re.search(pattern, stem, re.IGNORECASE):
             return screen_type, stereo_mode, stereo_mode != 'off'
+
+    # Steps 2-5 only decide THAT the file is VR. A bare `180` beside them
+    # names the projection, as it did when it matched in step 1.
+    def _vr(screen_type, stereo_mode):
+        return _vr_projection(stem, screen_type, stereo_mode)
 
     # 2. Known studio prefix — tokenise to catch both `SIVR-178` and `SIVR178`.
     for tok in _SEP_SPLIT_RE.split(stem):
@@ -284,24 +330,22 @@ def detect_vr_format(filename):
             continue
         upper = tok.upper()
         if upper in VR_STUDIO_FORMATS:
-            screen_type, stereo_mode = VR_STUDIO_FORMATS[upper]
-            return screen_type, stereo_mode, True
+            return _vr(*VR_STUDIO_FORMATS[upper])
         m = _STUDIO_COMBO_RE.match(upper)
         if m and m.group(1) in VR_STUDIO_FORMATS:
-            screen_type, stereo_mode = VR_STUDIO_FORMATS[m.group(1)]
-            return screen_type, stereo_mode, True
+            return _vr(*VR_STUDIO_FORMATS[m.group(1)])
 
     # 3. Broad XXVR-### / VRXX-### studio fallback.
     if _VR_STUDIO_RE.search(stem):
-        return 'mkx200', 'sbs', True
+        return _vr('mkx200', 'sbs')
 
     # 4. VR resolution / projection tags (VR180, 8KVR, ...).
     if _VR_TAG_RE.search(stem):
-        return 'mkx200', 'sbs', True
+        return _vr('mkx200', 'sbs')
 
     # 5. Bare "VR" as its own token — weakest signal.
     if _BARE_VR_RE.search(stem):
-        return 'mkx200', 'sbs', True
+        return _vr('mkx200', 'sbs')
 
     return 'flat', 'off', False
 
@@ -358,14 +402,22 @@ _video_info_cache = {}
 _probe_pending = set()  # video_ids currently being probed
 
 
-def _get_cached_video_info(video_id, video):
-    """Return cached info immediately, or defaults while probing in background."""
+def _get_cached_video_info(video_id, video, exists=None):
+    """Return cached info immediately, or defaults while probing in background.
+
+    ``exists``: whether the caller has already found a regular file at the
+    video's path. The scene routes stat it once in the threadpool and pass
+    the answer, so nothing here stats on the event loop (E2-03); left None,
+    it is checked here as before.
+    """
     if video_id in _video_info_cache:
         return _video_info_cache[video_id]
 
     # Not cached — return defaults now, probe in background
     path = video.get('path', '')
-    if path and os.path.isfile(path) and video_id not in _probe_pending:
+    if exists is None:
+        exists = bool(path) and os.path.isfile(path)
+    if path and exists and video_id not in _probe_pending:
         _probe_pending.add(video_id)
         import threading
         def _bg_probe():
@@ -423,13 +475,17 @@ async def deovr_library(request: Request):
 
     for vid_id, video in registry.items():
         name = video.get('name', '')
-        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
+        # VR = any projection but flat, mono included: the same test the
+        # desktop's VR filter and tests/fixtures/vr-filename-parity.json use.
+        # `is3d` (stereo) left mono 180 / 360 out of the VR group (V61).
+        screen, _, _ = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
+        is_vr = screen != 'flat'
         has_script = bool(video.get('funscriptPath'))
 
         # Apply filter
-        if vr_filter == 'vr' and not is_3d:
+        if vr_filter == 'vr' and not is_vr:
             continue
-        if vr_filter == 'flat' and is_3d:
+        if vr_filter == 'flat' and is_vr:
             continue
         if vr_filter == 'scripted' and not has_script:
             continue
@@ -442,7 +498,7 @@ async def deovr_library(request: Request):
         }
 
         # Add to VR group
-        if is_3d:
+        if is_vr:
             vr_group.append(item)
 
         # Add to scripted group
@@ -509,23 +565,26 @@ async def deovr_scene(video_id: str, request: Request):
     duration = _get_duration(video)
     path = video.get('path', '')
 
+    # ONE stat, in the threadpool (E2-03): is there a file, and its size. It
+    # used to be an isfile and a getsize on the event loop, and on a
+    # spun-down or offline drive a stat can take seconds, during which
+    # /health went unanswered (a busy backend read as a dead one).
+    size = await asyncio.to_thread(_regular_file_size, path) if path else None
+    exists = size is not None
+
     # Prime the resolution cache for THIS scene (off the event loop) so VR
     # auto-detect sees real dimensions on first open. Only this one video
     # is probed per request — no library-wide probe storm.
-    if video_id not in _video_info_cache and path and os.path.isfile(path):
+    if video_id not in _video_info_cache and exists:
         info = await asyncio.to_thread(_probe_video_info, path)
         if info:
             _video_info_cache[video_id] = info
-    width, height, codec = _get_cached_video_info(video_id, video)
+    width, height, codec = _get_cached_video_info(video_id, video, exists=exists)
 
     screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video, dims=(width, height))
 
     # Build encodings
-    file_size = 0
-    try:
-        file_size = os.path.getsize(path)
-    except OSError:
-        pass
+    file_size = size or 0
 
     size_label = f'{file_size / (1024**3):.1f} GB' if file_size > 1024**3 else f'{file_size / (1024**2):.0f} MB'
 
@@ -593,6 +652,139 @@ async def deovr_scene(video_id: str, request: Request):
 
 # === HereSphere API ===
 
+# --- HereSphere library metadata ------------------------------------------
+#
+# `dateAdded` comes from the file's mtime, which is a stat() per video. On a
+# NAS-backed library that is thousands of network round trips, and /scan walks
+# the WHOLE library — so the results are memoised for the process lifetime and
+# the whole build runs off the event loop. A backend that stops answering
+# /health during a scan is reported as a dead backend (see Python Backend.md).
+_mtime_cache: dict[str, str] = {}
+
+
+def _date_added(path):
+    """File mtime as YYYY-MM-DD, or None when it cannot be read.
+
+    Deliberately NOT reused as `dateReleased`. We have no idea when a studio
+    released anything, and inventing one from mtime would give HereSphere a
+    "sort by release date" that looks like it works and silently is not.
+    Omitting the field leaves that sort empty, which is honest.
+    """
+    if not path:
+        return None
+    cached = _mtime_cache.get(path)
+    if cached is not None:
+        return cached
+    try:
+        stamp = time.strftime('%Y-%m-%d', time.localtime(os.path.getmtime(path)))
+    except OSError:
+        return None
+    _mtime_cache[path] = stamp
+    return stamp
+
+
+def _category_index():
+    """`videoPath -> [category name]`, resolved from ids once per request."""
+    names = {c.get('id'): c.get('name') for c in get_categories() if c.get('id')}
+    out = {}
+    for video_path, ids in get_video_categories().items():
+        resolved = [names[i] for i in (ids or []) if names.get(i)]
+        if resolved:
+            out[video_path] = resolved
+    return out
+
+
+def _playlist_index():
+    """`videoPath -> [playlist name]`."""
+    out = {}
+    for pl in get_playlists():
+        name = pl.get('name')
+        if not name:
+            continue
+        for video_path in pl.get('videoPaths') or []:
+            out.setdefault(video_path, []).append(name)
+    return out
+
+
+def _library_tags(video, categories=None, playlists=None):
+    """Untimed `Category:Tag` tags describing a video.
+
+    HereSphere's tag browser and filters key off these, and the spec's format
+    is `Category:Tag` — the part before the colon groups them in the UI. Shared
+    by `/heresphere/{id}` and `/heresphere/scan` so the two cannot report
+    different tags for the same video. Chapter tags are NOT here: they are
+    per-scene navigation, and at ~12 per video they would dominate a
+    library-wide scan payload for no filtering value.
+    """
+    path = video.get('path', '')
+    tags = []
+    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
+    if source_name:
+        tags.append({'name': f'Studio:{source_name}'})
+    if video.get('hasFunscript') or video.get('funscriptPath'):
+        tags.append({'name': 'Feature:Is scripted'})
+    for cat in (categories or {}).get(path, []):
+        tags.append({'name': f'Category:{cat}'})
+    for pl in (playlists or {}).get(path, []):
+        tags.append({'name': f'Playlist:{pl}'})
+    return tags
+
+
+def _library_fields(video, categories=None, playlists=None):
+    """The fields `/heresphere/scan` and `/heresphere/{id}` BOTH report.
+
+    One builder, so the two cannot disagree about a video. They did: the
+    scene hard-coded `dateAdded: ''`, `dateReleased: ''`, `rating: 0` and
+    `isFavorite: False` while /scan sent the real dateAdded and omitted the
+    rest, so a video's added date and rating changed depending on whether
+    HereSphere had opened it (V64). Fields FunSync cannot answer (rating,
+    favorites, comments, isFavorite, dateReleased) are absent here on
+    purpose; see the /scan docstring.
+
+    Blocking: `dateAdded` is a stat() per video. Call it off the event loop.
+    """
+    fields = {
+        'title': os.path.splitext(video.get('name', '') or '')[0],
+        # Milliseconds, per the spec. `_get_duration` is seconds and reads
+        # the registry's cached value (no ffprobe here).
+        'duration': float(_get_duration(video)) * 1000.0,
+        'tags': _library_tags(video, categories, playlists),
+    }
+    date_added = _date_added(video.get('path', ''))
+    if date_added:
+        fields['dateAdded'] = date_added
+    return fields
+
+
+def _sort_key(video):
+    """Title to sort a HereSphere library entry by.
+
+    Matches what `/heresphere/{id}` reports as the scene `title` — the
+    filename without its extension — so the order the user sees in the list
+    agrees with the names they see on the scenes.
+    """
+    name = video.get('name', '') or ''
+    return os.path.splitext(name)[0].lower()
+
+
+def _sorted_urls(entries):
+    """Order `(sort_key, url)` pairs by title and return just the URLs.
+
+    HereSphere's library format is a bare list of URLs per section, unlike
+    DeoVR's, whose entries are objects carrying a `title` — so DeoVR's
+    `sorted(..., key=title)` had an obvious key to use and this did not.
+    Applying `sorted()` to the URLs instead looked equivalent and was not:
+    every URL ends in `_path_to_id(path)`, an **md5 hex digest**, so the
+    library came back in hash order — stable, arbitrary, and impossible to
+    read as anything but "sorting is broken" (pallokala2, thread #338).
+    Measured before the fix: the first eight titles served came out S, T, S,
+    C, H, B, X, A.
+
+    The URL is therefore never the sort key. Carry the title alongside it.
+    """
+    return [url for _, url in sorted(entries, key=lambda e: (e[0], e[1]))]
+
+
 @router.api_route("/heresphere", methods=["GET", "POST"])
 async def heresphere_library(request: Request):
     """HereSphere library listing.
@@ -607,47 +799,108 @@ async def heresphere_library(request: Request):
     vr_filter = request.query_params.get('filter', '')
 
     groups = {}
-    vr_urls = []
-    scripted_urls = []
+    vr_entries = []
+    scripted_entries = []
 
     for vid_id, video in registry.items():
         name = video.get('name', '')
-        _, _, is_3d = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
+        # VR = any projection but flat, mono included (see deovr_library).
+        screen, _, _ = detect_vr_format_for_video(video, dims=_dims_for_detection(vid_id, video))
+        is_vr = screen != 'flat'
         has_script = bool(video.get('funscriptPath'))
 
-        if vr_filter == 'vr' and not is_3d:
+        if vr_filter == 'vr' and not is_vr:
             continue
-        if vr_filter == 'flat' and is_3d:
+        if vr_filter == 'flat' and is_vr:
             continue
         if vr_filter == 'scripted' and not has_script:
             continue
 
         url = f'{base_url}/heresphere/{vid_id}'
+        # Sort key carried alongside the URL. The URL cannot supply one: it
+        # ends in `_path_to_id`, an md5 hex digest, so sorting URLs sorts
+        # HASHES. See the comment on `_sorted_urls`.
+        entry = (_sort_key(video), url)
 
-        if is_3d:
-            vr_urls.append(url)
+        if is_vr:
+            vr_entries.append(entry)
         if has_script:
-            scripted_urls.append(url)
+            scripted_entries.append(entry)
 
         path = video.get('path', '')
         group_name = video.get('sourceName') or os.path.basename(os.path.dirname(path)) or 'Library'
         if group_name not in groups:
             groups[group_name] = []
-        groups[group_name].append(url)
+        groups[group_name].append(entry)
 
     library = []
 
-    if vr_urls and vr_filter != 'flat':
-        library.append({'name': '🥽 VR Videos', 'list': sorted(vr_urls)})
+    if vr_entries and vr_filter != 'flat':
+        library.append({'name': '🥽 VR Videos', 'list': _sorted_urls(vr_entries)})
 
-    if scripted_urls and vr_filter != 'vr':
-        library.append({'name': '🎮 With Funscript', 'list': sorted(scripted_urls)})
+    if scripted_entries and vr_filter != 'vr':
+        library.append({'name': '🎮 With Funscript', 'list': _sorted_urls(scripted_entries)})
 
-    for group_name, urls in sorted(groups.items()):
-        library.append({'name': group_name, 'list': sorted(urls)})
+    for group_name, entries in sorted(groups.items(), key=lambda kv: kv[0].lower()):
+        library.append({'name': group_name, 'list': _sorted_urls(entries)})
 
     return JSONResponse(
         content={'access': 1, 'library': library},
+        headers={
+            'Access-Control-Allow-Origin': '*',
+            'HereSphere-JSON-Version': '1',
+        },
+    )
+
+
+@router.api_route("/heresphere/scan", methods=["GET", "POST"])
+async def heresphere_scan(request: Request):
+    """HereSphere library scan — the whole library's metadata in one request.
+
+    Without this, HereSphere has to GET every scene URL individually to fill
+    its UI ("The app will scan the entire list and send a http GET request to
+    every video url"), and until it has done so it has nothing to sort, filter
+    or search on. That is the half of pallokala2's report (#338) that the
+    listing-order fix does not touch.
+
+    Declared BEFORE `/heresphere/{video_id}` — FastAPI matches routes in
+    definition order, and the parameterised route would otherwise swallow
+    `/scan` and answer 404 "Scene not found".
+
+    Fields are supplied only where FunSync actually knows the answer. We have
+    no ratings, no favourites and no comment counts, and no notion of a studio
+    release date, so `rating`, `favorites`, `comments`, `isFavorite` and
+    `dateReleased` are omitted rather than filled with zeros — a zero rating
+    sorts as a real rating, and a made-up release date produces an order that
+    looks right and is not.
+    """
+    registry = get_video_registry()
+    base_url = _get_base_url(request)
+
+    def _build():
+        # Whole body built off the event loop. It walks every video and stats
+        # each file for its mtime; run inline on the handler it would block
+        # /health, and a backend that goes quiet reads as a dead backend.
+        categories = _category_index()
+        playlists = _playlist_index()
+        entries = []
+        for vid_id, video in registry.items():
+            # title, duration (ms), tags, dateAdded: shared with the scene.
+            # The duration probe is a background pass kicked off by
+            # register_videos, so a video the probe has not reached yet
+            # reports 0 and is simply unsorted until the next scan.
+            item = {
+                'link': f'{base_url}/heresphere/{vid_id}',
+                **_library_fields(video, categories, playlists),
+            }
+            entries.append(item)
+        entries.sort(key=lambda e: (e['title'].lower(), e['link']))
+        return entries
+
+    scan_data = await asyncio.to_thread(_build)
+
+    return JSONResponse(
+        content={'scanData': scan_data},
         headers={
             'Access-Control-Allow-Origin': '*',
             'HereSphere-JSON-Version': '1',
@@ -669,20 +922,22 @@ async def heresphere_scene(video_id: str, request: Request):
         record_vr_activity(client_ip, video_id)
 
     base_url = _get_base_url(request)
-    name = video.get('name', '')
-    title = os.path.splitext(name)[0]
     duration = _get_duration(video)
     path = video.get('path', '')
+
+    # ONE stat, in the threadpool (E2-03), as in deovr_scene.
+    size = await asyncio.to_thread(_regular_file_size, path) if path else None
+    exists = size is not None
 
     # Prime the resolution cache for THIS scene (off the event loop) so VR
     # auto-detect + the media block below see real dimensions on first
     # open. Only this one video is probed per request — no library-wide
     # probe storm.
-    if video_id not in _video_info_cache and path and os.path.isfile(path):
+    if video_id not in _video_info_cache and exists:
         info = await asyncio.to_thread(_probe_video_info, path)
         if info:
             _video_info_cache[video_id] = info
-    width, height, codec = _get_cached_video_info(video_id, video)
+    width, height, codec = _get_cached_video_info(video_id, video, exists=exists)
 
     screen_type, stereo_mode, is_3d = detect_vr_format_for_video(video, dims=(width, height))
 
@@ -705,12 +960,8 @@ async def heresphere_scene(video_id: str, request: Request):
     # FOV
     fov = 180.0 if screen_type in ('dome', 'mkx200', 'mkx220', 'rf52', 'fisheye') else 360.0 if screen_type == 'sphere' else 0.0
 
-    # File info
-    file_size = 0
-    try:
-        file_size = os.path.getsize(path)
-    except OSError:
-        pass
+    # File info (the stat above)
+    file_size = size or 0
 
     size_label = f'{file_size / (1024**3):.1f} GB' if file_size > 1024**3 else f'{file_size / (1024**2):.0f} MB'
 
@@ -736,15 +987,15 @@ async def heresphere_scene(video_id: str, request: Request):
             'url': f'{base_url}/api/media/script/{video_id}',
         })
 
-    # Tags
-    tags = []
-    source_name = video.get('sourceName') or os.path.basename(os.path.dirname(path))
-    if source_name:
-        tags.append({'name': f'Studio:{source_name}'})
-    if video.get('hasFunscript'):
-        tags.append({'name': 'Feature:Is scripted'})
+    # Title, duration, dateAdded and the untimed tags come from the builder
+    # /heresphere/scan uses, so the two can never disagree about a video
+    # (V64). Off the event loop: dateAdded stats the file.
+    common = await asyncio.to_thread(
+        lambda: _library_fields(video, _category_index(), _playlist_index()))
+    tags = common['tags']
 
-    # Auto-generate chapter tags for navigation (every 5 min)
+    # Auto-generate chapter tags for navigation (every 5 min). Scene-only:
+    # they are timeline markers, not something to filter a library by.
     if duration > 300:
         interval = 300
         t = interval
@@ -772,16 +1023,14 @@ async def heresphere_scene(video_id: str, request: Request):
 
     stereo_hs = 'sbs' if stereo_mode == 'sbs' else 'tb' if stereo_mode == 'tb' else 'mono'
 
+    # No rating, isFavorite or dateReleased: FunSync has none, and a zero
+    # rating or an empty date sorts as a real value (see /heresphere/scan).
     scene = {
         'access': 1,
-        'title': title,
+        'title': common['title'],
         'description': '',
         'thumbnailImage': f'{base_url}/api/media/thumb/{video_id}',
-        'dateReleased': '',
-        'dateAdded': '',
-        'duration': duration * 1000,  # HereSphere uses milliseconds
-        'rating': 0,
-        'isFavorite': False,
+        'duration': common['duration'],  # milliseconds
         'projection': projection,
         'stereo': stereo_hs,
         'fov': fov,
@@ -795,6 +1044,8 @@ async def heresphere_scene(video_id: str, request: Request):
         'writeTags': False,
         'writeHSP': False,
     }
+    if 'dateAdded' in common:
+        scene['dateAdded'] = common['dateAdded']
 
     return JSONResponse(
         content=scene,

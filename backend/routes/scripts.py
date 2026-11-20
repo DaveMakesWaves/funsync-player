@@ -7,6 +7,7 @@ import tempfile
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
+from routes.desktop_gate import DESKTOP_ONLY
 from services.funscript import parse_funscript, funscript_to_csv
 from services.network import get_local_ip
 
@@ -34,10 +35,13 @@ async def get_script(script_hash: str):
     return PlainTextResponse(content, media_type="text/csv")
 
 
-@router.post("/convert")
+@router.post("/convert", dependencies=DESKTOP_ONLY)
 async def convert_funscript(request: Request):
     """Parse a funscript JSON and convert to CSV. Returns the CSV content,
-    a hash for caching, and a local download URL for the Handy device."""
+    a hash for caching, and a local download URL for the Handy device.
+
+    Desktop-only (FT-009): it writes files and publishes them for download.
+    The Handy only ever GETs `/{hash}.csv`, which stays open."""
     body = await request.body()
     content = body.decode("utf-8")
 

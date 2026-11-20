@@ -1,8 +1,12 @@
 // KeyCapture component tests.
 // SCOPE: notes/features/SCOPE-editor-custom-position-keys.md §6.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
 import { KeyCapture, formatBindingLabel } from '../../renderer/components/key-capture.js';
+import { _setBundlesForTests, _resetForTests } from '../../renderer/js/i18n.js';
+
+const bundle = (l) => JSON.parse(fs.readFileSync(`renderer/locales/${l}.json`, 'utf8'));
 
 function makeMount() {
   const div = document.createElement('div');
@@ -50,11 +54,11 @@ describe('KeyCapture component', () => {
     new KeyCapture({ element: mount, onChange });
     const root = document.querySelector('.key-capture');
     root.click();
-    fireKey(root, { code: 'KeyA' });
+    const e = fireKey(root, { code: 'KeyA', key: 'a' });
     expect(onChange).toHaveBeenCalledWith({
       code: 'KeyA',
       mods: { shift: false, ctrl: false, alt: false },
-    });
+    }, e);
     expect(root.classList.contains('key-capture--capturing')).toBe(false);
     expect(root.textContent).toBe('A');
   });
@@ -65,11 +69,11 @@ describe('KeyCapture component', () => {
     new KeyCapture({ element: mount, onChange });
     const root = document.querySelector('.key-capture');
     root.click();
-    fireKey(root, { code: 'KeyA', shiftKey: true });
+    const e = fireKey(root, { code: 'KeyA', shiftKey: true });
     expect(onChange).toHaveBeenCalledWith({
       code: 'KeyA',
       mods: { shift: true, ctrl: false, alt: false },
-    });
+    }, e);
     expect(root.textContent).toBe('Shift+A');
   });
 
@@ -79,11 +83,11 @@ describe('KeyCapture component', () => {
     new KeyCapture({ element: mount, onChange });
     const root = document.querySelector('.key-capture');
     root.click();
-    fireKey(root, { code: 'KeyJ', shiftKey: true, ctrlKey: true, altKey: true });
+    const e = fireKey(root, { code: 'KeyJ', shiftKey: true, ctrlKey: true, altKey: true });
     expect(onChange).toHaveBeenCalledWith({
       code: 'KeyJ',
       mods: { shift: true, ctrl: true, alt: true },
-    });
+    }, e);
     expect(root.textContent).toBe('Ctrl+Alt+Shift+J');
   });
 
@@ -196,5 +200,97 @@ describe('formatBindingLabel', () => {
     expect(formatBindingLabel(null)).toBe('');
     expect(formatBindingLabel({})).toBe('');
     expect(formatBindingLabel({ code: '' })).toBe('');
+  });
+});
+
+// FT-014: the key names were English in every language: the modifiers were
+// literal 'Ctrl' / 'Alt' / 'Shift', and a media, volume or cursor key showed
+// its raw KeyboardEvent.code ('MediaTrackNext', 'AudioVolumeUp', 'ArrowLeft').
+// Display only: what is stored stays the English code / accelerator.
+describe('formatBindingLabel in the active language (FT-014)', () => {
+  const EN = bundle('en');
+  const DE = bundle('de');
+  afterEach(() => _resetForTests());
+
+  it('German: Strg / Umschalt, and the media, volume and cursor keys by their German names', () => {
+    _setBundlesForTests('de', DE, EN);
+    expect(formatBindingLabel({ code: 'KeyP', mods: { ctrl: true, shift: true } })).toBe('Strg+Umschalt+P');
+    expect(formatBindingLabel({ code: 'KeyP', mods: { ctrl: true, alt: true, shift: true } })).toBe('Strg+Alt+Umschalt+P');
+    expect(formatBindingLabel({ code: 'MediaTrackNext', mods: {} })).toBe('Nächster Titel');
+    expect(formatBindingLabel({ code: 'AudioVolumeUp', mods: {} })).toBe('Lauter');
+    expect(formatBindingLabel({ code: 'Delete', mods: { ctrl: true } })).toBe('Strg+Entf');
+    expect(formatBindingLabel({ code: 'Home', mods: {} })).toBe('Pos1');
+    expect(formatBindingLabel({ code: 'ArrowLeft', mods: { ctrl: true } })).toBe('Strg+Pfeil links');
+    expect(formatBindingLabel({ code: 'Space', mods: { shift: true } })).toBe('Umschalt+Leertaste');
+  });
+
+  it('letters, digits and F-keys are the same in every language', () => {
+    _setBundlesForTests('de', DE, EN);
+    expect(formatBindingLabel({ code: 'KeyZ', mods: {} })).toBe('Z');
+    expect(formatBindingLabel({ code: 'Digit5', mods: { alt: true } })).toBe('Alt+5');
+    expect(formatBindingLabel({ code: 'F9', mods: {} })).toBe('F9');
+  });
+
+  // R3-25: this case used to pin German NumpadAdd as "Numpad+", the English
+  // word, which is exactly what the `?` list was reported for. The numpad's
+  // name now comes from `keys.numpad` in every language; English is as before.
+  it('the numpad by its local name (R3-25): German Ziffernblock, English unchanged', () => {
+    _setBundlesForTests('de', DE, EN);
+    expect(formatBindingLabel({ code: 'NumpadAdd', mods: {} })).toBe('Ziffernblock +');
+    expect(formatBindingLabel({ code: 'Numpad5', mods: { shift: true } })).toBe('Umschalt+Ziffernblock 5');
+    expect(formatBindingLabel({ code: 'NumpadEnter', mods: {} })).toBe(`Ziffernblock ${DE.keys.enter}`);
+    _setBundlesForTests('ja', bundle('ja'), EN);
+    expect(formatBindingLabel({ code: 'NumpadSubtract', mods: {} })).toBe('テンキー-');
+    _setBundlesForTests('en', EN, EN);
+    expect(formatBindingLabel({ code: 'NumpadAdd', mods: {} })).toBe('Numpad+');
+    expect(formatBindingLabel({ code: 'Numpad5', mods: {} })).toBe('Numpad5');
+    expect(formatBindingLabel({ code: 'NumpadEnter', mods: {} })).toBe('NumpadEnter');
+  });
+
+  it('French and Spanish name Shift as their keyboards do', () => {
+    _setBundlesForTests('fr', bundle('fr'), EN);
+    expect(formatBindingLabel({ code: 'KeyP', mods: { ctrl: true, shift: true } })).toBe('Ctrl+Maj+P');
+    expect(formatBindingLabel({ code: 'Escape', mods: {} })).toBe('Échap');
+    _setBundlesForTests('es', bundle('es'), EN);
+    expect(formatBindingLabel({ code: 'KeyP', mods: { ctrl: true, shift: true } })).toBe('Ctrl+Mayús+P');
+  });
+
+  it('English keeps its names; the media and cursor keys read as words, not codes', () => {
+    _setBundlesForTests('en', EN, EN);
+    expect(formatBindingLabel({ code: 'KeyP', mods: { ctrl: true, alt: true, shift: true } })).toBe('Ctrl+Alt+Shift+P');
+    expect(formatBindingLabel({ code: 'MediaTrackNext', mods: {} })).toBe('Next Track');
+    expect(formatBindingLabel({ code: 'AudioVolumeMute', mods: {} })).toBe('Mute');
+    expect(formatBindingLabel({ code: 'ArrowLeft', mods: { ctrl: true } })).toBe('Ctrl+Left Arrow');
+    expect(formatBindingLabel({ code: 'Space', mods: {} })).toBe('Space');
+  });
+
+  it('every named key has a word in every locale (no raw code or key path leaks through)', () => {
+    const codes = ['Space', 'Enter', 'Tab', 'Backspace', 'Delete', 'Insert', 'Home', 'End', 'PageUp', 'PageDown',
+      'PrintScreen', 'Escape', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'MediaPlayPause',
+      'MediaTrackNext', 'MediaTrackPrevious', 'MediaStop', 'AudioVolumeUp', 'AudioVolumeDown', 'AudioVolumeMute'];
+    // Codes that are also their own English word.
+    const sameAsCode = new Set(['Space', 'Enter', 'Tab', 'Backspace', 'Delete', 'Insert', 'Home', 'End']);
+    for (const l of ['en', 'de', 'es', 'fr', 'ja', 'ko', 'ru', 'zh']) {
+      _setBundlesForTests(l, bundle(l), EN);
+      for (const code of codes) {
+        const shown = formatBindingLabel({ code, mods: {} });
+        expect(shown, `${l} ${code}`).not.toMatch(/^keys\./);
+        expect(shown, `${l} ${code}`).not.toMatch(/\+/); // '+' is the separator
+        if (!sameAsCode.has(code)) expect(shown, `${l} ${code}`).not.toBe(code);
+      }
+    }
+  });
+
+  it('the capture box itself shows the German label', () => {
+    _setBundlesForTests('de', DE, EN);
+    document.body.innerHTML = '';
+    new KeyCapture({ element: makeMount(), initial: { code: 'MediaTrackPrevious', mods: { ctrl: true } } });
+    expect(document.querySelector('.key-capture').textContent).toBe('Strg+Vorheriger Titel');
+  });
+
+  it('with no locale loaded at all it still reads in English, never as a key path', () => {
+    _resetForTests();
+    expect(formatBindingLabel({ code: 'KeyA', mods: { ctrl: true, shift: true } })).toBe('Ctrl+Shift+A');
+    expect(formatBindingLabel({ code: 'MediaStop', mods: {} })).toBe('MediaStop');
   });
 });

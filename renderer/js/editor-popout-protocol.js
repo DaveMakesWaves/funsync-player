@@ -16,7 +16,9 @@
 //
 // - `INITIAL_STATE` — pop-out's first hello receives the full snapshot:
 //     { type, scripts, activePath, videoSrc, videoDuration, videoTime,
-//       videoPaused, videoRate, splineMode, snapToFrame }
+//       videoPaused, videoRate, splineMode, snapToFrame, locale }
+//   `locale` is the main window's language (FT-103); a switch while the
+//   pop-out is open follows as `LOCALE`.
 // - `TIME_TICK` — RAF-throttled video position update (~30 Hz):
 //     { type, time, paused }
 // - `VIDEO_META` — video-element metadata change (load, src swap, duration discovery):
@@ -79,6 +81,9 @@ export const VIDEO_META      = 'video-meta';
 export const SCRIPTS_CHANGED = 'scripts-changed';
 export const ACTIONS_CHANGED = 'actions-changed';
 export const THEME           = 'theme';   // { type, theme: 'dark' | 'light' }
+// The user switched language in the main window (FT-103): the pop-out loads
+// that bundle and relabels itself, as the player window does on its LOCALE.
+export const LOCALE          = 'locale';  // { type, locale: 'de' | 'fr' | … }
 
 // Pop-out → parent
 export const READY             = 'ready';
@@ -129,11 +134,52 @@ export const OP_SELECT_BY_POSITION    = 'selectByPositionRange'; // Ctrl+1/2/3 �
 export const OP_APPLY_MODIFIER        = 'applyModifier';         // { name: 'halfSpeed'|'doubleSpeed'|'reverse' }
 export const OP_MOVE_ACTIONS          = 'moveActions';           // { indices?, deltaAt?, deltaPos? }
 
+// Selection filters (belgriffinite #261, 2026-11-04). Selection only: the
+// parent pushes no undo step and leaves the dirty flag alone.
+export const OP_SELECT_CREATED        = 'selectCreated';         // N — New points only
+export const OP_SELECT_EVERY_NTH      = 'selectEveryNth';        // { n, start } — the pop-out's own Every Nth dialog (FT-029)
+
+// A position key in the pop-out (0-9, Shift+0 / - / Numpad- → 100, the
+// user's custom keys; resolvePositionKey in position-key-resolver.js). The
+// parent runs the docked editor's place-or-tweak: a second press on the
+// selected point's frame moves that point instead of stacking a duplicate,
+// and recording mode inserts (FT-032). OP_INSERT stays Alt+click's op.
+export const OP_PLACE_AT              = 'placeAt';               // { at, pos }
+
+// Fill with pattern (pattern library, Round 2): the pop-out's drawer renders
+// its preview locally (the fill core is pure) and on Apply sends the fill it
+// showed. The parent checks it (editor-popout-dispatch.js validFillRange:
+// sorted, whole ms, strictly inside (t0, t1), positions 0-100, at most
+// MAX_FILL_POINTS) and lands it with EditableScript.replaceRange, one undo
+// step; `options` is what the drawer remembers (editor.patternFill), stored
+// by the parent. What the user saw is what lands, and only on the script it
+// was built on: `path` is the pop-out's script and `sig` the signature of
+// the points the preview read (pattern-fill-drawer.js windowSignature); the
+// parent refuses on a mismatch or while a script switch or reload runs
+// (review-2 blocker). It answers with FILL_RESULT; the pop-out's drawer
+// stays open (busy) until then and keeps its settings on a refusal.
+// `range: true`: a fill of a time range the user marked (a rubber band over
+// 0 or 1 points), with no anchors on t0 / t1; it lands as an insert.
+export const OP_FILL_RANGE            = 'fillRange';             // { t0, t1, points: [{at,pos}], mode: 'replace'|'gap', patternId, options, path, sig, requestId, range }
+// Parent → pop-out: how an OP_FILL_RANGE ended (true = it landed).
+export const FILL_RESULT              = 'fill-result';           // { requestId, ok }
+
 // Parent → pop-out additions: settings that affect rendering or
 // input interpretation (snap-to-frame, spline mode, recording mode,
 // playback rate). Broadcast on settings change so the pop-out stays
 // coherent with the docked editor's state.
-export const SETTINGS                 = 'settings';              // { snapToFrame, splineMode, recordingMode, playbackRate, ... }
+export const SETTINGS                 = 'settings';              // { snapToFrame, splineMode, recordingMode, playbackRate, customPositionKeys, patternFill }
+// `customPositionKeys` (also in INITIAL_STATE) is the raw
+// `editor.customPositionKeys` setting, re-sent when it changes, so a custom
+// position key works in the pop-out as in the docked editor (FT-032).
+
+// Parent → pop-out: a toast for a command the POP-OUT sent (Every Nth, N, a
+// Modify item that is refused or changes nothing), shown in the pop-out,
+// where the user is looking, instead of the main window (FT-029). The parent
+// translates `text` (the command ran there). `dismissLabel` (the X's
+// aria-label) is the same words the pop-out's own i18n gives the X since
+// FT-103; it is used when sent.
+export const TOAST                    = 'toast';                 // { text, level: 'info'|'warn'|'error', duration?, dismissLabel? }
 
 // Pop-out → parent: requests that open one of the docked editor's
 // existing modals. Mounting those modals inside a second renderer is
@@ -151,6 +197,10 @@ export const REQUEST_RANGE_EXTEND     = 'request-range-extend';
 export const REQUEST_GENERATE_PATTERN = 'request-generate-pattern';
 export const REQUEST_EXPORT_HEATMAP   = 'request-export-heatmap';
 export const REQUEST_TOGGLE_WAVEFORM  = 'request-waveform-toggle';
+// Opens the PARENT's Every Nth dialog. The pop-out no longer sends it: since
+// FT-029 its Every Nth point… item opens a dialog in the pop-out, which sends
+// OP_SELECT_EVERY_NTH. The parent still answers it.
+export const REQUEST_SELECT_EVERY_NTH = 'request-select-every-nth';
 
 // Pop-out → parent: settings the user can flip in the pop-out
 // (snap-to-frame checkbox, spline/curves checkbox, R recording mode,

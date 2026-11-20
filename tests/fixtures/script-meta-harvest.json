@@ -1,0 +1,99 @@
+{
+  "_comment": "One table for the funscript metadata harvest (P1 tags, Round 3, 2026-11-18). backend/tests/test_script_meta.py asserts services/script_meta.py harvest_metadata(file) == `harvested` and topicId == `topicId`; tests/unit/script-meta-harvest-parity.test.js asserts renderer/js/video-tags.js funscriptMetaRecord(file.metadata) deep-equals funscriptMetaRecord(harvested): the renderer gets the same record from the backend's harvest as from the file itself. Synthetic names only. Each `file` is a whole parsed funscript.",
+  "cases": [
+    {
+      "name": "a full OFS block with a forum link",
+      "file": { "version": "1.0", "actions": [], "metadata": {
+        "creator": "Scripter One", "title": "Scene Title", "tags": ["POV", "Blowjob", "POV"], "performers": ["Jane Doe"],
+        "script_url": "https://discuss.eroscripts.com/t/scene-title/12345", "video_url": "https://example.invalid/v/1",
+        "description": "not read", "duration": 600, "license": "", "notes": "", "type": "basic"
+      } },
+      "harvested": { "tags": ["POV", "Blowjob"], "performers": ["Jane Doe"], "creator": "Scripter One", "title": "Scene Title",
+        "script_url": "https://discuss.eroscripts.com/t/scene-title/12345", "video_url": "https://example.invalid/v/1" },
+      "topicId": 12345
+    },
+    {
+      "name": "author instead of creator, topic_url and topic_tags",
+      "file": { "actions": [], "metadata": {
+        "author": "Scripter Two", "topic_url": "https://discuss.eroscripts.com/t/77/3", "topic_tags": ["the-handy", "len-10-25"],
+        "script_url": "https://discuss.eroscripts.com/t/other/99"
+      } },
+      "harvested": { "topic_tags": ["the-handy", "len-10-25"], "author": "Scripter Two",
+        "topic_url": "https://discuss.eroscripts.com/t/77/3", "script_url": "https://discuss.eroscripts.com/t/other/99" },
+      "topicId": 77
+    },
+    {
+      "name": "videoSourceUrl and a link on another host (no topic id)",
+      "file": { "actions": [], "metadata": { "videoSourceUrl": "https://example.invalid/watch", "script_url": "https://example.invalid/t/slug/5" } },
+      "harvested": { "script_url": "https://example.invalid/t/slug/5", "videoSourceUrl": "https://example.invalid/watch" },
+      "topicId": null
+    },
+    {
+      "name": "odd types are left out, never coerced",
+      "file": { "actions": [], "metadata": {
+        "tags": { "a": 1 }, "topic_tags": 42, "performers": null, "creator": ["Not", "A", "String"], "author": 7,
+        "title": { "t": 1 }, "topic_url": 12345, "script_url": true, "video_url": ["x"]
+      } },
+      "harvested": {},
+      "topicId": null
+    },
+    {
+      "name": "junk inside a tag list: numbers, objects, nulls, blanks are dropped",
+      "file": { "actions": [], "metadata": { "tags": [1, null, "", "   ", { "name": "x" }, ["y"], true, "real", " spaced ", "real"] } },
+      "harvested": { "tags": ["real", " spaced "] },
+      "topicId": null
+    },
+    {
+      "name": "a single string as tags is one tag",
+      "file": { "actions": [], "metadata": { "tags": "solo" } },
+      "harvested": { "tags": ["solo"] },
+      "topicId": null
+    },
+    {
+      "name": "an overlong value is left out, not cut short",
+      "file": { "actions": [], "metadata": { "creator": "@@LONG201@@", "tags": ["ok", "@@LONG201@@"], "title": "@@LONG200@@" } },
+      "harvested": { "tags": ["ok"], "title": "@@LONG200@@" },
+      "topicId": null
+    },
+    {
+      "name": "no metadata block",
+      "file": { "version": "1.0", "actions": [{ "at": 0, "pos": 0 }] },
+      "harvested": null,
+      "topicId": null
+    },
+    {
+      "name": "metadata that is not an object",
+      "file": { "actions": [], "metadata": "junk" },
+      "harvested": null,
+      "topicId": null
+    },
+    {
+      "name": "forum links: post numbers, zero, too many digits, other schemes",
+      "file": { "actions": [], "metadata": { "topic_url": "ftp://discuss.eroscripts.com/t/slug/5", "script_url": "https://DISCUSS.EROSCRIPTS.COM/t/slug/0" } },
+      "harvested": { "topic_url": "ftp://discuss.eroscripts.com/t/slug/5", "script_url": "https://DISCUSS.EROSCRIPTS.COM/t/slug/0" },
+      "topicId": null
+    },
+    {
+      "name": "a bare /t/<id> link",
+      "file": { "actions": [], "metadata": { "script_url": "http://discuss.eroscripts.com/t/4242" } },
+      "harvested": { "script_url": "http://discuss.eroscripts.com/t/4242" },
+      "topicId": 4242
+    },
+    {
+      "name": "astral characters count as two (UTF-16), as the renderer counts them",
+      "file": { "actions": [], "metadata": { "tags": ["@@EMOJI100@@", "@@EMOJI101@@"] } },
+      "harvested": { "tags": ["@@EMOJI100@@"] },
+      "topicId": null
+    },
+    {
+      "name": "a lone UTF-16 surrogate (half an emoji, valid JSON) is left out on both sides; a whole pair is kept (r3-fixup R3R-1)",
+      "file": { "actions": [{ "at": 0, "pos": 0 }, { "at": 500, "pos": 100 }], "metadata": {
+        "title": "Scene \ud83d", "creator": "\udc00Bad", "author": "Fine Author",
+        "tags": ["pov", "x\ud83d", "😀 ok", "\udfff"], "topic_tags": "\ud800",
+        "performers": ["\udfffJane", "Ann"], "topic_url": "https://discuss.eroscripts.com/t/scene/55\ud800",
+        "script_url": "https://discuss.eroscripts.com/t/scene/56" } },
+      "harvested": { "tags": ["pov", "😀 ok"], "performers": ["Ann"], "author": "Fine Author", "script_url": "https://discuss.eroscripts.com/t/scene/56" },
+      "topicId": 56
+    }
+  ]
+}

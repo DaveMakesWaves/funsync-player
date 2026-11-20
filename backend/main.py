@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from routes.scripts import router as scripts_router
 from routes.thumbnails import router as thumbnails_router
 from routes.metadata import router as metadata_router
-from routes.media import router as media_router
+from routes.media import router as media_router, set_thumb_cache_dir
 from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
@@ -80,6 +80,23 @@ if _locales_dir:
     app.mount("/locales", StaticFiles(directory=_locales_dir), name="locales")
 
 
+def apply_user_data_dir(user_data_dir: str) -> None:
+    """Point the backend's per-user state at Electron's userData dir.
+
+    The VR / web-remote thumbnail cache used to be set ONLY by the
+    `thumbCacheDir` field of a library registration, and the only sender was
+    a single fire-and-forget POST at the end of the main-process scan. The
+    window and the backend boot in parallel, so when the scan beat uvicorn
+    that POST was lost and every `/api/media/thumb/{id}` answered 500
+    "Thumbnail cache not configured" until the next scan; after a backend
+    restart nothing sent it at all (V22). The backend now owns the path from
+    the moment it starts: the same `<userData>/thumb-cache` Electron sends,
+    so a later registration carrying it changes nothing.
+    """
+    set_user_data_dir(user_data_dir)
+    set_thumb_cache_dir(os.path.join(user_data_dir, "thumb-cache"))
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}
@@ -113,6 +130,22 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.user_data_dir:
-        set_user_data_dir(args.user_data_dir)
+        apply_user_data_dir(args.user_data_dir)
+
+    # Say which ffmpeg we are about to use, BEFORE anything needs it. A
+    # packaged build that silently fell back to PATH produced a log
+    # indistinguishable from a healthy one, and the first sign of trouble was
+    # a hundred identical "Backend returned 500" lines with no reason attached
+    # (Sylvain-Et-Un, 2026-08-24). This line makes the difference visible in
+    # the first second of every log.
+    from services.ffmpeg import describe_binaries
+    _bins = describe_binaries()
+    print(f"[ffmpeg] ffmpeg={_bins['ffmpeg']} (bundled={_bins['ffmpeg_bundled']}) "
+          f"ffprobe={_bins['ffprobe']} (bundled={_bins['ffprobe_bundled']}) "
+          f"frozen={_bins['frozen']}", flush=True)
+    if not (_bins["ffmpeg_bundled"] and _bins["ffprobe_bundled"]):
+        print("[ffmpeg] WARNING: falling back to PATH for at least one binary. "
+              "If ffmpeg is not installed system-wide, thumbnails and metadata "
+              "will fail for EVERY video.", flush=True)
 
     uvicorn.run(app, host=args.host, port=args.port)

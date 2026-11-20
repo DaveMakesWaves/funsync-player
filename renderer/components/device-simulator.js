@@ -13,6 +13,9 @@ export class DeviceSimulator {
     this.player = videoPlayer;
     this.funscript = funscriptEngine;
     this.orgasmSwitch = orgasmSwitch;
+    // Edge Hold "Play a pattern" drives the devices with its own loop (an
+    // OrgasmSwitch too); app.js assigns it like the switch.
+    this.edgeLoop = null;
 
     this._visible = false;
     this._panel = null;
@@ -22,6 +25,10 @@ export class DeviceSimulator {
     this._rafId = null;
     this._lastPosition = 50;
     this._lastTimeMs = 0;
+    // Called with the new visibility after every show/hide, whoever asked
+    // (the D key or the player's ⋮ menu item), so the menu's tick can
+    // never disagree with the widget (zaikechi #381).
+    this.onVisibilityChange = null;
 
     this._buildPanel();
   }
@@ -62,7 +69,8 @@ export class DeviceSimulator {
     // The Orgasm Switch runs on its OWN clock and drives the managers directly
     // with the sync engines stopped, so video.currentTime says nothing about
     // what the hardware is doing. While it is active it is the authority.
-    const live = this.orgasmSwitch?.livePosition;
+    // An Edge Hold pattern is the same kind of loop.
+    const live = this.orgasmSwitch?.livePosition ?? this.edgeLoop?.livePosition;
     if (live !== null && live !== undefined) return live;
 
     if (!this.funscript.isLoaded) return 50;
@@ -104,10 +112,27 @@ export class DeviceSimulator {
     }
   }
 
+  /**
+   * The clock the speed is measured on: the video's, or the wall clock while
+   * a live loop (X, an Edge Hold pattern) drives the devices on its own. On a
+   * paused video the video's time stands still, and the read-out said 0/s
+   * while the bar moved (live verifier 2026-11-17).
+   * @returns {number} ms
+   */
+  _clockMs() {
+    const live = this.orgasmSwitch?.livePosition ?? this.edgeLoop?.livePosition;
+    this._liveClock = live !== null && live !== undefined && typeof performance !== 'undefined';
+    if (this._liveClock) return performance.now();
+    return this.player.currentTime * 1000;
+  }
+
   _update() {
-    const timeMs = this.player.currentTime * 1000;
+    const timeMs = this._clockMs();
     const position = this.getPosition();
-    const speed = this.getSpeed(position, timeMs);
+    // A live loop moves its position once per tick (40 ms), so most frames
+    // see no change: between its ticks the last measured speed stays.
+    const hold = this._liveClock && position === this._lastPosition && timeMs - this._lastTimeMs < 250;
+    const speed = hold ? (this._lastSpeed || 0) : this.getSpeed(position, timeMs);
 
     // Update marker position (0 at bottom, 100 at top)
     const pct = Math.max(0, Math.min(100, position));
@@ -118,6 +143,8 @@ export class DeviceSimulator {
     this._posLabel.textContent = Math.round(position);
     this._speedLabel.textContent = Math.round(speed);
 
+    this._lastSpeed = speed;
+    if (hold) return;
     this._lastPosition = position;
     this._lastTimeMs = timeMs;
   }
@@ -136,6 +163,7 @@ export class DeviceSimulator {
     this._lastTimeMs = this.player.currentTime * 1000;
     this._lastPosition = this.getPosition();
     this._startAnimation();
+    this._emitVisibility();
   }
 
   hide() {
@@ -143,6 +171,15 @@ export class DeviceSimulator {
     this._visible = false;
     this._panel.hidden = true;
     this._stopAnimation();
+    this._emitVisibility();
+  }
+
+  _emitVisibility() {
+    try {
+      this.onVisibilityChange?.(this._visible);
+    } catch (err) {
+      console.warn('[DeviceSimulator] visibility listener failed:', err?.message || err);
+    }
   }
 
   get isVisible() {

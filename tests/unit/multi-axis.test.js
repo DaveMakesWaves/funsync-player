@@ -8,6 +8,7 @@ import {
   AXIS_DEFINITIONS, parseAxisSuffix, getBaseName, detectCompanionFiles,
   buildCompanionPath, getAxisBadges, tcodeToFeature,
   getAxisBySuffix, axisSuffixVariants,
+  buildCompanionIndex, detectCompanionFilesIndexed,
 } from '../../renderer/js/multi-axis.js';
 
 describe('multi-axis', () => {
@@ -218,6 +219,86 @@ describe('multi-axis', () => {
       ];
       const companions = detectCompanionFiles('C:\\videos\\video.funscript', filesWithPaths);
       expect(companions.length).toBe(2);
+    });
+  });
+
+  // The indexed lookup exists because the per-video re-walk froze the window
+  // when the settings dropdown asked for an eligible count (stingray,
+  // 2026-08-24). A faster path that answers differently is a new bug, so the
+  // contract under test is EQUIVALENCE: every case above, run both ways.
+  describe('buildCompanionIndex / detectCompanionFilesIndexed', () => {
+    const cases = [
+      {
+        name: 'flat names',
+        primary: 'video.funscript',
+        files: ['video.funscript', 'video.twist.funscript', 'video.surge.funscript',
+          'video.vib.funscript', 'other.funscript', 'other.twist.funscript', 'video.mp4'],
+      },
+      {
+        name: 'prefix collision (video vs video2)',
+        primary: 'video.funscript',
+        files: ['video.funscript', 'video2.funscript', 'video2.twist.funscript'],
+      },
+      {
+        name: 'full Windows paths',
+        primary: 'C:\\videos\\video.funscript',
+        files: ['C:\\videos\\video.funscript', 'C:\\videos\\video.twist.funscript',
+          'C:\\videos\\video.surge.funscript'],
+      },
+      {
+        name: "stingray's layout — spaces, dashes, parentheses",
+        primary: 'E:\\S\\TAKE IT - PMV (extended mix).funscript',
+        files: ['E:\\S\\TAKE IT - PMV (extended mix).funscript',
+          'E:\\S\\TAKE IT - PMV (extended mix).pitch.funscript',
+          'E:\\S\\TAKE IT - PMV (extended mix).roll.funscript'],
+      },
+      {
+        name: 'alias spellings (suction / yaw / raw channel)',
+        primary: 'clip.funscript',
+        files: ['clip.funscript', 'clip.suction.funscript', 'clip.yaw.funscript',
+          'clip.R1.funscript'],
+      },
+      {
+        name: 'case-insensitive base match',
+        primary: 'Clip.funscript',
+        files: ['Clip.funscript', 'CLIP.twist.funscript'],
+      },
+      { name: 'empty list', primary: 'video.funscript', files: [] },
+    ];
+
+    for (const c of cases) {
+      it(`matches detectCompanionFiles — ${c.name}`, () => {
+        const direct = detectCompanionFiles(c.primary, c.files);
+        const indexed = detectCompanionFilesIndexed(c.primary, buildCompanionIndex(c.files));
+        expect(indexed).toEqual(direct);
+      });
+    }
+
+    it('returns empty for null inputs', () => {
+      expect(detectCompanionFilesIndexed(null, buildCompanionIndex(['a.twist.funscript']))).toEqual([]);
+      expect(detectCompanionFilesIndexed('a.funscript', null)).toEqual([]);
+      expect(buildCompanionIndex(null).size).toBe(0);
+    });
+
+    it('indexes only companions, so a primary-only library builds an empty index', () => {
+      expect(buildCompanionIndex(['a.funscript', 'b.funscript', 'c.mp4']).size).toBe(0);
+    });
+
+    it('is built once and reused across every video — one pass over the scripts', () => {
+      // The freeze was O(videos × scripts). Assert the shape that prevents it:
+      // building the index touches each script once, and each subsequent
+      // lookup is a single Map hit regardless of how many scripts exist.
+      const files = [];
+      for (let i = 0; i < 500; i++) {
+        files.push(`v${i}.funscript`, `v${i}.pitch.funscript`, `v${i}.roll.funscript`);
+      }
+      const index = buildCompanionIndex(files);
+      expect(index.size).toBe(500);
+      for (let i = 0; i < 500; i++) {
+        expect(detectCompanionFilesIndexed(`v${i}.funscript`, index)).toEqual(
+          detectCompanionFiles(`v${i}.funscript`, files),
+        );
+      }
     });
   });
 

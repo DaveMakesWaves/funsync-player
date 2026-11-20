@@ -12,6 +12,8 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve, basename, extname } from 'node:path';
+// The same build renderer/js/i18n.js formats every message with.
+import { IntlMessageFormat } from '../../node_modules/intl-messageformat/intl-messageformat.iife.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const localesDir = resolve(__dirname, '../../renderer/locales');
@@ -46,42 +48,54 @@ const NON_EN = SHIPPED.filter(c => c !== 'en');
 
 const en = flatten(loadBundle('en'));
 
-// Extract ICU placeholder NAMES from a message. A placeholder is an
-// identifier inside `{...}` that's immediately followed by `}` (simple
-// `{name}` interpolation) or `,` (a typed placeholder like
-// `{count, plural, ...}`). Walking the string this way correctly
-// distinguishes placeholders from plural-form sub-template bodies like
-// `{Auto-assigned # videos}` — there `Auto-assigned` is followed by a
-// hyphen + space, not `}` or `,`, so it's ignored.
+// Extract ICU placeholder NAMES from a message: the argument names of the
+// parsed message ({name}, {count, plural, ...}, {os, select, ...}), read from
+// the real ICU parse, nested branch bodies included — so
+// `{filtered, plural, other {{total} ... }}` gives filtered and total.
 //
-// Plural sub-template bodies CAN contain real placeholders too — e.g.
-// `{filtered, plural, other {{total} ... }}` — and those should be
-// captured. The walker keeps scanning past the first `{`, so it still
-// finds `{total}` inside the body.
-function extractPlaceholderNames(str) {
-  const names = new Set();
-  for (let i = 0; i < str.length; i++) {
-    if (str[i] !== '{') continue;
-    let j = i + 1;
-    while (j < str.length && /\s/.test(str[j])) j++;
-    let name = '';
-    while (j < str.length && /\w/.test(str[j])) {
-      name += str[j];
-      j++;
-    }
-    if (!name) continue;
-    // Only count as a placeholder if followed by `}` or `,` (possibly
-    // after whitespace). Otherwise this is plural-form body text like
-    // `{Auto-assigned # videos}` and we should skip it.
-    while (j < str.length && /\s/.test(str[j])) j++;
-    if (str[j] === '}' || str[j] === ',') {
-      names.add(name);
-    }
+// A plural / select branch BODY is text, not a placeholder. The old
+// string-walking heuristic counted any `{word}` followed by `}` as one, so
+// the first one-word select branch (R3-06's
+// `{os, select, win {Recycle Bin} other {Trash}}`) read as a placeholder
+// named "Trash" that no translation can carry ("Papierkorb", "ゴミ箱").
+// The parse gives exactly the old answer on every string that had no such
+// branch (all 15,528 values of the 8 bundles, checked when it changed).
+//
+// Tags are left as text (ignoreTag), so markup like <strong> never trips the
+// parse. A message that does not parse fails the test: at runtime t() would
+// show its raw template instead.
+function extractPlaceholderNames(str, label = '') {
+  let ast;
+  try {
+    ast = new IntlMessageFormat(str, 'en', undefined, { ignoreTag: true }).getAst();
+  } catch (err) {
+    throw new Error(`${label} is not valid ICU MessageFormat (${err.message}): "${str}"`);
   }
+  const names = new Set();
+  const walk = (els) => {
+    for (const el of els) {
+      // 1 argument, 2 number, 3 date, 4 time, 5 select, 6 plural
+      // (0 literal, 7 pound, 8 tag carry no argument name).
+      if (el.type >= 1 && el.type <= 6) names.add(el.value);
+      if (el.options) for (const opt of Object.values(el.options)) walk(opt.value);
+      if (el.children) walk(el.children);
+    }
+  };
+  walk(ast);
   return names;
 }
 
 describe('locale key parity', () => {
+  it('reads placeholder names, not plural / select branch text', () => {
+    const names = (s) => [...extractPlaceholderNames(s)].sort();
+    expect(names('Move to {os, select, win {Recycle Bin} other {Trash}}')).toEqual(['os']);
+    expect(names('In den {os, select, win {Papierkorb} other {Papierkorb}}')).toEqual(['os']);
+    expect(names('{count, plural, one {# file} other {# files}} ({size})')).toEqual(['count', 'size']);
+    expect(names('{filtered, plural, other {{total} of # shown}}')).toEqual(['filtered', 'total']);
+    expect(names('Saved: {name}')).toEqual(['name']);
+    expect(() => extractPlaceholderNames('Saved: {name', 'x.y')).toThrow(/x\.y is not valid ICU/);
+  });
+
   it.each(NON_EN)('%s.json covers every key in en.json', (code) => {
     const other = flatten(loadBundle(code));
     const missing = Object.keys(en).filter(k => !(k in other));
@@ -169,8 +183,8 @@ describe('locale key parity', () => {
     for (const [k, enVal] of Object.entries(en)) {
       const otherVal = other[k];
       if (typeof otherVal !== 'string') continue;
-      const enNames = extractPlaceholderNames(enVal);
-      const otherNames = extractPlaceholderNames(otherVal);
+      const enNames = extractPlaceholderNames(enVal, `en.${k}`);
+      const otherNames = extractPlaceholderNames(otherVal, `${code}.${k}`);
       const missing = [...enNames].filter(n => !otherNames.has(n));
       const extra = [...otherNames].filter(n => !enNames.has(n));
       expect(

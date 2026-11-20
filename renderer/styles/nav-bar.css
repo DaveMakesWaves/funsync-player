@@ -131,6 +131,17 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
   z-index: 50;
 }
 
+/* While the backend banner shows, it is the row right under the nav bar,
+   z-index 9000 (player.css .backend-banner), and nothing between here and
+   the root makes a stacking context. At 50 the menu opened UNDER it: its
+   first two options were hidden, and a press there landed on the banner,
+   which the outside-click closer read as outside (V80 review). So it goes
+   above the banner, but not above a dialog's backdrop (Modal inerts #app)
+   or the Devices panel's, which a key (H, ?) can open while it is open. */
+html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdrop:not([hidden]))) .nav-bar__library-dropdown {
+  z-index: 9001;
+}
+
 .nav-bar__library-option {
   display: block;
   width: 100%;
@@ -332,6 +343,10 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
    moved here so the position is independent of which is the leftmost
    right-side button). */
 .nav-bar__eroscripts { margin-left: auto; }
+/* With EroScripts hidden (Settings > Appearance > Navigation bar, #381),
+   NavBar.setHiddenItems gives this class to the first visible right-side
+   button so the right side still sits on the right. */
+.nav-bar__action--push { margin-left: auto; }
 
 /* EroScripts connected-state tint — green border + accent text was the
    prior design; kept as a colour change without the bordered-pill
@@ -370,6 +385,19 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
 .nav-bar__handy-led--connecting {
   background: #ff9800;
   animation: pulse 1s ease-in-out infinite;
+}
+/* Connected, but commands are not landing. Red rather than the amber used for
+   "connecting", because amber reads as "in progress, wait" and this is the
+   opposite — it needs attention now. Pulses so it is distinguishable from the
+   flat grey of a clean disconnect at a glance, and the label says
+   "Not responding" regardless: colour is never the only signifier. */
+.nav-bar__handy-led--unresponsive {
+  background: #f44336;
+  box-shadow: 0 0 6px #f44336;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-bar__handy-led--unresponsive { animation: none; }
 }
 .nav-bar__handy-led--active {
   box-shadow: 0 0 8px 2px #4caf50;
@@ -411,4 +439,79 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
 .nav-bar__vr-btn--waiting:hover {
   color: var(--state-warning);
   background: var(--state-warning-soft);
+}
+
+/* === Fitting the bar to its width (CB-20) ===========================
+ *
+ * The right-side buttons have `min-width: 36px`, which lets flexbox
+ * shrink them below their text, and their text then painted over the
+ * next button (German at 125% on a 1280 px window, English at 800 px).
+ * NavBar._fitToWidth measures the bar and adds cumulative
+ * `nav-bar--fit-1` ... `-6` classes until it fits on one line; the rules
+ * below are what each step takes off. What remains is a guarantee for
+ * any frame in between: nothing inside a button paints outside it. */
+
+/* A button clips its own content; icons and the LED never squash. Its
+   focus ring (outline / box-shadow) is outside the box and unaffected. */
+.nav-bar__action { overflow: hidden; }
+.nav-bar__icon,
+.nav-bar__action > svg { flex-shrink: 0; }
+
+/* A collection's name in the Library button stops at a sensible width.
+   overflow clips at the padding box and line-height 1 leaves no room for
+   descenders or accents (g, y, Ä), so the clip gets 3 px each way
+   without moving anything. */
+.nav-bar__library-wrapper .nav-bar__label {
+  max-width: 16em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-block: 3px;
+  margin-block: -3px;
+}
+
+/* While measuring, nothing may shrink: the bar overflows exactly when the
+   natural widths do not fit. */
+.nav-bar.nav-bar--measuring > *,
+.nav-bar.nav-bar--measuring .nav-bar__action > * { flex-shrink: 0; }
+
+/* Steps 1-5 hide a label VISUALLY only: it stays the button's accessible
+   name (Devices and the right-side icons also carry aria-labels), and
+   every button keeps its tooltip. Library (which can show the active
+   collection's name) goes after Playlists and Categories. */
+.nav-bar--fit-1 .nav-bar__remote-btn .nav-bar__action-label,
+.nav-bar--fit-1 .nav-bar__vr-btn .nav-bar__action-label,
+.nav-bar--fit-1 .nav-bar__settings .nav-bar__action-label,
+.nav-bar--fit-2 .nav-bar__handy .nav-bar__handy-label,
+.nav-bar--fit-3 .nav-bar__eroscripts .nav-bar__action-label,
+.nav-bar--fit-4 .nav-bar__item:not([data-view-id="library"]) .nav-bar__label,
+.nav-bar--fit-5 .nav-bar__item .nav-bar__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* Step 6: the device status text gives way last, with an ellipsis (the
+   LED and the aria-label still say it in full). The spacing tightens first
+   so it keeps as much text as it can: cluster gaps 12 -> 4 px, view buttons
+   14 -> 10 px each side (still a 36 px target). Reached only near the
+   minimum window at 150%. */
+.nav-bar--fit-6 .nav-bar__cluster-gap { width: 4px; }
+.nav-bar--fit-6 .nav-bar__item {
+  padding-left: 10px;
+  padding-right: 10px;
+}
+.nav-bar--fit-6 .nav-bar__handy-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-block: 3px;
+  margin-block: -3px;
 }

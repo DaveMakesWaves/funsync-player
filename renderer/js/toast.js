@@ -71,11 +71,30 @@ export function showToast(message, type = 'info', duration = TOAST_DURATION) {
   // (preserves the prior frictionless flow). Pressing Enter / Space on
   // the focused toast also dismisses, matching button affordance.
   body.addEventListener('click', dismiss);
+  // A mouse press on a toast never takes focus (FT-036). The click still
+  // lands, so the X and any button inside still work, and Tab still reaches
+  // the toast. Without this the browser focused the pressed X, and once the
+  // toast had gone focus was on <body>: an open EroScripts or Devices panel,
+  // whose Escape listener sits on the panel, no longer heard Escape.
+  // Modal.open() has the same guard for dialogs. A text field inside a toast
+  // (none today) would still take focus.
+  el.addEventListener('mousedown', (e) => {
+    if (e.target?.closest?.('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return;
+    e.preventDefault();
+  });
   el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      dismiss();
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.target !== el) {
+      // A button in the toast (an Undo, the X) activates on its own: the
+      // keydown's default action IS that activation, so cancelling it here
+      // closed the toast without the click, and Undo never ran from the
+      // keyboard (V78 review). Stop the key at the toast instead, so the
+      // player's shortcuts on `document` do not also play/pause.
+      e.stopPropagation();
+      return;
     }
+    e.preventDefault();
+    dismiss();
   });
 
   container.appendChild(el);
@@ -100,7 +119,14 @@ export function showToast(message, type = 'info', duration = TOAST_DURATION) {
     };
     el.addEventListener('mouseenter', pause);
     el.addEventListener('mouseleave', resume);
-    el.addEventListener('focusin', pause);
+    // Pause only while focus really is in the toast (FT-037). A dialog that
+    // sends focus straight back from a toast does it inside this same focusin
+    // (Modal.open's capture listener runs first): the toast's focusout had
+    // already fired, finding nothing to resume, and a pause here would then
+    // never be undone, so the toast stayed for good.
+    el.addEventListener('focusin', () => {
+      if (el.contains(document.activeElement)) pause();
+    });
     el.addEventListener('focusout', resume);
   }
 

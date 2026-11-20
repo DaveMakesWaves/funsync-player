@@ -10,15 +10,19 @@ import {
   computeNaturalRange,
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from './device-transform-stack.js';
+import { clampVideoSyncOffset } from './video-sync-offset.js';
 import {
   createNoise1D,
   fbm,
   noiseToPercent,
   patternValue,
+  blendWithStroke,
   shapeGeneratedValue,
   axisPhase,
   normaliseMotionConfig,
 } from './motion-source.js';
+import { AXIS_DEFINITIONS } from './multi-axis.js';
+import { StallHold, isProxyStall } from './playback-stall.js';
 
 // Poll/detect rate. This is NOT the number of moves sent — moves are emitted
 // per funscript keyframe (see _tick). It's how often we sample the clock to
@@ -40,6 +44,24 @@ const MIN_POS_DELTA = 0.5;
 // Floor for a per-move interval (I-suffix). Keeps a fast keyframe from being
 // told to move in ~0ms (jitter / divide issues) without slowing it materially.
 const MIN_MOVE_MS = 10;
+// Position axes that go back to centre when a video that no longer drives
+// them starts playing (FT-095, kissenpirat #389). Never L0 (the stroke is the
+// clock and the new video's first keyframe places it) and never an intensity
+// channel (V*, A*: stop() already zeroes those where a rest frame is sent).
+const HOME_AXES = new Set(['L1', 'L2', 'R0', 'R1', 'R2']);
+// How long that move takes. Slow on purpose: a bare or fast frame slams an
+// OSR2+/SR6 across its travel (the 2026-08-01 "violent jump on pause" fix).
+const HOME_MOVE_MS = 1000;
+// The Go home button's move (#384 uhntiss, #389 kissenpirat): slower still,
+// because it can take L0 and every rotation across half their travel at once.
+export const GO_HOME_MOVE_MS = 2000;
+// Channels that carry an INTENSITY, not a position (V0 vibe, V1 pump, A1
+// suck, A2 lube; any other V*): they keep acting on the last value they were
+// sent, so a stall turns them off (FN-02). A0, the valve, is a position.
+const INTENSITY_AXES = new Set(
+  AXIS_DEFINITIONS.filter((a) => a.type === 'vibrate').map((a) => a.tcode),
+);
+const isIntensityAxis = (tcode) => INTENSITY_AXES.has(tcode) || String(tcode).charAt(0) === 'V';
 
 export class TCodeSync {
   /**
@@ -107,10 +129,46 @@ export class TCodeSync {
     // Track last sent values for delta optimization
     this._lastSentAxes = {};
 
+    // Unused axes go home (FT-095, #389). Over serial stop() sends DSTOP,
+    // which halts in place, so R0 / R1 / L1… stayed wherever a multi-axis
+    // video left them through every later single-axis video.
+    //   _drivenAxes     — HOME_AXES this run has moved (since the last start)
+    //   _homeCandidates — those a new video takes back to centre
+    //   _homeArmed      — a new video is starting; home on its first play
+    this._drivenAxes = new Set();
+    this._homeCandidates = new Set();
+    this._homeArmed = false;
+    // Axes the Go home button parked in the middle: each one's first move on
+    // the next play goes to its keyframe at the keyframe's pace, never a
+    // one-tick snap (goHome, _tick).
+    this._fromHome = new Set();
+    // The new video's companion axis files are still loading (E2-06): the
+    // homing decision waits for them. Set by holdHomeUntil, one per load.
+    this._homeHold = null;
+
     // Per-device sync offset in ms. NEGATIVE = fire commands earlier.
     // Same semantics as buttplug-sync._offsetMs — see that module's
     // setOffsetMs comment for the formula and rationale.
     this._offsetMs = 0;
+    // The current video's own delta on top (`library.syncOffsets`, #380).
+    this._videoOffsetMs = 0;
+
+    // FN-02 (Dave 2026-11-16: "yes everything should shop while a video
+    // buffers"). The picture can stop without a 'pause' (a starved source, a
+    // seek while playing, an error, a frozen clock, a proxy's stall). The
+    // position axes already stood on the frozen clock, but the intensity
+    // channels and a generated intensity kept their last level. A stall now
+    // turns those off and sends nothing until the picture moves; its end
+    // re-arms WITHOUT the one-tick snap a seek or a pause needs, because no
+    // position axis was stopped or centred (no DSTOP, no rest frame).
+    // FN-05: only past a grace window (STALL_GRACE_MS); a hiccup inside it
+    // turns nothing off, and its end re-arms in place like a hold's.
+    this._stall = new StallHold({
+      getPlayer: () => this.player,
+      onHold: (reason) => this._holdForStall(reason),
+      onRelease: () => this._rearmAfterHold(),
+      tag: '[TCodeSync]',
+    });
 
     // Callbacks
     this.onSyncStatus = null;
@@ -119,11 +177,16 @@ export class TCodeSync {
   start() {
     if (this._active) return;
     this._active = true;
+    this._stall.clear();   // a new player or video: no hold carried over (FN-02)
+    // A new video (or the same one after a stop): axes the last one moved and
+    // this one does not drive go home when it starts playing (FT-095).
+    this._armHome();
     this._cacheActions();
     this._bindVideoEvents();
 
     if (!this.player.paused) {
       this._resetIndices();
+      this._homeUnusedAxes();
       this._startScheduler();
     }
     console.log('[TCodeSync] Started');
@@ -132,6 +195,7 @@ export class TCodeSync {
   stop() {
     this._active = false;
     this._awaitingResume = false;
+    this._stall.clear();
     this._unbindVideoEvents();
     this._stopScheduler();
     this.tcode.stop();
@@ -161,16 +225,37 @@ export class TCodeSync {
    * @returns {boolean} false when refused
    */
   sendPositionNow(position, durationMs) {
+    return this.previewAxisPosition('L0', position, durationMs);
+  }
+
+  /**
+   * Push one target on ANY axis from outside the video clock.
+   *
+   * Generalises `sendPositionNow` off L0 so the per-axis range sliders can
+   * drive the axis they belong to. The whole point of that preview is to feel
+   * where the boundary actually lands, so it runs the same invert → range →
+   * cutoff stack a scripted position runs; sending 0 or 100 through it lands
+   * the device exactly on the min or max the slider is currently showing.
+   *
+   * Refuses while a video is driving — playback owns the device then, and a
+   * preview command racing the scheduler would fight it mid-stroke.
+   *
+   * @param {string} tcode axis id, e.g. 'L0', 'R1'
+   * @param {number} position 0-100, PRE-transform
+   * @param {number} durationMs time to reach it
+   * @returns {boolean} false when refused
+   */
+  previewAxisPosition(tcode, position, durationMs) {
     if (this._active) return false;
     if (!this.tcode?.connected) return false;
-    if (!this.isAxisEnabled('L0')) return false;
+    if (!tcode || !this.isAxisEnabled(tcode)) return false;
 
-    let value = applyInvert(position, this.isAxisInverted('L0'));
-    const range = this.getAxisRange('L0');
+    let value = applyInvert(position, this.isAxisInverted(tcode));
+    const range = this.getAxisRange(tcode);
     value = range.min + (value / 100) * (range.max - range.min);
-    value = applyCutoff(value, this._axisCutoff.get('L0'));
+    value = applyCutoff(value, this._axisCutoff.get(tcode));
 
-    this.tcode.sendAxes({ L0: value }, undefined, { L0: this._clampMove(durationMs) });
+    this.tcode.sendAxes({ [tcode]: value }, undefined, { [tcode]: this._clampMove(durationMs) });
     return true;
   }
 
@@ -307,8 +392,13 @@ export class TCodeSync {
     return this._offsetMs;
   }
 
+  /** The playing video's own delta (#380), on top of the global offset. */
+  setVideoOffsetMs(ms) {
+    this._videoOffsetMs = clampVideoSyncOffset(ms);
+  }
+
   _currentTimeMs() {
-    return this.player.currentTime * 1000 - this._offsetMs;
+    return this.player.currentTime * 1000 - this._offsetMs - this._videoOffsetMs;
   }
 
   // --- Internal ---
@@ -389,8 +479,16 @@ export class TCodeSync {
   _bindVideoEvents() {
     const v = this.player.video;
     this._onPlaying = () => {
+      // The end of a stall hold (FN-02), or of a hiccup inside its grace
+      // window (FN-05), re-arms in place: nothing stopped the position axes,
+      // so they carry on from the target they were sent (a seek during the
+      // stall has already reset them, in _onSeeked).
+      const heldFor = this._stall.clear('playing');
       if (!this._active) return;
-      this._resetIndices();
+      if (heldFor) this._rearmAfterHold();
+      else this._resetIndices();
+      // Only the first play of a new video; a no-op on every later one.
+      this._homeUnusedAxes();
       this._startScheduler();
       this._emitStatus('synced');
       // Closes the pair logged by _onEmptied. A "source changed" line with no
@@ -401,9 +499,22 @@ export class TCodeSync {
         console.log('[TCodeSync] RE-ARMED after source change');
       }
     };
-    this._onPause = () => { if (!this._active) return; this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle'); };
+    this._onPause = () => {
+      if (!this._active) return;
+      // A proxy reports a STALL as a 'pause' (the player pop-out, the
+      // headset): hold, as the inline 'waiting' does, rather than stop(),
+      // whose rest frame centres every axis over UDP / WebSocket (FN-02).
+      if (isProxyStall(this.player?.video)) { this._stall.enter('proxy'); return; }
+      this._stall.clear('pause');
+      this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle');
+    };
     this._onSeeked = () => { if (!this._active) return; this._resetIndices(); };
-    this._onEnded = () => { if (!this._active) return; this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle'); };
+    this._onEnded = () => { if (!this._active) return; this._stall.clear(); this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle'); };
+    // FN-02: the picture stops without a 'pause'. Each holds (see _stall).
+    this._onWaiting = () => { if (this._active) this._stall.enter('waiting'); };
+    this._onStalled = () => { if (this._active) this._stall.enter('stalled'); };
+    this._onSeeking = () => { if (this._active) this._stall.enter('seeking'); };
+    this._onError = () => { if (this._active) this._stall.enter('error'); };
     // Source replaced (manual next/prev, or picking another video mid-play).
     // The media load algorithm sets paused = true WITHOUT firing `pause`, and
     // the video didn't end — so neither handler above runs and the axes would
@@ -413,10 +524,13 @@ export class TCodeSync {
     this._onEmptied = () => {
       if (!this._active) return;
       console.log('[TCodeSync] Video source changed — stopping axes, holding until the new video plays');
+      this._stall.clear();   // the stop below owns every axis now
       this._awaitingResume = true;
       this._stopScheduler();
       this.tcode.stop();
       this._resetIndices();
+      // A new video in the same run: its first play homes what it leaves.
+      this._armHome();
       this._emitStatus('idle');
     };
     v.addEventListener('playing', this._onPlaying);
@@ -424,6 +538,10 @@ export class TCodeSync {
     v.addEventListener('seeked', this._onSeeked);
     v.addEventListener('ended', this._onEnded);
     v.addEventListener('emptied', this._onEmptied);
+    v.addEventListener('waiting', this._onWaiting);
+    v.addEventListener('stalled', this._onStalled);
+    v.addEventListener('seeking', this._onSeeking);
+    v.addEventListener('error', this._onError);
   }
 
   _unbindVideoEvents() {
@@ -433,6 +551,62 @@ export class TCodeSync {
     if (this._onSeeked) v.removeEventListener('seeked', this._onSeeked);
     if (this._onEnded) v.removeEventListener('ended', this._onEnded);
     if (this._onEmptied) v.removeEventListener('emptied', this._onEmptied);
+    if (this._onWaiting) v.removeEventListener('waiting', this._onWaiting);
+    if (this._onStalled) v.removeEventListener('stalled', this._onStalled);
+    if (this._onSeeking) v.removeEventListener('seeking', this._onSeeking);
+    if (this._onError) v.removeEventListener('error', this._onError);
+  }
+
+  /**
+   * The intensity channels this run drives (a script or generated motion)
+   * and the user has not switched off: what a stall turns off.
+   */
+  _drivenIntensityAxes() {
+    const axes = new Set();
+    for (const tcode of [...this._axisActions.keys(), ...this._axisMotion.keys()]) {
+      if (isIntensityAxis(tcode) && this.isAxisEnabled(tcode)) axes.add(tcode);
+    }
+    return [...axes];
+  }
+
+  /**
+   * A stall hold began (FN-02): each driven intensity channel goes to 0, its
+   * stopped state, in one frame with no interval (a motor or pump goes off
+   * at once). No position axis is in it: the clock is frozen, so they stand
+   * where their last move takes them, and no DSTOP or rest frame jerks them.
+   */
+  _holdForStall(reason) {
+    const timeMs = Math.round((Number(this.player?.currentTime) || 0) * 1000);
+    const axes = this._drivenIntensityAxes();
+    console.log(`[TCodeSync] picture stopped (${reason}) at ${timeMs}ms — ` +
+      (axes.length ? `${axes.join(' ')} off until it moves` : 'holding until it moves'));
+    if (!axes.length || !this.tcode?.connected) return;
+    const off = {};
+    for (const axis of axes) off[axis] = 0;
+    this.tcode.sendAxes(off);
+  }
+
+  /**
+   * The picture moves again after a hold (FN-02): pick the cursors up at the
+   * current time and keep each position axis's last target, so the next
+   * keyframe is reached by a normal move, never by the one-tick snap a seek
+   * needs (a seek during the hold reset them already, so it still snaps).
+   * The intensity channels were turned off: their current level is sent
+   * again, and so is the generated value for the current keyframe.
+   */
+  _rearmAfterHold() {
+    const timeMs = this._currentTimeMs();
+    if (this._actions && this._actions.length > 0) {
+      this._lastActionIndex = this._binarySearch(this._actions, timeMs);
+    }
+    for (const [tcode, state] of this._axisActions) {
+      state.index = this._binarySearch(state.actions, timeMs);
+      if (isIntensityAxis(tcode)) state.lastSentValue = -1;
+    }
+    this._genBeatIndex = -1;
+    for (const [tcode, state] of this._genState) {
+      if (isIntensityAxis(tcode)) state.lastSentValue = -1;
+    }
   }
 
   // --- Scheduler ---
@@ -457,6 +631,8 @@ export class TCodeSync {
     if (this._intervalId) return;
     this._intervalId = setInterval(() => {
       if (!this._active || this.player.paused) return;
+      // FN-02: the picture is not moving. Send nothing (see _holdForStall).
+      if (this._stall.sample()) return;
       this._tick();
     }, this._tickIntervalMs);
   }
@@ -512,7 +688,10 @@ export class TCodeSync {
         const remaining = next.at - timeMs; // time to reach the next keyframe
 
         if (remaining > 0 && remaining <= MAX_GAP_MS) {
-          const firstSend = this._lastSentPos < 0;
+          // Go home parked L0 in the middle: its first move is to the next
+          // keyframe at the keyframe's own pace, never a one-tick snap.
+          const fromHome = this._fromHome.delete('L0');
+          const firstSend = this._lastSentPos < 0 && !fromHome;
           // Steady state: target = the next keyframe's real position (so peaks
           // and troughs reach the device intact). First send: snap to the
           // current interpolated position over one tick.
@@ -565,7 +744,10 @@ export class TCodeSync {
       const remaining = next.at - timeMs;
       if (remaining <= 0 || remaining > MAX_GAP_MS) continue;
 
-      const firstSend = state.lastSentValue < 0;
+      // An axis Go home parked in the middle never snaps from there: its first
+      // move is to the next keyframe at the keyframe's own pace (goHome).
+      const fromHome = this._fromHome.delete(tcode);
+      const firstSend = state.lastSentValue < 0 && !fromHome;
       let rawVal, moveMs;
       if (firstSend) {
         // Snap to the current interpolated position over one tick.
@@ -603,7 +785,144 @@ export class TCodeSync {
     if (Object.keys(axisValues).length > 0) {
       this.tcode.sendAxes(axisValues, undefined, axisIntervals);
       this._lastSendTime = now;
+      for (const axis of Object.keys(axisValues)) {
+        if (HOME_AXES.has(axis)) this._drivenAxes.add(axis);
+      }
     }
+  }
+
+  /**
+   * Take the homing decision only once `ready` settles (E2-06). The app
+   * calls this as a video with companion axis files starts loading, with a
+   * promise that settles when they have all loaded or failed: an axis one of
+   * them drives must not be eased to centre first. The files load one after
+   * another and are not awaited before playback starts, so with autoplay
+   * and a slow drive the first play used to send `R0500I1000 R1500I1000` for
+   * axes Companion Clip drives and hold them at centre for 6-9 s (verify-3).
+   *
+   * A play while held decides nothing; when `ready` settles, a video still
+   * playing is homed then, from the axes it has scripts for by then (a file
+   * that failed counts as undriven). `null` drops any hold, as a video with
+   * no companions does. A newer call replaces an older one, so a superseded
+   * load settling late holds nothing.
+   *
+   * @param {Promise|null} ready
+   */
+  holdHomeUntil(ready) {
+    if (!ready) {
+      const wasHeld = !!this._homeHold;
+      this._homeHold = null;
+      if (wasHeld) this._homeIfPlaying();
+      return;
+    }
+    const hold = {};
+    this._homeHold = hold;
+    Promise.resolve(ready).then(() => {}, () => {}).then(() => {
+      if (this._homeHold !== hold) return;
+      this._homeHold = null;
+      this._homeIfPlaying();
+    });
+  }
+
+  /** Home now if this engine drives a video that is playing; otherwise the
+   *  next play does (the decision stays armed). */
+  _homeIfPlaying() {
+    if (this._active && this.player && !this.player.paused) this._homeUnusedAxes();
+  }
+
+  /** A new video is starting: what the last one moved may need to go home. */
+  _armHome() {
+    for (const axis of this._drivenAxes) this._homeCandidates.add(axis);
+    this._drivenAxes.clear();
+    this._homeArmed = true;
+  }
+
+  /**
+   * The new video's first play (FT-095, #389): each position axis the last
+   * video moved that this one has no script or generated motion for, and is
+   * enabled, eases back to centre over HOME_MOVE_MS. Never a bare frame,
+   * never L0 or an axis no video moved, never while paused (this runs only
+   * from a play), never mid-video (once per start). "Centre" goes through
+   * the axis's own stack, as a scripted 50 would: the middle of the travel
+   * its range allows, inside its cutoff. Stop is unchanged: UDP / WebSocket
+   * stop() already centres every axis, serial DSTOP holds in place.
+   */
+  _homeUnusedAxes() {
+    if (!this._homeArmed) return;
+    // Its companion axes are still loading: decide when they have (E2-06).
+    if (this._homeHold) return;
+    this._homeArmed = false;
+    // No link: keep them for the next start (a reconnect stops and starts).
+    if (!this.tcode?.connected) return;
+    const candidates = [...this._homeCandidates];
+    this._homeCandidates.clear();
+    const values = {};
+    const intervals = {};
+    for (const axis of candidates) {
+      if (!this.isAxisEnabled(axis)) continue;
+      if (this._axisActions.has(axis) || this._axisMotion.has(axis)) continue;
+      let value = applyInvert(50, this.isAxisInverted(axis));
+      const range = this.getAxisRange(axis);
+      value = range.min + (value / 100) * (range.max - range.min);
+      value = applyCutoff(value, this._axisCutoff.get(axis));
+      values[axis] = value;
+      intervals[axis] = HOME_MOVE_MS;
+    }
+    if (Object.keys(values).length === 0) return;
+    console.log(`[TCodeSync] Homing axes this video does not drive: ${Object.keys(values).join(' ')}`);
+    this.tcode.sendAxes(values, undefined, intervals);
+  }
+
+  /**
+   * Go home (Devices > T-Code, #384 uhntiss, #389 kissenpirat; Dave
+   * 2026-11-20: "can we impliment the t code return home stuff at least").
+   * Every enabled position axis (L0, L1, L2, R0, R1, R2, A0) eases to the
+   * middle of the user's own range over `moveMs`, through invert, range and
+   * cutoff like any other value (so it never leaves the limits); every
+   * intensity channel (V0, V1, A1, A2) goes to 0 at once. One frame, timed
+   * per axis (`L0500I2000 ... V0000`): a bare or fast frame slams an
+   * OSR2+/SR6 across its travel (the 2026-08-01 "violent jump on pause").
+   * The caller pauses the video first (app.js `_tcodeGoHome`): while it
+   * plays, the next keyframe would take the axes straight back.
+   *
+   * @param {{moveMs?: number}} [opts]
+   * @returns {{sent: boolean, reason?: string, positions?: string[], intensities?: string[]}}
+   */
+  goHome({ moveMs = GO_HOME_MOVE_MS } = {}) {
+    if (!this.tcode?.connected) return { sent: false, reason: 'not-connected' };
+    const values = {};
+    const intervals = {};
+    const positions = [];
+    const intensities = [];
+    const axes = ['L0', ...AXIS_DEFINITIONS.map((a) => a.tcode)];
+    for (const axis of axes) {
+      if (!this.isAxisEnabled(axis)) continue;
+      if (INTENSITY_AXES.has(axis)) {
+        values[axis] = 0;
+        intervals[axis] = 0;   // off at once, no ramp
+        intensities.push(axis);
+        continue;
+      }
+      let value = applyInvert(50, this.isAxisInverted(axis));
+      const range = this.getAxisRange(axis);
+      value = range.min + (value / 100) * (range.max - range.min);
+      value = applyCutoff(value, this._axisCutoff.get(axis));
+      values[axis] = value;
+      intervals[axis] = moveMs;
+      positions.push(axis);
+    }
+    if (positions.length === 0 && intensities.length === 0) return { sent: false, reason: 'no-axes' };
+    this.tcode.sendAxes(values, undefined, intervals);
+    // The next play must not slam them back. Every play / seek resets what
+    // the engine remembers as sent, and its first send then snaps to the
+    // current position over ONE tick: harmless from where the video paused,
+    // half the travel at full speed from the middle. So each axis parked
+    // here takes its first move to the next keyframe at the keyframe's own
+    // pace instead (_tick; used once per axis).
+    this._fromHome = new Set(positions);
+    this._homeCandidates.clear();   // FT-095: nothing left to home on the next video
+    console.log(`[TCodeSync] Go home: ${positions.join(' ') || '(no position axis)'} to the middle over ${moveMs} ms${intensities.length ? `; ${intensities.join(' ')} off` : ''}`);
+    return { sent: true, positions, intensities };
   }
 
   /**
@@ -694,6 +1013,13 @@ export class TCodeSync {
       } else {
         const t = this._genClockSec * cfg.speed + axisPhase(tcode);
         raw = shapeGeneratedValue(noiseToPercent(fbm(this._noise, t)), cfg);
+      }
+
+      // Blend toward the stroke if asked (MFP's MotionProviderBlend). Uses
+      // the same beat position the link mode traces, so at blend=100 a random
+      // axis lands exactly where "follow stroke" would.
+      if (cfg.blend > 0 && cfg.mode !== 'link') {
+        raw = blendWithStroke(raw, shapeGeneratedValue(beat.pos, cfg), cfg.blend);
       }
 
       // Same output stack as a scripted axis (minus the extender, which

@@ -23,7 +23,8 @@
  * or disconnected volume.
  *
  * Fails OPEN: if the IPC is missing or throws, every path is reported
- * available. That matters — a probe failure must never cascade into greying
+ * available, and so is any single path whose check timed out (`null`). That
+ * matters — a probe failure must never cascade into greying
  * out (or worse, dropping) a library that is perfectly fine. The destructive
  * bug this module exists to fix came from trusting a negative answer.
  *
@@ -42,7 +43,11 @@ export async function probeAvailability(paths, api) {
     if (bridge?.filesExist) {
       const results = await bridge.filesExist(unique);
       if (Array.isArray(results) && results.length === unique.length) {
-        return new Set(unique.filter((_, i) => results[i]));
+        // Only an explicit `false` is unavailable. `files-exist` answers
+        // `null` when a path did not answer in time (a spun-down disk, a NAS
+        // past the budget): that is UNKNOWN, and a display probe fails open,
+        // so it must not grey out a video that would play fine.
+        return new Set(unique.filter((_, i) => results[i] !== false));
       }
       // Length mismatch means a contract break, not a set of absent files.
       return new Set(unique);

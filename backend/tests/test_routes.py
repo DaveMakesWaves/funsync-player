@@ -19,7 +19,7 @@ def anyio_backend():
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:5123") as c:  # what the desktop dials (FT-009 gate checks Host)
         yield c
 
 

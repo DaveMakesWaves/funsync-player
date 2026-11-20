@@ -168,6 +168,15 @@ export class RemoteSyncClient {
   }
 
   /**
+   * Edge Hold remote trigger (next major), the Orgasm button's twin: the
+   * same hold / toggle contract, reaching the desktop's Z handler. The
+   * `edge-state` broadcast keeps the button honest.
+   */
+  sendEdgeHold(active) {
+    this._send({ type: 'edge-hold', active: !!active });
+  }
+
+  /**
    * Per-device offset adjustment from the phone (F4). `device` is the
    * kind key the desktop's device-status list uses (handy/buttplug/
    * tcode/autoblow); ms is clamped desktop-side (untrusted LAN input).

@@ -35,13 +35,16 @@ export const SET_PLAY_STATE = 'set-play-state';
 // Playback-rate / volume relayed down when changed from a main-side UI.
 export const SET_RATE      = 'set-rate';      // { type, rate }
 export const SET_VOLUME    = 'set-volume';    // { type, volume, muted }
+// Loop the current video. Sent when the pop-out takes over (so a video
+// looped inline stays looped) and for Shift+L pressed in the main window.
+export const SET_LOOP      = 'set-loop';      // { type, loop }
 // Request a current-frame screenshot from the player (2d).
 export const CAPTURE_FRAME = 'capture-frame'; // { type, requestId }
 // Funscript-driven overlays streamed down for the reused ProgressBar +
 // variant selector (the data lives in main with the devices).
 export const HEATMAP       = 'heatmap';       // { type, actions, durationMs }
 export const CHAPTERS      = 'chapters';       // { type, chapters, bookmarks, durationMs }
-export const VARIANTS      = 'variants';       // { type, list:[{label,path}], activeLabel }
+export const VARIANTS      = 'variants';       // { type, list:[{label,path,text}], activeLabel, activeText? (no entry plays) }
 export const QUEUE_STATE   = 'queue-state';    // { type, hasPrev, hasNext, label }
 // Up Next overlay, mirrored into the pop-out so the countdown card shows
 // where the video actually is. `action` selects the sub-event; the engine
@@ -54,14 +57,25 @@ export const QUEUE_STATE   = 'queue-state';    // { type, hasPrev, hasNext, labe
 export const UP_NEXT       = 'up-next';
 export const THEME         = 'theme';         // { type, theme }
 export const LOCALE        = 'locale';        // { type, locale }
+// Settings > Playback changed the HM playhead marker or the overlay opacity
+// while the pop-out is open (FT-028). Applied there, never echoed back.
+// INITIAL_STATE still carries both for a fresh open.
+//   { type, playhead: boolean, opacity: number (percent, 20-100) }
+export const INLINE_VIZ_STATE = 'inline-viz-state';
 
 // ── Pop-out → main ─────────────────────────────────────────────────────
 export const READY         = 'ready';         // { type }
 // High-frequency clock tick that drives the IPCPlaybackProxy (2c).
-//   { type, timeMs, paused, rate }
+//   { type, timeMs, paused, stalled, rate, loop }
+// `paused` is the element's own flag; `stalled` (N-01) is true while it is
+// not paused but the picture cannot move (starved, seeking, failed, or a
+// time frozen for a second). Main's proxy treats either as paused for the
+// devices. Also sent at once on every stall boundary, not only every 100 ms.
 export const TIME_TICK     = 'time-tick';
 // Discrete <video> events the proxy re-dispatches to the sync engines.
 //   { type, event: 'play'|'pause'|'seeked'|'ended', timeMs }
+// 'volumechange' carries { volume, muted } instead: main keeps the saved
+// volume in step with the pop-out's slider and its own volume keys.
 export const VIDEO_EVENT   = 'video-event';
 // Video metadata on load / change.
 //   { type, src, durationMs, width, height }
@@ -83,6 +97,13 @@ export const LOAD_PREV     = 'load-prev';      // { type }
 export const UP_NEXT_ACTION = 'up-next-action'; // { type, action }
 // Reply to CAPTURE_FRAME with a data URL (2d).
 export const FRAME_CAPTURED = 'frame-captured'; // { type, requestId, dataUrl }
+// X (Orgasm Switch) and Z (Edge Hold) pressed and let go in the player
+// window (next major, Dave 2026-11-17). Main calls the handlers its own
+// keyboard calls (_onOrgasmHold / _onEdgeHold), which apply hold or toggle
+// as set. `active` is true on the press (once: auto-repeat is not sent)
+// and false on the key's release.
+export const ORGASM_HOLD   = 'orgasm-hold';    // { type, active }
+export const EDGE_HOLD     = 'edge-hold';      // { type, active }
 
 /**
  * Build an inner message payload. The window-module `relay()` wraps it in
@@ -104,8 +125,9 @@ export function classifyMessage(payload) {
 
 /** Every known message type — for tests + dev-time unknown-type warnings. */
 export const ALL_MESSAGE_TYPES = Object.freeze([
-  INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME,
+  INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME, SET_LOOP,
   CAPTURE_FRAME, HEATMAP, CHAPTERS, VARIANTS, QUEUE_STATE, UP_NEXT, THEME, LOCALE,
   READY, TIME_TICK, VIDEO_EVENT, VIDEO_META, REQUEST_EXPAND, SWITCH_VARIANT,
-  LOAD_NEXT, LOAD_PREV, UP_NEXT_ACTION, FRAME_CAPTURED, SET_INLINE_VIZ,
+  LOAD_NEXT, LOAD_PREV, UP_NEXT_ACTION, FRAME_CAPTURED, SET_INLINE_VIZ, INLINE_VIZ_STATE,
+  ORGASM_HOLD, EDGE_HOLD,
 ]);

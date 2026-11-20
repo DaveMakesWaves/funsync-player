@@ -99,6 +99,116 @@ class TestFindBinary:
         assert result == "ffmpeg"
 
 
+class TestFindBinaryPackaged:
+    """The FROZEN branch — the one that ships, and the one nothing tested.
+
+    Sylvain-Et-Un, 2026-08-24: 104 videos, 103 thumbnail requests, 103 backend
+    500s, zero successes. The packaged backend looked for ffmpeg beside its own
+    exe, where nothing puts it, without the `.exe` suffix it would need on
+    Windows anyway — so it always fell through to PATH and worked only on
+    machines with a system-wide ffmpeg. Every test above exercises the dev
+    branch, which is why they were all green while this shipped.
+    """
+
+    @staticmethod
+    def _fake_install(tmp_path, exe_name, ffmpeg_names):
+        """Build the layout electron-builder actually produces:
+
+            <root>/ffmpeg/ffmpeg.exe          <- extraFiles
+            <root>/resources/backend/<exe>    <- extraResources
+        """
+        backend_dir = tmp_path / "resources" / "backend"
+        backend_dir.mkdir(parents=True)
+        exe = backend_dir / exe_name
+        exe.write_text("")
+        ff_dir = tmp_path / "ffmpeg"
+        ff_dir.mkdir()
+        for n in ffmpeg_names:
+            (ff_dir / n).write_text("")
+        return exe, ff_dir
+
+    def test_windows_packaged_finds_ffmpeg_in_the_install_root(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(os, "name", "nt")
+        exe, ff_dir = self._fake_install(
+            tmp_path, "funsync-backend.exe", ["ffmpeg.exe", "ffprobe.exe"])
+
+        from services import ffmpeg as ffmpeg_mod
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", str(exe))
+
+        assert ffmpeg_mod._find_binary("ffmpeg") == str((ff_dir / "ffmpeg.exe").resolve())
+        assert ffmpeg_mod._find_binary("ffprobe") == str((ff_dir / "ffprobe.exe").resolve())
+
+    def test_linux_packaged_finds_ffmpeg_in_the_install_root(self, monkeypatch, tmp_path):
+        """The AppImage uses the same relative layout, suffix aside."""
+        monkeypatch.setattr(os, "name", "posix")
+        exe, ff_dir = self._fake_install(
+            tmp_path, "funsync-backend", ["ffmpeg", "ffprobe"])
+
+        from services import ffmpeg as ffmpeg_mod
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", str(exe))
+
+        assert ffmpeg_mod._find_binary("ffmpeg") == str((ff_dir / "ffmpeg").resolve())
+
+    def test_packaged_still_finds_a_binary_sitting_beside_the_exe(self, monkeypatch, tmp_path):
+        """Kept so a future build that DOES colocate them keeps working."""
+        monkeypatch.setattr(os, "name", "nt")
+        backend_dir = tmp_path / "resources" / "backend"
+        backend_dir.mkdir(parents=True)
+        exe = backend_dir / "funsync-backend.exe"
+        exe.write_text("")
+        beside = backend_dir / "ffmpeg.exe"
+        beside.write_text("")
+
+        from services import ffmpeg as ffmpeg_mod
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", str(exe))
+
+        assert ffmpeg_mod._find_binary("ffmpeg") == str(beside.resolve())
+
+    def test_packaged_with_nothing_bundled_falls_back_to_path(self, monkeypatch, tmp_path):
+        """The fallback is legitimate — it just must not be the only outcome."""
+        monkeypatch.setattr(os, "name", "nt")
+        backend_dir = tmp_path / "resources" / "backend"
+        backend_dir.mkdir(parents=True)
+        exe = backend_dir / "funsync-backend.exe"
+        exe.write_text("")
+
+        from services import ffmpeg as ffmpeg_mod
+        monkeypatch.setattr(sys, "frozen", True, raising=False)
+        monkeypatch.setattr(sys, "executable", str(exe))
+        # Neutralise the dev-tree probe, which would find the developer's own
+        # ffmpeg/ directory and mask the fallback.
+        fake_file = tmp_path / "nowhere" / "services" / "ffmpeg.py"
+        fake_file.parent.mkdir(parents=True)
+        fake_file.touch()
+        monkeypatch.setattr(ffmpeg_mod, "__file__", str(fake_file))
+
+        assert ffmpeg_mod._find_binary("ffmpeg") == "ffmpeg"
+
+
+class TestDescribeBinaries:
+    """A total ffmpeg outage and a healthy install used to produce identical
+    logs. `describe_binaries` is what makes them different."""
+
+    def test_reports_resolved_paths_and_whether_they_are_real(self):
+        from services.ffmpeg import describe_binaries
+        info = describe_binaries()
+        assert set(info) == {
+            "ffmpeg", "ffprobe", "ffmpeg_bundled", "ffprobe_bundled", "frozen"}
+        assert isinstance(info["ffmpeg_bundled"], bool)
+        assert isinstance(info["ffprobe_bundled"], bool)
+
+    def test_bundled_is_false_when_we_are_only_trusting_PATH(self, monkeypatch):
+        import services.ffmpeg as ffmpeg_mod
+        monkeypatch.setattr(ffmpeg_mod, "FFMPEG", "ffmpeg")
+        monkeypatch.setattr(ffmpeg_mod, "FFPROBE", "ffprobe")
+        info = ffmpeg_mod.describe_binaries()
+        assert info["ffmpeg_bundled"] is False
+        assert info["ffprobe_bundled"] is False
+
+
 class TestGetVideoHash:
     def test_hash_format(self):
         """Hash should be 12 hex characters."""
@@ -322,9 +432,292 @@ class TestGenerateSingleThumbnail:
         assert default["path"] != exact["path"]
         assert "_v4e_" in os.path.basename(exact["path"])
         # And the exact call actually re-ran ffmpeg (not a cache hit on
-        # the default file): its output path is the exact-namespace one.
+        # the default file): its output is the exact-namespace one. ffmpeg
+        # writes a `.jpg` temp beside it that is renamed onto it (FT-084;
+        # this asserted `-y` named the cache file itself).
         out_arg = captured["args"][captured["args"].index("-y") + 1]
-        assert out_arg == exact["path"]
+        assert os.path.dirname(out_arg) == os.path.dirname(exact["path"])
+        assert os.path.basename(out_arg).startswith(os.path.basename(exact["path"])[:-4] + ".part-")
+        assert out_arg.endswith(".jpg")
+        assert os.path.exists(exact["path"]) and not os.path.exists(out_arg)
+
+    # --- App test V31 / V32: no keyframe after the seek point ---------------
+
+    _BANNER = (
+        "ffmpeg version 8.1-full_build-www.gyan.dev Copyright (c) 2000-2026 the FFmpeg developers\n"
+        "  built with gcc 15.2.0 (Rev8, Built by MSYS2 project)\n"
+        "  configuration: --enable-gpl --enable-version3 --enable-static " + "--enable-lib" * 120 + "\n"
+        "  libavutil      60.  8.100 / 60.  8.100\n"
+    )
+    _NO_FRAME = (
+        "[vost#0:0/mjpeg] Could not open encoder before EOF\n"
+        "[out#0/image2] Nothing was written into output file, because at least one "
+        "of its streams received no packets.\n"
+        "Conversion failed!\n"
+    )
+
+    def _patch_failing_keyframe_decode(self, monkeypatch, tmp_path, retry_works=True):
+        """run_silent fake: the keyframe-only decode writes nothing (what real
+        ffmpeg does when no keyframe sits at/after the seek point); a decode
+        without `-skip_frame` writes the frame, unless `retry_works` is off."""
+        from services import ffmpeg as ffmpeg_mod
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(ffmpeg_mod, "get_metadata", lambda _p: {
+            "duration": 5.0, "width": 1920, "height": 1080,
+        })
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+        calls = []
+
+        def fake_run(args, **kw):
+            calls.append({"args": list(args), "kwargs": kw})
+            if "-skip_frame" in args or not retry_works:
+                return MagicMock(returncode=234, stderr=self._BANNER + self._NO_FRAME)
+            with open(args[args.index("-y") + 1], "wb") as f:
+                f.write(b"\xff\xd8\xff")
+            return MagicMock(returncode=0, stderr="")
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", fake_run)
+        return calls
+
+    def test_no_frame_from_keyframe_decode_retries_once_without_skip_frame(self, monkeypatch, tmp_path):
+        """V31: a clip whose only keyframe is before the seek point produced
+        NO frame under `-skip_frame nokey`, ffmpeg exited non-zero, and the
+        thumbnail failed on every request forever. One retry without
+        `-skip_frame` (exact mode's argv) gets the frame. The retry must stay
+        a single-frame decode at the same seek with the plain scale filter:
+        thumbnail/select filters break VR libraries."""
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "short-one-gop.mp4"
+        video.write_bytes(b"placeholder")
+        calls = self._patch_failing_keyframe_decode(monkeypatch, tmp_path)
+
+        result = generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+
+        assert os.path.exists(result["path"])
+        assert len(calls) == 2
+        first, retry = calls[0]["args"], calls[1]["args"]
+        assert "-skip_frame" in first
+        assert "-skip_frame" not in retry
+        assert retry[retry.index("-ss") + 1] == first[first.index("-ss") + 1] == "0.5"
+        assert retry.index("-ss") < retry.index("-i")
+        assert retry[retry.index("-frames:v") + 1] == "1"
+        assert retry[retry.index("-vf") + 1] == "scale=320:-2"
+        # Both runs write the same temp, renamed onto the cache name (FT-084;
+        # this asserted `-y` named the cache file itself).
+        assert retry[retry.index("-y") + 1] == first[first.index("-y") + 1]
+        assert not os.path.exists(retry[retry.index("-y") + 1])
+        assert calls[1]["kwargs"]["timeout"] == calls[0]["kwargs"]["timeout"]
+
+    def test_a_working_keyframe_decode_runs_ffmpeg_once(self, monkeypatch, tmp_path):
+        """The retry is for the no-frame case only: a normal file must not
+        pay for a second decode."""
+        from services import ffmpeg as ffmpeg_mod
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"placeholder")
+        captured = self._patch_ffmpeg(monkeypatch, tmp_path, duration=300.0)
+        fake = ffmpeg_mod.run_silent
+        calls = []
+
+        def counting(args, **kw):
+            calls.append(args)
+            return fake(args, **kw)
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", counting)
+        generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+        assert len(calls) == 1
+        assert "-skip_frame" in captured["args"]
+
+    def test_exact_mode_failure_is_not_retried(self, monkeypatch, tmp_path):
+        """Exact mode already decodes without `-skip_frame`; a failure there
+        is a real failure, reported once."""
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"placeholder")
+        calls = self._patch_failing_keyframe_decode(monkeypatch, tmp_path, retry_works=False)
+        with pytest.raises(RuntimeError):
+            generate_single_thumbnail(str(video), seek_pct=0.5, width=320, exact=True)
+        assert len(calls) == 1
+
+    def test_failure_message_carries_the_error_not_the_banner(self, monkeypatch, tmp_path):
+        """V32: the raised message (which becomes the HTTP 500 detail and the
+        main.log line) used to be the FULL stderr, which opens with the
+        version/build banner; main.js kept the first 400 characters, so the
+        log showed only the banner. Ask ffmpeg for errors only, and raise
+        with the stderr TAIL, where ffmpeg prints the cause."""
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "broken.mp4"
+        video.write_bytes(b"placeholder")
+        calls = self._patch_failing_keyframe_decode(monkeypatch, tmp_path, retry_works=False)
+
+        with pytest.raises(RuntimeError) as exc:
+            generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+
+        msg = str(exc.value)
+        assert "Nothing was written into output file" in msg
+        assert "configuration:" not in msg
+        assert len(msg) < 600
+        for call in calls:
+            args = call["args"]
+            assert "-hide_banner" in args
+            assert args[args.index("-loglevel") + 1] == "error"
+            assert args.index("-loglevel") < args.index("-i")
+
+    def test_real_ffmpeg_single_keyframe_clip_gets_a_thumbnail(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """V31 against the REAL ffmpeg: a 5 s clip encoded with one keyframe
+        (-g 1000), thumbnailed at 10% (0.5 s). The keyframe-only decode gives
+        no frame; the retry must produce a real JPEG."""
+        import shutil
+        import subprocess
+        from services import ffmpeg as ffmpeg_mod
+        from services.ffmpeg import generate_single_thumbnail
+
+        ffmpeg_bin = ffmpeg_mod.FFMPEG
+        if not (os.path.isabs(ffmpeg_bin) and os.path.exists(ffmpeg_bin)) and not shutil.which(ffmpeg_bin):
+            pytest.skip("ffmpeg not available")
+
+        clip = tmp_path / "one-keyframe.mp4"
+        subprocess.run(
+            [ffmpeg_bin, "-hide_banner", "-loglevel", "error", "-y",
+             "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=30", "-t", "5",
+             "-c:v", "libx264", "-g", "1000", "-pix_fmt", "yuv420p", str(clip)],
+            check=True, capture_output=True,
+        )
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+        real_run = ffmpeg_mod.run_silent
+        codes = []
+
+        def spy(args, **kw):
+            r = real_run(args, **kw)
+            if "-frames:v" in args:  # the thumbnail runs, not get_metadata's ffprobe
+                codes.append(("-skip_frame" in args, r.returncode))
+            return r
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", spy)
+
+        result = generate_single_thumbnail(str(clip), seek_pct=0.1, width=160)
+
+        with open(result["path"], "rb") as f:
+            assert f.read(2) == b"\xff\xd8", "not a JPEG"
+        # The reproduction itself: keyframe-only decode failed, retry worked.
+        assert codes[0][0] is True and codes[0][1] != 0
+        assert codes[-1] == (False, 0)
+
+    # --- FT-084: a cut-off JPEG is never a cache hit ---------------------------
+    #
+    # ffmpeg wrote straight to the cache name, a run killed by the 25 s
+    # timeout left a partial JPEG there (TimeoutExpired was not even caught),
+    # and every later request took "the file exists" as a cache hit: the
+    # same broken image, for good.
+
+    _WHOLE_JPEG = b"\xff\xd8\xff\xe0" + b"\x00" * 32 + b"\xff\xd9"
+
+    def _patch_writing(self, monkeypatch, tmp_path, write=None, raise_timeout=False):
+        """Stub get_metadata + run_silent; the fake ffmpeg writes `write`
+        (default: a whole JPEG) to its `-y` target, then optionally times out."""
+        import subprocess
+        from services import ffmpeg as ffmpeg_mod
+        from unittest.mock import MagicMock
+
+        monkeypatch.setattr(ffmpeg_mod, "get_metadata", lambda _p: {
+            "duration": 120.0, "width": 1920, "height": 1080,
+        })
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+        calls = []
+
+        def fake_run(args, **kw):
+            out = args[args.index("-y") + 1]
+            calls.append(out)
+            with open(out, "wb") as f:
+                f.write(self._WHOLE_JPEG if write is None else write)
+            if raise_timeout:
+                raise subprocess.TimeoutExpired(args, kw.get("timeout", 25))
+            return MagicMock(returncode=0, stderr="")
+
+        monkeypatch.setattr(ffmpeg_mod, "run_silent", fake_run)
+        return calls
+
+    def _cache_path_for(self, monkeypatch, tmp_path, video):
+        """Where generate_single_thumbnail caches `video` at 10% / 320."""
+        from services.ffmpeg import generate_single_thumbnail
+        calls = self._patch_writing(monkeypatch, tmp_path)
+        path = generate_single_thumbnail(str(video), seek_pct=0.1, width=320)["path"]
+        assert len(calls) == 1
+        return path
+
+    def test_truncated_cached_thumbnail_is_regenerated(self, monkeypatch, tmp_path):
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"placeholder")
+        cache = self._cache_path_for(monkeypatch, tmp_path, video)
+        with open(cache, "wb") as f:   # what a killed ffmpeg left: SOI, no EOI
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 16)
+
+        calls = self._patch_writing(monkeypatch, tmp_path)
+        result = generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+
+        assert len(calls) == 1, "a cut-off JPEG was taken as a cache hit"
+        assert result["path"] == cache
+        with open(cache, "rb") as f:
+            data = f.read()
+        assert data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")
+
+    def test_whole_cached_thumbnail_is_still_a_hit(self, monkeypatch, tmp_path):
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "v.mp4"
+        video.write_bytes(b"placeholder")
+        cache = self._cache_path_for(monkeypatch, tmp_path, video)
+
+        calls = self._patch_writing(monkeypatch, tmp_path)
+        assert generate_single_thumbnail(str(video), seek_pct=0.1, width=320)["path"] == cache
+        assert calls == []
+
+    def test_timeout_leaves_no_cached_partial(self, monkeypatch, tmp_path):
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "slow.mp4"
+        video.write_bytes(b"placeholder")
+        cache = self._cache_path_for(monkeypatch, tmp_path, video)
+        os.remove(cache)
+
+        calls = self._patch_writing(monkeypatch, tmp_path, write=b"\xff\xd8\xff\xe0half", raise_timeout=True)
+        with pytest.raises(RuntimeError, match="timed out"):
+            generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+
+        assert not os.path.exists(cache), "the partial JPEG reached the cache name"
+        assert all(not os.path.exists(p) for p in calls), "the temp file was left behind"
+        # And the next request runs ffmpeg again instead of serving a stub.
+        calls = self._patch_writing(monkeypatch, tmp_path)
+        generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+        assert len(calls) == 1
+        assert os.path.exists(cache)
+
+    def test_failed_run_leaves_no_temp_file(self, monkeypatch, tmp_path):
+        from services.ffmpeg import generate_single_thumbnail
+
+        video = tmp_path / "broken.mp4"
+        video.write_bytes(b"placeholder")
+        calls = self._patch_failing_keyframe_decode(monkeypatch, tmp_path, retry_works=False)
+        with pytest.raises(RuntimeError):
+            generate_single_thumbnail(str(video), seek_pct=0.1, width=320)
+        outs = {c["args"][c["args"].index("-y") + 1] for c in calls}
+        assert all(not os.path.exists(p) for p in outs)
 
     def test_metadata_cache_survives_backend_restart(self, monkeypatch, tmp_path, _isolated_metadata_cache):
         """THE startup fix (2026-08-03): the ffprobe metadata cache used to
@@ -404,6 +797,75 @@ class TestGenerateSingleThumbnail:
             payload = json.load(f)
         assert payload["version"] == ffmpeg_mod.METADATA_CACHE_VERSION
         assert len(payload["entries"]) == 1
+
+    def test_real_ffprobe_failure_says_why(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """verify-2 (2026-11-07; also in v0.9.2): ffprobe ran with -v quiet, so
+        a file it cannot read failed with an EMPTY stderr and the FT-084
+        warning read 'ffprobe failed:' with nothing after it. Against the
+        REAL ffprobe: random bytes named .mp4 must fail with the reason."""
+        import shutil
+        from services import ffmpeg as ffmpeg_mod
+        from services.ffmpeg import get_metadata
+
+        probe_bin = ffmpeg_mod.FFPROBE
+        if not (os.path.isabs(probe_bin) and os.path.exists(probe_bin)) and not shutil.which(probe_bin):
+            pytest.skip("ffprobe not available")
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+        corrupt = tmp_path / "Corrupt Bytes.mp4"
+        corrupt.write_bytes(os.urandom(4096))
+
+        with pytest.raises(RuntimeError) as err:
+            get_metadata(str(corrupt))
+        message = str(err.value)
+        assert message.startswith("ffprobe failed:")
+        reason = message[len("ffprobe failed:"):].strip()
+        assert reason, "ffprobe failed with no reason (the -v quiet stderr)"
+        assert "Invalid data" in reason or "moov" in reason or "Corrupt Bytes" in reason
+
+    def test_thumbnail_failure_reason_is_one_line(self, monkeypatch, tmp_path, _isolated_metadata_cache):
+        """E-11 (2026-11-07): ffprobe's stderr for a cut-off MP4 is two lines
+        ("[mov,...] moov atom not found", then "<file>: Invalid data found
+        when processing input"). It went into the 500's detail as it was, and
+        main.js logs that detail in one warning, so the second line landed in
+        main.log with no timestamp or level. Against the REAL ffprobe, through
+        the route the desktop library calls: the detail is one line and still
+        carries both halves."""
+        import shutil
+        from fastapi.testclient import TestClient
+        from services import ffmpeg as ffmpeg_mod
+        from main import app
+
+        probe_bin = ffmpeg_mod.FFPROBE
+        if not (os.path.isabs(probe_bin) and os.path.exists(probe_bin)) and not shutil.which(probe_bin):
+            pytest.skip("ffprobe not available")
+        test_mp4 = os.path.join(os.path.dirname(__file__), "..", "..", "Test.mp4")
+        if not os.path.exists(test_mp4):
+            pytest.skip("Test.mp4 not found")
+        monkeypatch.setattr(
+            ffmpeg_mod, "tempfile",
+            type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
+        )
+        cut = tmp_path / "Corrupt Bytes.mp4"
+        with open(test_mp4, "rb") as f:
+            cut.write_bytes(f.read(65536))   # the header, no moov atom
+
+        # The desktop's own address: the route is DESKTOP_ONLY (FT-009).
+        client = TestClient(app, base_url="http://127.0.0.1:5123", client=("127.0.0.1", 50000))
+        res = client.post("/thumbnails/single", params={"video_path": str(cut)})
+        assert res.status_code == 500
+        detail = res.json()["detail"]
+        assert "\n" not in detail and "\r" not in detail, detail
+        assert "moov atom not found" in detail
+        assert "Invalid data found" in detail
+
+    def test_one_line_keeps_the_end(self):
+        from services.ffmpeg import _one_line
+        assert _one_line("a\n  b\r\n\tc\n") == "a b c"
+        assert _one_line(None) == ""
+        assert _one_line("x" * 600 + "\nthe cause", 20) == "x" * 10 + " the cause"
 
     def _patch_probe(self, monkeypatch, tmp_path):
         """Point the module's tempfile at tmp_path (isolates the cache

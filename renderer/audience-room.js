@@ -1,7 +1,7 @@
 // Audience room — pop-out renderer entry point.
 //
 // Thin client to the main renderer's AudienceBridge. Sends user
-// commands (add / remove / mute / set-offset / test-buzz) via the
+// commands (add / remove / mute / set-offset / test-buzz / resend) via the
 // popout protocol; receives state updates via INITIAL_STATE and the
 // VIEWER_* / HIDE_KEYS_CHANGED messages.
 //
@@ -14,18 +14,19 @@
 //     this window re-renders.
 
 import { t, initI18n, setLocale } from './js/i18n.js';
-import { icon, X, Volume2, VolumeX, Eye, EyeOff, Bell, Users } from './js/icons.js';
-import { applyWcoClass } from './js/wco.js';
+import { icon, X, Volume2, VolumeX, Eye, EyeOff, Bell, Users, RotateCcw } from './js/icons.js';
+import { watchWcoClass } from './js/wco.js';
 import {
   INITIAL_STATE, VIEWER_ADDED, VIEWER_REMOVED, VIEWER_STATUS, VIEWER_OFFSET,
   HIDE_KEYS_CHANGED, THEME,
   READY, ADD_VIEWER, REMOVE_VIEWER, SET_OFFSET, SET_MUTED, TEST_BUZZ,
-  TEST_BUZZ_ALL, SET_HIDE_KEYS, END_ROOM,
+  TEST_BUZZ_ALL, RESEND, SET_HIDE_KEYS, END_ROOM,
   makeMessage, classifyMessage,
 } from './js/audience-popout-protocol.js';
 
 // Frameless window → the page owns the drag region (.popout-titlebar).
-applyWcoClass();
+// Kept in step with the overlay for the whole session, not just at boot (FT-055).
+watchWcoClass({ where: 'audience room' });
 
 const HOST_ID = 'audience-room-host';
 const host = document.getElementById(HOST_ID);
@@ -36,7 +37,7 @@ if (!host) throw new Error('[audience-room] missing host #' + HOST_ID);
 const state = {
   roomActive: false,
   viewers: [],          // array of viewer snapshots from main
-  hideKeys: false,
+  hideKeys: true,       // masked until main says otherwise (store.js default)
   theme: 'dark',
   locale: 'en',         // updated from INITIAL_STATE
 };
@@ -114,7 +115,7 @@ function render() {
   buzzAllBtn.type = 'button';
   buzzAllBtn.className = 'audience-room__buzz-all-btn';
   buzzAllBtn.title = t('audience.room.testBuzzAllTitle');
-  buzzAllBtn.disabled = state.viewers.length === 0;
+  buzzAllBtn.disabled = !state.viewers.some(canTestBuzz);
   buzzAllBtn.appendChild(icon(Bell, { width: 16, height: 16 }));
   const baLabel = document.createElement('span');
   baLabel.textContent = t('audience.room.testBuzzAll');
@@ -224,19 +225,34 @@ function renderViewerCard(viewer) {
   offsetRow.appendChild(resetBtn);
   li.appendChild(offsetRow);
 
-  // Action row: Test buzz, Mute, Remove
+  // Action row: Test buzz, Resend, Mute, Remove
   const actions = document.createElement('div');
   actions.className = 'audience-room__card-actions';
 
   const buzzBtn = document.createElement('button');
   buzzBtn.type = 'button';
   buzzBtn.className = 'audience-room__card-buzz-btn';
+  buzzBtn.disabled = !canTestBuzz(viewer);
   buzzBtn.appendChild(icon(Bell, { width: 14, height: 14 }));
   const buzzLabel = document.createElement('span');
   buzzLabel.textContent = t('audience.room.testBuzz');
   buzzBtn.appendChild(buzzLabel);
   buzzBtn.addEventListener('click', () => send(makeMessage(TEST_BUZZ, { key: viewer.key })));
   actions.appendChild(buzzBtn);
+
+  // Resend (FT-121): connect again if the device dropped, then send the
+  // current script again. Nothing goes to a muted viewer.
+  const resendBtn = document.createElement('button');
+  resendBtn.type = 'button';
+  resendBtn.className = 'audience-room__card-resend-btn';
+  resendBtn.title = t('audience.room.resendTitle');
+  resendBtn.disabled = !canResend(viewer);
+  resendBtn.appendChild(icon(RotateCcw, { width: 14, height: 14 }));
+  const resendLabel = document.createElement('span');
+  resendLabel.textContent = t('audience.room.resend');
+  resendBtn.appendChild(resendLabel);
+  resendBtn.addEventListener('click', () => send(makeMessage(RESEND, { key: viewer.key })));
+  actions.appendChild(resendBtn);
 
   const muteBtn = document.createElement('button');
   muteBtn.type = 'button';
@@ -265,11 +281,13 @@ function renderViewerCard(viewer) {
 
   li.appendChild(actions);
 
-  // Error footer if any
-  if (viewer.lastError && (viewer.status === 'error' || viewer.status === 'disconnected')) {
+  // Error footer if any. A known error code gets its translated line; the
+  // raw message is the fallback (connect failures).
+  const errorText = viewerErrorText(viewer);
+  if (errorText && (viewer.status === 'error' || viewer.status === 'disconnected')) {
     const errFoot = document.createElement('div');
     errFoot.className = 'audience-room__card-error';
-    errFoot.textContent = viewer.lastError;
+    errFoot.textContent = errorText;
     li.appendChild(errFoot);
   }
 
@@ -323,19 +341,54 @@ function renderAddForm() {
 
 // --- Helpers ---
 
+// Statuses mirror VIEWER_STATUS in renderer/js/audience-bridge.js. A row
+// that does not hold the current video's script (waiting / uploading) is
+// never green, and neither is the header while any row is like that.
+const RED_STATUSES = new Set(['error', 'disconnected', 'script-failed']);
+const AMBER_STATUSES = new Set(['connecting', 'uploading', 'calibrating', 'waiting']);
+// Stopped on purpose, nothing wrong: grey.
+const GREY_STATUSES = new Set(['no-script', 'speed', 'muted', 'remote-held']);
+
 function aggregateStatus() {
   if (state.viewers.length === 0) return 'dim';
   const statuses = state.viewers.map((v) => v.status);
-  if (statuses.some((s) => s === 'error' || s === 'disconnected')) return 'error';
-  if (statuses.some((s) => s === 'connecting' || s === 'uploading' || s === 'calibrating')) return 'warning';
+  if (statuses.some((s) => RED_STATUSES.has(s))) return 'error';
+  if (statuses.some((s) => AMBER_STATUSES.has(s))) return 'warning';
   return 'connected';
 }
 
 function viewerLedState(v) {
-  if (v.status === 'error' || v.status === 'disconnected') return 'error';
-  if (v.status === 'connecting' || v.status === 'uploading' || v.status === 'calibrating') return 'warning';
-  if (v.muted) return 'muted';
+  if (RED_STATUSES.has(v.status)) return 'error';
+  if (AMBER_STATUSES.has(v.status)) return 'warning';
+  if (v.muted || GREY_STATUSES.has(v.status)) return 'muted';
   return 'connected';
+}
+
+// The bridge refuses a test buzz while a viewer plays, is muted, is not
+// connected, is being connected or set up, or its last stop failed
+// (AudienceBridge._buzzRefusal, FT-119); its button says so by being off.
+// An 'error' row with no error code is a connect that failed.
+const NO_BUZZ_STATUSES = new Set(['playing', 'connecting', 'calibrating', 'uploading', 'disconnected']);
+function canTestBuzz(v) {
+  if (v.muted || NO_BUZZ_STATUSES.has(v.status)) return false;
+  if (v.status === 'error') return v.errorCode === 'setup-failed' || v.errorCode === 'play-failed';
+  return true;
+}
+
+// Resend (FT-121): nothing for a muted viewer, or while it is connecting.
+function canResend(v) {
+  return !v.muted && v.status !== 'connecting' && v.status !== 'calibrating';
+}
+
+const ERROR_TEXT_KEYS = {
+  'stop-failed': 'audience.room.errorStopFailed',
+  'setup-failed': 'audience.room.errorSetupFailed',
+  'play-failed': 'audience.room.errorPlayFailed',
+};
+
+function viewerErrorText(v) {
+  const key = v.errorCode && ERROR_TEXT_KEYS[v.errorCode];
+  return key ? t(key) : (v.lastError || '');
 }
 
 function viewerStatusLabel(v) {
@@ -345,11 +398,18 @@ function viewerStatusLabel(v) {
     case 'uploading':    return t('audience.room.statusUploading');
     case 'calibrating':  return t('audience.room.statusCalibrating');
     case 'synced':       return t('audience.room.statusSynced');
+    case 'waiting':      return t('audience.room.statusWaiting');
+    case 'ready':        return t('audience.room.statusReady');
+    case 'remote-held':  return t('audience.room.statusRemoteHeld');
+    case 'no-script':    return t('audience.room.statusNoScript');
+    case 'speed':        return t('audience.room.statusSpeed', { rate: v.rate ?? '' });
+    case 'script-failed': return t('audience.room.statusScriptFailed');
     case 'playing':
       return v.rtdMs != null
         ? t('audience.room.statusPlayingWithRtd', { rtd: v.rtdMs })
         : t('audience.room.statusPlaying');
     case 'paused':       return t('audience.room.statusPaused');
+    case 'muted':        return t('audience.room.statusMuted');
     case 'error':        return t('audience.room.statusError');
     case 'disconnected': return t('audience.room.statusDisconnected');
     default:             return v.status;
@@ -366,7 +426,7 @@ function onMessage(payload) {
     case INITIAL_STATE: {
       state.roomActive = !!payload.roomActive;
       state.viewers = Array.isArray(payload.viewers) ? payload.viewers : [];
-      state.hideKeys = !!payload.hideKeys;
+      state.hideKeys = payload.hideKeys !== false;
       state.theme = payload.theme || 'dark';
       state.locale = payload.locale || 'en';
       applyTheme(state.theme);
@@ -403,6 +463,12 @@ function onMessage(payload) {
         v.status = payload.status;
         if (payload.rtdMs !== undefined) v.rtdMs = payload.rtdMs;
         if (payload.lastError !== undefined) v.lastError = payload.lastError;
+        if (payload.errorCode !== undefined) v.errorCode = payload.errorCode;
+        if (payload.rate !== undefined) v.rate = payload.rate;
+        // The row and the Mute / Unmute button read `muted`. Never mirrored
+        // until 2026-11-04 (since v0.9.2), so after Mute the button still
+        // said "Mute", sent mute again, and the viewer could not be unmuted.
+        if (payload.muted !== undefined) v.muted = !!payload.muted;
         render();
       }
       break;

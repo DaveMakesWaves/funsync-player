@@ -4,6 +4,24 @@ import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, 
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
 
+/**
+ * Nav-bar buttons a user can hide (zaikechi #381), in bar order, with the
+ * label each one shows. Settings > Appearance > Navigation bar lists exactly
+ * these; `player.navHidden` holds one flag per key. Library and Settings are
+ * deliberately absent: without them there is no way back to anything.
+ */
+export const NAV_HIDEABLE_ITEMS = Object.freeze([
+  { key: 'playlists', labelKey: 'nav.playlists' },
+  { key: 'categories', labelKey: 'nav.categories' },
+  { key: 'eroscripts', labelKey: 'nav.eroscripts' },
+  { key: 'devices', labelKey: 'nav.devices' },
+  { key: 'remote', labelKey: 'nav.webRemote' },
+  { key: 'vr', labelKey: 'nav.vr' },
+]);
+
+/** How many `nav-bar--fit-N` steps nav-bar.css defines (see `_fitToWidth`). */
+const NAV_FIT_LEVELS = 6;
+
 export class NavBar {
   constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLoadUrlClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
     this._onNavigate = onNavigate;
@@ -144,7 +162,9 @@ export class NavBar {
     });
     this._el.appendChild(this._esBtn);
 
-    this._el.appendChild(this._buildClusterGap());
+    // Kept so setHiddenItems can drop a gap whose cluster is hidden.
+    this._gapAfterEroScripts = this._buildClusterGap();
+    this._el.appendChild(this._gapAfterEroScripts);
 
     // Device status widget — LED dot + "Devices" label + status text.
     // LED is aria-hidden; status text gets aria-live so screen readers
@@ -240,7 +260,8 @@ export class NavBar {
     this._el.appendChild(this._loadUrlBtn);
     */
 
-    this._el.appendChild(this._buildClusterGap());
+    this._gapBeforeSettings = this._buildClusterGap();
+    this._el.appendChild(this._gapBeforeSettings);
 
     // Settings — app preferences. Rightmost convention (Slack, Discord,
     // GitHub, Notion all do this).
@@ -262,6 +283,15 @@ export class NavBar {
     // Insert at the top of the parent
     parentEl.prepend(this._el);
 
+    // Keep everything on one line at any width, zoom and language (CB-20):
+    // refit whenever the bar's width changes. ResizeObserver delivers before
+    // paint, so a frame with overlapping items is never shown.
+    if (typeof ResizeObserver === 'function') {
+      this._fitObserver = new ResizeObserver(() => this._fitToWidth());
+      this._fitObserver.observe(this._el);
+    }
+    this._fitToWidth();
+
     // Re-translate when the user switches locale. Walks every label with
     // a stashed `data-i18n-key` so we don't re-construct the DOM tree
     // (preserves event listeners, dropdown state, etc.).
@@ -280,26 +310,166 @@ export class NavBar {
       const key = el.dataset.i18nKey;
       if (key) el.textContent = t(key);
     }
+    // The library label carries `nav.library`, but shows the active
+    // collection's NAME when one is picked; the walk above just replaced
+    // that name with "Library".
+    if (this._libraryLabel && this._activeCollectionId) {
+      const col = this._collections.find((c) => c.id === this._activeCollectionId);
+      if (col) this._libraryLabel.textContent = col.name;
+    }
     // Replay the last dynamic setter calls so their translated strings
-    // refresh to the new locale.
-    if (this._lastHandyStatus) {
-      this.setHandyStatus(this._lastHandyStatus.status, this._lastHandyStatus.deviceCount);
+    // refresh to the new locale. ALWAYS, falling back to the state init()
+    // drew: these used to replay only after a setter had run, so with no
+    // saved device and no remote/VR activity the device widget, the remote
+    // tooltip and the VR tooltip kept the boot language (app test V50).
+    const handy = this._lastHandyStatus || { status: 'disconnected', deviceCount: 0 };
+    this.setHandyStatus(handy.status, handy.deviceCount);
+    const remote = this._lastRemoteState || { connected: false, count: 0 };
+    this.setRemoteState(remote.connected, remote.count);
+    const vr = this._lastVRTooltip || { status: 'disconnected', detail: {} };
+    this.setVRTooltip(vr.status, vr.detail);
+    // Titles and aria-labels set once in init() — re-apply every one.
+    this._el.setAttribute('aria-label', t('nav.mainNavAria'));
+    for (const btn of this._el.querySelectorAll('.nav-bar__item')) {
+      const item = this._items.find((i) => i.id === btn.dataset.viewId);
+      if (item) btn.title = t(item.labelKey);
     }
-    if (this._lastRemoteState) {
-      this.setRemoteState(this._lastRemoteState.connected, this._lastRemoteState.count);
+    const arrow = this._el.querySelector('.nav-bar__library-arrow');
+    if (arrow) {
+      arrow.title = t('nav.switchLibrary');
+      arrow.setAttribute('aria-label', t('nav.switchLibrary'));
     }
-    if (this._lastVRTooltip) {
-      this.setVRTooltip(this._lastVRTooltip.status, this._lastVRTooltip.detail);
-    }
-    // Static button titles set once in init() — re-apply now too.
-    if (this._libraryBtn) this._libraryBtn.title = t('nav.library');
     if (this._esBtn) this._esBtn.title = t('nav.eroscriptsTitle');
-    if (this._handyBtn && !this._lastHandyStatus) {
-      this._handyBtn.title = t('nav.deviceConnection');
-    }
+    if (this._handyBtn) this._handyBtn.title = t('nav.deviceConnection');
+    if (this._remoteBtn) this._remoteBtn.setAttribute('aria-label', t('nav.webRemote'));
+    if (this._vrBtn) this._vrBtn.setAttribute('aria-label', t('nav.vr'));
     if (this._settingsBtn) {
       this._settingsBtn.title = t('nav.settings');
       this._settingsBtn.setAttribute('aria-label', t('nav.settings'));
+    }
+    // Every label just changed length: "Web Remote" is "Web-Fernsteuerung".
+    this._scheduleFit();
+  }
+
+  // --- Fitting the bar to its width (CB-20) -------------------------------
+  //
+  // Labels differ by language and the interface zooms to 150% in a window
+  // that can be 800 px wide, so no fixed breakpoint keeps the bar on one
+  // line: German at 125% on 1280 px (1024 CSS px) ran "Nicht verbunden" into
+  // "Web-Fernsteuerung", English did the same at 800 px. The right-side
+  // buttons have `min-width: 36px`, so flexbox shrank them below their text
+  // and the text painted over the next button.
+  //
+  // Instead the bar measures itself and takes text off in steps until it
+  // fits, each step a `nav-bar--fit-N` class (nav-bar.css), cumulative:
+  //   1  Web Remote, VR and Settings labels (icon-only, as below 1024 px)
+  //   2  the "Devices" word (the LED and the status text stay)
+  //   3  the EroScripts label
+  //   4  the Playlists and Categories labels
+  //   5  the Library label (it can show the active collection's name)
+  //   6  the device status text may shrink, with an ellipsis, and the
+  //      spacing tightens (reached near the minimum window at 150%)
+  // A hidden label is visually hidden, not removed, so every button keeps
+  // its accessible name, and each keeps its tooltip. Measured with the
+  // buttons not allowed to shrink (`nav-bar--measuring`): the bar overflows
+  // when the last button (Settings, never hideable) ends past the content
+  // edge. A bar that is not laid out (hidden, or jsdom) is left alone.
+
+  /** Refit once, after the current batch of label changes. */
+  _scheduleFit() {
+    if (this._fitQueued) return;
+    this._fitQueued = true;
+    // A microtask runs before the next paint, so the change never shows unfitted.
+    queueMicrotask(() => {
+      this._fitQueued = false;
+      this._fitToWidth();
+    });
+  }
+
+  _fitToWidth() {
+    const el = this._el;
+    if (!el || el.hidden || !el.isConnected || !this._settingsBtn) return;
+    if (!el.getBoundingClientRect().width) return;
+    const setLevel = (n) => {
+      for (let i = 1; i <= NAV_FIT_LEVELS; i++) el.classList.toggle(`nav-bar--fit-${i}`, i <= n);
+    };
+    el.classList.add('nav-bar--measuring');
+    let level = 0;
+    setLevel(0);
+    while (level < NAV_FIT_LEVELS && this._overflows()) setLevel(++level);
+    el.classList.remove('nav-bar--measuring');
+    this._fitLevel = level;
+  }
+
+  /** True when the last button ends past the bar's content edge. */
+  _overflows() {
+    const el = this._el;
+    const padRight = parseFloat(getComputedStyle(el).paddingRight) || 0;
+    const limit = el.getBoundingClientRect().right - padRight;
+    return this._settingsBtn.getBoundingClientRect().right > limit + 0.5;
+  }
+
+  /**
+   * Hide the nav-bar buttons the user switched off (`player.navHidden`,
+   * zaikechi #381). Only `=== true` hides, so a missing map shows everything,
+   * as before. Buttons are hidden with the `hidden` attribute and never
+   * removed: app.js keeps references into them (it flashes `_handyLed` on
+   * every device command), and a hidden Devices button leaves the H key and
+   * the status updates working.
+   *
+   * A cluster gap is dropped when it would no longer sit between two visible
+   * buttons, so hiding a whole cluster does not leave a double gap or a stray
+   * one at the edge. And the right side is pushed over by a margin on
+   * EroScripts (nav-bar.css), so with EroScripts hidden the first visible
+   * right-side button takes the push instead.
+   */
+  setHiddenItems(hidden = {}) {
+    if (!this._el) return;
+    const map = (hidden && typeof hidden === 'object') ? hidden : {};
+    const els = this._hideableEls();
+    for (const { key } of NAV_HIDEABLE_ITEMS) {
+      if (els[key]) els[key].hidden = map[key] === true;
+    }
+    this._layoutRightSide();
+    // Fewer buttons may leave room for labels again, more need less.
+    this._scheduleFit();
+  }
+
+  /** The element behind each NAV_HIDEABLE_ITEMS key. */
+  _hideableEls() {
+    const item = (id) => this._el?.querySelector(`.nav-bar__item[data-view-id="${id}"]`) || null;
+    return {
+      playlists: item('playlists'),
+      categories: item('categories'),
+      eroscripts: this._esBtn || null,
+      devices: this._handyBtn || null,
+      remote: this._remoteBtn || null,
+      vr: this._vrBtn || null,
+    };
+  }
+
+  /** Collapse cluster gaps around hidden buttons; move the right-side push. */
+  _layoutRightSide() {
+    const seq = [this._esBtn, this._gapAfterEroScripts, this._handyBtn, this._remoteBtn,
+      this._vrBtn, this._gapBeforeSettings, this._settingsBtn].filter(Boolean);
+    // A gap shows only with a visible button before it (since the last gap
+    // that showed) AND one after it.
+    let pending = null;
+    let seen = false;
+    for (const el of seq) {
+      if (el.classList.contains('nav-bar__cluster-gap')) {
+        el.hidden = true;
+        if (seen) { pending = el; seen = false; }
+      } else if (!el.hidden) {
+        if (pending) { pending.hidden = false; pending = null; }
+        seen = true;
+      }
+    }
+    // Gaps can never be the first visible thing, so the first visible button
+    // is the leftmost right-side element.
+    const first = seq.find((el) => !el.hidden && !el.classList.contains('nav-bar__cluster-gap'));
+    for (const el of seq) {
+      el.classList.toggle('nav-bar__action--push', el === first && el !== this._esBtn);
     }
   }
 
@@ -399,6 +569,7 @@ export class NavBar {
   setHandyStatus(status, deviceCount = 0) {
     if (!this._handyLed || !this._handyText) return;
     this._lastHandyStatus = { status, deviceCount };
+    const shownBefore = `${this._handyLabel?.textContent}|${this._handyText.textContent}`;
     this._handyLed.className = 'nav-bar__handy-led';
 
     if (this._handyLabel) {
@@ -420,6 +591,15 @@ export class NavBar {
         this._handyLed.classList.add('nav-bar__handy-led--connecting');
         textValue = t('nav.connecting');
         break;
+      // Connected, but recent commands are not landing. Distinct from both
+      // "connected" and "disconnected" on purpose: the session is still up, so
+      // saying disconnected would be wrong, but saying connected is the lie
+      // that sends people hunting for a fault in their own setup while the
+      // device sits dead (Dave, 2026-08-26).
+      case 'unresponsive':
+        this._handyLed.classList.add('nav-bar__handy-led--unresponsive');
+        textValue = t('nav.notResponding');
+        break;
       case 'disconnected':
       default:
         textValue = t('nav.notConnected');
@@ -432,6 +612,9 @@ export class NavBar {
     if (this._handyBtn) {
       this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: textValue }));
     }
+    // "Not connected" and "2 Connected" differ in width (CB-20). Only when
+    // the text changed: app.js calls this on every device event.
+    if (`${this._handyLabel?.textContent}|${this._handyText.textContent}` !== shownBefore) this._scheduleFit();
   }
 
   setCollections(collections, activeCollectionId, sources, unavailablePaths, unavailableCollectionIds) {
@@ -447,6 +630,8 @@ export class NavBar {
       } else {
         this._libraryLabel.textContent = t('nav.library');
       }
+      // A collection's name can be longer than "Library" (CB-20).
+      this._scheduleFit();
     }
   }
 
@@ -454,8 +639,7 @@ export class NavBar {
     if (!this._libraryDropdown) return;
     const arrow = this._el?.querySelector('.nav-bar__library-arrow');
     if (!this._libraryDropdown.hidden) {
-      this._libraryDropdown.hidden = true;
-      arrow?.setAttribute('aria-expanded', 'false');
+      this._closeLibraryDropdown();
       return;
     }
     this._renderLibraryDropdown();
@@ -469,12 +653,41 @@ export class NavBar {
     this._libraryDropdownClose = (e) => {
       const arrow = this._el?.querySelector('.nav-bar__library-arrow');
       if (this._libraryDropdown.contains(e.target) || (arrow && arrow.contains(e.target))) return;
-      this._libraryDropdown.hidden = true;
-      arrow?.setAttribute('aria-expanded', 'false');
+      this._closeLibraryDropdown();
+    };
+    // Reads the field when it fires: a close in the meantime nulls it, and
+    // addEventListener(null) is a no-op, so no stale listener is armed.
+    setTimeout(() => document.addEventListener('pointerdown', this._libraryDropdownClose, true), 0);
+  }
+
+  /**
+   * The ONE way the library dropdown closes. Hides the menu, resets the
+   * arrow's aria-expanded (which is also what un-rotates the chevron,
+   * nav-bar.css) and drops the outside-click listener.
+   *
+   * Every item handler used to do a bare `dd.hidden = true`, so picking an
+   * item left the arrow announcing "expanded" with the chevron rotated (app
+   * test V53). A mouse pick did too — its pointerdown lands inside the
+   * dropdown, which the outside-click closer ignores — and only the next
+   * click elsewhere healed it. Keyboard picks never healed.
+   */
+  _closeLibraryDropdown() {
+    const arrow = this._el?.querySelector('.nav-bar__library-arrow');
+    // The focus inside the menu (an item was chosen) goes back to the arrow
+    // that opened it, so a dialog the item opens (Delete collection, Rename,
+    // New collection) gives it back there, not to <body> (block C verifier
+    // 1; also in v0.9.2).
+    const returnFocus = !!this._libraryDropdown && !this._libraryDropdown.hidden
+      && this._libraryDropdown.contains(document.activeElement);
+    if (this._libraryDropdown) this._libraryDropdown.hidden = true;
+    arrow?.setAttribute('aria-expanded', 'false');
+    if (returnFocus && arrow?.isConnected) {
+      try { arrow.focus({ preventScroll: true }); } catch { /* not focusable */ }
+    }
+    if (this._libraryDropdownClose) {
       document.removeEventListener('pointerdown', this._libraryDropdownClose, true);
       this._libraryDropdownClose = null;
-    };
-    setTimeout(() => document.addEventListener('pointerdown', this._libraryDropdownClose, true), 0);
+    }
   }
 
   _renderLibraryDropdown() {
@@ -489,7 +702,7 @@ export class NavBar {
     if (isAllActive) allBtn.classList.add('nav-bar__library-option--active');
     allBtn.textContent = t('nav.allVideos');
     allBtn.addEventListener('click', () => {
-      dd.hidden = true;
+      this._closeLibraryDropdown();
       if (this._onLibraryCollectionChange) this._onLibraryCollectionChange(null);
     });
     dd.appendChild(allBtn);
@@ -532,7 +745,7 @@ export class NavBar {
           btn.disabled = true;
         } else {
           btn.addEventListener('click', () => {
-            dd.hidden = true;
+            this._closeLibraryDropdown();
             if (this._onLibraryCollectionChange) this._onLibraryCollectionChange(col.id);
           });
         }
@@ -545,7 +758,7 @@ export class NavBar {
           renameBtn.className = 'nav-bar__library-action';
           renameBtn.textContent = '✎';
           renameBtn.title = t('nav.edit');
-          renameBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onRenameCollection) this._onRenameCollection(col.id); });
+          renameBtn.addEventListener('click', (e) => { e.stopPropagation(); this._closeLibraryDropdown(); if (this._onRenameCollection) this._onRenameCollection(col.id); });
           actions.appendChild(renameBtn);
         }
 
@@ -553,7 +766,7 @@ export class NavBar {
         deleteBtn.className = 'nav-bar__library-action nav-bar__library-action--danger';
         deleteBtn.textContent = '✕';
         deleteBtn.title = t('common.delete');
-        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); dd.hidden = true; if (this._onDeleteCollection) this._onDeleteCollection(col.id); });
+        deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this._closeLibraryDropdown(); if (this._onDeleteCollection) this._onDeleteCollection(col.id); });
         actions.appendChild(deleteBtn);
         row.appendChild(btn);
         row.appendChild(actions);
@@ -569,14 +782,14 @@ export class NavBar {
     const addSourceBtn = document.createElement('button');
     addSourceBtn.className = 'nav-bar__library-option nav-bar__library-option--new';
     addSourceBtn.textContent = t('nav.addSourceFolder');
-    addSourceBtn.addEventListener('click', () => { dd.hidden = true; if (this._onAddSource) this._onAddSource(); });
+    addSourceBtn.addEventListener('click', () => { this._closeLibraryDropdown(); if (this._onAddSource) this._onAddSource(); });
     dd.appendChild(addSourceBtn);
 
     const newBtn = document.createElement('button');
     newBtn.className = 'nav-bar__library-option nav-bar__library-option--new';
     newBtn.textContent = t('nav.newCollection');
     newBtn.addEventListener('click', () => {
-      dd.hidden = true;
+      this._closeLibraryDropdown();
       if (this._onNewCollection) this._onNewCollection();
     });
     dd.appendChild(newBtn);

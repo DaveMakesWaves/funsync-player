@@ -8,23 +8,10 @@ const DEFAULT_BINS = 100;
 const FALLBACK_COLOR = '#e94560';
 const MAX_SPEED = 0.5; // pos-units per ms; anything faster saturates the bar height
 
-export function speedToColor(speed) {
-  // Kept for backward compat / tests. Not used by renderBars — theme color wins.
-  const n = Math.min(Math.max(speed, 0) / MAX_SPEED, 1);
-  if (n < 0.25) {
-    const t = n / 0.25;
-    return `rgb(0,${Math.round(t * 200)},${Math.round(255 - t * 55)})`;
-  } else if (n < 0.5) {
-    const t = (n - 0.25) / 0.25;
-    return `rgb(0,${Math.round(200 + t * 55)},${Math.round(200 - t * 200)})`;
-  } else if (n < 0.75) {
-    const t = (n - 0.5) / 0.25;
-    return `rgb(${Math.round(t * 255)},255,0)`;
-  } else {
-    const t = (n - 0.75) / 0.25;
-    return `rgb(255,${Math.round(255 - t * 255)},0)`;
-  }
-}
+// Kept for backward compat / tests. Not used by renderBars — theme color
+// wins. It is the player's shared heatmap scale, not a private copy: a copy
+// is how the seek bar and the HM overlay drifted apart (app test V36).
+export { heatmapSpeedToColor as speedToColor } from './heatmap-palette.js';
 
 function resolveFillColor(canvas) {
   try {
@@ -72,19 +59,76 @@ export function computeBins(actions, binCount = DEFAULT_BINS) {
 
 export function renderBins(canvas, bins) {
   if (!canvas || !bins || bins.length === 0) return;
+  const m = measureStrip(canvas, bins);
+  if (m) drawStrip(m);
+}
+
+// Everything renderBins READS from layout and style. Reading `clientWidth`
+// forces a layout and `getComputedStyle` a style pass whenever the DOM has
+// changed since the last one, and drawing (`canvas.width = ...`) changes it.
+// So drawing strips one at a time costs one full-document layout PER STRIP:
+// a library grid of 1,546 cards spent 13 s in it on one sort (V81).
+function measureStrip(canvas, bins) {
   const ctx = canvas.getContext && canvas.getContext('2d');
-  if (!ctx) return;
-
+  if (!ctx) return null;
   const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
-  const cssW = canvas.clientWidth || canvas.width / dpr || bins.length;
-  const cssH = canvas.clientHeight || canvas.height / dpr || 24;
+  return {
+    canvas,
+    bins,
+    ctx,
+    dpr,
+    cssW: canvas.clientWidth || canvas.width / dpr || bins.length,
+    cssH: canvas.clientHeight || canvas.height / dpr || 24,
+    color: resolveFillColor(canvas),
+  };
+}
 
+/**
+ * Draw several strips with ONE layout: measure every canvas first, then draw
+ * every canvas. Same pixels as calling renderBins on each.
+ *
+ * @param {Array<{canvas: HTMLCanvasElement, bins: Float32Array}>} jobs
+ */
+export function renderBinsBatch(jobs) {
+  const measured = [];
+  for (const { canvas, bins } of jobs || []) {
+    if (!canvas || !bins || bins.length === 0) continue;
+    const m = measureStrip(canvas, bins);
+    if (m) measured.push(m);
+  }
+  for (const m of measured) drawStrip(m);
+}
+
+// Strips queued for the next animation frame, drawn as one batch. The last
+// bins queued for a canvas win.
+let pendingStrips = null;
+
+/**
+ * Draw this strip on the next animation frame, together with every other
+ * strip queued for that frame (see renderBinsBatch). For callers that draw
+ * many strips at once, such as a library grid render.
+ */
+export function queueRenderBins(canvas, bins) {
+  if (!canvas || !bins || bins.length === 0) return;
+  if (!pendingStrips) {
+    pendingStrips = new Map();
+    requestAnimationFrame(() => {
+      const jobs = [...pendingStrips].map(([c, b]) => ({ canvas: c, bins: b }));
+      pendingStrips = null;
+      // A strip whose card was replaced before the frame has nothing to draw on.
+      renderBinsBatch(jobs.filter((j) => j.canvas.isConnected !== false));
+    });
+  }
+  pendingStrips.set(canvas, bins);
+}
+
+function drawStrip({ canvas, bins, ctx, dpr, cssW, cssH, color }) {
   canvas.width = Math.max(1, Math.round(cssW * dpr));
   canvas.height = Math.max(1, Math.round(cssH * dpr));
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, cssW, cssH);
 
-  ctx.fillStyle = resolveFillColor(canvas);
+  ctx.fillStyle = color;
 
   const binW = cssW / bins.length;
   for (let i = 0; i < bins.length; i++) {

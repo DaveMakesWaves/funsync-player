@@ -3,7 +3,7 @@
  * No DOM required — skips jsdom construction. See notes/CLAUDE.md
  * "Test environments" before changing this or adding DOM here.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   halfSpeed,
   doubleSpeed,
@@ -13,6 +13,18 @@ import {
   reverseActions,
   generatePattern,
 } from '../../renderer/js/script-modifiers.js';
+
+// Seeded stand-in for Math.random (mulberry32, as library-play-options.test.js
+// uses), so a pattern drawn from it is the same every run.
+function seededRandom(seed) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let x = Math.imul(a ^ (a >>> 15), 1 | a);
+    x = (x + Math.imul(x ^ (x >>> 7), 61 | x)) ^ x;
+    return ((x ^ (x >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 describe('script-modifiers', () => {
   const sampleActions = [
@@ -522,10 +534,24 @@ describe('script-modifiers', () => {
     });
 
     it('every pattern moves — none is a flat line', () => {
-      for (const type of ['sine', 'sawtooth', 'square', 'triangle', 'escalating', 'random']) {
-        const result = generatePattern(type, 0, 8000, 25, 0, 100);
-        const positions = result.map((a) => a.pos);
-        expect(Math.max(...positions) - Math.min(...positions), type).toBeGreaterThan(50);
+      // `random` draws its 8 positions from Math.random. Unseeded, they span
+      // 50 or less about one run in 26, and the case failed (FLAKY-TESTS.md
+      // row 5). Seeded, each draw is a fact: a generator that ignored the
+      // draws, or squashed them, still fails here every run.
+      const span = (type) => {
+        const positions = generatePattern(type, 0, 8000, 25, 0, 100).map((a) => a.pos);
+        return Math.max(...positions) - Math.min(...positions);
+      };
+      for (const type of ['sine', 'sawtooth', 'square', 'triangle', 'escalating']) {
+        expect(span(type), type).toBeGreaterThan(50);
+      }
+      for (const seed of [1, 7, 42, 2026, 99991]) {
+        const spy = vi.spyOn(Math, 'random').mockImplementation(seededRandom(seed));
+        try {
+          expect(span('random'), `random, seed ${seed}`).toBeGreaterThan(50);
+        } finally {
+          spy.mockRestore();
+        }
       }
     });
 

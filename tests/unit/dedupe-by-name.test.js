@@ -96,3 +96,25 @@ describe('dedupeByName', () => {
     expect(dedupeByName([v('A.mp4', 'D:/A.mp4')])).toHaveLength(1);
   });
 });
+
+// R4-16 (cosmetic, not reachable today: every scanned video has a name): a
+// video with no `name` falls back to its path's file name, and a Windows
+// path was taken whole because the split matched forward slashes only.
+describe('dedupeByName without a name: the file name from either separator (R4-16)', () => {
+  it('two Windows paths to the same file name collapse, the scripted one kept', () => {
+    const out = dedupeByName([
+      { path: 'C:\\Lib\\a\\Clip.mp4', hasFunscript: false },
+      { path: 'C:\\Lib\\b\\Clip.mp4', hasFunscript: true },
+    ]);
+    expect(out.map((x) => x.path)).toEqual(['C:\\Lib\\b\\Clip.mp4']);
+  });
+
+  it('a Windows path and a forward-slash path to the same name are the same name', () => {
+    const out = dedupeByName([
+      { path: 'C:\\Lib\\a\\Clip.mp4' },
+      { path: '/mnt/lib/Clip.mp4' },
+      { name: 'clip.MP4', path: 'C:/x/clip.MP4' },
+    ]);
+    expect(out).toHaveLength(1);
+  });
+});

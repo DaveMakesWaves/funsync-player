@@ -1,0 +1,860 @@
+/* === Video options dialog (DESIGN-video-options.md (b), stage 2a) ===
+ * A video's ⋮ opens it. Laid out like Settings (modal.css, FT-039): the
+ * panel carries `modal-panel--settings` for its no-body-scroll layout, so the
+ * body never scrolls; the content column does, on its own. The rail copies
+ * the Settings rail's look and focus ring (`.settings-panel__rail-item`) under
+ * its own class names, so neither dialog's tests or rules reach the other.
+ * Semantic tokens only (DESIGN.md §2.1): both themes are a token swap.
+ */
+
+.modal-panel.modal-panel--video-options {
+  max-width: 780px;
+  width: 92vw;
+  /* A fixed height, so switching sections never resizes the dialog. It
+     leaves 60 px under the (centred) dialog for a toast (below). */
+  height: min(600px, calc(100vh - 120px));
+}
+
+/* Toasts sit in the band under the dialog while it is open, not over its
+   lower edge and its Undo (verify-1). `video-options-open` is on body from
+   the dialog's render to its close. */
+body.video-options-open .toast-container {
+  bottom: 8px;
+}
+
+/* The title is the video's name, cut with an ellipsis; the full name is in
+   its title attribute. */
+.modal-panel--video-options .modal-header {
+  gap: 12px;
+}
+
+.modal-panel--video-options .video-options__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modal-panel--video-options .modal-body.video-options {
+  flex: 1 1 auto;
+  gap: 12px;
+}
+
+/* --- Header: thumbnail, facts, play buttons --- */
+.video-options__header {
+  flex: none;
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.video-options__thumb {
+  flex: none;
+  width: 128px;
+  height: 72px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-overlay);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-options__thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-options__summary {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.video-options__facts-line {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+}
+
+.video-options__cat {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-primary);
+}
+
+.video-options__cat-mark {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: none;
+}
+
+.video-options__cat-mark--icon {
+  width: auto;
+  height: auto;
+  border-radius: 0;
+}
+
+.video-options__header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* --- Rail + content (Settings' two columns) --- */
+.video-options__layout {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 168px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  gap: 16px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+}
+
+.video-options__rail {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border-right: 1px solid var(--border-subtle);
+  padding-right: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.video-options__rail-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: none;
+  border: none;
+  border-left: 2px solid transparent;
+  color: var(--text-secondary);
+  text-align: left;
+  padding: 8px 10px;
+  min-height: 36px;
+  font-size: 13px;
+  font-family: inherit;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color var(--transition-fast), background var(--transition-fast);
+}
+
+.video-options__rail-item:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.video-options__rail-item--active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+  font-weight: 600;
+}
+
+.video-options__rail-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.video-options__rail-count {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.video-options__column {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.video-options__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* --- Sections --- */
+.video-options__block + .video-options__block {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+  margin-top: 12px;
+}
+
+.video-options__block-title {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.video-options__checks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 8px;
+}
+
+.video-options__check,
+.video-options__radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.video-options__check:hover,
+.video-options__radio:hover {
+  background: var(--surface-overlay);
+}
+
+.video-options__check input,
+.video-options__radio input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.video-options__check-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.video-options__fieldset {
+  border: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.video-options__legend {
+  padding: 0;
+  margin-bottom: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.video-options__radio-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+
+.video-options__row {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  min-height: 24px;
+}
+
+.video-options__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.video-options__path {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+.video-options__note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-secondary);
+}
+
+.video-options__note--warn {
+  color: var(--state-warning);
+}
+
+.video-options__tag {
+  display: inline-block;
+  font-size: 11px;
+  line-height: 18px;
+  padding: 0 8px;
+  border-radius: 9px;
+  background: var(--surface-overlay);
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.video-options__tag--warn {
+  background: var(--state-warning-soft);
+  color: var(--state-warning);
+}
+
+/* Tri-state: "not found" only on proven absence (design (b)). */
+.video-options__status {
+  font-size: 12px;
+}
+
+.video-options__status--missing {
+  color: var(--state-error);
+}
+
+.video-options__status--unknown {
+  color: var(--text-muted);
+}
+
+/* "Script not found" as a control (Locate, Dave 2026-11-18): it opens the
+   file picker at the folder the stored path points to. */
+.video-options__locate {
+  background: none;
+  border: none;
+  padding: 0 4px;
+  min-height: 28px;
+  font-family: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.video-options__locate:hover {
+  text-decoration-thickness: 2px;
+}
+
+.video-options__locate:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* A variation whose file is not found: not offered to play first. */
+.video-options__radio-row--missing .video-options__radio {
+  cursor: default;
+  color: var(--text-secondary);
+}
+
+/* The dialog's own scroll bars (the content column, the narrow body, the
+   Tags lists) follow the theme instead of staying white in the dark one. */
+html[data-theme="dark"] .modal-panel--video-options {
+  color-scheme: dark;
+}
+
+html[data-theme="light"] .modal-panel--video-options {
+  color-scheme: light;
+}
+
+.video-options__slots {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.video-options__slot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+.video-options__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Every button here meets the 36 px desktop floor (DESIGN.md §2.3). */
+.video-options__btn {
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.video-options__btn:focus-visible,
+.video-options__link-btn:focus-visible,
+.video-options__undo:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.video-options__btn--danger {
+  color: var(--state-error);
+}
+
+.video-options__link-btn {
+  background: none;
+  border: none;
+  padding: 0 6px;
+  min-height: 28px;
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--accent);
+  cursor: pointer;
+  border-radius: 4px;
+}
+
+.video-options__link-btn:hover {
+  text-decoration: underline;
+}
+
+.video-options__tile {
+  width: 192px;
+  height: 108px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--surface-overlay);
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.video-options__tile img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.video-options__facts-list {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 6px 16px;
+  font-size: 13px;
+}
+
+.video-options__fact-label {
+  color: var(--text-secondary);
+}
+
+.video-options__fact-value {
+  margin: 0;
+  color: var(--text-primary);
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+
+/* --- The live line: what changed, with Undo (role="status") --- */
+.video-options__live {
+  flex: none;
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px solid var(--border-subtle);
+  margin-top: 8px;
+  padding-top: 6px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+/* What the pending Undo undoes, once a newer message took the line. */
+.video-options__live-undo-text {
+  color: var(--text-muted);
+  min-width: 0;
+}
+
+.video-options__live-undo-text::before {
+  content: "· ";
+}
+
+.video-options__undo {
+  background: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.video-options__undo:hover {
+  border-color: var(--accent);
+}
+
+/* A card's script badge for a pairing whose script cannot be found (kept,
+   Dave 2026-11-18 "Stop pruning"; library.js `_decorateScriptBadge`). Here,
+   loaded after library.css, so it wins over --manual / --auto. */
+.library__funscript-badge--missing,
+.library__funscript-badge--inline.library__funscript-badge--missing {
+  color: var(--state-error);
+}
+
+/* The red badge is a control (it opens the video options at Script, on its
+   Locate). A grid card's badge row has pointer-events: none (library.css),
+   so without this a real click fell through to the card's play overlay and
+   started the video (verify-3, 2026-11-18). The row sits above the overlay
+   (z-index 1), so only the missing badge takes the click; other badges stay
+   click-through. */
+.library__card-badges .library__funscript-badge--missing {
+  pointer-events: auto;
+}
+
+/* The quick (right-click) menu's line between the queue items and
+   "All options…". The menu itself is styled in queue-panel.css. */
+.library__queue-context-separator {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--video-overlay-border);
+}
+
+/* Narrow windows (below 620 CSS px: Interface size 140% and up at the
+   800 px window minimum). The wide layout's fixed rows left the section
+   0-137 px once the rail wrapped and the header grew (verify-1). Here the
+   BODY scrolls instead: a compact header, the rail one row that scrolls
+   sideways and sticks to the top, the section at its full height under it,
+   the live line (with its Undo) stuck to the bottom.
+   Short windows too (below 571 CSS px tall: 1280 x 800 at 150 % and up,
+   1024 x 700 at 125 % and up): the wide layout left the section 36 px at
+   640 x 400 and 95 px at 731 x 457 (verify-2). 571 px tall still gives the
+   wide layout's section about 200 px. */
+@media (max-width: 620px), (max-height: 570px) {
+  .modal-panel.modal-panel--video-options {
+    width: calc(100vw - 16px);
+    min-width: 0;
+    height: min(600px, calc(100vh - 24px));
+  }
+
+  .modal-panel--video-options .modal-header {
+    padding: 8px 12px 8px 16px;
+  }
+
+  .modal-panel--video-options .modal-body.video-options {
+    display: block;
+    overflow-y: auto;
+    /* No top padding, so the sticky rail's top: 0 is the visible edge. */
+    padding: 0 12px 0 16px;
+  }
+
+  /* A short dialog has no band under it: the toast goes to the top. */
+  body.video-options-open .toast-container {
+    top: 4px;
+    bottom: auto;
+  }
+
+  .video-options__header {
+    gap: 10px;
+    margin: 10px 0 8px;
+  }
+
+  .video-options__thumb {
+    width: 96px;
+    height: 54px;
+  }
+
+  .video-options__summary {
+    gap: 6px;
+  }
+
+  .video-options__header-actions {
+    gap: 6px;
+  }
+
+  .video-options__header-actions .video-options__btn {
+    padding: 0 12px;
+  }
+
+  .video-options__layout {
+    display: block;
+    border-top: none;
+    padding-top: 0;
+  }
+
+  .video-options__rail {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 2px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    margin: 0 0 10px;
+    padding: 2px 0;
+    border-right: none;
+    border-top: 1px solid var(--border-subtle);
+    border-bottom: 1px solid var(--border-subtle);
+    background: var(--surface-card);
+  }
+
+  /* A thin bar, as the dialog lists have (modal.css .modal-list). */
+  .video-options__rail::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .video-options__rail::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .video-options__rail::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 2px;
+  }
+
+  .video-options__rail-item {
+    flex: none;
+    border-left: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    padding: 6px 10px;
+    white-space: nowrap;
+  }
+
+  .video-options__rail-item--active {
+    border-bottom-color: var(--accent);
+  }
+
+  .video-options__column {
+    display: block;
+  }
+
+  .video-options__content {
+    overflow: visible;
+    padding-right: 0;
+  }
+
+  .video-options__live {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
+    background: var(--surface-card);
+    margin-top: 8px;
+    padding-bottom: 6px;
+  }
+
+  /* Nothing said yet: no empty band over the section's foot. It stays in
+     the page (role="status" must be there before it speaks). */
+  .video-options__live--empty {
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border-top: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .video-options__thumb {
+    display: none;
+  }
+}
+
+/* === Tags section (stage 2b; appended by stage 2a as handed over) === */
+/* The Tags section of the video options dialog (stage 2b, 2026-11-18).
+   For renderer/styles/video-options.css (owned by stage 2a): append as is.
+   Semantic tokens only (notes/DESIGN.md 2.1); targets at least 36 px tall
+   for buttons (2.3), the chip x 28 px (filter chip pattern 2.7). */
+
+/* 13 px like the rest of the dialog: the chip names (a button with
+   `font: inherit`) and the post line inherited the page's 16 px (verify-1). */
+.video-options-tags { display: flex; flex-direction: column; gap: 16px; font-size: 13px; }
+.video-options-tags[aria-busy="true"] .video-options-tags__sources { cursor: progress; }
+
+/* Find box (past 24 chips) */
+.video-options-tags__find-input { width: 100%; max-width: 320px; }
+
+/* Facet groups */
+.video-options-tags__facets { display: flex; flex-direction: column; gap: 8px; }
+.video-options-tags__facet { display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: start; }
+.video-options-tags__facet-name { color: var(--text-secondary); font-size: 12px; line-height: 28px; }
+.video-options-tags__chips { display: flex; flex-wrap: wrap; gap: 6px; list-style: none; margin: 0; padding: 0; }
+
+/* A chip: [label · sources] [x] */
+.video-options-tags__chip {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 4px;
+  min-height: 28px; padding: 0 2px 0 10px;
+  border: 1px solid var(--border-strong); border-radius: 14px;
+  background: var(--surface-overlay); color: var(--text-primary);
+}
+.video-options-tags__chip-label {
+  background: none; border: none; padding: 0; color: inherit; font: inherit; cursor: pointer;
+}
+.video-options-tags__chip-label:hover { text-decoration: underline; }
+.video-options-tags__chip-sources { color: var(--text-secondary); font-size: 12px; }
+.video-options-tags__chip-sources::before { content: "· "; }
+.video-options-tags__chip-remove {
+  width: 28px; height: 28px; border: none; border-radius: 50%;
+  background: none; color: var(--text-secondary); cursor: pointer; font-size: 16px; line-height: 1;
+}
+.video-options-tags__chip-remove:hover { background: var(--surface-overlay-strong); color: var(--text-primary); }
+.video-options-tags__chip-label:focus-visible,
+.video-options-tags__chip-remove:focus-visible,
+.video-options-tags__menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* The chip menu (role="menu") */
+.video-options-tags__menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 5;
+  min-width: 220px; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface-card); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: var(--shadow-modal);
+}
+.video-options-tags__menu-item {
+  display: block; width: 100%; min-height: 36px; padding: 0 12px; text-align: left;
+  background: none; border: none; border-radius: 6px; color: var(--text-primary); font: inherit; cursor: pointer;
+}
+.video-options-tags__menu-item:hover,
+.video-options-tags__menu-item:focus { background: var(--surface-overlay-strong); }
+
+/* Add a tag + suggestions (role="listbox") */
+.video-options-tags__add { position: relative; margin-top: 12px; }
+.video-options-tags__add-line { display: flex; gap: 8px; align-items: center; }
+.video-options-tags__add-input { flex: 1; min-width: 0; max-width: 360px; }
+.video-options-tags__add-hint { margin-top: 6px; }
+.video-options-tags__suggestions {
+  position: absolute; top: 40px; left: 0; z-index: 5;
+  min-width: 240px; max-width: 360px; margin: 0; padding: 4px; list-style: none;
+  background: var(--surface-card); border: 1px solid var(--border-strong); border-radius: 8px;
+  box-shadow: var(--shadow-modal);
+}
+.video-options-tags__suggestion {
+  display: flex; justify-content: space-between; gap: 12px;
+  min-height: 32px; align-items: center; padding: 0 10px; border-radius: 6px; cursor: pointer;
+}
+.video-options-tags__suggestion:hover,
+.video-options-tags__suggestion--active { background: var(--surface-overlay-strong); }
+.video-options-tags__suggestion-facet { color: var(--text-secondary); font-size: 12px; }
+
+/* Where they came from */
+.video-options-tags__source { display: grid; grid-template-columns: 96px 1fr; gap: 8px; align-items: start; }
+.video-options-tags__source + .video-options-tags__source { margin-top: 10px; }
+.video-options-tags__source-name { color: var(--text-secondary); font-size: 12px; line-height: 20px; }
+.video-options-tags__post { margin: 0 0 8px; overflow-wrap: anywhere; }
+.video-options-tags__get--disabled,
+.video-options-tags__get[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
+.video-options-tags__spinner {
+  display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -2px;
+  border: 2px solid var(--border-strong); border-top-color: var(--accent); border-radius: 50%;
+  animation: video-options-tags-spin 0.8s linear infinite;
+}
+@keyframes video-options-tags-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .video-options-tags__spinner { animation: none; } }
+
+/* Hidden on this video */
+.video-options-tags__hidden-list { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; margin: 0; padding: 0; }
+.video-options-tags__hidden-item { display: inline-flex; gap: 8px; align-items: center; color: var(--text-secondary); }
+
+/* The Undo the section shows itself (when the dialog passes no announceUndo) */
+.video-options-tags__undo-row { display: flex; justify-content: flex-end; }
+
+/* The stacked questions (Paste a post link, Make a category) */
+.video-options-tags__field { display: flex; flex-direction: column; gap: 6px; }
+.video-options-tags__field-label { color: var(--text-secondary); font-size: 12px; }
+.video-options-tags__error { color: var(--state-error); }
+
+/* Link-only search rows (eroscripts-inline-search.js, mode 'link') */
+.eroscripts-inline__result--link .eroscripts-inline__result-head { display: flex; align-items: center; gap: 10px; }
+.eroscripts-inline__result--link .eroscripts-inline__result-info { flex: 1; min-width: 0; }
+
+@media (max-width: 620px) {
+  .video-options-tags__facet,
+  .video-options-tags__source { grid-template-columns: 1fr; gap: 4px; }
+}
+
+/* --- Stash S1 (stage s1-2c, 2026-11-18): File > Stash, the Tags section's
+   Stash row, and Find in Stash… (stash-scene-picker.js). Untrusted text
+   (titles, names, paths, links from Stash) wraps anywhere. --- */
+.video-options-stash__title { gap: 4px 10px; }
+.video-options-stash__facts { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.video-options-stash__line { overflow-wrap: anywhere; }
+.video-options-stash__facts-list { margin-top: 8px; }
+.video-options-stash__urls { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.video-options-stash__url { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.video-options-stash__url-text { overflow-wrap: anywhere; user-select: text; }
+.video-options-stash__details { margin-top: 8px; font-size: 13px; }
+.video-options-stash__summary {
+  display: flex;
+  align-items: center;
+  min-height: 36px;
+  width: max-content;
+  padding: 0 6px;
+  border-radius: 4px;
+  color: var(--accent);
+  cursor: pointer;
+}
+.video-options-stash__summary:hover { text-decoration: underline; }
+.video-options-stash__summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.video-options-stash__description {
+  margin: 4px 0 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  color: var(--text-secondary);
+  user-select: text;
+}
+.video-options-stash__choices { margin-top: 8px; }
+.video-options-stash__choices .video-options__radio-text { overflow-wrap: anywhere; }
+.video-options-stash__copy-note { overflow-wrap: anywhere; }
+.video-options-stash[aria-busy="true"] { cursor: progress; }
+.video-options-stash .video-options__btn[aria-disabled="true"] { opacity: 0.6; cursor: not-allowed; }
+.video-options-tags__stash-line { overflow-wrap: anywhere; }
+
+/* Find in Stash… (stacked on the dialog) */
+.modal-panel.modal-panel--stash-picker { width: min(560px, calc(100vw - 16px)); }
+.stash-picker { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.stash-picker__search { display: flex; flex-direction: column; gap: 6px; }
+.stash-picker__label { color: var(--text-secondary); font-size: 12px; }
+.stash-picker__line { display: flex; gap: 8px; align-items: center; }
+.stash-picker__input { flex: 1; min-width: 0; min-height: 36px; }
+.stash-picker__go { min-height: 36px; }
+.stash-picker__go[aria-disabled="true"] { opacity: 0.6; cursor: progress; }
+.stash-picker__hint,
+.stash-picker__status { margin: 0; }
+.stash-picker__status--error { color: var(--state-warning); }
+.stash-picker__results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: min(360px, 50vh);
+  overflow-y: auto;
+}
+.stash-picker__result {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: var(--surface-overlay);
+}
+.stash-picker__info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.stash-picker__title { font-weight: 600; overflow-wrap: anywhere; }
+.stash-picker__meta { color: var(--text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.stash-picker__link { min-height: 36px; flex: none; }
+.stash-picker__link:focus-visible,
+.stash-picker__go:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (max-width: 480px) {
+  .stash-picker__result { flex-direction: column; align-items: stretch; }
+}

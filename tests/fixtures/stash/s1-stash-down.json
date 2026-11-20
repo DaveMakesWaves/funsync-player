@@ -1,0 +1,6 @@
+{
+  "note": "Stash not running: fetch throws TypeError \"fetch failed\" with cause ECONNREFUSED, in 36 ms (client: unreachable). Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by the design pass (stage design-stash, 25-stash-down.json); copied by s1-1a-client.",
+  "error": "TypeError",
+  "message": "fetch failed",
+  "cause": "ECONNREFUSED"
+}

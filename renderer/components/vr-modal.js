@@ -25,13 +25,19 @@
 
 import { Modal } from './modal.js';
 import { t } from '../js/i18n.js';
+import { vrDisplayName } from '../js/vr-bridge.js';
+import { eventBus } from '../js/event-bus.js';
+import { createVideoSyncOffsetRow } from './video-sync-offset-row.js';
 
 /**
  * @param {object} opts
  * @param {import('../js/data-service.js').DataService|object} opts.settings
  * @param {import('../js/vr-bridge.js').VRBridge} opts.vrBridge
+ * @param {{get: Function, set: Function}} [opts.videoSyncOffset] — the
+ *   headset video's own delta (#380): app.js `_vrVideoSyncOffsetState` /
+ *   `_setVideoSyncOffset`. Without it the "This video" row never shows.
  */
-export async function openVRModal({ settings, vrBridge } = {}) {
+export async function openVRModal({ settings, vrBridge, videoSyncOffset } = {}) {
   if (!vrBridge) return;
   const port = settings?.get?.('backend.port') || 5123;
 
@@ -43,7 +49,7 @@ export async function openVRModal({ settings, vrBridge } = {}) {
       wrap.innerHTML = _template();
       body.appendChild(wrap);
 
-      _wire(wrap, { settings, vrBridge, port });
+      _wire(wrap, { settings, vrBridge, port, videoSyncOffset });
 
       // Modal doesn't have an onClose hook, so intercept the DOM removal
       // via a MutationObserver on the overlay — fires once when the modal
@@ -185,13 +191,14 @@ function _template() {
         <p class="vr-modal__hint" id="vr-offset-hint">
           ${t('vrModal.offsetHint')}
         </p>
+        <div id="vr-video-offset-mount"></div>
       </div>
     </section>
   `;
 }
 
 
-function _wire(root, { settings, vrBridge, port }) {
+function _wire(root, { settings, vrBridge, port, videoSyncOffset }) {
   // Populate server URL and remember this PC's LAN IP so we can flag a
   // subnet mismatch on the Device-Sync host below (see _checkSubnet).
   let pcIp = null;
@@ -268,6 +275,9 @@ function _wire(root, { settings, vrBridge, port }) {
     if (state === 'receiving') paintStatus('connected', vrBridge.host);
     else if (state === 'waiting') paintStatus('waiting', vrBridge.host);
     else paintStatus('disconnected');
+    // The name can change after the video does: a FunSync stream URL is
+    // reported as an id, and app.js names the file once it resolves (V63).
+    if (vrBridge.__vrModalLastVideo) videoName.textContent = vrBridge.__vrModalLastVideo;
   };
   const statusPollId = setInterval(pollStatus, 1000);
 
@@ -330,6 +340,20 @@ function _wire(root, { settings, vrBridge, port }) {
     if (vrBridge.proxy) vrBridge.proxy.setOffset(v);
   });
 
+  // "This video" (#380): the headset video's own delta, keyed by the local
+  // library file it matched; hidden while it matched none. The same value
+  // the Sync tab shows. Re-read when app.js applies a new one (next video).
+  let unsubVideoOffset = null;
+  const videoOffsetMount = root.querySelector('#vr-video-offset-mount');
+  if (videoSyncOffset && videoOffsetMount) {
+    const videoOffsetRow = createVideoSyncOffsetRow({
+      getState: () => videoSyncOffset.get?.() || null,
+      onChange: (ms) => videoSyncOffset.set?.(ms),
+    });
+    videoOffsetMount.appendChild(videoOffsetRow.el);
+    unsubVideoOffset = eventBus.on('videoSyncOffset:changed', () => videoOffsetRow.refresh());
+  }
+
   // Live status updates — wire temporary listeners for as long as the
   // modal is open. The bridge keeps a single slot per callback so we
   // stash the originals and restore on close.
@@ -357,12 +381,17 @@ function _wire(root, { settings, vrBridge, port }) {
     // poll fine, so the VR panel reported "connected, receiving
     // timestamps" while the device sat silent. Discovered 2026-04-29.
     if (prevOnVideo) prevOnVideo(name, rawPath);
-    vrBridge.__vrModalLastVideo = name || '';
-    videoName.textContent = name || '—';
+    // `name` is the normalised match key ("vr tagged 180 lr"), not a label.
+    // Writing it here overwrote the file name app.js had just set, here and
+    // on every later open of the modal (V66). Show the file name instead.
+    const display = vrDisplayName(rawPath, name);
+    vrBridge.__vrModalLastVideo = display;
+    videoName.textContent = display || '—';
   };
 
   vrBridge.__vrModalCleanup = () => {
     clearInterval(statusPollId);
+    if (unsubVideoOffset) unsubVideoOffset();
     vrBridge.onConnect = prevOnConnect;
     vrBridge.onDisconnect = prevOnDisconnect;
     vrBridge.onVideoChanged = prevOnVideo;

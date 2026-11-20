@@ -26,16 +26,20 @@ export class KeyCapture {
    *   component's own root.
    * @param {{code: string, mods?: object}|null} [opts.initial] — initial
    *   binding to display, or null for the empty placeholder.
-   * @param {Function} [opts.onChange] — (binding|null) => void; fired on
-   *   each successful capture and on clear.
+   * @param {Function} [opts.onChange] — (binding|null, keydownEvent?) => void;
+   *   fired on each successful capture (with the KeyboardEvent) and on clear.
    * @param {string} [opts.placeholder] — optional override for the
    *   capture-mode placeholder (defaults to t('editor.customKeysPressKey')).
+   * @param {string} [opts.ariaLabel] — what this field binds, for a screen
+   *   reader (defaults to the generic "Press a key…"). A page with several
+   *   capture fields needs each one named.
    */
-  constructor({ element, initial, onChange, placeholder }) {
+  constructor({ element, initial, onChange, placeholder, ariaLabel }) {
     this._mount = element;
     this._binding = initial || null;
     this._onChange = onChange || null;
     this._placeholder = placeholder || null;
+    this._ariaLabel = ariaLabel || null;
     this._capturing = false;
     this._boundKeyHandler = (e) => this._handleKeyDown(e);
     this._boundDocClick = (e) => this._handleDocClick(e);
@@ -72,7 +76,7 @@ export class KeyCapture {
     this._root = document.createElement('button');
     this._root.type = 'button';
     this._root.className = 'key-capture';
-    this._root.setAttribute('aria-label', t('editor.customKeysPressKey'));
+    this._root.setAttribute('aria-label', this._ariaLabel || t('editor.customKeysPressKey'));
     this._root.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -144,7 +148,9 @@ export class KeyCapture {
     this._binding = binding;
     this._stopCapture();
     this._render();
-    if (this._onChange) this._onChange(binding);
+    // The event goes along for a caller that needs more than the physical
+    // key: the global hotkeys read `key` for the layout's letter (FT-012).
+    if (this._onChange) this._onChange(binding, e);
   }
 
   _handleDocClick(e) {
@@ -161,7 +167,8 @@ export class KeyCapture {
  * the user expects: 'KeyA' → 'A', 'Digit5' → '5', 'NumpadAdd' → 'Numpad +'.
  *
  * Exported so the settings list, help overlay, and toast messages
- * render bindings identically.
+ * render bindings identically. Modifier and named-key words come from the
+ * active locale (`keys.*`, FT-014), so call it at render time.
  *
  * @param {{code: string, mods?: object}|string} bindingOrSerialized
  * @returns {string}
@@ -173,25 +180,67 @@ export function formatBindingLabel(bindingOrSerialized) {
   if (!b || !b.code) return '';
   const mods = b.mods || {};
   const parts = [];
-  if (mods.ctrl) parts.push('Ctrl');
-  if (mods.alt) parts.push('Alt');
-  if (mods.shift) parts.push('Shift');
+  if (mods.ctrl) parts.push(keyName('ctrl', 'Ctrl'));
+  if (mods.alt) parts.push(keyName('alt', 'Alt'));
+  if (mods.shift) parts.push(keyName('shift', 'Shift'));
   parts.push(prettyCode(b.code));
   return parts.join('+');
 }
 
+// Keys whose name differs by language (FT-014): the modifiers, the media
+// and volume keys, and the cursor/editing keys, as the keyboards and OS of
+// each locale label them ("Strg+Umschalt+P", "Maj", "Entf", "Pos1"...).
+// Display only: stored bindings and accelerators keep the English code.
+// Letters, digits and F-keys are the same everywhere; the numpad's NAME is
+// not ("Ziffernblock", "Pavé num.", "テンキー"), see numpadKeyName (R3-25).
+const NAMED_KEY_IDS = {
+  Space: 'space', Enter: 'enter', Tab: 'tab', Backspace: 'backspace',
+  Delete: 'delete', Insert: 'insert', Home: 'home', End: 'end',
+  PageUp: 'pageUp', PageDown: 'pageDown', PrintScreen: 'printScreen', Escape: 'escape',
+  ArrowLeft: 'arrowLeft', ArrowRight: 'arrowRight', ArrowUp: 'arrowUp', ArrowDown: 'arrowDown',
+  MediaPlayPause: 'mediaPlayPause', MediaTrackNext: 'mediaNext',
+  MediaTrackPrevious: 'mediaPrevious', MediaStop: 'mediaStop',
+  AudioVolumeUp: 'volumeUp', AudioVolumeDown: 'volumeDown', AudioVolumeMute: 'volumeMute',
+};
+
+/** `keys.<id>` in the active locale; `fallback` when no bundle has it. */
+function keyName(id, fallback) {
+  const k = `keys.${id}`;
+  const s = t(k);
+  return typeof s === 'string' && s && s !== k ? s : fallback;
+}
+
+/**
+ * A numpad key in the active language (R3-25). `keys.numpad` is a template,
+ * "Numpad{key}" in English, "Ziffernblock {key}" in German, "テンキー{key}"
+ * in Japanese, so each language puts its word and the key the way it reads.
+ * English is unchanged: "Numpad5", "Numpad-", and the `?` list's
+ * "Numpad 0 – 9" (whatever follows "Numpad" is passed through as written,
+ * then doubled spaces are folded). Without a bundle it reads as English.
+ * Exported for the `?` overlay's chord column (keyboard-help.js).
+ * @param {string} key — what follows "Numpad": "5", "-", " 0 – 9"
+ * @returns {string}
+ */
+export function numpadKeyName(key) {
+  const k = String(key ?? '');
+  const s = t('keys.numpad', { key: k });
+  if (typeof s !== 'string' || !s || s === 'keys.numpad') return `Numpad${k}`;
+  return s.replace(/ {2,}/g, ' ').trim();
+}
+
 function prettyCode(code) {
+  if (NAMED_KEY_IDS[code]) return keyName(NAMED_KEY_IDS[code], code);
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
   if (code.startsWith('Numpad')) {
     const tail = code.slice(6);
-    if (tail === 'Add') return 'Numpad+';
-    if (tail === 'Subtract') return 'Numpad-';
-    if (tail === 'Multiply') return 'Numpad*';
-    if (tail === 'Divide') return 'Numpad/';
-    if (tail === 'Decimal') return 'Numpad.';
-    if (tail === 'Enter') return 'NumpadEnter';
-    return `Numpad${tail}`;
+    if (tail === 'Add') return numpadKeyName('+');
+    if (tail === 'Subtract') return numpadKeyName('-');
+    if (tail === 'Multiply') return numpadKeyName('*');
+    if (tail === 'Divide') return numpadKeyName('/');
+    if (tail === 'Decimal') return numpadKeyName('.');
+    if (tail === 'Enter') return numpadKeyName(keyName('enter', 'Enter'));
+    return numpadKeyName(tail);
   }
   if (code === 'Minus') return '-';
   if (code === 'Equal') return '=';

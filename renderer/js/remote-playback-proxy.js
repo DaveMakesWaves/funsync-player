@@ -28,6 +28,14 @@ export class RemotePlaybackProxy extends EventTarget {
     this._ended = false;
     this._lastUpdateWallMs = 0;     // performance.now() when last state arrived
     this._staleTimer = null;
+    // N-01: the player pop-out reports its element's own `paused` and,
+    // separately, `stalled` (the picture cannot move: starved, seeking,
+    // failed or frozen). `_paused` above is what the engines see: paused OR
+    // stalled, so a stall reaches them as a 'pause' and its end as a
+    // 'playing', and currentTime stops extrapolating through it. The phone
+    // folds a stall into `paused` itself and never sends `stalled`.
+    this._sourcePaused = true;
+    this._stalled = false;
   }
 
   // --- HTMLVideoElement-shaped interface --------------------------------
@@ -47,6 +55,14 @@ export class RemotePlaybackProxy extends EventTarget {
   get duration() { return this._duration; }
   get paused() { return this._paused; }
   get playbackRate() { return this._playbackRate; }
+  /**
+   * The source element's own paused flag, without a stall. What a Play /
+   * Pause TOGGLE must read: during a stall `paused` is true while the video
+   * is still playing, and toggling from it would ask a playing video to play.
+   */
+  get sourcePaused() { return this._sourcePaused; }
+  /** True while the source reports a stalled picture (N-01). */
+  get stalled() { return this._stalled; }
 
   play() {
     if (this._paused) {
@@ -70,8 +86,9 @@ export class RemotePlaybackProxy extends EventTarget {
   // --- Bridge-facing update methods ------------------------------------
 
   /**
-   * Apply a `state` message from the phone.
-   * @param {{at: number, paused?: boolean, rate?: number, duration?: number}} state
+   * Apply a `state` message from the phone (or a TIME_TICK from the player
+   * pop-out, which adds `stalled`).
+   * @param {{at: number, paused?: boolean, stalled?: boolean, rate?: number, duration?: number}} state
    */
   updateState(state) {
     if (!state || typeof state !== 'object') return;
@@ -90,8 +107,10 @@ export class RemotePlaybackProxy extends EventTarget {
       this._duration = state.duration;
     }
 
-    if (typeof state.paused === 'boolean') {
-      const nowPaused = state.paused;
+    if (typeof state.paused === 'boolean' || typeof state.stalled === 'boolean') {
+      if (typeof state.paused === 'boolean') this._sourcePaused = state.paused;
+      if (typeof state.stalled === 'boolean') this._stalled = state.stalled;
+      const nowPaused = this._sourcePaused || this._stalled;
       if (wasPaused && !nowPaused) {
         this._paused = false;
         this._armStaleWatchdog();
@@ -120,7 +139,11 @@ export class RemotePlaybackProxy extends EventTarget {
 
   /** Explicit play event from the phone. */
   handlePlay() {
-    if (this._paused) {
+    this._sourcePaused = false;
+    // A Play on a picture that cannot move yet (N-01: the pop-out ticks
+    // `stalled` just before its 'play') starts nothing: the tick that says
+    // it moves does.
+    if (this._paused && !this._stalled) {
       this._paused = false;
       this._lastUpdateWallMs = performance.now();
       this._armStaleWatchdog();
@@ -130,6 +153,7 @@ export class RemotePlaybackProxy extends EventTarget {
 
   /** Explicit pause event from the phone. */
   handlePause() {
+    this._sourcePaused = true;
     if (!this._paused) {
       this._currentTimeSec = this.currentTime;
       this._lastUpdateWallMs = performance.now();
@@ -140,6 +164,8 @@ export class RemotePlaybackProxy extends EventTarget {
 
   /** Explicit ended event from the phone. */
   handleEnded() {
+    this._sourcePaused = true;
+    this._stalled = false;
     if (!this._ended) {
       this._ended = true;
       this._paused = true;
@@ -152,6 +178,8 @@ export class RemotePlaybackProxy extends EventTarget {
     this._currentTimeSec = 0;
     this._duration = 0;
     this._paused = true;
+    this._sourcePaused = true;
+    this._stalled = false;
     this._playbackRate = 1;
     this._ended = false;
     this._lastUpdateWallMs = 0;

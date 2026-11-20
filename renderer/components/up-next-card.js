@@ -5,6 +5,7 @@
 
 import { icon, X, Play } from '../js/icons.js';
 import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 
 function _esc(str) {
   return String(str).replace(/[&<>"']/g, (c) => ({
@@ -74,6 +75,7 @@ export class UpNextCard {
 
     this._countdownLabelEl = null;
     this._currentPath = null;
+    this._currentSourceLabel = null;
     this._currentSourceContext = null;
     // Mini-player mode: renders a minimal "Next video starts in Ns" strip and
     // suppresses hover-pause (the corner overlay is glanceable and the user's
@@ -109,6 +111,25 @@ export class UpNextCard {
       if (this._el.contains(e.relatedTarget)) return;
       if (this.onHoverLeave) this.onHoverLeave();
     });
+
+    // The region label is set once above and the card's text when it is
+    // shown, so a live language switch left both in the old language
+    // (app test V50).
+    if (eventBus?.on) eventBus.on('language:changed', () => this._retranslate());
+  }
+
+  /** Re-label the region and redraw a card that is up, in the new language. */
+  _retranslate() {
+    if (!this._el) return;
+    this._el.setAttribute('aria-label', t('upNext.regionAria'));
+    if (this._el.hidden) return;
+    if (this._el.classList.contains('up-next--end-of-list')) {
+      this.showEndOfList(this._currentSourceLabel, this._currentSourceContext);
+    } else if (this._currentPath) {
+      // Same redraw setMini() does: keep the seconds left.
+      const secs = parseInt(this._countdownLabelEl?.textContent, 10);
+      this.show(this._currentPath, Number.isFinite(secs) ? secs : 10);
+    }
   }
 
   /** Toggle the compact mini-player rendering. Re-renders if a card is up. */
@@ -225,6 +246,7 @@ export class UpNextCard {
 
   showEndOfList(sourceLabel, sourceContext) {
     if (!this._el) return;
+    this._currentSourceLabel = sourceLabel;
     this._currentSourceContext = sourceContext || {};
     this._el.classList.add('up-next--end-of-list');
     this._el.hidden = false;
@@ -236,7 +258,13 @@ export class UpNextCard {
       return;
     }
 
-    const safeSource = _esc(sourceLabel || t('upNext.endSourceFallback'));
+    // `sourceLabel` is the NAME of the list that ended (app.js
+    // `_upNextListName`): a playlist's, a category's, the library's. The
+    // sentence quotes it; with no name it says "this list" (CB-13: it read
+    // "No more videos in this FT034 Two.", the template expecting a kind word).
+    const endText = sourceLabel
+      ? t('upNext.endText', { source: sourceLabel })
+      : t('upNext.endTextGeneric');
 
     this._el.innerHTML = `
       <div class="up-next__header">
@@ -246,7 +274,7 @@ export class UpNextCard {
       </div>
       <div class="up-next__body">
         <div class="up-next__info">
-          <div class="up-next__end-text">${_esc(t('upNext.endText', { source: sourceLabel || t('upNext.endSourceFallback') }))}</div>
+          <div class="up-next__end-text">${_esc(endText)}</div>
           <button type="button" class="up-next__end-cta">${_esc(t('upNext.endCta', { source: sourceLabel || t('upNext.endSourceFallback') }))}</button>
         </div>
       </div>
@@ -277,6 +305,7 @@ export class UpNextCard {
     this._el.innerHTML = '';
     this._countdownLabelEl = null;
     this._currentPath = null;
+    this._currentSourceLabel = null;
     this._currentSourceContext = null;
   }
 

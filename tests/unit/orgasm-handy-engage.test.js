@@ -21,6 +21,8 @@ import {
   engageHandyFinisher,
   releaseHandyFinisher,
   tileFinisherContent,
+  holdFinisherEnd,
+  HOLD_END_MS,
   TILE_TARGET_MS,
   TILE_MAX_ACTIONS,
 } from '../../renderer/js/orgasm-handy-engage.js';
@@ -76,6 +78,32 @@ describe('engageHandyFinisher — happy path', () => {
     const last = uploaded.actions[uploaded.actions.length - 1];
     expect(uploaded.actions.length).toBeGreaterThan(3);
     expect(last.at).toBeGreaterThanOrEqual(TILE_TARGET_MS);
+  });
+
+  // Device session 2026-11-20, step 37: an HSSP script that reaches its END
+  // left Dave's Handy at the last point's RAW position (4 mm with a 35-65
+  // stroke zone), not where the ending finished. So an ending's last position
+  // is carried on in the upload while the key is held.
+  it('uploads an ending (once) NOT tiled, with its last position held for HOLD_END_MS', async () => {
+    const handy = makeFakeHandy();
+    await engageHandyFinisher({ handyManager: handy, content: SCRIPT, cachedUrl: null, once: true, isCurrent: () => true });
+    const uploaded = JSON.parse(handy.uploadScriptOnly.mock.calls[0][0]).actions;
+    expect(uploaded.slice(0, 3), 'the ending itself plays once, untouched').toEqual(JSON.parse(SCRIPT).actions);
+    expect(uploaded).toHaveLength(4);
+    expect(uploaded[3]).toEqual({ at: 1000 + HOLD_END_MS, pos: 10 });
+    expect(HOLD_END_MS, 'held as long as a tiled loop lasts').toBe(TILE_TARGET_MS);
+  });
+
+  it('the held end goes through invert and the output limit like every other point', async () => {
+    const handy = makeFakeHandy();
+    await engageHandyFinisher({
+      handyManager: handy, content: SCRIPT, cachedUrl: null, once: true, inverted: true,
+      cutoff: { min: 20, max: 80 }, isCurrent: () => true,
+    });
+    const uploaded = JSON.parse(handy.uploadScriptOnly.mock.calls[0][0]).actions;
+    const lastTwo = uploaded.slice(-2);
+    expect(lastTwo[0].pos, 'inverted (100 - 10 = 90), then held to 80').toBe(80);
+    expect(lastTwo[1].pos, 'the hold is at the same, limited position').toBe(lastTwo[0].pos);
   });
 
   it('skips the upload when a cached cloud URL exists', async () => {
@@ -220,6 +248,32 @@ describe('engageHandyFinisher — aborts', () => {
       isCurrent: () => true,
     });
     expect(status).toBe('error');
+  });
+});
+
+describe('holdFinisherEnd', () => {
+  it('adds one point: the last position, holdMs later; keeps every other field', () => {
+    const out = JSON.parse(holdFinisherEnd(JSON.stringify({ version: '1.0', inverted: false, range: 100, actions: [
+      { at: 500, pos: 80 }, { at: 0, pos: 20 }, { at: 1200, pos: 2 },
+    ] }), 3000));
+    expect(out.version).toBe('1.0');
+    expect(out.range).toBe(100);
+    expect(out.actions, 'sorted, then held').toEqual([
+      { at: 0, pos: 20 }, { at: 500, pos: 80 }, { at: 1200, pos: 2 }, { at: 4200, pos: 2 },
+    ]);
+  });
+
+  it('returns its input unchanged when it cannot help (unparseable, no actions, no hold)', () => {
+    expect(holdFinisherEnd('not json')).toBe('not json');
+    expect(holdFinisherEnd('')).toBe('');
+    const empty = JSON.stringify({ actions: [] });
+    expect(holdFinisherEnd(empty)).toBe(empty);
+    expect(holdFinisherEnd(SCRIPT, 0)).toBe(SCRIPT);
+  });
+
+  it('defaults to HOLD_END_MS', () => {
+    const out = JSON.parse(holdFinisherEnd(SCRIPT)).actions;
+    expect(out[out.length - 1].at).toBe(1000 + HOLD_END_MS);
   });
 });
 

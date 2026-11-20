@@ -54,6 +54,9 @@ export class AudiencePanel {
       'audience:viewer-status',
       'audience-popout:opened',
       'audience-popout:closed',
+      // Every string here is drawn by _render(); without this the Audience
+      // tab stayed in the old language after a live switch (app test V50).
+      'language:changed',
     ]) {
       const off = eventBus.on(evt, refresh);
       this._unsubscribers.push(off);
@@ -166,9 +169,10 @@ export class AudiencePanel {
     if (!this._bridge.roomActive) return t('audience.tab.statusNoRoom');
     const viewers = this._bridge.viewers;
     if (viewers.length === 0) return t('audience.tab.statusRoomEmpty');
-    const connected = viewers.filter((v) => v.status === 'synced' || v.status === 'playing' || v.status === 'paused').length;
-    const calibrating = viewers.filter((v) => v.status === 'connecting' || v.status === 'uploading' || v.status === 'calibrating').length;
-    const errored = viewers.filter((v) => v.status === 'error' || v.status === 'disconnected').length;
+    // Same buckets as the bridge's aggregateStatus (audience-bridge.js).
+    const connected = viewers.filter((v) => ['synced', 'ready', 'remote-held', 'playing', 'paused', 'speed', 'no-script'].includes(v.status)).length;
+    const calibrating = viewers.filter((v) => ['connecting', 'uploading', 'calibrating', 'waiting'].includes(v.status)).length;
+    const errored = viewers.filter((v) => ['error', 'disconnected', 'script-failed'].includes(v.status)).length;
     const parts = [];
     if (connected > 0) parts.push(t('audience.tab.statusConnectedN', { count: connected }));
     if (calibrating > 0) parts.push(t('audience.tab.statusCalibratingN', { count: calibrating }));

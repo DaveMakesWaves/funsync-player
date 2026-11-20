@@ -1,5 +1,5 @@
 // Tests for VR Companion Mode — VRPlaybackProxy + VRBridge
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VRPlaybackProxy } from '../../renderer/js/vr-playback-proxy.js';
 
 // === VRPlaybackProxy ===
@@ -358,13 +358,21 @@ describe('VRBridge — linkState (three-state UI)', () => {
     expect(bridge.linkState).toBe('disconnected');
   });
 
-  it('returns receiving immediately after connect (seeded _lastArrivalMs)', async () => {
+  // Rewritten in the block C fix-up (2026-11-06, real-app verifier 2): this
+  // pinned the bug as correct. connect() seeds _lastArrivalMs to now for the
+  // watchdog, so a link that had sent NOTHING read 'receiving' ('receiving
+  // timestamps' in the VR modal and nav bar) for its first 5 s, retries to a
+  // quiet headset included. It is 'waiting' until the first packet.
+  it('returns waiting after connect until the first packet, then receiving', async () => {
     const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
-    // _lastArrivalMs is seeded to Date.now() on connect, so linkState
-    // is 'receiving' (within the 5 s threshold).
+    expect(bridge.linkState).toBe('waiting');
+    bridge._handleStateUpdate({
+      currentTime: 1, duration: 100, playerState: 1, playbackSpeed: 1,
+      _arrivalMs: Date.now(),
+    });
     expect(bridge.linkState).toBe('receiving');
     bridge._stopLivenessWatchdog();
   });
@@ -374,6 +382,11 @@ describe('VRBridge — linkState (three-state UI)', () => {
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
+    bridge._handleStateUpdate({
+      currentTime: 1, duration: 100, playerState: 1, playbackSpeed: 1,
+      _arrivalMs: Date.now(),
+    });
+    expect(bridge.linkState).toBe('receiving');
     // Backdate the last arrival to 6 s ago
     bridge._lastArrivalMs = Date.now() - 6000;
     expect(bridge.linkState).toBe('waiting');
@@ -398,22 +411,105 @@ describe('VRBridge — linkState (three-state UI)', () => {
 });
 
 describe('VRBridge — connect() coalescing', () => {
-  it('short-circuits a second connect() while one is in flight', async () => {
+  // A second connect() while one is in flight joins it: no second dial, and
+  // the caller gets the REAL outcome. This test used to expect `false` for
+  // the joined call, which pinned app test V24 as correct: every caller
+  // reads `false` as a failed dial, so the activity poll counted it toward
+  // the 8 s backoff and a Connect click said "failed" without dialing.
+  it('joins the in-flight attempt and reports its success', async () => {
     const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     let resolveFirst;
+    window.funsync.vrConnect.mockClear();
     window.funsync.vrConnect.mockImplementation(() =>
       new Promise(r => { resolveFirst = r; })
     );
     // Don't await — kick off a "slow" connect
     const p1 = bridge.connect('deovr', '1.2.3.4', 23554);
-    // Immediately try again — should short-circuit and return false
     const p2 = bridge.connect('deovr', '1.2.3.4', 23554);
-    expect(await p2).toBe(false);
-    // First one still resolves normally
     resolveFirst({ success: true });
     expect(await p1).toBe(true);
+    expect(await p2).toBe(true);
+    expect(window.funsync.vrConnect).toHaveBeenCalledTimes(1);
     bridge._stopLivenessWatchdog();
+    window.funsync.vrConnect.mockReset();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+  });
+
+  it('joins the in-flight attempt and reports its failure', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    let resolveFirst;
+    window.funsync.vrConnect.mockClear();
+    window.funsync.vrConnect.mockImplementation(() =>
+      new Promise(r => { resolveFirst = r; })
+    );
+    const p1 = bridge.connect('deovr', '1.2.3.4', 23554);
+    const p2 = bridge.connect('deovr', '1.2.3.4', 23554);
+    resolveFirst({ success: false, error: 'connect ECONNREFUSED 1.2.3.4:23554' });
+    expect(await p1).toBe(false);
+    expect(await p2).toBe(false);
+    expect(window.funsync.vrConnect).toHaveBeenCalledTimes(1);
+    // Settled: the next call dials again.
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+    expect(await bridge.connect('deovr', '1.2.3.4', 23554)).toBe(true);
+    expect(window.funsync.vrConnect).toHaveBeenCalledTimes(2);
+    bridge._stopLivenessWatchdog();
+    window.funsync.vrConnect.mockReset();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+  });
+
+  // The VR modal's Connect with a host typed in, clicked while the activity
+  // poll is dialing another IP: the click must dial what the user typed, not
+  // inherit the background dial's refusal.
+  it('a connect to ANOTHER host waits for the in-flight attempt, then dials its own', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    const dials = [];
+    window.funsync.vrConnect.mockClear();
+    window.funsync.vrConnect.mockImplementation((host) =>
+      new Promise((resolve) => dials.push({ host, resolve }))
+    );
+    const background = bridge.connect('heresphere', '192.168.1.202', 23554);
+    const click = bridge.connect('heresphere', '127.0.0.1', 23554);
+    await Promise.resolve();
+    expect(dials.map((d) => d.host)).toEqual(['192.168.1.202']); // one dial at a time
+
+    dials[0].resolve({ success: false, error: 'connect ECONNREFUSED 192.168.1.202:23554' });
+    expect(await background).toBe(false);
+    await vi.waitFor(() => expect(dials).toHaveLength(2));
+    expect(dials[1].host).toBe('127.0.0.1');
+    dials[1].resolve({ success: true });
+    expect(await click).toBe(true);
+    expect(bridge.connected).toBe(true);
+    expect(bridge.host).toBe('127.0.0.1');
+    bridge._stopLivenessWatchdog();
+    window.funsync.vrConnect.mockReset();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+  });
+
+  it('a connect to ANOTHER host ends on that host even when the in-flight one connected', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    const dials = [];
+    window.funsync.vrConnect.mockClear();
+    window.funsync.vrDisconnect.mockClear();
+    window.funsync.vrConnect.mockImplementation((host) =>
+      new Promise((resolve) => dials.push({ host, resolve }))
+    );
+    const background = bridge.connect('heresphere', '192.168.1.202', 23554);
+    const click = bridge.connect('heresphere', '127.0.0.1', 23554);
+    await Promise.resolve();
+    dials[0].resolve({ success: true });
+    expect(await background).toBe(true);
+    await vi.waitFor(() => expect(dials).toHaveLength(2));
+    dials[1].resolve({ success: true });
+    expect(await click).toBe(true);
+    expect(bridge.host).toBe('127.0.0.1');
+    expect(window.funsync.vrDisconnect).toHaveBeenCalledTimes(1); // the first link was closed
+    bridge._stopLivenessWatchdog();
+    window.funsync.vrConnect.mockReset();
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
   });
 });
 
@@ -595,5 +691,114 @@ describe('VRBridge — liveness watchdog', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// FT-053 (2026-11-06, also in v0.9.2): the watchdog tore the link down after
+// 8 s of silence even while the headset was paused, so any pause longer than
+// that could drop it (a likely cause of #343's drops). While paused on a link
+// that has received, 60 s is allowed; the first-packet window and a playing
+// link keep 8 s. Packets go through the bridge's real IPC listener; the
+// watchdog's interval and Date.now() run on a fake clock.
+describe('VRBridge — liveness watchdog while paused (FT-053)', () => {
+  const PAUSED = { path: '/storage/emulated/0/VR/Scene.mp4', currentTime: 12, duration: 600, playerState: 1, playbackSpeed: 1 };
+  const PLAYING = { ...PAUSED, playerState: 0 };
+  let bridge;
+  let onDisconnect;
+  let packet;
+
+  beforeEach(async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'setTimeout', 'clearTimeout', 'Date'] });
+    let stateListener = null;
+    window.funsync.onVrState.mockImplementation((cb) => { stateListener = cb; return () => { stateListener = null; }; });
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    bridge = new VRBridge();
+    onDisconnect = vi.fn();
+    bridge.onDisconnect = onDisconnect;
+    await bridge.connect('heresphere', '127.0.0.1', 23554);
+    // What main sends for one timestamp packet (vr-socket.js stamps the arrival).
+    packet = (data) => stateListener?.({ ...data, _arrivalMs: Date.now() });
+  });
+
+  afterEach(() => {
+    bridge._stopLivenessWatchdog();
+    window.funsync.onVrState.mockImplementation(() => () => {});
+    vi.useRealTimers();
+  });
+
+  it('paused, then 30 s of silence: the link holds, shown as waiting', () => {
+    packet(PAUSED);
+    vi.advanceTimersByTime(30_000);
+    expect(bridge.connected).toBe(true);
+    expect(onDisconnect).not.toHaveBeenCalled();
+    expect(bridge.linkState).toBe('waiting');
+  });
+
+  it('paused, then 61 s of silence: torn down', () => {
+    packet(PAUSED);
+    vi.advanceTimersByTime(61_000);
+    expect(bridge.connected).toBe(false);
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('playing, then 9 s of silence: torn down at the 8 s rule', () => {
+    packet(PLAYING);
+    vi.advanceTimersByTime(9_000);
+    expect(bridge.connected).toBe(false);
+    expect(onDisconnect).toHaveBeenCalledTimes(1);
+  });
+
+  it('no packet at all: torn down after 9 s, although the proxy starts out paused', () => {
+    expect(bridge.proxy.paused).toBe(true);
+    vi.advanceTimersByTime(9_000);
+    expect(bridge.connected).toBe(false);
+  });
+
+  it('a pause, a long silence, then play again: back on the 8 s rule', () => {
+    packet(PLAYING);
+    vi.advanceTimersByTime(1_000);
+    packet(PAUSED);
+    vi.advanceTimersByTime(40_000);
+    expect(bridge.connected).toBe(true);
+    packet(PLAYING);
+    vi.advanceTimersByTime(7_000);
+    expect(bridge.connected).toBe(true);
+    vi.advanceTimersByTime(2_000);
+    expect(bridge.connected).toBe(false);
+  });
+});
+
+// FT-054: the bridge says whether a link has had a packet, once per link.
+describe('VRBridge — first packet of a link (FT-054)', () => {
+  let stateListener = null;
+  beforeEach(() => {
+    window.funsync.onVrState.mockImplementation((cb) => { stateListener = cb; return () => { stateListener = null; }; });
+    window.funsync.vrConnect.mockResolvedValue({ success: true });
+  });
+  afterEach(() => {
+    window.funsync.onVrState.mockImplementation(() => () => {});
+  });
+
+  it('received is false after a connect, true from the first packet; onFirstPacket fires once per link', async () => {
+    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
+    const bridge = new VRBridge();
+    const first = vi.fn();
+    bridge.onFirstPacket = first;
+    await bridge.connect('heresphere', '127.0.0.1', 23554);
+    expect(bridge.received).toBe(false);
+    const data = { path: '/vr/a.mp4', currentTime: 1, duration: 60, playerState: 0, playbackSpeed: 1 };
+    stateListener({ ...data, _arrivalMs: Date.now() });
+    stateListener({ ...data, _arrivalMs: Date.now() });
+    expect(bridge.received).toBe(true);
+    expect(first).toHaveBeenCalledTimes(1);
+
+    // A new link starts over.
+    await bridge.disconnect();
+    await bridge.connect('heresphere', '127.0.0.1', 23554);
+    expect(bridge.received).toBe(false);
+    stateListener({ ...data, _arrivalMs: Date.now() });
+    expect(first).toHaveBeenCalledTimes(2);
+    bridge._stopLivenessWatchdog();
   });
 });

@@ -9,10 +9,25 @@
 // mount (no pointer wiring — the editor attaches its handlers externally,
 // so a bare ActionGraph is already non-interactive), which guarantees
 // visual parity with the editor for free. HM uses the seek-bar heatmap's
-// exact per-action-pair algorithm (see _renderHeatmap) so both show
-// identical detail.
+// exact per-action-pair algorithm AND colour scale (see _renderHeatmap) so
+// both show identical detail in identical colours.
 
 import { ActionGraph } from '../js/action-graph.js';
+import { heatmapSpeedToColor } from '../js/heatmap-palette.js';
+
+/** The TL's window width for every new video: the editor's OFS default (5 s). */
+export const INLINE_VIEW_MS = 5000;
+
+/**
+ * Where the HM playhead marker sits, as a 0..1 share of the strip: the
+ * playback position over the VIDEO duration, the same mapping the strip's
+ * rects use (so the marker lands on the stroke being played). Clamped, and 0
+ * while the duration is unknown.
+ */
+export function heatmapPlayheadFraction(timeMs, durationMs) {
+  if (!(durationMs > 0) || !Number.isFinite(timeMs)) return 0;
+  return Math.min(1, Math.max(0, timeMs / durationMs));
+}
 
 export class InlineViz {
   /**
@@ -27,6 +42,9 @@ export class InlineViz {
     this._raf = null;
     this._tlOn = false;
     this._hmOn = false;
+    // Optional playhead marker on the HM strip (zaikechi #381,
+    // `player.inlineHeatmapPlayhead`, off by default).
+    this._hmPlayheadOn = false;
 
     this._root = document.createElement('div');
     this._root.className = 'inline-viz';
@@ -37,13 +55,25 @@ export class InlineViz {
     this._hmCanvas.className = 'inline-viz__heatmap';
     this._hmCanvas.hidden = true;
 
+    // The strip's playhead is an element positioned OVER the canvas, never
+    // painted into it: the strip is cached (redrawn only on script, toggle or
+    // resize), and its pixels are what heatmap-palette-parity.test.js holds to
+    // the seek bar's. The wrap is only a positioning box for the two.
+    this._hmWrap = document.createElement('div');
+    this._hmWrap.className = 'inline-viz__heatmap-wrap';
+    this._hmWrap.hidden = true;
+    this._hmPlayhead = document.createElement('div');
+    this._hmPlayhead.className = 'inline-viz__hm-playhead';
+    this._hmPlayhead.hidden = true;
+    this._hmWrap.append(this._hmCanvas, this._hmPlayhead);
+
     this._tlWrap = document.createElement('div');
     this._tlWrap.className = 'inline-viz__timeline';
     this._tlWrap.hidden = true;
     this._tlCanvas = document.createElement('canvas');
     this._tlWrap.appendChild(this._tlCanvas);
 
-    this._root.append(this._hmCanvas, this._tlWrap);
+    this._root.append(this._hmWrap, this._tlWrap);
     container.appendChild(this._root);
 
     // Read-only shim satisfying ActionGraph's script interface
@@ -52,7 +82,8 @@ export class InlineViz {
     this._graph = new ActionGraph(this._tlCanvas, this._shim);
 
     // Drive the graph's cursor from the video clock with our own rAF loop
-    // (only while playing AND the TL is visible — zero cost otherwise).
+    // (only while playing AND the TL, or the HM playhead, is visible — zero
+    // cost otherwise).
     // centerOnTime keeps the OFS-style centered playhead.
     this._onPlay = () => this._syncLoop();
     // Pause: stop the loop and draw once so the frozen frame is current.
@@ -80,9 +111,13 @@ export class InlineViz {
     this._actions = clean.length >= 2 ? clean : null;
     this._shim.actions = this._actions || [];
     this._durationMs = (durationSec && isFinite(durationSec)) ? durationSec * 1000 : 0;
-    if (this._durationMs > 0) {
-      this._graph.setVideoDuration(this._durationMs);
-    }
+    // The new video's length FIRST (0 = unknown, no clamp), then the TL's own
+    // default window: the one graph lives for the whole session and the TL
+    // has no zoom of its own, so a window a short video narrowed must not
+    // carry over to the next one (Dave, 2026-11-18: the timeline "moves
+    // wayyyyy faster than the video" after a video change).
+    this._graph.setVideoDuration(this._durationMs);
+    this._graph.setViewport(0, INLINE_VIEW_MS);
     this._updateVisibility();
     this._renderHeatmap();
     this._drawOnce();
@@ -109,10 +144,23 @@ export class InlineViz {
     this._hmOn = !!on;
     this._updateVisibility();
     this._renderHeatmap();
+    // The playhead marker moves with the clock, so the loop has to run for
+    // the HM alone when the marker is on.
+    this._drawOnce();
+    this._syncLoop();
+  }
+
+  /** Show a playhead marker on the HM strip (`player.inlineHeatmapPlayhead`). */
+  setHeatmapPlayhead(on) {
+    this._hmPlayheadOn = !!on;
+    this._updateVisibility();
+    this._drawOnce();
+    this._syncLoop();
   }
 
   get timelineVisible() { return this._tlOn; }
   get heatmapVisible() { return this._hmOn; }
+  get heatmapPlayheadVisible() { return this._hmPlayheadOn; }
 
   destroy() {
     this._stopLoop();
@@ -131,6 +179,8 @@ export class InlineViz {
     const any = this._hasScript() && (this._tlOn || this._hmOn);
     this._root.hidden = !any;
     this._hmCanvas.hidden = !(this._hasScript() && this._hmOn);
+    this._hmWrap.hidden = this._hmCanvas.hidden;
+    this._hmPlayhead.hidden = this._hmCanvas.hidden || !this._hmPlayheadOn;
     this._tlWrap.hidden = !(this._hasScript() && this._tlOn);
   }
 
@@ -138,12 +188,22 @@ export class InlineViz {
     return this._hasScript() && this._tlOn && !this._root.hidden;
   }
 
+  _hmPlayheadActive() {
+    return this._hasScript() && this._hmOn && this._hmPlayheadOn && !this._root.hidden;
+  }
+
+  /** Anything on screen that follows the clock. */
+  _loopActive() {
+    return this._tlActive() || this._hmPlayheadActive();
+  }
+
   _syncLoop() {
-    if (!this._tlActive() || this._video.paused) { this._stopLoop(); return; }
+    if (!this._loopActive() || this._video.paused) { this._stopLoop(); return; }
     if (this._raf) return; // already running
     const loop = () => {
-      if (!this._tlActive() || this._video.paused) { this._raf = null; return; }
-      this._drawFrame();
+      if (!this._loopActive() || this._video.paused) { this._raf = null; return; }
+      if (this._tlActive()) this._drawFrame();
+      if (this._hmPlayheadActive()) this._placeHeatmapPlayhead();
       this._raf = requestAnimationFrame(loop);
     };
     this._raf = requestAnimationFrame(loop);
@@ -158,6 +218,13 @@ export class InlineViz {
 
   _drawOnce() {
     if (this._tlActive()) this._drawFrame();
+    if (this._hmPlayheadActive()) this._placeHeatmapPlayhead();
+  }
+
+  /** Move the HM marker to the current position (CSS %, so no DPR maths). */
+  _placeHeatmapPlayhead() {
+    const frac = heatmapPlayheadFraction((this._video.currentTime || 0) * 1000, this._durationMs);
+    this._hmPlayhead.style.left = `${frac * 100}%`;
   }
 
   _drawFrame() {
@@ -209,8 +276,11 @@ export class InlineViz {
    * the seek bar even when a script starts late). An earlier revision
    * binned speeds into 240 fixed buckets, which read as blocky flat colour
    * next to the seek bar's per-action detail (Dave, 2026-08-04).
-   * Colors via ActionGraph.speedToColor — one palette across the strip,
-   * seek bar, and editor lines.
+   * Colors via heatmapSpeedToColor, the seek bar's own scale, so a speed
+   * looks the same in the strip and the seek bar under it. Until app test
+   * V36 this used ActionGraph.speedToColor and went red at 0.3 pos/ms where
+   * the seek bar was still yellow (EroScripts #381). The TL graph above it
+   * stays on the editor's OFS palette, like the editor.
    */
   _renderHeatmap() {
     if (this._hmCanvas.hidden || !this._actions || !(this._durationMs > 0)) return;
@@ -235,7 +305,7 @@ export class InlineViz {
       const speed = Math.abs(b.pos - a.pos) / dt; // pos-units per ms
       const x1 = (a.at / durationMs) * cssW;
       const x2 = (b.at / durationMs) * cssW;
-      ctx.fillStyle = ActionGraph.speedToColor(speed);
+      ctx.fillStyle = heatmapSpeedToColor(speed);
       ctx.fillRect(x1, 0, Math.max(x2 - x1, 1), cssH);
     }
   }

@@ -95,6 +95,8 @@
       "testBuzzAll": "测试全部",
       "testBuzzAllTitle": "对每个已连接设备进行振动测试",
       "testBuzz": "测试振动",
+      "resend": "重新发送",
+      "resendTitle": "如果此观众的 Handy 已断开，则重新连接，然后再次发送当前脚本",
       "mute": "静音",
       "unmute": "取消静音",
       "remove": "移除观众",
@@ -111,13 +113,23 @@
       "statusSynced": "已同步",
       "statusPlaying": "播放中",
       "statusPlayingWithRtd": "播放中 · {rtd}ms RTD",
+      "statusWaiting": "等待脚本",
+      "statusReady": "就绪",
+      "statusRemoteHeld": "已停止 · 观众不跟随手机或头显播放",
+      "statusNoScript": "此视频没有脚本",
+      "statusSpeed": "已停止 · {rate}× 速度",
+      "statusScriptFailed": "无法加载脚本",
+      "errorStopFailed": "停止失败。设备可能仍在运动。",
+      "errorSetupFailed": "设备没有接受该脚本。",
+      "errorPlayFailed": "设备没有开始播放。",
       "statusPaused": "已暂停",
       "statusMuted": "已静音",
       "statusError": "错误",
       "statusDisconnected": "已断开"
     },
     "toast": {
-      "selfKey": "这是你自己的 Handy — 它已经由 Handy 标签控制。"
+      "selfKey": "这是你自己的 Handy — 它已经由 Handy 标签控制。",
+      "uploadFailed": "无法将新脚本发送给你的观众。他们的设备已停止。"
     },
     "popoutWindowTitle": "观众房间"
   },
@@ -157,7 +169,8 @@
     "sourceDisconnected": "来源已断开",
     "edit": "编辑",
     "addSourceFolder": "+ 添加来源文件夹…",
-    "newCollection": "+ 新建合集…"
+    "newCollection": "+ 新建合集…",
+    "notResponding": "无响应"
   },
   "common": {
     "ok": "确定",
@@ -198,6 +211,7 @@
     "scriptEditor": "脚本编辑器 (E)",
     "inlineTimeline": "脚本时间轴",
     "inlineHeatmap": "热力图条",
+    "deviceSimulator": "设备模拟器",
     "screenshot": "截图",
     "pictureInPicture": "画中画",
     "miniPlayPause": "播放 / 暂停",
@@ -229,6 +243,8 @@
     "replayTitle": "重播 (K)",
     "playTitle": "播放 (K)",
     "pauseTitle": "暂停 (K)",
+    "muteTitle": "静音 (M)",
+    "unmuteTitle": "取消静音 (M)",
     "infoResolution": "分辨率",
     "infoDuration": "时长",
     "infoCurrent": "当前",
@@ -245,7 +261,13 @@
     "windowWaiting": "播放器窗口已连接。视频播放将在后续更新中移到此处。",
     "popOutUnavailableRemote": "手机或 VR 头显连接时不可用。",
     "popOutUnavailableSrc": "弹出窗口目前支持本地媒体库视频。",
-    "popOutOpening": "正在打开播放器窗口…"
+    "popOutOpening": "正在打开播放器窗口…",
+    "windowCrashed": "播放器窗口崩溃了，视频已回到此窗口。",
+    "windowHung": "播放器窗口无响应。你的设备已停止。请等待，或关闭它并在此处继续观看。",
+    "windowHungClose": "关闭播放器窗口",
+    "windowRecovered": "播放器窗口已恢复响应。它已暂停：按播放即可重新启动你的设备。",
+    "stashMarker": "Stash 标记：{title}",
+    "stashMarkerUntitled": "Stash 标记"
   },
   "backend": {
     "title": "后端无响应",
@@ -291,16 +313,26 @@
     "filterVR": "VR",
     "filterVROnly": "仅 VR",
     "filterNonVR": "非 VR",
-    "kebabResetVRCurrentlyVR": "重置 VR (当前:VR)",
-    "kebabResetVRCurrentlyFlat": "重置 VR (当前:平面)",
-    "kebabMarkFlat": "标记为平面",
-    "kebabMarkVR": "标记为 VR",
+    "filterTags": "标签",
+    "filterTagsFind": "查找标签",
+    "filterTagsFindAria": "在标签和分类中查找",
+    "filterTagsEmpty": "你的视频还没有标签或分类。",
+    "filterTagsNoMatch": "没有与“{query}”匹配的项。",
+    "filterTagsShowAll": "全部显示 ({count})",
+    "filterTagsShowFewer": "收起",
+    "filterCategory": "分类",
+    "filterTagSource": "标签来源",
+    "filterTagSourceEroscripts": "EroScripts",
+    "filterTagSourceFile": "脚本文件",
+    "filterTagSourceUser": "你",
+    "filterTagOptionAria": "{label}，{count, plural, other {# 个视频}}",
+    "filterChipFacet": "{facet}：{value}",
+    "filterChipFacetNot": "{facet}：不含 {value}",
+    "cardTagsMore": "+{count}",
     "kebabVRFormat": "VR 格式…",
-    "kebabRemoveFunscript": "移除脚本",
-    "kebabChangeSubtitle": "更换字幕",
+    "kebabRemoveFunscript": "取消脚本配对",
     "kebabAssociateSubtitle": "关联字幕",
-    "kebabRemoveSubtitle": "移除字幕",
-    "kebabOptions": "选项",
+    "kebabRemoveSubtitle": "取消字幕配对",
     "kebabFolderOptions": "文件夹选项",
     "clearFolderScope": "清除文件夹范围",
     "funscriptManual": "脚本 (手动)",
@@ -311,6 +343,7 @@
     "subtitlesAuto": "字幕 (自动检测)",
     "multiAxis": "多轴",
     "multiAxisCount": "{count, plural, other {多轴 (# 个脚本)}}",
+    "multiAxisEmbedded": "{count, plural, other {多轴 — 脚本内嵌 # 个轴：{axes}}}",
     "vrBadge": "VR",
     "flatBadge": "FLAT",
     "limitToFolder": "仅限此文件夹",
@@ -324,6 +357,8 @@
     "select": "选择",
     "cancelSelect": "取消",
     "noSourcesEmpty": "添加来源文件夹以浏览您的视频库",
+    "noVideoTrack": "无视频轨道",
+    "sourcesAllOff": "所有来源文件夹都已关闭。请在 {settings} > {tab} 中打开一个以浏览。",
     "addSourceFolder": "+ 添加来源文件夹",
     "gridView": "网格视图",
     "listView": "列表视图",
@@ -333,6 +368,13 @@
     "shuffleAll": "随机播放全部",
     "shuffleAllTitle": "以随机、不重复的顺序播放所有显示的视频",
     "shuffleEmpty": "这里没有可随机播放的视频",
+    "playOptions": {
+      "openTitle": "播放选项",
+      "title": "媒体库和分类的播放选项",
+      "loopLabel": "循环",
+      "loopWhy": "最后一个视频播放完后从第一个重新开始。",
+      "shuffleNote": "同样的机会和“优先未观看”只在随机播放时生效。分类中的“全部播放”保持列表顺序。播放列表有各自的设置。"
+    },
     "vrType": "VR 类型",
     "loading": "加载中…",
     "allSources": "所有来源",
@@ -354,10 +396,6 @@
     "variantDefault": "默认",
     "assignScriptBulk": "分配脚本",
     "bulkScriptAssigned": "已将 {name} 分配给 {count} 个视频",
-    "kebabGroupOrganize": "整理",
-    "kebabGroupScripts": "脚本与字幕",
-    "kebabGroupThumbnail": "缩略图",
-    "kebabGroupVR": "VR",
     "kebabExtractAxes": "提取内嵌轴 ({count})…",
     "kebabExtractAxesTitle": "将 {axes} 保存为配套 .funscript 文件",
     "customThumbTitle": "选择缩略图帧",
@@ -378,7 +416,6 @@
     "resetVRClassification": "重置为自动检测",
     "pinAsCollection": "固定为合集",
     "selectAllInFolder": "选择此文件夹中的全部",
-    "changeFunscriptBtn": "更换脚本",
     "associateFunscriptBtn": "关联脚本",
     "noSourcesToRefresh": "没有可刷新的来源文件夹",
     "refreshedNoChanges": "媒体库已刷新 — 无变化",
@@ -443,6 +480,7 @@
       "changeTo": "更换为:",
       "selectScript": "选择脚本:",
       "noFunscripts": "目录中未找到脚本。请使用浏览。",
+      "noNameMatch": "没有与此视频同名的脚本。以下是其文件夹中的所有脚本：",
       "browse": "浏览…",
       "save": "保存",
       "variations": "变体",
@@ -469,11 +507,24 @@
       "selectScriptBtn": "选择",
       "addRoute": "+ 添加路由",
       "variantSearchTitle": "选择变体脚本",
+      "routeScriptSearchTitle": "选择路由脚本",
       "searchEroScripts": "搜索 EroScripts..."
     },
     "heatmapUnavailable": "热力图不可用",
     "sortSwitchTo": "切换为 {order}",
-    "selectedAll": "{count, plural, other {已选择 # 个视频}}"
+    "selectedAll": "{count, plural, other {已选择 # 个视频}}",
+    "contextAllOptions": "全部选项…",
+    "filterTagIncludesSubTags": "{count, plural, other {包含 # 个子标签}}",
+    "sortStashRatingDesc": "Stash 评分 高-低",
+    "sortStashRatingAsc": "Stash 评分 低-高",
+    "sortStashLastPlayedDesc": "Stash 最近播放",
+    "sortStashLastPlayedAsc": "Stash 最早播放",
+    "filterStash": "Stash",
+    "filterStashRating": "Stash 评分",
+    "filterStashRatingAny": "任意评分",
+    "filterStashRatingAtLeast": "{count, plural, other {评分 # 星及以上}}",
+    "filterStashOrganised": "在 Stash 中已整理",
+    "filterChipStashRating": "{count, plural, other {Stash：# 星及以上}}"
   },
   "playlists": {
     "title": "播放列表",
@@ -492,6 +543,8 @@
     "moveDown": "下移",
     "moveUpNamed": "将 {name} 上移",
     "moveDownNamed": "将 {name} 下移",
+    "moveToTop": "移到顶部",
+    "moveToBottom": "移到底部",
     "reorderAnnounce": "{name} 已移至第 {pos}/{total} 位",
     "renamePlaylist": "重命名播放列表",
     "deletePlaylist": "删除播放列表",
@@ -502,7 +555,7 @@
     "gridView": "网格视图",
     "listView": "列表视图",
     "detailEmpty": "此播放列表中无视频",
-    "detailEmptyHint": "通过媒体库中的更多菜单添加视频",
+    "detailEmptyHint": "从媒体库添加视频：打开视频的选项（⋮），在“整理”中勾选此播放列表。",
     "advanced": {
       "openTitle": "播放列表高级设置",
       "title": "播放列表高级设置",
@@ -528,7 +581,36 @@
     "unavailableCount": "{count, plural, other {# 个视频当前不可用}}",
     "unavailableOnVolume": "{count, plural, other {{volume} 上的 # 个视频当前不可用}}",
     "unavailableHint": "重新连接驱动器即可播放。它们仍保留在播放列表中。",
-    "unavailableTooltip": "当前不可用：{path}"
+    "unavailableTooltip": "当前不可用：{path}",
+    "sortAzTitle": "按名称排序 (A-Z)",
+    "sortZaTitle": "按名称排序 (Z-A)",
+    "sortedAz": "已将“{name}”按名称排序 (A-Z)",
+    "sortedZa": "已将“{name}”按名称排序 (Z-A)",
+    "selectModeTitle": "选择视频，一次移动或移除多个",
+    "selectVideoNamed": "选择 {name}",
+    "movedSelection": "{count, plural, other {已在“{name}”中移动 # 个视频}}",
+    "removedSelection": "{count, plural, other {已从“{name}”中移除 # 个视频}}。视频文件本身不受影响。",
+    "confirmRemoveSelection": "{count, plural, other {要从“{name}”中移除 # 个视频吗？}}视频文件本身不受影响。",
+    "stashGroups": {
+      "sectionTitle": "来自 Stash",
+      "sectionHint": "来自你的 Stash 的分组，每次 FunSync 与 Stash 同步时都会更新。要修改分组，请在 Stash 中修改。",
+      "name": "Stash：{name}",
+      "unnamed": "未命名分组",
+      "readOnly": "只读",
+      "readOnlyReason": "与你的 Stash 中的此分组保持同步。FunSync 无法更改其中的视频或顺序：请在 Stash 中修改分组，然后同步。",
+      "missingCount": "{count, plural, other {# 个场景不在你的媒体库中}}",
+      "missingScene": "不在你的 FunSync 媒体库中",
+      "missingSceneTooltip": "此 Stash 场景在你的 FunSync 媒体库中没有关联的视频，因此播放分组时会跳过它。",
+      "untitledScene": "无标题的 Stash 场景",
+      "playOptionsNote": "这些选项与媒体库和分类共用。同样的机会和“优先未观看”只在随机播放时生效；“全部播放”保持 Stash 的顺序。",
+      "addToQueue": "添加到队列",
+      "addToQueueTitle": "将此分组的视频添加到队列末尾",
+      "addedToQueue": "{count, plural, other {已将 # 个视频添加到队列}}",
+      "copy": "复制到我的播放列表",
+      "copyTitle": "用这些视频创建你自己的播放列表。你可以随意编辑，它不会跟随 Stash 变化。",
+      "copied": "已将“{name}”添加到你的播放列表",
+      "copyFailed": "无法创建播放列表。请重试。"
+    }
   },
   "categories": {
     "title": "分类",
@@ -548,7 +630,8 @@
     "gridView": "网格视图",
     "listView": "列表视图",
     "detailEmpty": "此分类中无视频",
-    "detailEmptyHint": "通过媒体库中的更多菜单分配视频",
+    "unavailableHint": "重新连接驱动器即可播放。它们仍保留在分类中。",
+    "detailEmptyHint": "从媒体库分配视频：打开视频的选项（⋮），在“整理”中勾选此分类。",
     "iconLabel": "图标",
     "iconModeColor": "颜色",
     "iconModeShape": "形状",
@@ -570,6 +653,8 @@
     "removeAria": "移除筛选:{label}"
   },
   "collectionModal": {
+    "titleCreate": "创建合集",
+    "titleEdit": "编辑 — {name}",
     "sourceLabel": "来源:",
     "allSources": "所有来源",
     "sourceDisconnected": "{name} (已断开)",
@@ -600,8 +685,11 @@
     "tcodePrecision4": "4 位 (TCode-0.3)"
   },
   "toast": {
+    "tcodeGoHomePauseFirst": "请先在手机或头显上暂停视频——它正在控制你的设备。",
     "dismissAria": "关闭通知",
     "tryAgain": "重试",
+    "vrTimestampServerHint": "VR 伴随程序无法连接到 HereSphere 的时间戳服务器。在 Quest 上打开 HereSphere → Settings → Timestamp Server，确认它已启用，然后点击 IP 字段旁的自动查找按钮 — Quest 的 IP 是 {ip}，端口应为 23554。如果仍然无效，请将时间戳服务器关闭再开启，以强制重新初始化。",
+    "vrQuestIpUnknown": "Quest Wi-Fi 设置中显示的地址",
     "connecting": "连接中…",
     "undo": "撤销",
     "getScript": "获取脚本",
@@ -634,6 +722,7 @@
     "vrFlattenLabel": "VR 平面化：{label}",
     "noVRDetected": "未在此视频中检测到 VR 立体编码",
     "vrLooksLikeVR": "看起来是 VR 视频。请在播放器菜单中设置格式",
+    "vrSetFormatInMenu": "此视频尚未设置 VR 格式。请在播放器菜单 (⋮) 的“VR 格式”中选择。",
     "noVideoLoaded": "未加载视频",
     "tcodePort": "请选择端口",
     "tcodeHost": "请输入主机地址",
@@ -641,6 +730,7 @@
     "tcodeWsUrlInvalid": "URL 必须以 ws:// 或 wss:// 开头",
     "scriptLoadFailed": "加载脚本失败：{error}",
     "handyUploadFailed": "上传脚本到 Handy 失败",
+    "handyStopFailed": "无法停止 Handy，可能仍在运行。请按设备上的按钮。",
     "variantSwitchFailed": "切换脚本变体失败",
     "noPlaylists": "暂无播放列表 — 请前往播放列表页创建",
     "addNoPath": "无法添加 — 视频缺少文件路径",
@@ -654,6 +744,8 @@
     "remoteDisconnected": "远程已断开",
     "remoteTakenOver": "远程已被 {ip} 接管",
     "funscriptUnreadable": "{name} 的脚本无法读取 — 无同步播放",
+    "scriptAccessDenied": "无法读取 {name}：访问被拒绝。无同步播放。",
+    "scriptUnreadableNow": "暂时无法读取 {name}。无同步播放。",
     "playlistNoPlayable": "此播放列表中没有可播放的视频",
     "fullscreenBlocked": "全屏被阻止:{error}",
     "fullscreenUnavailable": "此上下文中无法使用全屏。",
@@ -662,7 +754,7 @@
     "pipFailed": "画中画失败。",
     "nameSourcePrompt": "为此来源命名",
     "nameSourcePlaceholder": "来源名称",
-    "deleteCollectionTitle": "删除媒体库",
+    "deleteCollectionTitle": "删除合集",
     "deleteCollectionConfirm": "删除 \"{name}\"?您的视频不会受影响。",
     "renameVariationTitle": "重命名变体",
     "renameVariationLabel": "名称",
@@ -676,12 +768,17 @@
     "vrScriptLoadFailed": "加载 VR 脚本失败",
     "remoteNoScript": "远程正在播放 {name} — 无脚本",
     "vrReconnected": "VR 伴随程序已重新连接 — 设备同步中",
+    "settingSaveFailed": "无法保存该设置，已还原为先前的值",
+    "globalShortcutTaken": "{key} 已被其他应用占用，请换一个快捷键",
+    "globalShortcutInvalid": "{key} 不是有效的按键组合，请换一个快捷键",
     "vrConnected": "VR 伴随程序已连接 — 设备同步中",
     "restartFailed": "重启失败:{error}",
     "logsOpenFailed": "无法打开日志文件:{error}",
     "handyAutoFailed": "Handy 自动连接失败 — 按 H 手动连接",
     "sourceDisconnectedFile": "来源已断开 — 文件不再可用",
+    "videoFileMissing": "找不到 {name}。它可能已被移动或重命名，或者所在的驱动器未连接。",
     "multiAxisFailed": "多轴:{suffix} 脚本加载失败 ({error})",
+    "extractKeptExisting": "{count, plural, other {已保留 # 个现有伴随文件，未覆盖：{names}}}",
     "queueReadFailed": "队列项 {name}:脚本 {script} 无法读取 — 无同步播放",
     "queueReadError": "队列项 {name}:脚本读取失败 ({error}) — 无同步播放",
     "handyUploadTimeout": "Handy 脚本上传超时 — 视频正在播放但 Handy 无法同步。请检查连接并重新加载视频。",
@@ -690,7 +787,10 @@
     "videoUnavailable": "此视频当前不可用。请重新连接存储它的驱动器。",
     "playlistAllUnavailable": "这些视频当前均不可用。请重新连接驱动器。",
     "playlistSkippedUnavailable": "{count, plural, other {已跳过 # 个不可用的视频}}",
-    "nextAllUnavailable": "该方向没有更多可用视频。请重新连接驱动器以播放其余视频。"
+    "nextAllUnavailable": "该方向没有更多可用视频。请重新连接驱动器以播放其余视频。",
+    "settingsRecovered": "已从最近的备份恢复设置。可在“设置 → 数据”中查看备份历史。",
+    "settingsNotRecovered": "无法恢复设置，将以默认设置启动 — 请使用“设置 → 数据 → 导入备份文件”从备份文件恢复。",
+    "patternTestHandyFailed": "Handy 无法播放测试。请检查连接后重试。"
   },
   "modal": {
     "noItemsAvailable": "无可用项",
@@ -730,7 +830,9 @@
       "clear": "清除搜索"
     },
     "filterChips": {
-      "aria": "活动筛选条件"
+      "aria": "活动筛选条件",
+      "removeAria": "移除筛选:{label}",
+      "tag": "{facet}：{label}"
     },
     "actions": {
       "sort": "排序",
@@ -762,7 +864,12 @@
       "vrAria": "VR 筛选",
       "vrAll": "全部",
       "vrOnly": "仅 VR",
-      "vrFlat": "非 VR"
+      "vrFlat": "非 VR",
+      "tagsHeader": "标签",
+      "tagsFindLabel": "查找标签",
+      "tagsFindPlaceholder": "查找标签…",
+      "tagsNoMatch": "没有与“{query}”匹配的标签。",
+      "tagAria": "{label}，{count} 个视频"
     },
     "sortSheet": {
       "title": "排序方式",
@@ -849,7 +956,12 @@
       "avg": "平均",
       "max": "最大",
       "speedUnit": "单位/秒",
-      "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒"
+      "speedTooltip": "平均 {avg} 单位/秒 • 最大 {max} 单位/秒",
+      "variantListAria": "Funscript 变体",
+      "edgeHold": "边缘控制 - 按住",
+      "edgeRelease": "松开恢复",
+      "edgeTap": "边缘控制 - 点按",
+      "edgeResume": "点按恢复"
     }
   },
   "hevc": {
@@ -874,11 +986,18 @@
     "browse": "浏览…",
     "noManualVariations": "无手动变体",
     "defaultLabel": "默认",
+    "mainTag": "主脚本",
     "addScriptVariation": "添加脚本变体",
     "setDefault": "设为此视频的默认",
     "unsetDefault": "取消此视频的默认",
     "defaultSet": "已将“{label}”设为此视频的默认",
-    "defaultCleared": "已清除默认变体"
+    "defaultCleared": "已清除默认变体",
+    "bulkNamingTitle": "{count, plural, other {命名 # 个变体}}",
+    "bulkNamingHint": "每个脚本都会在变体菜单中显示一个名称。可修改任意名称，或点击其下方的建议。",
+    "bulkSkipped": "{count, plural, other {已跳过 # 个已在列表中的文件：{names}}}",
+    "bulkAddButton": "{count, plural, other {添加 # 个变体}}",
+    "bulkAdded": "{count, plural, other {已添加 # 个变体}}",
+    "alreadyListed": "{count, plural, other {已在变体列表中：{names}}}"
   },
   "syncChip": {
     "noDevices": "无设备",
@@ -980,7 +1099,10 @@
       "alreadyAdded": "已作为 \"{name}\" 添加",
       "childOverlapTitle": "该文件夹已被覆盖",
       "childOverlapBody": "\"{path}\" 位于 \"{parentName}\" ({parentPath}) 之内。该位置的文件已被扫描 — 再次添加会让每个视频被重复计入。\n\n仍要添加吗?",
+      "addAnyway": "仍要添加",
       "parentOverlapTitle": "来源重叠",
+      "parentOverlapBody": "\"{path}\" 包含 {count} 个已添加的来源：{names}。这些文件会被扫描两次。\n\n移除{count, plural, =1 {该来源} other {这些来源}}，改为添加此文件夹？",
+      "parentOverlapConfirm": "移除并添加",
       "convertedCollections": "{count, plural, other {# 个同步合集}}现在直接跟踪此文件夹。请将该文件夹重新添加为来源以查看视频。",
       "added": "来源 \"{name}\" 已添加",
       "removed": "来源 \"{name}\" 已移除",
@@ -1001,6 +1123,7 @@
       "title": "切换为多轴默认?",
       "bodyUnknown": "FunSync 将为所有检测到伴随文件的视频自动启用多轴播放。",
       "bodyNone": "您的媒体库中目前没有检测到伴随文件的视频。新增带伴随文件的视频将自动启用。",
+      "bodyAllAssigned": "媒体库中所有检测到伴随文件的视频都已设置播放模式，因此现在不会有任何变化。新增带伴随文件的视频将自动启用。",
       "bodyCount": "FunSync 将为 {count, plural, other {# 个}} 检测到伴随文件的视频自动启用多轴播放。",
       "warning": "之后切换回单轴并不会撤销这些分配。请在单个视频上使用更换脚本来撤销。",
       "confirm": "切换为多轴"
@@ -1030,9 +1153,9 @@
       "autoplayOnAdvanceResetAria": "将自动播放重置为默认",
       "multiHeader": "多轴",
       "fieldDefaultPlayback": "默认播放",
-      "preferSingle": "单轴 (默认)",
-      "preferMulti": "可用时使用多轴",
-      "preferResetTitle": "重置为默认 (单轴)",
+      "preferSingle": "单轴",
+      "preferMulti": "可用时使用多轴 (默认)",
+      "preferResetTitle": "重置为默认 (多轴)",
       "preferResetAria": "将默认播放重置为默认",
       "multiHint": "设为多轴时,FunSync 会为检测到伴随文件 (twist、surge 等) 的视频自动启用多轴播放。已设置的视频保持当前选择。切换回单轴不会撤销自动分配 — 请在单个视频上使用更换脚本来撤销。",
       "smoothingHeader": "运动平滑",
@@ -1052,6 +1175,10 @@
       "rangeExtenderHint": "当脚本的笔触位置集中在较窄的范围(例如 30–70)时,将其拉伸至使用设备的完整范围。下次加载视频时对所有设备生效。",
       "rangeExtenderResetTitle": "重置为默认 (关闭)",
       "rangeExtenderResetAria": "将拉伸范围受限的脚本重置为默认",
+      "rangeLivePreviewLabel": "在设备上预览范围",
+      "rangeLivePreviewHint": "未播放时，在连接面板中拖动范围滑块会让设备移动到该限位，方便查看当前位置——更换套筒后很实用。仅限位置类设备；播放期间不会触发。",
+      "rangeLivePreviewResetTitle": "恢复默认值（开）",
+      "rangeLivePreviewResetAria": "将“在设备上预览范围”恢复为默认值",
       "orgasmScriptLabel": "高潮开关脚本",
       "orgasmScriptChoose": "设置…",
       "orgasmScriptClear": "清除高潮脚本",
@@ -1061,11 +1188,29 @@
       "orgasmModeHold": "按住持续播放(松开返回)",
       "orgasmModeToggle": "点按完成(之后停止)",
       "orgasmModeHint": "按住持续播放:按住 X 播放循环脚本,松开后返回主脚本。点按完成:点按 X 开始循环,再次点按停止设备——不会返回主脚本。",
+      "orgasmSourceLabel": "来源",
+      "orgasmSourceFile": "脚本文件",
+      "orgasmSourcePattern": "生成的模式",
+      "orgasmPatternHint": "循环播放生成的模式，而不是脚本文件。你选择的脚本会保留，方便切换回来。",
+      "orgasmSummaryGenerated": "已生成：{shape}，{bpm} BPM",
       "edgeHeader": "边缘控制",
       "edgeModeLabel": "Z 键行为",
       "edgeModeHold": "按住暂停(松开恢复)",
       "edgeModeToggle": "点按暂停(再次点按恢复)",
       "edgeModeHint": "按住暂停:按住 Z 停止设备,视频继续播放;松开后脚本会在当前位置同步恢复。点按暂停:点按 Z 停止,再次点按恢复——长时间边缘控制时更省力。",
+      "globalHotkeysHeader": "全局快捷键",
+      "globalHotkeysHint": "即使 FunSync 已最小化或正在使用其他应用，这些快捷键也有效；在这里设置的按键将不再传递给任何其他应用。点击输入框，然后按下一个键并同时按住 Ctrl、Alt、Shift 中的两个，或单独按 F13–F24 或媒体键。Ctrl+Alt 还需要加上 Shift，因为在许多键盘上 Ctrl+Alt 就是 AltGr，用于输入 @ 等字符。复制、粘贴、撤销、保存等常用快捷键、修饰键少于两个的 F1–F12，以及光标和编辑键都无法设置。通过全局快捷键触发时，Orgasm Switch 和边缘控制始终为切换模式（按一次开始，再按一次停止）。",
+      "globalHotkeyPlayPause": "播放 / 暂停",
+      "globalHotkeyOrgasm": "Orgasm Switch",
+      "globalHotkeyEdge": "边缘控制",
+      "globalHotkeyClear": "移除{action}快捷键",
+      "globalHotkeyNeedsModifier": "设置 {key} 后，该键在所有其他应用中都无法输入，请试试与 Ctrl+Alt+Shift 组合",
+      "globalHotkeyAppShortcut": "{key} 是其他应用使用的快捷键（复制、粘贴、撤销、保存、刷新等），设置后它在所有这些应用中都会失效。请试试与 Ctrl+Alt+Shift 组合，或使用 F13–F24",
+      "globalHotkeyAltGr": "在许多键盘上 Ctrl+Alt 就是 AltGr，因此 {key} 可能让 @ 或 € 等字符在所有应用中都无法输入，请加上 Shift",
+      "globalHotkeyCursorKey": "{key} 是光标、编辑或截图键，其他应用会配合任意修饰键使用它，请改用字母、数字或 F 键",
+      "globalHotkeyKeptRisky": "仍按已保存的设置生效。{reason}",
+      "globalHotkeyNotActiveTaken": "未生效：{key} 已被系统或其他应用占用，请换一个快捷键",
+      "globalHotkeyNotActiveInvalid": "未生效：{key} 不是有效的按键组合，请换一个快捷键",
       "randomVariantLabel": "随机脚本变体",
       "randomVariantHint": "当视频有多个脚本变体时，每次播放随机选择一个。开启期间优先于已固定的默认变体。",
       "bpHeader": "Buttplug 线性输出 (BLE)",
@@ -1086,15 +1231,23 @@
       "inlineVizOpacityLabel": "叠加层不透明度",
       "inlineVizOpacityResetTitle": "恢复默认不透明度",
       "deviceSimOpacityLabel": "设备模拟器不透明度",
-      "deviceSimOpacityHint": "行程指示器在视频上的清晰程度。按 D 键显示。",
+      "deviceSimOpacityHint": "行程指示器在视频上的清晰程度。按 D 键或在播放器的 ⋮ 菜单中显示。",
       "deviceSimOpacityResetTitle": "恢复默认不透明度",
       "inlineVizOpacityHint": "脚本时间轴和热力图条在视频上的清晰程度。在播放器的 ⋮ 菜单中开启。",
+      "heatmapPlayheadLabel": "在热力图条上显示播放位置",
+      "heatmapPlayheadHint": "像时间轴的光标一样，在热力图条的当前位置画一条线。热力图条在播放器的 ⋮ 菜单中开启。",
       "orgasmScriptMissing": "（找不到文件）",
       "playbackHeader": "播放",
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "视频与性能",
       "rememberSpeedLabel": "记住播放速度",
       "rememberSpeedHint": "加载其他视频时保持当前速度。默认关闭，每个视频都以 1 倍速开始。",
+      "openFullscreenLabel": "全屏打开视频",
+      "openFullscreenHint": "从库中播放视频时以全屏开始。按 Esc 可照常退出。",
+      "autoplayOnOpenLabel": "打开后立即播放",
+      "autoplayOnOpenHint": "从库中打开视频时立即开始播放，而不是以暂停状态载入。默认关闭，这样单击一次不会让设备自行开始动作。",
+      "autoplayOnOpenResetTitle": "恢复默认值（关）",
+      "autoplayOnOpenResetAria": "将“打开后立即播放”恢复为默认值",
       "fillerHeader": "空隙填充",
       "fillerEnable": "用动作填充空隙",
       "fillerResetEnable": "重置空隙填充",
@@ -1110,7 +1263,19 @@
       "fillerDepth": "深度",
       "fillerAbsolute": "设定精确范围",
       "fillerAbsMin": "最小值",
-      "fillerAbsMax": "最大值"
+      "fillerAbsMax": "最大值",
+      "orgasmSourceLibrary": "资料库中的模式",
+      "orgasmSummaryLibrary": "模式：{name}",
+      "orgasmLibraryHint": "循环播放内置资料库中的模式，而不是脚本文件。你选择的脚本会保留，方便切换回来。",
+      "edgeActionLabel": "边缘控制期间",
+      "edgeActionStop": "停止设备",
+      "edgeActionPattern": "播放模式",
+      "edgeActionHint": "停止设备：视频继续播放，设备暂停。播放模式：改为播放下方的模式，即使视频已暂停也会播放。两种情况下，结束后脚本都会在当前位置同步恢复；如果视频已暂停，则会等到你按下播放。",
+      "patternRangeWidened": "此范围对该模式来说太窄，因此会稍微放宽播放：{lo} 到 {hi}。",
+      "orgasmLibraryNone": "尚未选择模式。在你选择之前，X 会像以前一样播放你的脚本文件。",
+      "edgePatternNone": "尚未选择模式，因此 Z 会像“停止设备”一样停止设备。请在上方选择一个模式。",
+      "fillerThreshold": "填充长于此值的空隙",
+      "fillerResetThresholdAria": "将空隙填充阈值重置为默认 (10 秒)"
     },
     "appearance": {
       "themeHeader": "主题",
@@ -1127,6 +1292,10 @@
       "styleClassicDesc": "FunSync 的原始设计",
       "styleModern": "现代",
       "styleModernDesc": "更柔和的层次、间距和动效",
+      "scaleHeader": "界面大小",
+      "scaleHint": "放大或缩小主窗口中的所有内容。Ctrl+= 和 Ctrl+- 也可以调整，Ctrl+0 恢复为 100%。打开 VR 视频时，这些键改为缩放视频。",
+      "scaleOption": "{percent}%",
+      "scaleOptionDefault": "{percent}% (默认)",
       "languageHeader": "语言",
       "languageHint": "切换界面语言,立即生效。",
       "libraryHeader": "媒体库",
@@ -1141,10 +1310,16 @@
       "hwDecodeRestart": "重启 FunSync 以应用视频解码更改。",
       "cardHeatmapLabel": "在媒体库卡片上显示热力图",
       "cardHeatmapHint": "在每个缩略图下方显示行程速度热力图。使用视频的主脚本。默认关闭，因为每张卡片都需读取脚本。",
+      "tagsOnCardsLabel": "在资料库卡片上显示标签",
+      "tagsOnCardsHint": "在每个视频名称下显示几个标签。视频选项（⋮ → 标签）中列出全部标签。",
       "resumeProgressLabel": "在播放列表中显示进度",
       "resumeProgressHint": "在播放列表的卡片和列表行上以进度条显示观看位置。仅适用于播放列表，主媒体库不会显示。",
       "hideDupesLabel": "隐藏重复名称",
-      "hideDupesHint": "当多个视频文件名完全相同时只显示一个条目，例如同一文件位于两个来源文件夹中。会保留带脚本的那一份。"
+      "hideDupesHint": "当多个视频文件名完全相同时只显示一个条目，例如同一文件位于两个来源文件夹中。会保留带脚本的那一份。",
+      "folderScriptsAsVariantsLabel": "仅含一个视频的文件夹：将其中的每个脚本都列为变体",
+      "folderScriptsAsVariantsHint": "适用于 journey 和 FapLand 关卡：当文件夹中只有一个视频时，其中的其他所有脚本都会出现在该视频的脚本菜单中，手机上也是如此。视频自己的脚本仍为默认，轴文件仍作为轴文件。磁盘上的文件不会有任何改动，因此关闭后只是不再提供这些脚本。",
+      "navHeader": "导航栏",
+      "navHint": "取消勾选即可从导航栏隐藏该按钮。媒体库和设置始终保留。设备仍可用 H 键打开，但网页遥控和 VR 没有其他入口，需要时请重新勾选。"
     },
     "data": {
       "backupHeader": "备份与恢复",
@@ -1162,6 +1337,7 @@
       "restoreModalTitle": "从备份恢复",
       "restoreConfirmTitle": "恢复此快照?",
       "restoreConfirmBody": "当前设置将先作为应急快照保存,以便在需要时撤销。应用将重新启动以应用恢复后的状态。",
+      "restoreConfirmBtn": "恢复",
       "restoreFailed": "恢复失败",
       "restoreFailedReason": "恢复失败: {error}",
       "noBackupsList": "无法加载备份列表",
@@ -1169,7 +1345,7 @@
       "openFolder": "打开备份文件夹",
       "openFolderFailed": "无法打开文件夹",
       "exportHeader": "导出与导入",
-      "exportBlurb": "将设置、播放列表、分类与关联保存为可移植文件 — 便于迁移到其他机器或额外的离机备份。",
+      "exportBlurb": "将设置、播放列表、分类、关联与自定义缩略图保存为可移植文件 — 便于迁移到其他机器或额外的离机备份。",
       "export": "导出备份文件",
       "exporting": "正在导出…",
       "exportSaved": "备份已保存:{path}",
@@ -1179,6 +1355,9 @@
       "importDone": "已导入 ({count} 个脚本)",
       "importCancelled": "导入已取消",
       "importFailed": "导入失败",
+      "importFailedReason": "导入失败: {error}",
+      "importConfirmTitle": "导入备份文件?",
+      "importConfirmBody": "接下来请选择一个 FunSync 备份文件。其中的播放列表、分类和关联会添加到你现有的数据中（你已有的播放列表保持不变），其设置会替换你当前的设置。你在这里已有的密钥和登录会保留。播放和所有设备会先停止。当前状态会保存为快照，因此可以通过“从备份恢复”撤销此操作。应用将重新启动以加载结果。",
       "triggerStartup": "启动",
       "triggerDebounced": "自动保存",
       "triggerPreAction": "{label} 之前",
@@ -1192,7 +1371,12 @@
       "summarySources": "{count, plural, other {# 个来源}}",
       "summaryCollections": "{count, plural, other {# 个合集}}",
       "summaryPlaylists": "{count, plural, other {# 个播放列表}}",
+      "summaryCategories": "{count, plural, other {# 个分类}}",
+      "summaryCategoryAssignments": "{count, plural, other {# 个分类分配}}",
+      "summaryAssociations": "{count, plural, other {# 个关联}}",
       "summaryRoutings": "{count, plural, other {# 个路由}}",
+      "summaryTagAssignments": "{count, plural, other {# 个添加的标签}}",
+      "summaryEroscriptsLinks": "{count, plural, other {# 个 EroScripts 帖子链接}}",
       "relJustNow": "刚刚",
       "relMinutesAgo": "{count, plural, other {# 分钟前}}",
       "relHoursAgo": "{count, plural, other {# 小时前}}",
@@ -1217,7 +1401,201 @@
       "logsHeader": "日志隐私",
       "logsBlurb": "日志会记录你打开过的视频。这对排查问题很有用，但在公开分享之前值得先考虑一下。",
       "hideFileNames": "在日志中隐藏文件名",
-      "hideFileNamesHint": "将日志中的视频、脚本和字幕文件名替换为 [hidden]。文件夹和文件类型会保留，因此日志仍可用于排查问题。默认关闭。"
+      "hideFileNamesHint": "将日志中的视频、脚本和字幕文件名替换为 [hidden]。文件夹和文件类型会保留，因此日志仍可用于排查问题。开启后，日志中已有的文件名也会被隐藏，关闭后不会恢复。默认关闭。"
+    },
+    "duplicates": {
+      "sectionHeader": "重复项",
+      "findBtn": "查找重复项…",
+      "sectionBlurb": "查找有多个副本的视频，把多余的移到{os, select, win {回收站} other {回收站}}以腾出空间。",
+      "title": "重复的视频",
+      "scanning": "正在检查媒体库…",
+      "noneTitle": "未发现重复项",
+      "noneHint": "媒体库中没有看起来重复的文件。",
+      "summary": "{groups} 组，最多可回收 {size}",
+      "caveat": "依据文件大小、时长、内容和相似文件名判断。无法识别画质差异很大的重新编码版本。",
+      "tierIdentical": "完全相同",
+      "tierLikely": "很可能",
+      "tierPossible": "可能",
+      "whyIdentical": "大小、时长和内容均相同",
+      "whyLikely": "时长相同、大小不同，可能是重新编码",
+      "whyPossible": "仅文件名相似，请自行确认",
+      "groupHead": "{count} 个副本，可回收 {size}",
+      "keep": "保留",
+      "hasScript": "有 funscript",
+      "scriptBadge": "脚本",
+      "selectTier": "选中\"{tier}\"中的多余副本（{count}）",
+      "clearSelection": "清除选择",
+      "nothingSelected": "未选择任何项",
+      "selectedCount": "已选 {count} 个文件，{size}",
+      "remove": "移到{os, select, win {回收站} other {回收站}}",
+      "confirmTitle": "移到{os, select, win {回收站} other {回收站}}？",
+      "confirmBody": "将 {count} 个文件（{size}）移到{os, select, win {回收站} other {回收站}}？之后可以从那里恢复。每组中标记为\"保留\"的副本不会被移动。",
+      "confirmBtn": "移到{os, select, win {回收站} other {回收站}}",
+      "removedToast": "已将 {count} 个文件移到{os, select, win {回收站} other {回收站}}，回收 {size}",
+      "removeSomeFailed": "有 {count} 个文件无法移动，可能正在使用或为只读",
+      "removeFailed": "无法删除文件：{error}",
+      "tierStash": "看起来相同（Stash）",
+      "whyStash": "你的 Stash 中它们的画面指纹（phash）相同，可能是重新编码",
+      "selectTierStash": "选中在 Stash 中看起来相同的多余副本（{count}）"
+    },
+    "support": {
+      "header": "支持这个项目",
+      "blurb": "FunSync 是免费的，并且会一直免费。想和其他用户交流、反馈问题，或者帮助项目继续下去，都可以从这里开始。",
+      "discord": "加入 Discord",
+      "kofi": "请我喝杯咖啡",
+      "footnote": "无需账号，没有付费墙，也不会因此解锁任何功能。"
+    },
+    "stash": {
+      "header": "Stash",
+      "intro": "关联您自己的 Stash 服务器，把它的标签、演员和工作室带入 FunSync。只读：FunSync 不会更改 Stash 中的任何内容。",
+      "addressLabel": "地址",
+      "keyLabel": "API 密钥",
+      "keyHint": "仅当您的 Stash 设置了用户名和密码时才需要。在 Stash 中：Settings > Security > API Key。",
+      "keyNotePlain": "此 FunSync 会把密钥以未加密形式保存在其数据文件夹中。",
+      "keyNotePortable": "便携版 FunSync 会像 Handy 密钥一样，把密钥以未加密形式保存在便携数据文件夹中。",
+      "keyNoteNoEncryption": "这台电脑无法加密密钥，因此 FunSync 会把它以未加密形式保存在数据文件夹中。",
+      "keyNoteMemory": "密钥仅保留到 FunSync 关闭（此处无法将其绑定到您的账户）。",
+      "keySavedEncrypted": "API 密钥已保存，在此电脑上加密",
+      "keySavedPlain": "API 密钥已保存，未加密存放在 FunSync 数据文件夹中",
+      "keySavedMemory": "API 密钥保留到 FunSync 关闭",
+      "noKey": "没有 API 密钥",
+      "replaceKey": "替换",
+      "removeKey": "移除",
+      "addKey": "添加密钥",
+      "removeKeyTitle": "移除 API 密钥？",
+      "removeKeyBody": "FunSync 会忘记已保存的 Stash API 密钥。如果您的 Stash 有密码，您需要重新粘贴。",
+      "keyRemoved": "已移除 API 密钥。",
+      "test": "测试连接",
+      "testing": "正在测试…",
+      "connected": "已连接到 Stash {version}。{count, plural, other {共有 # 个场景。}}",
+      "help": "除非另行设置，Stash 会在所有网络地址上监听。如果它运行在这台电脑上，请使用 127.0.0.1（并把 Stash 的主机设为 127.0.0.1），或者在 Stash 中设置用户名和密码，再把它的 API 密钥粘贴到这里。",
+      "keyInClear": "密钥会以未加密形式经您的网络发送到 {host}。请让 Stash 运行在这台电脑上，或使用 https。",
+      "link": "关联 Stash",
+      "linkNeedsTest": "请先测试连接。测试成功后才能关联 Stash。",
+      "linkedDone": "已关联 Stash。按“立即同步”带入它的标签、演员和工作室。",
+      "linked": "已关联到 {address}",
+      "linkedVersion": "已关联到 {address} · Stash {version}",
+      "change": "更改…",
+      "turnOff": "关闭",
+      "turnOn": "开启",
+      "turnedOff": "已关闭 Stash。其数据会保留。",
+      "turnedOn": "已开启 Stash。",
+      "offText": "Stash 已关闭：FunSync 中不显示任何 Stash 内容，其数据会保留。已关联到 {address}。",
+      "neverSynced": "尚未同步。",
+      "lastSync": "上次同步 {date}：{counts}",
+      "lastSyncPartial": "它提前停止了。没有移除任何内容。",
+      "countMatched": "{count, plural, other {# 个已匹配}}",
+      "countMatchedVideos": "{count, plural, other {# 个视频已匹配}}",
+      "countCheck": "{count, plural, other {# 个需要检查}}",
+      "countNotInStash": "{count, plural, other {# 个不在 Stash 中}}",
+      "countGone": "{count, plural, other {# 个已从 Stash 消失}}",
+      "countChanged": "{count, plural, other {# 个文件已更改}}",
+      "countSkipped": "{count, plural, other {# 个已跳过}}",
+      "syncNow": "立即同步",
+      "syncing": "正在与 Stash 同步…",
+      "progressLabel": "同步进度",
+      "stepStart": "正在开始…",
+      "stepHash": "正在读取文件指纹，{done, number} / {total, number}。",
+      "stepList": "正在读取 Stash 的场景列表，第 {done, number} / {total, number} 页。",
+      "stepMatch": "正在匹配。",
+      "stepDetails": "正在获取详细信息，{done, number} / {total, number}。",
+      "stepWrite": "正在保存。",
+      "cancelling": "正在取消…",
+      "syncDone": "同步完成：{counts}",
+      "syncCancelled": "已取消同步。没有移除任何内容。",
+      "syncFailed": "同步已停止：{reason} 没有移除任何内容。",
+      "syncPartial": "同步在 {total, number} 个场景中的第 {done, number} 个后停止：{reason} 已完成的部分已保存；没有移除任何内容。",
+      "errorBusy": "Stash 同步已在进行中。",
+      "errorNotLinked": "请先关联 Stash 并开启它。",
+      "errorOther": "出现问题（{code}）。",
+      "syncOnStart": "FunSync 启动时与 Stash 同步",
+      "syncOnStartHint": "在第一次媒体库扫描后同步一次。除此之外，FunSync 只在您按“立即同步”时同步。",
+      "checkHeader": "需要检查（{count, number}）",
+      "checkSeveral": "{count, plural, other {# 个 Stash 场景包含此文件}}",
+      "checkPathChanged": "Stash 中路径相同，但文件不同",
+      "choose": "选择…",
+      "chooseAria": "为 {name} 选择 Stash 场景",
+      "checkVideoMissing": "该视频目前不在媒体库中。",
+      "showAll": "全部显示（{count, number}）",
+      "pathRules": "路径规则（高级）",
+      "pathRulesHint": "仅当 Stash 以其他文件夹名称看到您的视频时才需要，例如在 Docker 或 NAS 中。FunSync 先按文件指纹匹配；路径规则只用于第二次检查。",
+      "ruleLocal": "FunSync 文件夹",
+      "ruleStash": "Stash 文件夹",
+      "addRule": "添加规则",
+      "removeRule": "移除",
+      "removeRuleAria": "移除 {folder} 的路径规则",
+      "ruleIncomplete": "规则需要两个文件夹。请都填写，或移除该规则。",
+      "remove": "移除 Stash 数据…",
+      "removeTitle": "移除 Stash 数据？",
+      "removeConfirm": "移除 {count, plural, other {# 个视频}}的 Stash 数据以及已保存的密钥？Stash 中不会有任何更改。您自己的标签和隐藏设置会保留。",
+      "removeConfirmNoKey": "移除 {count, plural, other {# 个视频}}的 Stash 数据？Stash 中不会有任何更改。您自己的标签和隐藏设置会保留。",
+      "removed": "已移除 Stash 数据。",
+      "removeUndone": "已恢复 Stash 数据。",
+      "removeFailed": "FunSync 无法移除 Stash 数据。没有任何更改。",
+      "undoFailed": "无法恢复 Stash 数据。",
+      "undoRemoveAria": "撤销移除 Stash 数据",
+      "damaged": "FunSync 无法读取其 Stash 数据。已另存为 {name}。同步即可重建。",
+      "certTitle": "这台电脑不信任此 Stash 的 https 证书。",
+      "certChanged": "此 Stash 现在出示的证书与您信任的那一个不同。",
+      "certSubject": "颁发给",
+      "certFingerprint": "SHA-256 指纹",
+      "certExplain": "仅当这是您自己的 Stash（例如使用自签名证书的 NAS），并且指纹与服务器显示的一致时，才信任它。之后 FunSync 只对 {address} 信任此证书。",
+      "certTrust": "信任此证书",
+      "certTrusted": "已为 {address} 信任该证书。",
+      "certTrustFailed": "FunSync 无法信任该证书。请再次测试连接。",
+      "certPinned": "{address} 的受信任证书",
+      "certForget": "不再信任",
+      "certForgetAria": "不再信任 {address} 的证书",
+      "certForgotten": "已不再信任该证书。",
+      "certForgetFailed": "FunSync 无法移除受信任的证书。",
+      "keyElsewhere": "已保存的 API 密钥属于 {address}，因此 FunSync 不会将其发送到此地址。请粘贴此 Stash 的密钥，或删除已保存的密钥。",
+      "damagedRecovered": "FunSync 无法读取其 Stash 数据。已另存为 {name}，并改用了上一份副本。",
+      "recoveredMissing": "FunSync 的 Stash 数据文件丢失。已改用上一份副本。",
+      "removeUndoneMerged": "已恢复 Stash 数据，之后同步的内容也一并保留。",
+      "undoFailedKept": "无法恢复 Stash 数据。它已另存于 FunSync 的数据文件夹中；你可以再试一次撤销。",
+      "syncRelinked": "{count, plural, other {# 个视频已重新关联到另一个 Stash 场景。}}",
+      "relinkHeader": "已重新关联（{count, number}）",
+      "relinkHint": "一次同步将这些视频关联到了另一个 Stash 场景（例如 Stash 中合并了场景）。撤销会恢复之前的关联。",
+      "relinkTo": "现已关联到 {name}",
+      "relinkToUntitled": "现已关联到另一个 Stash 场景",
+      "relinkUndoAria": "撤销 {name} 的重新关联",
+      "relinkUndoAll": "全部撤销",
+      "relinkUndoAllAria": "撤销全部 {count, number} 个重新关联",
+      "undoRelinksAria": "{count, plural, other {撤销 # 个重新关联}}",
+      "relinkUndone": "{name} 已重新关联到之前的 Stash 场景。",
+      "relinksUndone": "{count, plural, other {已撤销 # 个重新关联。}}",
+      "relinkUndoFailed": "无法撤销 {name} 的重新关联。其 Stash 数据此后已更改，或 FunSync 无法保存。",
+      "relinksUndonePartial": "已撤销 {total, number} 个重新关联中的 {done, number} 个。其余的此后已更改或无法保存。",
+      "keyElsewhereNoAddress": "已保存的 API 密钥属于另一个地址，因此 FunSync 不会将其发送到此地址。请粘贴此 Stash 的密钥，或移除已保存的密钥。",
+      "useTagRules": "使用 Stash 的标签别名和子标签",
+      "useTagRulesHint": "如果 Stash 将某个写法列为别名，来自任何来源的该标签都会以 Stash 的名称显示；在“标签”筛选中选择一个标签时，也会找到它的子标签。您隐藏的标签保持隐藏。立即生效，使用上次同步获取的标签列表。关闭：所有标签按原样显示。"
+    },
+    "patternBlock": {
+      "quickPicks": "快速选择",
+      "preview": "预览",
+      "previewAria": "将要播放的模式预览，8 秒",
+      "rangeExact": "精确",
+      "rangeScript": "跟随脚本",
+      "depthValue": "{pct}%",
+      "centre": "中心",
+      "centreOwn": "脚本自身",
+      "centreReset": "恢复脚本自身的中心",
+      "rangeScriptHint": "深度：模式在播放位置附近使用脚本自身范围的多少。中心：它在该范围中的位置。",
+      "testHint": "在已连接的设备上播放预览",
+      "groupAria": "{feature}：模式",
+      "oneShotHintGap": "结尾：在每个空隙开始时播放一次，然后保持最后的位置，直到空隙结束。",
+      "setPattern": "设置模式…",
+      "setPatternAria": "设置{feature}的模式",
+      "drawerTitle": "{feature}的模式",
+      "apply": "应用",
+      "summary": "{name}，{speed} 单位/秒，{range}",
+      "summaryReversed": "{name}，{speed} 单位/秒，反向，{range}",
+      "summaryRangeOwn": "自身范围",
+      "summaryRangeExact": "{lo} 至 {hi}",
+      "summaryRangeScript": "跟随脚本 {pct}%",
+      "summaryNone": "尚未选择模式",
+      "statsWithInstant": "平均 {avg} 单位/秒，峰值 {max} 单位/秒，另有瞬间跳变",
+      "statsInstantOnly": "瞬间跳变，以设备能达到的最快速度移动"
     }
   },
   "feedback": {
@@ -1265,6 +1643,8 @@
     "searching": "搜索中…",
     "noResultsTitle": "未找到 \"{query}\" 的脚本",
     "noResultsHint": "请尝试更短或更通用的搜索词 — 部分标题往往比完整文件名匹配得更好。",
+    "fewerWords": "用更少的词搜索",
+    "fewerWordsTitle": "搜索“{query}”",
     "likes": "{count, plural, other {# 个赞}}",
     "views": "{count, plural, other {# 次查看}}",
     "getScript": "获取脚本",
@@ -1272,10 +1652,32 @@
     "fetching": "正在获取…",
     "savingScript": "正在保存脚本…",
     "scriptSaved": "脚本已保存",
+    "upToDate": "已是最新",
     "noAttachments": "此主题中未找到 funscript 附件",
     "downloadFailed": "下载失败",
+    "downloadFailedStatus": "下载失败（HTTP {status}）",
+    "saveNotAFile": "无法保存 {name}：已有同名文件夹。",
+    "unusableName": "无法保存“{name}”：此文件名不能在这台电脑上使用。",
     "savedToast": "脚本已保存:{name}",
+    "savedFileToast": "已保存:{name}",
+    "alreadyUpToDate": "已是最新:{name}",
+    "replaceTitle": "替换 {name}？",
+    "replaceMessage": "已有另一个文件以此名称保存。要用下载的文件替换它吗？旧文件会移到{os, select, win {回收站} other {回收站}}，之后可以恢复。",
+    "replaceBtn": "替换",
+    "replaceManyTitle": "替换 {count} 个文件？",
+    "replaceManyMessage": "已有其他文件以这些名称保存：{names}。要用下载的文件替换它们吗？旧文件会移到{os, select, win {回收站} other {回收站}}，之后可以恢复。",
+    "notReplaced": "未保存 {name}：该位置已有另一个文件。",
+    "notDownloaded": "未保存 {name}：无法下载该文件。",
+    "trashFailed": "无法将 {name} 移到{os, select, win {回收站} other {回收站}}，因此下载的文件没有覆盖它。",
     "sessionExpired": "EroScripts 会话已过期 — 请在 EroScripts 面板中重新登录",
+    "error": {
+      "rateLimited": "EroScripts 正在限制请求。请稍后再试。",
+      "accessDenied": "访问被拒绝。请重新登录。",
+      "searchFailed": "搜索失败（HTTP {status}）。请退出后重新登录。",
+      "topicFailed": "无法加载该帖子（HTTP {status}）。",
+      "noPosts": "该主题没有帖子。",
+      "network": "无法连接 EroScripts。请检查网络连接后重试。"
+    },
     "inline": {
       "title": "在 EroScripts 上查找脚本",
       "axesLine": "主脚本 + {count} 个轴 ({list})",
@@ -1288,7 +1690,8 @@
       "noMain": "只有轴文件，没有主脚本",
       "zipNote": "{count} 个 zip 附件暂时无法打开",
       "loadingPost": "正在加载帖子..."
-    }
+    },
+    "loginToSearch": "请登录 EroScripts 后再搜索。"
   },
   "upNext": {
     "regionAria": "下一个",
@@ -1302,7 +1705,8 @@
     "funscriptChip": "脚本",
     "endLabel": "列表结束",
     "endDismissAria": "关闭",
-    "endText": "此{source}中没有更多视频。",
+    "endText": "“{source}”中没有更多视频。",
+    "endTextGeneric": "此列表中没有更多视频。",
     "endCta": "返回{source}",
     "endSourceFallback": "列表",
     "sourcePlaylist": "播放列表",
@@ -1390,13 +1794,21 @@
     "hostHint": "提示:在主机字段中保留 Quest 的 IP — FunSync 会记住并在下次启动时自动重连。",
     "subnetWarning": "⚠ {host} 与本电脑({pcIp})不在同一网络。你的 Quest 的 IP 应类似于 {pcNet}.x。请在同一 Wi-Fi 下获取,并关闭任何 VPN — VPN 会给 Quest 分配本电脑无法访问的地址。",
     "playing": "正在播放",
-    "offset": "偏移",
+    "offset": "偏移（所有视频）",
     "offsetHint": "补偿 VR 显示延迟。会叠加在每台设备自身的偏移之上 — 请在同步选项卡中查看每台设备的综合实际值。",
     "backendNotRunning": "后端未运行"
+  },
+  "videoSyncOffset": {
+    "label": "此视频",
+    "earlier": "提前 {ms} 毫秒",
+    "later": "延后 {ms} 毫秒",
+    "reset": "重置",
+    "hint": "播放此视频时叠加在每个设备的偏移之上，VR 中同样适用。负值表示更早触发。仅为此视频保存。"
   },
   "editor": {
     "toolbarAria": "脚本编辑器工具",
     "mainAxisLabel": "主轴 (L0)",
+    "embeddedAxisLabel": "{axis} (内嵌)：提取后编辑…",
     "btn": {
       "undo": "撤销 (Ctrl+Z)",
       "redo": "重做 (Ctrl+Y)",
@@ -1410,11 +1822,17 @@
       "waveform": "切换波形 (W)",
       "beats": "根据节拍生成",
       "zoomIn": "放大 (+)",
-      "zoomOut": "缩小 (-)",
+      "zoomOut": "缩小 (Ctrl+-)",
       "fitAll": "全部适应",
       "save": "保存 (Ctrl+S)",
       "stacked": "堆叠视图 — 显示所有轴",
-      "popout": "将编辑器弹出到单独的窗口"
+      "popout": "将编辑器弹出到单独的窗口",
+      "dock": "将编辑器收回到主窗口"
+    },
+    "unsaved": {
+      "title": "是否保存对 {name} 的更改？",
+      "message": "此脚本的编辑尚未保存。如果不保存，这些编辑将会丢失。",
+      "dontSave": "不保存"
     },
     "modify": {
       "title": "修改脚本",
@@ -1427,7 +1845,21 @@
       "removePauses": "移除停顿…",
       "rangeExtend": "时间拉伸/压缩…",
       "generatePattern": "生成模式…",
+      "fillPattern": "用模式填充…",
       "exportHeatmap": "导出热力图 PNG…"
+    },
+    "select": {
+      "title": "选择点",
+      "placeholder": "选择…",
+      "all": "全选 (Ctrl+A)",
+      "beforePlayhead": "选择播放头之前的点 (Ctrl+Alt+左方向键)",
+      "afterPlayhead": "选择播放头之后的点 (Ctrl+Alt+右方向键)",
+      "topThird": "上三分之一 (Ctrl+1)",
+      "middleThird": "中三分之一 (Ctrl+2)",
+      "bottomThird": "下三分之一 (Ctrl+3)",
+      "everyNth": "每隔 N 个点…",
+      "created": "仅新点 (N)",
+      "none": "取消选择 (Esc)"
     },
     "speedLabel": "速度:",
     "autosaveLabel": "自动保存",
@@ -1454,6 +1886,14 @@
     "extendTitle": "时间拉伸 / 压缩",
     "extendFactor": "时间缩放系数",
     "extendHint": "1.0 = 不变,2.0 = 倍长,0.5 = 减半",
+    "everyNthTitle": "每隔 N 个点选择一个",
+    "everyNthEvery": "每",
+    "everyNthStart": "从第几个点开始",
+    "everyNthScopeSelected": "按时间顺序计数所选的 {count, plural, other {# 个点}}。",
+    "everyNthScopeAll": "按时间顺序计数全部 {count, plural, other {# 个点}}。",
+    "everyNthResult": "将选择 {count, plural, other {# 个点}}。",
+    "everyNthTooFew": "至少需要 2 个点才能计数。",
+    "everyNthSelect": "选择",
     "patternTitle": "生成模式",
     "patternStyle": "模式",
     "patternBpm": "BPM",
@@ -1509,7 +1949,16 @@
       "offsetBy": "已偏移 {ms} 毫秒",
       "pausesRemoved": "停顿已移除",
       "selectToExtend": "请选择至少 2 个动作以拉伸/压缩",
+      "selectionChanged": "对话框打开期间选择发生了变化，未应用任何更改。",
       "timeScaled": "时间已按 {factor}x 缩放",
+      "needsContinuous": "{name}需要连续的选择。有间隔的选择(例如每隔 N 个点)可用于移动、微调、反转和重映射。",
+      "nothingChanged": "没有任何更改",
+      "selectToEqualize": "请选择至少 3 个动作以均衡",
+      "equalized": "已均衡 {count, plural, other {# 个动作}}",
+      "everyNthSelected": "已选择 {total, plural, other {# 个点}}中的 {count, number} 个。",
+      "everyNthNone": "没有可选择的内容:每隔 N 个点选择至少需要 2 个点。",
+      "newPointsSelected": "已选择 {count, plural, other {# 个新点}}。",
+      "newPointsNone": "没有可选择的新点。请先运行「修改」菜单中的操作或生成功能。",
       "recordingOn": "录制模式已开启 — 小键盘按键将在实时播放头处插入",
       "recordingOff": "录制模式已关闭",
       "patternInserted": "已插入 {count, plural, other {# 个动作}} ({type})",
@@ -1527,7 +1976,9 @@
       "gapsFilled": "已填充 {gaps, plural, other {# 处空白}},共 {actions, plural, other {# 个动作}}",
       "saved": "脚本已保存",
       "saveFailed": "保存失败: {error}",
-      "created": "已创建 {name}"
+      "created": "已创建 {name}",
+      "remoteScriptNotShown": "你的手机或 VR 头显正在播放它自己的脚本，所以编辑器不显示它。编辑器编辑的是此窗口中的视频。",
+      "popoutUnavailable": "无法弹出编辑器：缺少窗口与应用之间的连接。"
     },
     "extractingWaveform": "提取波形中…",
     "extractingWaveformPct": "提取波形中… {pct}%",
@@ -1549,7 +2000,60 @@
     "customKeysDuplicateWarn": "{key} 已绑定到位置 {pos}",
     "customKeysMidiHint": "MIDI 键盘用户通常配合 MIDI 转按键工具 (如 MIDIKey2Key) 使用。",
     "customKeysHelpGroup": "自定义位置按键",
-    "popoutWindowTitle": "脚本编辑器"
+    "popoutWindowTitle": "脚本编辑器",
+    "popout": {
+      "dock": "收回",
+      "waveformTitle": "切换主窗口中的波形 (W)"
+    },
+    "patternFill": {
+      "title": "用模式填充",
+      "menu": "用模式填充…",
+      "contextMenu": "时间轴操作",
+      "needSelection": "请至少选择两个点，或在时间轴的空白区段上拖动。模式会填充其间的时间。",
+      "search": "搜索模式",
+      "family": "类别",
+      "allFamilies": "全部",
+      "patterns": "模式",
+      "noMatch": "没有与“{query}”匹配的模式。",
+      "speed": "速度",
+      "speedValue": "{speed} 单位/秒",
+      "ownSpeed": "模式自身速度：{speed} 单位/秒",
+      "rampTo": "渐变至",
+      "rampOff": "关",
+      "reverse": "反转",
+      "range": "范围",
+      "rangeOwn": "模式自身的范围",
+      "rangeMin": "下",
+      "rangeMax": "上",
+      "variation": "变化",
+      "seed": "种子",
+      "reroll": "重新随机",
+      "rerollTitle": "尝试另一种变化（新种子）",
+      "join": "衔接平滑度",
+      "endFit": "结尾",
+      "endFitStretch": "拉伸到最后一个点",
+      "endFitPartial": "不完整的抽动",
+      "mode": "填充方式",
+      "modeReplace": "替换这些点",
+      "modeGap": "仅填充空隙",
+      "selection": "选区：{seconds} 秒，{count} 个点",
+      "rangeSelection": "时间范围：{seconds} 秒，{count, plural, =0 {没有点} other {# 个点}}",
+      "stats": "{points} 个新点，平均 {mean} 单位/秒，最高 {max} 单位/秒。",
+      "replaces": "将替换 {count} 个点。",
+      "apply": "应用",
+      "applied": "已用“{name}”填充：{count} 个点。",
+      "noGap": "没有足够长的空隙。空隙至少需要 1 秒，并能容纳两次抽动。",
+      "tooShort": "选区太短，无法填充。请选择更长的一段。",
+      "endFitFallback": "模式无法拉伸到最后一个点，因此以不完整的抽动结束。",
+      "joinTooFast": "在这段时间内两端相距太远：衔接部分被限制在速度上限内。",
+      "speedCapped": "部分动作已限制为 {max} 单位/秒，这是模式的最高速度。",
+      "speedUnreachable": "此模式在这里达不到该速度，会尽量接近。",
+      "rangeAdjusted": "已扩大范围以容纳模式的抽动。",
+      "failed": "无法生成此填充。请尝试其他模式或设置。",
+      "changed": "此预览之后脚本或选区已更改。未填充任何内容。",
+      "editingPaused": "在应用或取消之前，编辑按键暂停。",
+      "updating": "正在更新预览…"
+    }
   },
   "connection": {
     "vibeHelp": {
@@ -1570,7 +2074,18 @@
       "connectedToIntiface": "已连接到 Intiface",
       "disconnected": "已断开",
       "failed": "连接失败",
-      "failedIntiface": "连接失败 — Intiface 是否正在运行?"
+      "failedIntiface": "连接失败 — Intiface 是否正在运行?",
+      "notResponding": "已连接，但无响应",
+      "respondingSlowly": "已连接，响应缓慢"
+    },
+    "failure": {
+      "tcodePortNotFound": "未找到端口。请检查连接线，然后重新选择端口。",
+      "tcodePortBusy": "端口被占用或访问被拒绝。请关闭正在使用该端口的其他程序，然后重试。",
+      "tcodeWsRefused": "无法连接到该 WebSocket 地址。请检查地址，并确认设备或程序正在运行。",
+      "autoblowOffline": "设备未连接。请检查设备电源和 WiFi。",
+      "autoblowRateLimited": "请求过多。请稍等片刻，然后重试。",
+      "generic": "连接失败：{detail}",
+      "withDetail": "{reason}（{detail}）"
     },
     "btn": {
       "connect": "连接",
@@ -1585,7 +2100,9 @@
       "test": "测试",
       "measure": "测量",
       "measuring": "测量中…",
-      "applyLatency": "应用"
+      "applyLatency": "应用",
+      "reconnect": "重新连接",
+      "reconnectHint": "断开连接并使用已保存的连接密钥重新建立。"
     },
     "handy": {
       "connectionKey": "连接密钥",
@@ -1607,9 +2124,13 @@
       "cutoffMinAria": "输出下限",
       "cutoffMaxAria": "输出上限",
       "cutoffHint": "硬性限制：低于下限或高于上限的位置将被固定在该值，其余保持不变。在下次加载视频时生效。",
+      "invert": "反转方向",
+      "invertHint": "反转每个行程，0 变为 100。当 Handy 的运动方向与视频相反时使用。正常播放时立即生效，否则在下次加载视频时生效。",
       "syncing": "同步中…",
       "syncFailed": "同步失败",
-      "rtdResult": "RTD: {rtd}ms"
+      "rtdResult": "RTD: {rtd}ms",
+      "showKey": "显示连接密钥",
+      "hideKey": "隐藏连接密钥"
     },
     "buttplug": {
       "axisMainStroke": "主要 / 冲程 (L0)",
@@ -1637,7 +2158,8 @@
       "safetyCap": "安全上限:",
       "vibScriptOverride": "由专用脚本控制振动 — 模式与反转设置不生效。",
       "highIntensityTitle": "高强度",
-      "highIntensityBody": "将电刺激强度设为 {percent}% — 高强度可能引起不适。是否继续?",
+      "highIntensityBody": "设备将可以以最高 {percent}% 的强度运行。高强度可能引起不适，电刺激或机器尤其如此。将安全上限设为 {percent}%？",
+      "highIntensityConfirm": "设为 {percent}%",
       "vibrationModeTitle": "振动模式",
       "rotationModeTitle": "旋转模式",
       "estimModeTitle": "电刺激模式",
@@ -1681,6 +2203,8 @@
       "motionHalfTop": "上半段",
       "motionHalfBottom": "下半段",
       "motionSpeed": "速度",
+      "motionBlend": "混合",
+      "motionBlendHint": "将主轴的运动混入此轴：0% 仅为生成的运动，100% 跟随主轴。",
       "type": {
         "linear": "线性",
         "rotate": "旋转",
@@ -1705,6 +2229,8 @@
       "wsUrl": "WebSocket URL",
       "wsUrlAria": "WebSocket URL",
       "wsHint": "兼容 MultiFunPlayer 协议消费端 (restim、Howl 等) — 请指向其监听 URL。",
+      "goHome": "回到中间",
+      "goHomeTitle": "将所有轴缓慢移回中间，并关闭振动和吸力。会先暂停视频。",
       "precision": "TCode 精度",
       "precisionAria": "TCode 精度",
       "updateRate": "更新频率",
@@ -1741,7 +2267,9 @@
       "latencyToast": "Autoblow 延迟: {ms} ms",
       "latencyFailed": "延迟测量失败: {error}",
       "latencyNoReading": "未能测得延迟。请检查设备是否已连接。",
-      "latencyApplied": "同步偏移已设为 {ms} 毫秒"
+      "latencyApplied": "同步偏移已设为 {ms} 毫秒",
+      "showToken": "显示设备令牌",
+      "hideToken": "隐藏设备令牌"
     },
     "sync": {
       "experimental": "实验性",
@@ -1753,14 +2281,15 @@
       "vrTransport": "VR 传输",
       "noVrSession": "无 VR 会话",
       "handyNotConnected": "Handy 未连接",
-      "perDeviceOffsets": "各设备偏移",
-      "perDeviceHint": "每台设备都有自己的偏移以补偿指令延迟。负值会让指令提前触发。此处滑块与设备各自选项卡中的偏移联动 — 修改其一,两处都会更新。",
+      "perDeviceOffsets": "各设备偏移（所有视频）",
+      "perDeviceHint": "每台设备都有自己的偏移以补偿指令延迟。Buttplug 和 T-Code 设备上负值会让指令提前触发；Handy 和 Autoblow 则按其自身 API 的方式，正值才会提前触发。VR 合计行对所有设备都按「负值 = 提前」计算。此处滑块与设备各自选项卡中的偏移联动 — 修改其一，两处都会更新。",
       "connectDeviceHint": "连接设备后才能查看其偏移控件。",
       "deviceHandy": "The Handy (WiFi)",
       "deviceButtplug": "Buttplug.io 设备",
       "deviceTcode": "TCode (串口)",
       "suggested": "建议: {ms} ms",
       "vrModeTotal": "VR 模式: {device} (设备) {vr} (VR) = {total} ms 实际生效",
+      "vrModeTotalVideo": "VR 模式: {device} (设备) {vr} (VR) {thisVideo} (此视频) = {total} ms 实际生效",
       "latencyRefreshed": "延迟已刷新",
       "refreshFailed": "刷新失败: {error}"
     }
@@ -1769,7 +2298,9 @@
     "connectionFailed": "连接失败",
     "uploadFailed": "上传失败",
     "handyConnectionFailed": "连接失败 — 请检查您的连接密钥",
-    "connectionKeyTooShort": "连接密钥至少需要 5 个字符"
+    "handyStopFailed": "Handy 未确认已停止，可能仍在运行——请按设备上的按钮。",
+    "connectionKeyTooShort": "连接密钥至少需要 5 个字符",
+    "handyNotAnswering": "Handy 没有响应。请检查它的 WiFi 和设备屏幕。"
   },
   "deviceTest": {
     "handyNotConnected": "Handy 未连接",
@@ -1820,8 +2351,8 @@
     "cycleAspect": "循环切换画面比例",
     "vrFlatten": "切换 VR 展平（关闭 / 左眼 / 右眼）",
     "vrPan": "平移 VR 投影 (球面模式激活时)",
-    "vrZoom": "缩放 VR 视频（双指缩放 / Ctrl +-）",
-    "vrZoomReset": "重置 VR 缩放",
+    "vrZoom": "缩放 VR 视频（双指缩放 / Ctrl +-）。未打开 VR 视频时，Ctrl +- 缩放整个界面",
+    "vrZoomReset": "重置 VR 缩放（未打开 VR 视频时重置界面缩放）",
     "speedDown": "降低播放速度",
     "speedUp": "提高播放速度",
     "toggleInfo": "切换信息覆盖层",
@@ -1846,7 +2377,6 @@
     "prevBookmark": "上一个书签",
     "nextBookmark": "下一个书签",
     "openFile": "打开文件（原生对话框）",
-    "backToLibrary": "从播放器返回媒体库",
     "showHelp": "显示此帮助",
     "editorSelection": "选择与导航",
     "editorEdit": "编辑所选",
@@ -1858,6 +2388,7 @@
     "editorFastFrame": "快速帧步进（可配置；默认 6）",
     "editorSelectAll": "全选",
     "editorSelectThird": "选择上 / 中 / 下三分之一",
+    "editorSelectCreated": "仅选择上一次修改或生成操作创建的点",
     "editorClearSelection": "清除选择 / 关闭编辑器",
     "editorNudgeCoarse": "微调位置 ±5（粗调）",
     "editorNudgeFine": "微调位置 ±1（精调）",
@@ -1865,6 +2396,7 @@
     "editorMoveFrames": "时间上移动动作 ±N 帧",
     "editorDelete": "删除所选",
     "editorInvert": "反转位置",
+    "editorFillPattern": "用模式填充选区",
     "editorPlaceNumpad": "在 0 / 10 / 20 / … / 90 处插入动作",
     "editorPlaceTop": "在 100 (顶部) 插入动作",
     "editorInsertAtClick": "在点击位置插入动作",
@@ -1881,13 +2413,16 @@
     "editorZoom": "放大 / 缩小",
     "editorAlternatingInsert": "交替插入（翻转上一个位置）",
     "editorRepeatLastStroke": "重复最后两个动作的笔画",
-    "editorBookmarkNav": "跳转到下一个/上一个书签",
+    "editorBookmarkNav": "跳转到上一个/下一个书签",
     "editorMultiBand": "切换多频段波形（低/中/高）",
     "editorVAD": "切换语音活动轨道",
     "editorSpeedStep": "降低/提高播放速度",
     "editorSelectLeftRightOfCursor": "选择播放头之前/之后的全部",
     "editorEqualize": "均衡 — 在时间上均匀重新分布中间动作",
-    "editorMoveToPlayhead": "将单选动作移动到播放头"
+    "editorMoveToPlayhead": "将单选动作移动到播放头",
+    "edgeHoldPattern": "边缘控制 — 播放边缘模式，视频继续播放",
+    "edgeHoldPatternToggle": "边缘控制(切换) — 播放边缘模式，视频继续播放",
+    "videoOptions": "视频选项（在已聚焦的卡片上）"
   },
   "orgasmConfig": {
     "title": "高潮开关设置",
@@ -1932,6 +2467,870 @@
       "activity": "活动",
       "objects": "物品",
       "travel": "旅行与地点"
+    }
+  },
+  "keys": {
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "shift": "Shift",
+    "space": "空格",
+    "enter": "Enter",
+    "tab": "Tab",
+    "backspace": "Backspace",
+    "delete": "Delete",
+    "insert": "Insert",
+    "home": "Home",
+    "end": "End",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down",
+    "printScreen": "Print Screen",
+    "escape": "Esc",
+    "arrowLeft": "左方向键",
+    "arrowRight": "右方向键",
+    "arrowUp": "上方向键",
+    "arrowDown": "下方向键",
+    "arrows": "方向键",
+    "mediaPlayPause": "播放/暂停",
+    "mediaNext": "下一曲",
+    "mediaPrevious": "上一曲",
+    "mediaStop": "停止",
+    "volumeUp": "音量增大",
+    "volumeDown": "音量减小",
+    "volumeMute": "静音",
+    "scroll": "滚轮",
+    "click": "点击",
+    "dragPoint": "拖动点",
+    "numpad": "小键盘{key}"
+  },
+  "patterns": {
+    "family": {
+      "full-strokes": {
+        "name": "全程与半程抽动",
+        "desc": "全程或经过中段的简单抽动，单次、成对或三次一组。"
+      },
+      "tip-work": {
+        "name": "顶端动作",
+        "desc": "在顶端的抽动和轻弹，从不深入。"
+      },
+      "base-grind": {
+        "name": "根部与研磨",
+        "desc": "在根部的抽动和紧密研磨，始终保持深入。"
+      },
+      "buzz": {
+        "name": "嗡鸣与震动",
+        "desc": "快速震动，单独出现或叠加在抽动上。"
+      },
+      "climbs": {
+        "name": "攀升与阶梯",
+        "desc": "随着进行沿长度逐渐上移或下移的抽动。"
+      },
+      "holds": {
+        "name": "停顿与下沉",
+        "desc": "在顶部、底部或中途的停顿，以及停顿前的一次下沉。"
+      },
+      "waves": {
+        "name": "波浪与涌动",
+        "desc": "随着进行变大、减弱、加快或放慢的抽动。"
+      },
+      "stutters": {
+        "name": "卡顿与抖动",
+        "desc": "途中卡住、停顿或往回抽搐的抽动。"
+      },
+      "endings": {
+        "name": "结尾与收尾",
+        "desc": "收尾方式：最后一次向下、减速、冲刺、骤降或震动。"
+      },
+      "flutters": {
+        "name": "颤动与余震",
+        "desc": "在折返处带有极快颤动的抽动，以及在根部持续震动的结尾。"
+      },
+      "simple-shapes": {
+        "name": "简单波形",
+        "desc": "经典的生成波形：正弦、三角、锯齿、方波、递增和随机。"
+      }
+    },
+    "quick-full-strokes": {
+      "name": "轻快全程抽动",
+      "desc": "轻快地走完整个长度的抽动。"
+    },
+    "uneven-long-strokes": {
+      "name": "不规则长程抽动",
+      "desc": "经过中段的从容长程抽动，节奏和深度不断变化，从不完全重复。"
+    },
+    "full-strokes-slow-up-quick-down": {
+      "name": "全程抽动，慢上快下",
+      "desc": "平稳的全程抽动，上行慢、下行快。"
+    },
+    "frantic-long-strokes": {
+      "name": "疯狂长程抽动",
+      "desc": "经过中段的全速长程抽动。"
+    },
+    "slow-long-strokes-top-linger": {
+      "name": "缓慢长程抽动，顶部停留",
+      "desc": "经过中段的缓慢、从容的长程抽动，在顶部稍作停留。"
+    },
+    "full-strokes-long-short-top": {
+      "name": "全程抽动，从顶部一长一短",
+      "desc": "平稳的全程抽动：一次长的，再一次大约一半深、在到底前折返的。"
+    },
+    "long-strokes-long-short-top": {
+      "name": "长程抽动，从顶部一长一短",
+      "desc": "经过中段的平稳长程抽动：一次长的，再一次稍短、在到底前折返的。"
+    },
+    "slow-full-strokes-slow-up-quick-down": {
+      "name": "缓慢全程抽动，慢上快下",
+      "desc": "缓慢、从容的全程抽动，上行慢、下行快，在顶部停留。"
+    },
+    "fast-full-stroke-pairs": {
+      "name": "快速全程抽动，成对",
+      "desc": "成对的快速全程抽动，第二次比第一次稍早折返。"
+    },
+    "fast-full-strokes-bottom-bump": {
+      "name": "快速全程抽动，底部轻顶",
+      "desc": "快速全程抽动，每次长抽动后在底部轻轻一顶。"
+    },
+    "slow-full-strokes-slow-quick": {
+      "name": "缓慢全程抽动，一慢一快",
+      "desc": "缓慢、从容的全程抽动：一次较慢，再一次较快。"
+    },
+    "quick-full-strokes-threes": {
+      "name": "轻快全程抽动，三次一组",
+      "desc": "轻快的全程抽动，三次一个循环，感觉接近普通抽动。"
+    },
+    "uneven-tip-strokes": {
+      "name": "不规则顶端抽动",
+      "desc": "在顶端从容的短抽动，节奏和深度不断变化，从不完全重复。"
+    },
+    "fast-tip-flicks": {
+      "name": "顶端快速轻弹",
+      "desc": "在顶端快速的小幅轻弹，从不深入。"
+    },
+    "slow-tip-strokes": {
+      "name": "缓慢顶端抽动",
+      "desc": "围绕顶端的缓慢、从容的长抽动，从不深入。"
+    },
+    "tip-strokes-slow-up-quick-down": {
+      "name": "顶端抽动，慢上快下",
+      "desc": "在顶端平稳的半程抽动，上行慢、下行快。"
+    },
+    "quick-tip-strokes-long-short-high": {
+      "name": "轻快顶端抽动，一长一短，偏高",
+      "desc": "在顶端高处轻快的半程抽动：一次长的，再一次大约一半深的。"
+    },
+    "frantic-tip-strokes": {
+      "name": "疯狂顶端抽动",
+      "desc": "在顶端全速的半程抽动。"
+    },
+    "tip-strokes-long-short": {
+      "name": "顶端抽动，一长一短",
+      "desc": "在顶端平稳的半程抽动：一次长的，再一次大约一半深的。"
+    },
+    "quick-tip-strokes-long-short-low": {
+      "name": "轻快顶端抽动，一长一短，偏低",
+      "desc": "围绕顶端、伸得更低的轻快长抽动：一次长的，再一次短的。"
+    },
+    "tip-strokes-slow-quick": {
+      "name": "顶端抽动，一慢一快",
+      "desc": "在顶端平稳的半程抽动：一次较慢，再一次快得多。"
+    },
+    "frantic-tip-strokes-top-dip": {
+      "name": "疯狂顶端抽动，顶部小沉",
+      "desc": "在顶端全速的半程抽动，每次长抽动后在顶部轻轻一沉。"
+    },
+    "fast-base-strokes": {
+      "name": "快速根部抽动",
+      "desc": "在根部快速的半程抽动，始终保持深入。"
+    },
+    "uneven-base-strokes": {
+      "name": "不规则根部抽动",
+      "desc": "在根部轻快的短抽动，节奏和深度不断变化，从不完全重复。"
+    },
+    "slow-base-grind": {
+      "name": "缓慢根部研磨",
+      "desc": "在根部最底端缓慢而紧密的研磨，上行慢、下行快。"
+    },
+    "base-strokes-slow-up-quick-down": {
+      "name": "根部抽动，慢上快下",
+      "desc": "在根部轻快的半程抽动，上行慢、下行快。"
+    },
+    "fast-base-strokes-long-short": {
+      "name": "快速根部抽动，一长一短",
+      "desc": "在根部快速的半程抽动：一次长的，再一次较短、在到顶前折返的。"
+    },
+    "frantic-base-grind": {
+      "name": "疯狂根部研磨",
+      "desc": "在根部最底端全速而紧密的研磨，上行慢、下行快。"
+    },
+    "base-strokes-high-low": {
+      "name": "根部抽动，一高一低",
+      "desc": "在根部轻快的半程抽动：一次伸得很高，下一次低一些。"
+    },
+    "frantic-base-strokes-bottom-bump": {
+      "name": "疯狂根部抽动，底部轻顶",
+      "desc": "在根部全速的半程抽动，每次长抽动后在底部轻轻一顶。"
+    },
+    "buzz-uneven-short-base-strokes": {
+      "name": "不规则根部短抽动加震动",
+      "desc": "在根部不规则、轻快的短抽动，大多叠加震动。"
+    },
+    "buzz-uneven-half-base-strokes": {
+      "name": "不规则根部半程抽动加震动",
+      "desc": "在根部不规则但平稳的半程抽动，大多叠加震动。"
+    },
+    "buzz-uneven-long-strokes": {
+      "name": "不规则长程抽动加震动",
+      "desc": "经过中段的不规则快速长程抽动，大多叠加震动。"
+    },
+    "steady-buzz-base": {
+      "name": "根部持续震动",
+      "desc": "在根部原地不动的震动，下面没有真正的抽动。"
+    },
+    "buzz-long-strokes": {
+      "name": "长程抽动加震动",
+      "desc": "经过中段的平稳长程抽动，上面叠加震动。"
+    },
+    "steady-buzz-tip-high": {
+      "name": "顶端持续震动，偏高",
+      "desc": "在顶端高处原地不动的震动，下面没有真正的抽动。"
+    },
+    "buzz-frantic-base-strokes": {
+      "name": "疯狂根部抽动加震动",
+      "desc": "在根部不规则的全速短抽动，大多叠加震动。"
+    },
+    "buzz-uneven-tip-strokes": {
+      "name": "不规则顶端抽动加震动",
+      "desc": "在顶端不规则但平稳的半程抽动，大多叠加震动。"
+    },
+    "buzz-tiny-base-strokes": {
+      "name": "根部微小抽动加震动",
+      "desc": "在根部全速的微小抽动，上面叠加震动。"
+    },
+    "steady-buzz-tip-low": {
+      "name": "顶端持续震动，偏低",
+      "desc": "在顶端较低处原地不动的震动，下面没有真正的抽动。"
+    },
+    "buzz-short-tip-strokes": {
+      "name": "顶端短抽动加震动",
+      "desc": "在顶端全速的短抽动，上面叠加震动。"
+    },
+    "climbing-long-strokes": {
+      "name": "攀升的长程抽动",
+      "desc": "从中段开始、逐渐向顶端攀升的快速长程抽动。"
+    },
+    "sinking-full-strokes": {
+      "name": "下沉的全程抽动",
+      "desc": "从中段开始、逐渐向根部下沉的缓慢抽动。"
+    },
+    "climbing-half-strokes-from-low": {
+      "name": "从低处攀升的半程抽动",
+      "desc": "从低处开始、逐渐向顶端攀升的全速半程抽动。"
+    },
+    "ladder-stepping-up": {
+      "name": "阶梯，逐级上升",
+      "desc": "平稳的抽动，底部每次上升一级，然后重新开始。"
+    },
+    "pause-at-top": {
+      "name": "顶部停顿",
+      "desc": "上来后在顶端附近等待约两秒，然后再下去。"
+    },
+    "pause-at-bottom": {
+      "name": "底部停顿",
+      "desc": "在根部最底端停留约两秒，再开始下一次向上。"
+    },
+    "pause-halfway": {
+      "name": "中途停顿",
+      "desc": "在抽动中途停住约两秒，然后继续。"
+    },
+    "dip-climb-hold-top": {
+      "name": "下沉、回升、顶部停留",
+      "desc": "一次下沉，缓慢回升到顶端，然后等待几秒。"
+    },
+    "fading-long-strokes-bottoms-rising": {
+      "name": "渐弱长程抽动，底部上升",
+      "desc": "轻快的长程抽动，随着底部上升变得更短更快。"
+    },
+    "swelling-long-strokes-deeper": {
+      "name": "渐强长程抽动，更深",
+      "desc": "平稳的长程抽动，随着伸得更深而变长。"
+    },
+    "slowing-full-strokes": {
+      "name": "渐慢全程抽动",
+      "desc": "平稳的全程抽动，逐渐放慢。"
+    },
+    "swelling-long-strokes-higher": {
+      "name": "渐强长程抽动，更高",
+      "desc": "轻快的长程抽动，随着伸得更高而变长。"
+    },
+    "fading-long-strokes-tops-falling": {
+      "name": "渐弱长程抽动，顶部下降",
+      "desc": "轻快的长程抽动，随着顶部下降变得更短更快。"
+    },
+    "speeding-up-low-strokes": {
+      "name": "渐快低位抽动",
+      "desc": "低处轻快的长程抽动，逐渐加快，上行慢、下行快。"
+    },
+    "fading-half-strokes-tops-falling": {
+      "name": "渐弱半程抽动，顶部下降",
+      "desc": "根部快速的半程抽动，随着顶部下降而变短。"
+    },
+    "fading-tip-strokes-bottoms-rising": {
+      "name": "渐弱顶端抽动，底部上升",
+      "desc": "顶端平稳的半程抽动，随着底部上升变得更短更快。"
+    },
+    "stuttering-middle-strokes": {
+      "name": "中段卡顿抽动",
+      "desc": "经过中段的平稳半程抽动，不断卡住，伴有小幅回抽。"
+    },
+    "stuttering-tip-strokes": {
+      "name": "顶端卡顿抽动",
+      "desc": "在顶端平稳的半程抽动，不断卡住，伴有小幅回抽。"
+    },
+    "stuttering-base-strokes": {
+      "name": "根部卡顿抽动",
+      "desc": "在根部轻快的短抽动，不断卡住，伴有小幅回抽。"
+    },
+    "mixed-flutters-tip": {
+      "name": "顶端混合颤动",
+      "desc": "在顶端小幅颤动夹杂较大较慢的动作，轻柔且从不规律。"
+    },
+    "long-strokes-catch-up": {
+      "name": "长程抽动，上行时卡顿",
+      "desc": "平稳的长程抽动，上行途中稍稍滑回，然后继续到顶。"
+    },
+    "full-strokes-stall-down": {
+      "name": "全程抽动，下行时停顿",
+      "desc": "轻快的全程抽动，下行途中短暂停住。"
+    },
+    "fast-full-strokes-catch-up": {
+      "name": "快速全程抽动，上行时卡顿",
+      "desc": "快速的全程抽动，上行途中稍稍滑回，上行慢、下行快。"
+    },
+    "half-strokes-catch-down": {
+      "name": "半程抽动，下行时卡顿",
+      "desc": "在顶端平稳的半程抽动，下行途中稍稍弹回。"
+    },
+    "long-strokes-stall-up": {
+      "name": "长程抽动，上行时停顿",
+      "desc": "平稳的长程抽动，上行途中短暂停住：一次慢的，再一次快的。"
+    },
+    "last-stroke-then-still": {
+      "name": "最后一次向下，然后静止",
+      "desc": "抽动停止：最后一次一直到底，然后停在那里。"
+    },
+    "slow-down-finish": {
+      "name": "减速收尾",
+      "desc": "抽动继续，但逐渐放缓，越来越慢直到停止。"
+    },
+    "sprint-finish": {
+      "name": "冲刺到最后",
+      "desc": "比之前更快，一直保持到最后，然后停止。"
+    },
+    "plunge-finish": {
+      "name": "骤降",
+      "desc": "最后一次从高处快速落到底，然后停在那里。"
+    },
+    "buzz-finish": {
+      "name": "震动收尾",
+      "desc": "最后一段大多变成震动而不是抽动。"
+    },
+    "finishing-fast-strokes-long-short": {
+      "name": "收尾快速抽动，一长一短",
+      "desc": "快速的全程抽动：一次长的，再一次短的，上行慢、下行快。"
+    },
+    "full-strokes-base-flutter": {
+      "name": "全程抽动，根部颤动",
+      "desc": "触底的大幅抽动，在底部短暂颤动，然后直接回升。"
+    },
+    "drop-buzzing-aftershocks": {
+      "name": "落下后震动余震",
+      "desc": "抽动落到底部，并在那里继续震动、抽搐几秒钟。"
+    },
+    "fast-strokes-flutter-both-ends": {
+      "name": "快速抽动，两端颤动",
+      "desc": "轻快的抽动：在顶部颤动，冲下去，在底部颤动，再冲上来。"
+    },
+    "fast-full-strokes-long-short-bottom": {
+      "name": "快速全程抽动，从底部一长一短",
+      "desc": "快速的全程抽动：一次长的，再一次大约一半深、在到顶前折返的。"
+    },
+    "frantic-base-strokes-long-short": {
+      "name": "疯狂根部抽动，一长一短",
+      "desc": "在根部全速的长抽动：一次长的，再一次较短、在到顶前折返的。"
+    },
+    "full-strokes-bottom-linger": {
+      "name": "全程抽动，底部停留",
+      "desc": "平稳的全程抽动，在底部稍作停留。"
+    },
+    "ui": {
+      "pattern": "模式",
+      "family": "分组",
+      "allFamilies": "所有分组",
+      "choose": "选择…",
+      "pickerTitle": "选择模式",
+      "search": "搜索模式",
+      "noMatch": "没有匹配的模式。",
+      "speed": "速度",
+      "speedValue": "每秒 {speed} 单位",
+      "reverse": "反转",
+      "range": "范围",
+      "rangeOwn": "模式自身的范围",
+      "rangeMin": "最小值",
+      "rangeMax": "最大值",
+      "reset": "恢复模式自身的速度",
+      "speedLimited": "限制为每秒 {max} 单位",
+      "tooShort": "对这个模式来说太短了。",
+      "choosePattern": "选择模式…",
+      "oneShotName": "{name}（播放一次，然后保持）",
+      "oneShotHint": "结尾：从你按下按键时播放一次，然后保持最后的位置，直到你松开按键。"
+    },
+    "shape-sine": {
+      "name": "正弦",
+      "desc": "平稳均匀的抽动，在每次折返时柔和减速。"
+    },
+    "shape-triangle": {
+      "name": "三角",
+      "desc": "匀速的均匀抽动，在两端急转折返。"
+    },
+    "shape-sawtooth": {
+      "name": "锯齿",
+      "desc": "匀速上升，然后瞬间落回底部。"
+    },
+    "shape-square": {
+      "name": "方波",
+      "desc": "在顶部和底部停留，中间快速跳转。"
+    },
+    "shape-escalating": {
+      "name": "递增",
+      "desc": "从浅处开始，逐渐加深，直到用满整个范围。"
+    },
+    "shape-random": {
+      "name": "随机",
+      "desc": "每半次抽动移动到一个新的随机深度。"
+    }
+  },
+  "videoOptions": {
+    "openAria": "{name} 的选项",
+    "openTitle": "视频选项 (Alt+Enter)",
+    "railAria": "视频选项分区",
+    "rail": {
+      "organise": "整理",
+      "tags": "标签",
+      "script": "脚本",
+      "subtitles": "字幕",
+      "playback": "播放",
+      "thumbnail": "缩略图",
+      "vr": "VR",
+      "file": "文件"
+    },
+    "header": {
+      "script": "脚本：{how}",
+      "vrAuto": "VR（自动）",
+      "vrYours": "VR（由你设置）",
+      "flatYours": "平面（由你设置）"
+    },
+    "organise": {
+      "libraries": "媒体库",
+      "noPlaylists": "还没有播放列表。",
+      "noCategories": "还没有分类。",
+      "newPlaylist": "新建播放列表…",
+      "newCategory": "新建分类…",
+      "synced": "（与其来源同步）"
+    },
+    "tags": {
+      "heading": "此视频的标签（{count}）",
+      "empty": "此视频还没有标签。请在下方添加，或从 EroScripts 获取帖子的标签。",
+      "noMatch": "没有与“{query}”匹配的标签。",
+      "filter": {
+        "placeholder": "查找标签…",
+        "label": "查找此视频的标签"
+      },
+      "showAll": "全部显示（{count}）",
+      "showFewer": "显示较少",
+      "removeAria": "从此视频移除 {name}",
+      "add": {
+        "placeholder": "添加标签…",
+        "label": "为此视频添加标签",
+        "button": "添加",
+        "hint": "要将标签放入分组，请先输入分组，例如 device:the handy 或 performer:Jane Doe。",
+        "suggestionsAria": "建议的标签"
+      },
+      "sourcesHeading": "来源",
+      "source": {
+        "post": "“{title}”，作者 {creator}",
+        "postNoCreator": "“{title}”",
+        "postId": "帖子 {id}",
+        "got": "{date} 获取",
+        "stale": "已从 EroScripts 删除",
+        "fileRow": "脚本文件",
+        "tagCount": "{count, plural, other {# 个标签}}",
+        "notRead": "尚未获取标签",
+        "stashRow": "{tags, plural, other {# 个标签}}，{performers, plural, other {# 位演员}}，{studios, plural, other {# 个工作室}}",
+        "stashGone": "已从 Stash 中消失",
+        "stashHidden": "此文件已更改；其 Stash 标签在下次同步前隐藏"
+      },
+      "viewPost": "查看帖子",
+      "pasteLink": "粘贴帖子链接…",
+      "findPost": "在 EroScripts 上查找帖子…",
+      "paste": {
+        "title": "关联 EroScripts 帖子",
+        "label": "帖子链接",
+        "hint": "粘贴帖子的地址，例如 https://discuss.eroscripts.com/t/scene-name/12345。在你获取标签之前不会发送任何内容。",
+        "invalid": "这不是 EroScripts 帖子链接。链接以 https://discuss.eroscripts.com/t/ 开头",
+        "ok": "关联"
+      },
+      "find": {
+        "title": "在 EroScripts 上查找帖子",
+        "hint": "搜索后，选择此视频脚本所属的帖子。不会下载任何内容。",
+        "prompt": "输入帖子名称，然后搜索。",
+        "pick": "关联此帖子",
+        "pickAria": "关联帖子“{title}”"
+      },
+      "hiddenHeading": "在此视频中隐藏（{count}）",
+      "showAgain": "重新显示",
+      "showAgainAria": "在此视频中重新显示 {name}",
+      "undoAria": "撤销：{message}",
+      "menu": {
+        "aria": "标签 {name} 的选项",
+        "showVideos": "显示带有此标签的视频",
+        "makeCategory": "用此标签创建分类…",
+        "remove": "从此视频移除"
+      },
+      "category": {
+        "title": "用此标签创建分类",
+        "nameLabel": "分类名称",
+        "count": "{count, plural, =0 {媒体库中没有带此标签的视频。} other {有 # 个视频带有此标签。}}",
+        "exists": "已有名为 {name} 的分类。视频将添加到该分类。",
+        "create": "创建分类",
+        "addTo": "添加到 {name}",
+        "emptyName": "请输入分类名称。"
+      },
+      "live": {
+        "added": "已添加 {name}。",
+        "addedShown": "已添加 {name}。它会在此视频中重新显示。",
+        "already": "{name} 已在此视频上。",
+        "removed": "已从此视频移除 {name}。",
+        "shownAgain": "{name} 会在此视频中重新显示。",
+        "undone": "已撤销。",
+        "undoPartial": "已撤销。之后所做的更改已保留。",
+        "linked": "已关联帖子。在你获取其标签之前不会发送任何内容。",
+        "categoryMade": "已创建分类 {name}（{count, plural, other {# 个视频}}）。",
+        "categoryAdded": "已将 {count, plural, other {# 个视频}}添加到 {name}。",
+        "categoryNothing": "带此标签的视频都已在 {name} 中。",
+        "categoryFailed": "无法创建分类。",
+        "categoryRemoved": "已撤销。分类 {name} 已删除。",
+        "categoryUnassigned": "已撤销。视频已从 {name} 中移出。",
+        "reason": {
+          "empty": "请先输入标签。",
+          "tooLong": "标签太长（最多 {max} 个字符）。",
+          "badStore": "此视频保存的标签已损坏，因此未做任何更改。",
+          "noPath": "此视频没有文件路径，因此无法保存其标签。"
+        },
+        "postChanged": "已更换帖子。按下“获取标签”时会加入它的标签。",
+        "samePost": "这已经是此视频的帖子。未做任何更改。",
+        "undoChangedSince": "未撤销：此视频的帖子之后又被更改过。",
+        "getTagsUndone": "已撤销：标签已恢复到“获取标签”之前的样子。",
+        "getTagsUndoChanged": "未撤销：此视频的 EroScripts 标签此后又有变化。"
+      },
+      "fetch": {
+        "button": "从 EroScripts 获取标签",
+        "loginButton": "登录以获取标签…",
+        "running": "正在获取标签…",
+        "success": "已从 EroScripts 获取{count, plural, other {# 个标签}}（新增 {newCount} 个）。",
+        "successEmpty": "此帖子在 EroScripts 上没有标签。",
+        "unknown": "EroScripts 没有说明此帖子有哪些标签。",
+        "gone": "此帖子已从 EroScripts 删除。其标签会保留。",
+        "loginAgain": "请重新登录 EroScripts",
+        "loginAction": "登录…",
+        "loginRequired": "获取标签需要登录 EroScripts。未发送任何内容。",
+        "cooldown": "EroScripts 要求稍候。请在 {seconds} 秒后重试",
+        "otherScript": "已关联的帖子属于另一个脚本（{name}）",
+        "noPost": "此视频的脚本没有关联 EroScripts 帖子",
+        "noScript": "此视频没有脚本，因此没有关联 EroScripts 帖子。",
+        "superseded": "获取标签期间，此视频的帖子已更改。未保存任何内容。",
+        "hub": "该帖子是作者的脚本索引，不是此视频自己的帖子，因此未使用其标签。请查找此视频的帖子以获取标签。",
+        "hubNote": "此脚本链接到作者的脚本索引，而不是此视频自己的帖子"
+      },
+      "changePost": "更换帖子…",
+      "change": {
+        "title": "更换 EroScripts 帖子",
+        "message": "{post} 的标签从现在起不再显示在此视频上。新帖子的标签会在你按下“获取标签”时加入。"
+      }
+    },
+    "script": {
+      "heading": "脚本",
+      "none": "此视频还没有脚本。",
+      "change": "更改…",
+      "findOnEroScripts": "在 EroScripts 上查找…",
+      "fallback": "暂时无法读取 {name}，此视频先播放它自己的脚本。你的配对会保留。",
+      "modeHeading": "模式",
+      "modeSingle": "单个脚本",
+      "modeMulti": "多轴（{count, plural, other {# 个轴}}）",
+      "modeCustom": "自定义路由（{count, plural, other {# 条路由}}）",
+      "modeHint": "用“更改…”编辑模式。",
+      "slotsHeading": "已保存的配对",
+      "slot": {
+        "single": "单个脚本：{name}",
+        "multi": "多轴组（{count, plural, other {# 个轴}}）",
+        "plays": "使用中",
+        "saved": "已保存，未使用",
+        "unpairRemoves": "取消配对会移除它",
+        "unpairKeeps": "取消配对会保留它"
+      },
+      "playFirst": "优先播放",
+      "playFirstSet": "现在优先播放 {name}。",
+      "variation": {
+        "folder": "来自文件夹",
+        "added": "由你添加",
+        "removeAria": "从此视频的变体中移除 {name}",
+        "removed": "已从变体中移除 {name}。"
+      },
+      "addVariation": "添加变体…",
+      "randomHint": "设置中已开启“随机脚本变体”，所以会随机播放一个。关闭后此选择才会生效。",
+      "embeddedHeading": "内嵌轴",
+      "unpairHeading": "取消配对",
+      "pairing": {
+        "none": "无脚本",
+        "byName": "按名称配对",
+        "folder": "所在文件夹的第一个脚本",
+        "autoMulti": "按名称配对，含轴文件",
+        "single": "由你选择",
+        "multi": "多轴，由你选择",
+        "custom": "自定义路由，由你选择"
+      },
+      "status": {
+        "missing": "找不到脚本",
+        "unknown": "暂时无法检查脚本"
+      },
+      "unpair": {
+        "byName": "按文件名配对。重命名或移动该 .funscript 即可取消配对。",
+        "autoMulti": "按文件名与其轴文件一起配对。重命名或移动该 .funscript 即可取消配对。",
+        "folder": "正在播放此视频所在文件夹中的第一个脚本。将该 .funscript 移到其他文件夹即可停止。",
+        "ownScript": "主脚本是此视频自己的脚本（文件名相同）。其余部分请用“更改…”编辑。",
+        "noMain": "此配对没有主脚本。请用“更改…”编辑。",
+        "confirmTitle": "取消脚本配对",
+        "confirmQuestion": "取消 {name} 的配对？文件仍保留在磁盘上。",
+        "nextOwn": "此视频将使用自己的脚本 {name}。",
+        "nextNone": "此视频将没有脚本。",
+        "confirmButton": "取消配对",
+        "removesMulti": "这也会移除你创建的多轴组（{count, plural, other {# 个轴}}）。",
+        "removesCustom": "这也会移除你创建的自定义路由（{count, plural, other {# 条路由}}）。",
+        "keepsSingle": "保留：你保存的单轴脚本 {name}。“更改…”可再次使用它。",
+        "keepsMulti": "保留：你保存的多轴组（{count, plural, other {# 个轴}}）。“更改…”可再次使用它。",
+        "keepsCustom": "保留：你保存的自定义路由（{count, plural, other {# 条路由}}）。“更改…”可再次使用它。",
+        "done": "已取消 {name} 的配对。",
+        "undone": "已重新配对 {name}。",
+        "undoChanged": "无法撤销：此视频的脚本此后已被更改。"
+      },
+      "removeSet": {
+        "multiTitle": "移除多轴组",
+        "customTitle": "移除自定义路由",
+        "multiQuestion": "移除你创建的多轴组（{count, plural, other {# 个轴}}）？脚本文件仍保留在磁盘上。",
+        "customQuestion": "移除你创建的自定义路由（{count, plural, other {# 条路由}}）？脚本文件仍保留在磁盘上。",
+        "playsSame": "它目前未在使用，因此此视频播放的内容不变。",
+        "multiDone": "已移除多轴组。",
+        "customDone": "已移除自定义路由。",
+        "multiUndone": "多轴组已恢复。",
+        "customUndone": "自定义路由已恢复。",
+        "singleTitle": "移除已保存的单个脚本",
+        "singleQuestion": "移除你保存的单个脚本 {name}？文件仍保留在磁盘上。",
+        "singleDone": "已从已保存的配对中移除 {name}。",
+        "singleUndone": "{name} 已重新保存。"
+      },
+      "locate": {
+        "aria": "找不到脚本：选择 {name} 现在的位置",
+        "done": "现在播放 {newName}，代替 {name}。",
+        "undone": "已改回 {name}。"
+      }
+    },
+    "subtitles": {
+      "heading": "字幕",
+      "none": "此视频没有字幕。",
+      "byName": "按文件名配对。要取消配对，请重命名或移动字幕文件。"
+    },
+    "playback": {
+      "progressHeading": "进度",
+      "watchedTo": "已看到 {position} / {duration}（{percent}%）",
+      "notStarted": "未开始",
+      "progressReset": "进度已重置。"
+    },
+    "thumbnail": {
+      "auto": "由视频生成",
+      "frame": "你选的帧",
+      "image": "你上传的图片"
+    },
+    "vr": {
+      "legend": "此视频为",
+      "auto": "自动（检测为：{detected, select, vr {VR} other {平面}}）",
+      "vr": "VR",
+      "flat": "平面",
+      "formatAuto": "根据文件检测"
+    },
+    "file": {
+      "path": "路径",
+      "folder": "文件夹",
+      "size": "大小",
+      "source": "来源",
+      "unknown": "未知",
+      "copyPath": "复制路径",
+      "copied": "已复制路径。",
+      "copyFailed": "无法复制路径。"
+    },
+    "live": {
+      "addedTo": "已添加到 {name}。",
+      "removedFrom": "已从 {name} 移除。",
+      "undone": "已撤销。",
+      "undoGone": "无法撤销：它已被删除。",
+      "undoChanged": "无法撤销：它已被更改。"
+    },
+    "stash": {
+      "heading": "Stash",
+      "sceneTitle": "“{title}”",
+      "untitled": "场景 {id}",
+      "studioOf": "{studio}（{parent}）",
+      "code": "编号 {code}",
+      "rated": "评分 {rating}/100",
+      "organised": "已整理",
+      "director": "导演：{name}",
+      "markerCount": "{count, plural, other {# 个标记}}",
+      "by": {
+        "oshash": "按文件指纹匹配",
+        "chosen": "由你选择",
+        "manual": "由你关联"
+      },
+      "synced": "{date} 同步",
+      "verify": "已移动；下次同步时会再次检查",
+      "performers": "演员",
+      "markers": "标记",
+      "moreMarkers": "{count, plural, other {还有 # 个}}",
+      "urls": "链接",
+      "copyUrl": "复制",
+      "copyUrlAria": "复制 {url}",
+      "urlCopied": "已复制链接。",
+      "urlCopyFailed": "无法复制链接。",
+      "showDescription": "显示简介",
+      "copy": "库中另一个文件是同一个视频：{path}",
+      "open": "在 Stash 中打开",
+      "openAria": "在 Stash 中打开（会打开浏览器）",
+      "syncVideo": "同步此视频",
+      "syncing": "正在同步…",
+      "notThis": "不是这个场景…",
+      "unlink": "取消关联",
+      "find": "在 Stash 中查找…",
+      "notSynced": "FunSync 尚未与 Stash 同步。",
+      "notFound": "在 Stash 中未找到。",
+      "changed": "此文件在匹配后已更改。在下次同步前，其 Stash 数据会被隐藏。",
+      "gone": "此场景已从 Stash 中消失。其数据会保留。",
+      "refused": "你已指定此文件不是 {name}。",
+      "refusedSome": "{count, plural, other {你已指定此文件不是所提供的 # 个 Stash 场景中的任何一个。}}",
+      "otherServer": "来自你的另一个 Stash（{address}）。",
+      "check": {
+        "several": "{count, plural, other {有 # 个 Stash 场景包含完全相同的文件。}}是哪一个？",
+        "pathChanged": "Stash 在此路径有一个文件，但不是同一个文件。它在 Stash 上次扫描后发生了更改。",
+        "keptLink": "当前关联：{name}。",
+        "legend": "这是哪个 Stash 场景？",
+        "use": "使用此场景",
+        "none": "都不是",
+        "useAnyway": "仍然使用",
+        "ignore": "忽略",
+        "durationDiff": "时长相差 {seconds} 秒"
+      },
+      "notThisConfirm": {
+        "title": "不是这个场景？",
+        "message": "FunSync 会取消此视频与 {name} 的关联，并且不会再把此文件关联到它。Stash 中不会有任何更改。",
+        "button": "不是这个场景"
+      },
+      "live": {
+        "syncing": "正在将此视频与 Stash 同步…",
+        "synced": "已与 Stash 同步。",
+        "syncedLinked": "已同步。此视频在 Stash 中是 {name}。",
+        "syncedCheck": "已同步。无法确定此视频是哪个场景：请在下方选择。",
+        "syncedNotFound": "已同步。在 Stash 中未找到此视频。",
+        "syncedGone": "已同步。{name} 已从 Stash 中消失；其数据会保留。",
+        "syncedChanged": "已同步。此文件仍与匹配的文件不同；其 Stash 数据仍会隐藏。",
+        "relinked": "此文件现已关联到 {name}。",
+        "linked": "已将此视频关联到 {name}。",
+        "unlinked": "已取消此视频与 {name} 的关联。",
+        "noneOfThese": "这些场景不会再为此文件提供。",
+        "ignored": "该 Stash 场景不会再为此文件提供。",
+        "undoFailed": "无法撤销：FunSync 无法更改其 Stash 数据。",
+        "refusedLinkChanged": "它现在关联到 {name}，该关联保持不变。"
+      },
+      "error": {
+        "fileOffline": "FunSync 无法读取此视频的文件（其驱动器可能已离线）。没有任何更改。",
+        "busy": "已在与 Stash 同步。请在完成后重试。",
+        "cancelled": "已停止。没有任何更改。",
+        "changedMeanwhile": "此视频的 Stash 数据在此期间已更改。没有任何更改。",
+        "saveFailed": "FunSync 无法保存其 Stash 数据。没有任何更改。",
+        "generic": "无法向 Stash 查询。没有任何更改。"
+      },
+      "sceneChanged": "此 ID 的 Stash 场景已不再包含此文件（Stash 可能已重置或重新扫描）。其数据已隐藏。请取消关联，或使用“在 Stash 中查找…”重新关联。",
+      "plays": "播放次数",
+      "lastPlayed": "上次播放",
+      "lastPlayedNever": "从未",
+      "oCount": "O 计数"
+    }
+  },
+  "tags": {
+    "facet": {
+      "vr": "VR",
+      "display": "显示",
+      "length": "时长",
+      "device": "设备",
+      "axis": "轴",
+      "scriptType": "脚本类型",
+      "sexuality": "性取向",
+      "threesome": "3P",
+      "content": "内容",
+      "performer": "演员",
+      "creator": "创作者",
+      "studio": "工作室"
+    },
+    "lengthMinutes": "{range} 分钟",
+    "source": {
+      "user": "你",
+      "stash": "Stash",
+      "stashbox": "StashDB",
+      "funscript": "文件",
+      "eroscripts": "EroScripts"
+    }
+  },
+  "stash": {
+    "error": {
+      "unreachable": "无法连接 {address} 上的 Stash。Stash 正在运行吗？",
+      "timeout": "Stash 未及时响应。",
+      "badKey": "Stash 拒绝了 API 密钥。如果您的 Stash 没有设置密码，请移除该密钥。",
+      "needsKey": "此 Stash 设有密码。请粘贴它的 API 密钥（Stash：Settings > Security）。",
+      "forbidden": "Stash 拒绝了这台电脑。请在 Stash 中设置密码，并粘贴它的 API 密钥。",
+      "tooOld": "此 Stash（{version}）版本过旧。FunSync 需要 v{minVersion} 或更高版本。",
+      "tooOldNoVersion": "此 Stash 版本过旧。FunSync 需要 v{minVersion} 或更高版本。",
+      "notStash": "该地址有响应，但不是 Stash。",
+      "redirect": "Stash 将 FunSync 重定向到另一个地址，FunSync 不会跟随。请检查地址。",
+      "certificate": "这台电脑不信任 Stash 的 https 证书。请检查地址。",
+      "graphql": "Stash 无法响应 FunSync 的请求。",
+      "http": "Stash 返回了错误（HTTP {status}）。",
+      "tooLarge": "Stash 的响应过大，无法读取。",
+      "cancelled": "已取消。",
+      "badAddress": "请输入以 http:// 或 https:// 开头的地址，例如 http://127.0.0.1:9999。",
+      "badInput": "FunSync 无法向 Stash 发送该请求。",
+      "invalidKey": "这不是 Stash API 密钥。请从 Stash 的 Settings > Security > API Key 复制。",
+      "writeFailed": "FunSync 无法保存 API 密钥。在关闭 FunSync 之前会一直保留。",
+      "removeFailed": "FunSync 无法删除已保存的 API 密钥文件。",
+      "keyUnreadable": "无法在这台电脑上读取已保存的 API 密钥。请重新粘贴。"
+    },
+    "picker": {
+      "title": "在 Stash 中查找",
+      "label": "搜索你的 Stash",
+      "placeholder": "场景标题、编号或文件名",
+      "search": "搜索",
+      "hint": "选择此视频对应的场景。FunSync 只会关联它；Stash 中不会有任何更改。",
+      "prompt": "输入后按“搜索”。在此之前不会发送任何内容。",
+      "searching": "正在搜索…",
+      "none": "未找到与“{query}”匹配的场景。",
+      "found": "{count, plural, other {找到 # 个场景。}}",
+      "someOf": "显示 {count} 个中的前 {shown} 个。添加关键词以缩小搜索范围。",
+      "link": "关联",
+      "linkAria": "将此视频关联到 {name}",
+      "resultsAria": "Stash 场景"
     }
   }
 }

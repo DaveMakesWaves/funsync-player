@@ -1,0 +1,441 @@
+{
+  "data": {
+    "findScenes": {
+      "count": 10,
+      "scenes": [
+        {
+          "id": "2",
+          "title": "",
+          "rating100": 100,
+          "organized": true,
+          "play_count": 5,
+          "last_played_at": "2026-11-17T21:45:00Z",
+          "o_counter": 3,
+          "play_history": [
+            "2026-11-17T21:45:00Z",
+            "2026-11-12T08:00:00Z",
+            "2026-11-10T20:15:00Z",
+            "2026-11-05T12:30:00Z",
+            "2026-11-01T10:00:00Z"
+          ],
+          "o_history": [
+            "2026-11-17T22:00:00Z",
+            "2026-11-10T20:30:00Z",
+            "2026-11-05T12:40:00Z"
+          ],
+          "updated_at": "2026-11-19T09:24:26Z",
+          "tags": [
+            {
+              "id": "2",
+              "name": "Synthetic Tag B",
+              "aliases": [
+                "synthetic-child"
+              ],
+              "parents": [
+                {
+                  "id": "3",
+                  "name": "Synthetic Parent Tag"
+                }
+              ]
+            }
+          ],
+          "groups": [
+            {
+              "scene_index": 1,
+              "group": {
+                "id": "1",
+                "name": "Synthetic Series A"
+              }
+            }
+          ],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_large.mkv",
+              "basename": "synthetic_large.mkv",
+              "size": 7427628,
+              "duration": 12.02,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "60f7da65ec8d5d1d"
+                },
+                {
+                  "type": "phash",
+                  "value": "ab63cd1cc33c3343"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "10",
+          "title": "",
+          "rating100": null,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-19T09:23:57Z",
+          "tags": [],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_large_reencode.mp4",
+              "basename": "synthetic_large_reencode.mp4",
+              "size": 1076264,
+              "duration": 12.01,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "456cb0eefc8bb4e7"
+                },
+                {
+                  "type": "phash",
+                  "value": "ab63cd1cc33c3343"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "3",
+          "title": "Synthetic Scene Mid",
+          "rating100": 60,
+          "organized": false,
+          "play_count": 2,
+          "last_played_at": "2026-11-02T18:00:00Z",
+          "o_counter": 0,
+          "play_history": [
+            "2026-11-02T18:00:00Z",
+            "2026-10-20T09:00:00Z"
+          ],
+          "o_history": [],
+          "updated_at": "2026-11-19T09:24:26Z",
+          "tags": [
+            {
+              "id": "1",
+              "name": "Synthetic Tag A",
+              "aliases": [
+                "syn-a-two",
+                "synthetic-a"
+              ],
+              "parents": []
+            },
+            {
+              "id": "6",
+              "name": "Synthetic Tag C",
+              "aliases": [
+                "synthetic-c"
+              ],
+              "parents": []
+            }
+          ],
+          "groups": [
+            {
+              "scene_index": 2,
+              "group": {
+                "id": "1",
+                "name": "Synthetic Series A"
+              }
+            }
+          ],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_mid.mp4",
+              "basename": "synthetic_mid.mp4",
+              "size": 97200,
+              "duration": 3,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "69577801585835d2"
+                },
+                {
+                  "type": "phash",
+                  "value": "aa51aa2af70abf0a"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "4",
+          "title": "",
+          "rating100": 20,
+          "organized": true,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-19T09:24:26Z",
+          "tags": [],
+          "groups": [
+            {
+              "scene_index": 1,
+              "group": {
+                "id": "2",
+                "name": "Synthetic Series B"
+              }
+            }
+          ],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\synthetic_tiny.mp4",
+              "basename": "synthetic_tiny.mp4",
+              "size": 2146,
+              "duration": 1,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "18c7ca0d119137f4"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "7",
+          "title": "",
+          "rating100": null,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-17T20:37:23Z",
+          "tags": [],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65535.mp4",
+              "basename": "synthetic_edge_65535.mp4",
+              "size": 65535,
+              "duration": 1,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "e011589d0eb6a3b1"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "8",
+          "title": "",
+          "rating100": null,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-17T20:37:23Z",
+          "tags": [],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65536.mp4",
+              "basename": "synthetic_edge_65536.mp4",
+              "size": 65536,
+              "duration": 1,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "1e7fd6b1fad8ae46"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "9",
+          "title": "",
+          "rating100": null,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-17T20:37:23Z",
+          "tags": [],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_65543.mp4",
+              "basename": "synthetic_edge_65543.mp4",
+              "size": 65543,
+              "duration": 1,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "3fdde031d5e4cf6e"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "5",
+          "title": "",
+          "rating100": 80,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 2,
+          "play_history": [],
+          "o_history": [
+            "2026-11-16T10:00:00Z",
+            "2026-11-15T10:00:00Z"
+          ],
+          "updated_at": "2026-11-19T09:24:26Z",
+          "tags": [
+            {
+              "id": "3",
+              "name": "Synthetic Parent Tag",
+              "aliases": [
+                "synthetic-parent"
+              ],
+              "parents": [
+                {
+                  "id": "5",
+                  "name": "Synthetic Grandparent Tag"
+                }
+              ]
+            },
+            {
+              "id": "6",
+              "name": "Synthetic Tag C",
+              "aliases": [
+                "synthetic-c"
+              ],
+              "parents": []
+            }
+          ],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_131072.mp4",
+              "basename": "synthetic_edge_131072.mp4",
+              "size": 131072,
+              "duration": 1,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "6fc1fac03dfade66"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "6",
+          "title": "",
+          "rating100": null,
+          "organized": false,
+          "play_count": 0,
+          "last_played_at": null,
+          "o_counter": 0,
+          "play_history": [],
+          "o_history": [],
+          "updated_at": "2026-11-17T20:37:23Z",
+          "tags": [],
+          "groups": [],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\edge\\synthetic_edge_131079.mp4",
+              "basename": "synthetic_edge_131079.mp4",
+              "size": 131079,
+              "duration": 1,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "69198e60fe9f0678"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "id": "1",
+          "title": "Synthetic Scene Small",
+          "rating100": 80,
+          "organized": true,
+          "play_count": 1,
+          "last_played_at": "2026-09-30T23:10:00Z",
+          "o_counter": 1,
+          "play_history": [
+            "2026-09-30T23:10:00Z"
+          ],
+          "o_history": [
+            "2026-09-30T23:20:00Z"
+          ],
+          "updated_at": "2026-11-19T09:24:26Z",
+          "tags": [
+            {
+              "id": "1",
+              "name": "Synthetic Tag A",
+              "aliases": [
+                "syn-a-two",
+                "synthetic-a"
+              ],
+              "parents": []
+            },
+            {
+              "id": "2",
+              "name": "Synthetic Tag B",
+              "aliases": [
+                "synthetic-child"
+              ],
+              "parents": [
+                {
+                  "id": "3",
+                  "name": "Synthetic Parent Tag"
+                }
+              ]
+            }
+          ],
+          "groups": [
+            {
+              "scene_index": 3,
+              "group": {
+                "id": "1",
+                "name": "Synthetic Series A"
+              }
+            },
+            {
+              "scene_index": 2,
+              "group": {
+                "id": "2",
+                "name": "Synthetic Series B"
+              }
+            }
+          ],
+          "files": [
+            {
+              "path": "C:\\Users\\user\\Desktop\\Coding-Projects\\stash-test\\library\\sub\\Synthetic Clip Small.mp4",
+              "basename": "Synthetic Clip Small.mp4",
+              "size": 213390,
+              "duration": 6,
+              "fingerprints": [
+                {
+                  "type": "oshash",
+                  "value": "6b3f3b3ee9e8c31a"
+                },
+                {
+                  "type": "phash",
+                  "value": "8a7da502fa0aeb6a"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

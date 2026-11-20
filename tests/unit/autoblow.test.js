@@ -157,6 +157,44 @@ describe('AutoblowManager', () => {
     const lat = await mgr.estimateLatency();
     expect(lat).toBe(0);
   });
+
+  // FT-052 (2026-11-06, also in v0.9.2): a connect sent no offset unless a
+  // per-video delta was in play, so the saved `autoblow.offset` reached the
+  // device only when the slider was moved while connected.
+  describe('connect sends the saved global offset (FT-052)', () => {
+    const connectWith = async (state) => {
+      window.funsync.autoblowConnect.mockResolvedValueOnce({ success: true, deviceType: 'autoblow-ultra', deviceInfo: {} });
+      const ab = new AutoblowManager({ savedOffsetState: () => state });
+      await ab.connect('not-a-real-token');
+      return ab;
+    };
+    const sent = () => window.funsync.autoblowSyncOffset.mock.calls.map((c) => c[0]);
+
+    it('a library without per-video offsets: the saved 120 ms is sent on connect', async () => {
+      await connectWith({ globalMs: 120, videoOffsetsInUse: false });
+      expect(sent()).toEqual([120]);
+    });
+
+    it('a saved 0 is sent too, so the device runs at what the slider shows', async () => {
+      await connectWith({ globalMs: 0, videoOffsetsInUse: false });
+      expect(sent()).toEqual([0]);
+    });
+
+    it('every connect sends it again (a reconnect does not rely on the device keeping it)', async () => {
+      const ab = await connectWith({ globalMs: -40, videoOffsetsInUse: false });
+      await ab.disconnect();
+      window.funsync.autoblowConnect.mockResolvedValueOnce({ success: true, deviceType: 'autoblow-ultra', deviceInfo: {} });
+      await ab.connect('not-a-real-token');
+      expect(sent()).toEqual([-40, -40]);
+    });
+
+    it('a failed connect sends nothing', async () => {
+      window.funsync.autoblowConnect.mockResolvedValueOnce({ success: false, error: 'mock' });
+      const ab = new AutoblowManager({ savedOffsetState: () => ({ globalMs: 120, videoOffsetsInUse: false }) });
+      await ab.connect('not-a-real-token');
+      expect(sent()).toEqual([]);
+    });
+  });
 });
 
 // --- AutoblowSync Tests ---

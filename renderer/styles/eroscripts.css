@@ -17,6 +17,13 @@
   overflow: hidden;
 }
 
+/* While the backend banner shows, centre in the space under it, not under
+   it (V80; see .backend-banner in player.css). */
+html.backend-banner-shown #app > .eroscripts-panel {
+  top: calc(50% + var(--backend-banner-bottom, 0px) / 2);
+  max-height: calc(80vh - var(--backend-banner-bottom, 0px));
+}
+
 .eroscripts-panel__header {
   display: flex;
   align-items: center;
@@ -557,4 +564,41 @@
      the row wider than the modal instead of ellipsing. */
   min-width: 0;
   flex: 1;
+}
+
+/* "Log in to EroScripts to search." with its [Log In] (the panel and the
+   inline search, 2026-11-18): the message is dimmed like every placeholder,
+   the button is not, so it does not look disabled. */
+.eroscripts-panel__login-needed {
+  opacity: 1;
+}
+
+.eroscripts-panel__login-needed > div {
+  opacity: 0.7;
+}
+
+.eroscripts-panel__login-needed-btn {
+  margin-top: 12px;
+}
+
+/* Nothing found, with "Search with fewer words" (Dave, 2026-11-18): the
+   words dimmed like any placeholder, the button not. */
+.eroscripts-panel__no-results {
+  opacity: 1;
+}
+
+.eroscripts-panel__no-results > div {
+  opacity: 0.7;
+}
+
+.eroscripts-panel__fewer-words {
+  margin-top: 12px;
+}
+
+/* The Tags section's EroScripts row (video options): Change post…, Paste a
+   post link… and Find the post… are disabled while that video's Get tags
+   request is pending (fixup-data 2026-11-18, review-b RB-1); they look it. */
+.video-options-tags__source--eroscripts .video-options__btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }

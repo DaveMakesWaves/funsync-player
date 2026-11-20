@@ -1,0 +1,17 @@
+{
+  "note": "a: findScene(id: \"1\") b: findScene(id: \"999\"): a missing id answers null for its own alias only. Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by the design pass (stage design-stash, 16-findScene-missing.json); copied by s1-1a-client.",
+  "document": "{ a: findScene(id:\"1\") { id } b: findScene(id:\"999\") { id } }",
+  "status": 200,
+  "headers": {
+    "content-type": "application/graphql-response+json",
+    "x-content-type-options": "nosniff"
+  },
+  "body": {
+    "data": {
+      "a": {
+        "id": "1"
+      },
+      "b": null
+    }
+  }
+}

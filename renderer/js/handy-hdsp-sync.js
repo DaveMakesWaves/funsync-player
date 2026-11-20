@@ -20,7 +20,7 @@
 // usable feel — not as silky as HSSP at 1.0× but acceptable for the
 // non-1.0× preview case which the user wouldn't pick HSSP for anyway.
 
-import { applyCutoff } from './device-transform-stack.js';
+import { applyCutoff, applyInvert } from './device-transform-stack.js';
 
 const DEFAULT_TICK_INTERVAL_MS = 33; // ~30 Hz — Handy WiFi/BLE rate ceiling
 const DEFAULT_LOOKAHEAD_MS = 100;    // movement budget per command
@@ -78,9 +78,19 @@ export class HandyHdspSync {
     // Handy HSSP path, which clamps the uploaded script content instead
     // (HDSP is per-tick so it clamps here). See SCOPE-device-cutoff-threshold.
     this._cutoff = null;
+    // Direction flip (Handy invert, `handy.inverted`). Applied BEFORE the
+    // cutoff, same order as the HSSP upload chain and the per-tick stack.
+    this._inverted = false;
     this._timer = null;
-    this._setIntervalImpl = (typeof setInterval !== 'undefined') ? setInterval : null;
-    this._clearIntervalImpl = (typeof clearInterval !== 'undefined') ? clearInterval : null;
+    // Wrapped, never stored bare: `start()` calls these as methods of this
+    // object, and Chromium throws "Illegal invocation" when window.setInterval
+    // runs with any receiver but window. Stored bare (v0.8.0 to v0.9.2) every
+    // start() threw in the real app, so at any rate but 1x the Handy simply
+    // stopped (HSSP had just been stopped for the switch). Node's timers
+    // ignore the receiver, which is why the injected-timer tests never saw it.
+    // Found on Dave's Handy, 2026-11-04.
+    this._setIntervalImpl = (typeof setInterval !== 'undefined') ? (fn, ms) => setInterval(fn, ms) : null;
+    this._clearIntervalImpl = (typeof clearInterval !== 'undefined') ? (id) => clearInterval(id) : null;
   }
 
   /**
@@ -100,6 +110,17 @@ export class HandyHdspSync {
   setCutoff(cutoff) {
     this._cutoff = cutoff || null;
   }
+
+  /**
+   * Flip direction (pos -> 100 - pos) before the cutoff. Live: the next
+   * tick uses it (a flipped target differs from the last one sent, so the
+   * delta gate lets it through; at 50 nothing needs to move).
+   */
+  setInverted(inverted) {
+    this._inverted = inverted === true;
+  }
+
+  get inverted() { return this._inverted; }
 
   setActions(actions) {
     // Defensive copy + sort by `.at` so callers can't mutate underneath us.
@@ -128,6 +149,10 @@ export class HandyHdspSync {
       this._clearIntervalImpl(this._timer);
     }
     this._timer = null;
+    // A move still waiting for its turn in the manager is not sent after
+    // this (back at 1x it switched the device to HDSP after the HSSP play:
+    // fix-up after block F verify-1). Optional: test fakes may lack it.
+    try { this.handyManager?.hdspHalt?.(); } catch { /* best-effort */ }
   }
 
   get active() { return this._active; }
@@ -139,8 +164,9 @@ export class HandyHdspSync {
     const timeMs = Math.max(0, (this.player.currentTime || 0) * 1000);
     const raw = interpolatePosition(this._actions, timeMs);
     if (raw === null) return;
-    // Hard floor/ceiling clamp before send (no-op unless the user set one).
-    const target = applyCutoff(raw, this._cutoff);
+    // Invert, then the hard floor/ceiling clamp, before send (both no-ops
+    // unless the user set them). Invert first so a floor still holds.
+    const target = applyCutoff(applyInvert(raw, this._inverted), this._cutoff);
     if (this._lastSentPos >= 0 && Math.abs(target - this._lastSentPos) < MIN_POS_DELTA) return;
     this._lastSentPos = target;
     this._lastSendTime = (typeof performance !== 'undefined') ? performance.now() : Date.now();

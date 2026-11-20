@@ -2,10 +2,149 @@
 
 import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
+import { layoutKey, digitKey } from './keyboard-layout.js';
+
+// Controls that own EVERY key while focused: typing, picking an option,
+// stepping a value. The handler used to exempt only INPUT and TEXTAREA, so
+// ArrowDown on a focused Settings dropdown changed the volume instead, and
+// the preventDefault stopped the dropdown changing at all (V43).
+//
+// An <input> is NOT in this list: most of them own every key (text, number,
+// search, date...), but a slider, a checkbox or a button-like input owns
+// only the few keys it uses. See inputOwnsKey (C-01).
+const OWNS_ALL_KEYS = [
+  'textarea', 'select',
+  '[contenteditable]:not([contenteditable="false"])',
+  '[role="textbox"]', '[role="searchbox"]', '[role="combobox"]',
+  '[role="listbox"]', '[role="spinbutton"]',
+].join(', ');
+
+// The keys a list marked data-owns-keys="navigation" uses (targetOwnsKey).
+const LIST_NAV_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown', 'Enter', ' ',
+]);
+
+// The keys a native slider (<input type="range">) steps with. Every other key
+// belongs to the player. The bare 'input' above used to give the focused
+// volume slider EVERY key: after a drag or click on it, Space, K, M and F did
+// nothing, the arrows moved the volume by 1 %, and F11 fell through to the
+// View menu's window fullscreen, which the player does not know about.
+// Fullscreen hides the bar, so the focus left on the slider was invisible:
+// "the pause hotkey and other hotkeys dont work until i click the video"
+// (C-01, Dave 2026-11-06; also in v0.9.2).
+const RANGE_KEYS = new Set([
+  'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  'Home', 'End', 'PageUp', 'PageDown',
+]);
+const ARROW_KEYS = new Set(['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']);
+// Inputs that Space / Enter activate like a button. They follow the <button>
+// rule (ACTIVATES_ON_SPACE below): theirs only inside a modal dialog.
+const BUTTON_INPUT_TYPES = new Set(['button', 'submit', 'reset', 'image', 'color', 'file']);
+
+/**
+ * Does a focused <input> own this key? A slider owns its stepping keys, a
+ * checkbox Space (and Enter), a radio those plus the arrows that move along
+ * its group. Button-like inputs are handled with <button> (Space in a modal).
+ * Anything typed into (text, number, search, date...) owns every key.
+ */
+function inputOwnsKey(input, key) {
+  const type = String(input.type || 'text').toLowerCase();
+  if (type === 'range') return RANGE_KEYS.has(key);
+  if (type === 'checkbox') return key === ' ' || key === 'Enter';
+  if (type === 'radio') return key === ' ' || key === 'Enter' || ARROW_KEYS.has(key);
+  if (BUTTON_INPUT_TYPES.has(type)) return false;
+  return true;
+}
+
+// Controls that Space activates. Only exempted inside a modal dialog: there,
+// Space on "Got it" means close the help, not toggle the video behind the
+// dialog. Outside one, Space keeps meaning play/pause after a mouse click
+// left focus on a player control, as the play button's own "(Space)"
+// tooltip promises.
+const ACTIVATES_ON_SPACE = [
+  'button', 'a[href]', 'summary',
+  'input[type="button"]', 'input[type="submit"]', 'input[type="reset"]',
+  'input[type="image"]', 'input[type="color"]', 'input[type="file"]',
+  '[role="button"]', '[role="menuitem"]', '[role="menuitemcheckbox"]',
+  '[role="tab"]', '[role="switch"]', '[role="checkbox"]', '[role="radio"]',
+].join(', ');
+
+// Keys that act on the player (play/pause, seek, volume, mute, fullscreen,
+// screenshot, info, A-B loop and bookmarks, aspect / VR flatten, speed,
+// chapters, gap skip, editor, variant, next / previous video). They act only
+// while the user can SEE a player: the player view, the docked mini player,
+// or the detached player window. After Back with the mini player off, Space
+// in the Library played the hidden paused video (audio, no picture), and the
+// arrows changed its volume instead of scrolling (CB-05). Elsewhere they do
+// nothing and are not prevented, so Space reaches a focused control and the
+// arrows scroll the page. Home / End have their own, stricter rule (V44).
+const PLAYER_SURFACE_KEYS = new Set([
+  ' ', 'k', 'K', 'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
+  'j', 'J', 'l', 'L', 'm', 'M', 'f', 'F', 'F11', 's', 'S', 'i', 'I',
+  'a', 'A', 'b', 'B', 'r', 'R', '<', '>', ',', '.', 'g', 'G',
+  'e', 'E', 'v', 'V', 'n', 'N', 'p', 'P',
+]);
+
+/**
+ * True when the key belongs to whatever has focus, not to the player.
+ *
+ * A control on the way here that already handled the key says so with
+ * preventDefault: the progress slider's own arrows and Home/End, the
+ * Settings rail's Up/Down, Enter/Space on a queue row, a toast or the
+ * Up Next card. Acting on it again double-seeks, or changes the volume
+ * while the rail moves. Escape is exempt: surfaces mark an Esc "taken" so
+ * the layers under them (the queue panel, the A-B loop) stay as they are,
+ * and the Esc case below has to see the press to know that (only the Up
+ * Next card's dismiss runs before that check).
+ *
+ * Exported for the detached player window, which has its own key handler and
+ * follows the same rule (E-01).
+ */
+export function targetOwnsKey(e) {
+  if (e.defaultPrevented && e.key !== 'Escape') return true;
+  const el = e.target;
+  if (!el || typeof el.closest !== 'function') return false;
+  // A list that says it uses only its navigation keys (the Fill drawer's
+  // pattern list, where the focus lands when it opens) owns those; F, M, K
+  // and the rest go on to the player (live verifier 2026-11-17).
+  if (el.closest('[data-owns-keys="navigation"]')) return LIST_NAV_KEYS.has(e.key);
+  if (el.isContentEditable || el.closest(OWNS_ALL_KEYS)) return true;
+  // A focused <input> owns only its own keys (C-01). An input never has
+  // children, so the target itself is the one to ask. Inside a dialog it
+  // owns every key, as every <input> did in v0.9.2: the C-01 rule let
+  // Space, K and M through from a focused Settings or Devices slider, and
+  // the video behind the dialog paused, played or muted (block C
+  // verifier 1). C-01 is about the player bar's slider, never in a dialog.
+  if (String(el.tagName).toUpperCase() === 'INPUT'
+      && (el.closest('[aria-modal="true"]') || inputOwnsKey(el, e.key))) return true;
+  if (e.key === ' ' && el.closest('[aria-modal="true"]') && el.closest(ACTIVATES_ON_SPACE)) return true;
+  return false;
+}
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, isQueueOpen, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev, onPlaybackCommand, isVRZoomActive, getView, hasOffViewPlayer }) {
     this.player = videoPlayer;
+    // () => boolean: is a VR video open in the player view? Only then do
+    // Ctrl+= / Ctrl+- / Ctrl+0 mean VR zoom. Otherwise they are left to the
+    // View menu's whole-interface zoom, which they swallowed everywhere in
+    // v0.9.2 (V45). Unset means never VR zoom.
+    this.isVRZoomActive = isVRZoomActive || null;
+    // () => the current view id ('library', 'player', ...). Keys that only
+    // make sense on the player (Home/End) give way to the page elsewhere,
+    // so End scrolls the Library to its last row (V44). Unset means the
+    // player, the handler's original assumption.
+    this.getView = getView || null;
+    // () => boolean: is a player on screen OUTSIDE the player view (the
+    // docked mini player, or the detached player window)? With getView it
+    // decides whether the playback keys act (PLAYER_SURFACE_KEYS, CB-05).
+    this.hasOffViewPlayer = hasOffViewPlayer || null;
+    // Optional: send a playback command somewhere other than the inline
+    // player. While the detached player window owns playback, the inline
+    // <video> is paused and hidden, so Space or an arrow here used to start
+    // or seek a second, invisible copy while the pop-out and the device
+    // carried on (V13). (command, arg) => true when it handled the command;
+    // anything else falls through to the inline player as before.
+    this.onPlaybackCommand = onPlaybackCommand || null;
     this.connectionPanel = connectionPanel || null;
     this.onOpenFile = onOpenFile || null;
     this.scriptEditor = scriptEditor || null;
@@ -14,11 +153,28 @@ export class KeyboardHandler {
     this.onNavigate = onNavigate || null;
     this.onToggleLoop = onToggleLoop || null;
     this.onToggleQueue = onToggleQueue || null;
+    // () => boolean: is the queue panel open? Lets Esc close it (V26).
+    this.isQueueOpen = isQueueOpen || null;
     this.onJumpChapter = onJumpChapter || null;
     this.onJumpBookmark = onJumpBookmark || null;
     this.onLoadNext = onLoadNext || null;
     this.onLoadPrev = onLoadPrev || null;
     this._bindEvents();
+  }
+
+  /** True when onPlaybackCommand took this command (see the constructor). */
+  _routePlayback(command, arg) {
+    return !!this.onPlaybackCommand && this.onPlaybackCommand(command, arg) === true;
+  }
+
+  /** True on the player view, or when no view accessor was wired. */
+  _inPlayerView() {
+    return !this.getView || this.getView() === 'player';
+  }
+
+  /** True while the user can see a player: the player view, the mini player or the pop-out (CB-05). */
+  _playerSurfaceVisible() {
+    return this._inPlayerView() || !!this.hasOffViewPlayer?.();
   }
 
   _bindEvents() {
@@ -34,19 +190,24 @@ export class KeyboardHandler {
    * Edge — stuck silent). The holds themselves are gated in _onKeyDown.
    */
   _onKeyUp(e) {
-    if ((e.key === 'x' || e.key === 'X') && this._orgasmHoldActive) {
+    // The same layoutKey as the keydown below (FT-035): on a Russian layout
+    // X types 'ч', and a hold started by layoutKey must end on the same key,
+    // or the device stays on the orgasm loop (or silent) after release.
+    const key = layoutKey(e);
+    if ((key === 'x' || key === 'X') && this._orgasmHoldActive) {
       this._orgasmHoldActive = false;
       if (this.onOrgasmHold) this.onOrgasmHold(false);
     }
-    if ((e.key === 'z' || e.key === 'Z') && this._edgeHoldActive) {
+    if ((key === 'z' || key === 'Z') && this._edgeHoldActive) {
       this._edgeHoldActive = false;
       if (this.onEdgeHold) this.onEdgeHold(false);
     }
   }
 
   _onKeyDown(e) {
-    // Don't capture keys when typing in an input
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    // Keys belong to a focused text field, dropdown or list, or to whatever
+    // control already handled them (V43). See targetOwnsKey.
+    if (targetOwnsKey(e)) return;
 
     // Alt+1/2/3 — top-level nav between Library / Playlists / Categories.
     // Slack/Discord/Notion convention; Nielsen #7 (flexibility for experts).
@@ -56,7 +217,8 @@ export class KeyboardHandler {
     // explicitly).
     if (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && this.onNavigate && !this.scriptEditor?.isOpen) {
       const navMap = { '1': 'library', '2': 'playlists', '3': 'categories' };
-      const target = navMap[e.key];
+      // On the number-row KEY, not e.key: AZERTY types & é " there (CB-06).
+      const target = navMap[digitKey(e)];
       if (target) {
         e.preventDefault();
         this.onNavigate(target);
@@ -65,16 +227,23 @@ export class KeyboardHandler {
     }
 
     // Ctrl+= / Ctrl+- / Ctrl+0 zoom the VR video, mirroring Ctrl+scroll and
-    // trackpad pinch for anyone without a wheel. Handled ahead of the main
-    // switch because these keys otherwise mean nothing here, and because
-    // preventDefault MUST run or Chromium's page zoom rescales the whole UI.
-    // '+' is included since Shift+= is how many layouts produce it.
+    // trackpad pinch for anyone without a wheel. '+' is included since
+    // Shift+= is how many layouts produce it.
+    //
+    // ONLY while a VR video is open in the player (isVRZoomActive). The
+    // same keys are the View menu's whole-interface zoom (main.js
+    // buildAppMenu), and Electron fires a menu accelerator only for a key
+    // the page did NOT preventDefault. v0.9.2 took them unconditionally,
+    // so interface zoom died in every view and on every flat video while
+    // the VR handler did nothing (V45, forum #372). With a VR video open,
+    // preventDefault MUST run, or the interface zooms along with the video.
+    //
     // Gated on the editor being closed, matching every other player-only
     // key here. The editor binds BARE +/=/- to its own timeline zoom and
     // calls stopPropagation, so a focused canvas already wins — but with
     // the editor open and focus elsewhere this would otherwise zoom the
     // video behind the editor, which is not what the user is looking at.
-    if (e.ctrlKey && !e.altKey && !this.scriptEditor?.isOpen) {
+    if (e.ctrlKey && !e.altKey && !this.scriptEditor?.isOpen && this.isVRZoomActive?.()) {
       if (e.key === '=' || e.key === '+') {
         e.preventDefault();
         if (this.onVRZoom) this.onVRZoom(1);
@@ -92,12 +261,18 @@ export class KeyboardHandler {
       }
     }
 
-    switch (e.key) {
+    // layoutKey: the Latin letter on the key when the layout types another
+    // alphabet (Russian а on F, т on N), so the letter cases below work there
+    // too (FT-035). Every other key is e.key unchanged.
+    const key = layoutKey(e);
+    // No player on screen: the playback keys are not ours (CB-05).
+    if (PLAYER_SURFACE_KEYS.has(key) && !this._playerSurfaceVisible()) return;
+    switch (key) {
       case ' ':
       case 'k':
       case 'K':
         e.preventDefault();
-        this.player.togglePlay();
+        if (!this._routePlayback('toggle')) this.player.togglePlay();
         break;
 
       case 'ArrowLeft':
@@ -106,7 +281,7 @@ export class KeyboardHandler {
         // projection is active; otherwise the arrow seeks 5s.
         if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
           this.onVRPan(-10, 0);
-        } else {
+        } else if (!this._routePlayback('seekBy', -5)) {
           this.player.skip(-5);
         }
         break;
@@ -115,7 +290,7 @@ export class KeyboardHandler {
         e.preventDefault();
         if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
           this.onVRPan(10, 0);
-        } else {
+        } else if (!this._routePlayback('seekBy', 5)) {
           this.player.skip(5);
         }
         break;
@@ -123,7 +298,7 @@ export class KeyboardHandler {
       case 'j':
       case 'J':
         e.preventDefault();
-        this.player.skip(-10);
+        if (!this._routePlayback('seekBy', -10)) this.player.skip(-10);
         break;
 
       case 'l':
@@ -135,7 +310,7 @@ export class KeyboardHandler {
         // shiftKey check is the source of truth.
         if (e.shiftKey && this.onToggleLoop) {
           this.onToggleLoop();
-        } else {
+        } else if (!this._routePlayback('seekBy', 10)) {
           this.player.skip(10);
         }
         break;
@@ -155,7 +330,7 @@ export class KeyboardHandler {
         e.preventDefault();
         if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
           this.onVRPan(0, -10); // pitch up (look up)
-        } else {
+        } else if (!this._routePlayback('volumeBy', 0.05)) {
           this.player.setVolume(this.player.video.volume + 0.05);
         }
         break;
@@ -164,7 +339,7 @@ export class KeyboardHandler {
         e.preventDefault();
         if (e.shiftKey && this.onVRPan && this.player.isVRProjecting) {
           this.onVRPan(0, 10); // pitch down (look down)
-        } else {
+        } else if (!this._routePlayback('volumeBy', -0.05)) {
           this.player.setVolume(this.player.video.volume - 0.05);
         }
         break;
@@ -176,14 +351,26 @@ export class KeyboardHandler {
       // Found by the shortcut audit on 2026-08-15. The editor binds both
       // to its own actions (repeat-last-stroke / move-to-playhead), so
       // they are gated like every other player-only key.
+      //
+      // Player view only. Elsewhere they are the page's own keys: End
+      // scrolls the Library to its last row. They used to be swallowed in
+      // every view, and with the mini-player docked they silently seeked
+      // the corner video instead (V44). The one exception is the detached
+      // player window: while it owns playback the main window sits on the
+      // Library, and every playback key there drives the pop-out (V13),
+      // so _routePlayback runs before the view check.
       case 'Home':
         if (this.scriptEditor?.isOpen) break;
+        if (this._routePlayback('seekTo', 0)) { e.preventDefault(); break; }
+        if (!this._inPlayerView()) break;
         e.preventDefault();
         this.player.seek(0);
         break;
 
       case 'End':
         if (this.scriptEditor?.isOpen) break;
+        if (this._routePlayback('seekToEnd')) { e.preventDefault(); break; }
+        if (!this._inPlayerView()) break;
         e.preventDefault();
         // Land a hair before the end: seeking exactly to `duration` fires
         // `ended` on some builds, which would advance the playlist instead
@@ -196,7 +383,7 @@ export class KeyboardHandler {
       case 'm':
       case 'M':
         e.preventDefault();
-        this.player.toggleMute();
+        if (!this._routePlayback('toggleMute')) this.player.toggleMute();
         break;
 
       case 'f':
@@ -259,11 +446,17 @@ export class KeyboardHandler {
         break;
 
       case 'r':
+        // Ctrl+R (Cmd+R) is View > Reload, which asks about unsaved editor
+        // edits first (R3-19). Taken here, it cycled the aspect ratio and the
+        // reload never came in the player view (R3 fix-up, verifier 1, also
+        // in v0.9.2). Ctrl+Shift+R (Force Reload) below likewise.
+        if (e.ctrlKey || e.metaKey) break;
         e.preventDefault();
         this.player.cycleAspectRatio();
         break;
 
       case 'R':
+        if (e.ctrlKey || e.metaKey) break;
         // Shift+R cycles the VR-as-flat playback mode (Off → Left → Right → Off).
         // Format is taken from the current video's stereo classification
         // — fed in by app.js after loadVideo runs. No-op if no format set.
@@ -291,7 +484,7 @@ export class KeyboardHandler {
         // canvas has focus, so the guard below stays out of the way.
         if (e.shiftKey || e.key === '<') {
           e.preventDefault();
-          this.player.cyclePlaybackRate(-1);
+          if (!this._routePlayback('rate', -1)) this.player.cyclePlaybackRate(-1);
         } else if (!e.ctrlKey && !e.altKey && !e.metaKey && !this.scriptEditor?.isOpen && this.onJumpChapter) {
           e.preventDefault();
           this.onJumpChapter(-1);
@@ -304,7 +497,7 @@ export class KeyboardHandler {
         // Bare `.` jumps to the next chapter — same guard as `,` above.
         if (e.shiftKey || e.key === '>') {
           e.preventDefault();
-          this.player.cyclePlaybackRate(+1);
+          if (!this._routePlayback('rate', +1)) this.player.cyclePlaybackRate(+1);
         } else if (!e.ctrlKey && !e.altKey && !e.metaKey && !this.scriptEditor?.isOpen && this.onJumpChapter) {
           e.preventDefault();
           this.onJumpChapter(+1);
@@ -324,13 +517,16 @@ export class KeyboardHandler {
         break;
 
       case 'v':
-        e.preventDefault();
-        if (this.onCycleVariant) this.onCycleVariant(1);
-        break;
-
       case 'V':
+        // Gated against the editor, like N: the editor follows the loaded
+        // script, so a variant switch swaps the script out from under an
+        // authoring session and drops its unsaved edits. The canvas already
+        // stops V; this covers focus on an editor toolbar button, which used
+        // to cycle the variant (found in the 2026-11-04 live check). The
+        // variant dropdown still works.
+        if (this.scriptEditor?.isOpen) break;
         e.preventDefault();
-        if (this.onCycleVariant) this.onCycleVariant(-1);
+        if (this.onCycleVariant) this.onCycleVariant(key === 'V' ? -1 : 1);
         break;
 
       case 'g':
@@ -402,12 +598,30 @@ export class KeyboardHandler {
       case 'Escape':
         // Up Next dismiss runs FIRST so a visible card can be cleared
         // without also clearing the user's A-B loop. Other Esc handlers
-        // only run when the card isn't showing.
-        if (this.upNextEngine?.visible) {
+        // only run when the card isn't showing. Not when a surface on top
+        // already took this press (a playlist's Select mode, a panel): one
+        // Esc both left Select mode and dismissed the card (block E2 review).
+        if (this.upNextEngine?.visible && !e.defaultPrevented) {
           e.preventDefault();
           this.upNextEngine.dismiss();
           break;
         }
+        // An open queue panel is the next layer down: Esc closes it and
+        // stops there, so the A-B loop survives that press (SCOPE-queue-panel
+        // Q-E22). It used to have no Esc at all, in any view (V26).
+        // Not when a surface on top already took this press (it called
+        // preventDefault): Esc that closes the device panel, the overflow
+        // menu or the speed popover must not close the queue under it too.
+        if (!e.defaultPrevented && this.isQueueOpen?.() && this.onToggleQueue) {
+          e.preventDefault();
+          this.onToggleQueue();
+          break;
+        }
+        // A surface on top took this press and closed itself: that is the
+        // whole press. Without this the same Esc that closed the overflow
+        // menu, the speed popover or the device panel also cleared the A-B
+        // loop (FT-072; also in v0.9.2). The next Esc clears it.
+        if (e.defaultPrevented) break;
         e.preventDefault();
         if (this.scriptEditor?.isOpen) {
           this.scriptEditor.hide();

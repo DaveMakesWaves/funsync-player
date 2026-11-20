@@ -3,10 +3,9 @@
 // Lifecycle: settings hold a `customPositionKeys: [{code, mods, position}]`
 // array. The script editor's key handler calls `buildResolverMap()` once
 // per settings change to get a Map<serializedKey, position>, then does an
-// O(1) lookup on each keydown via `lookupBinding()`. Override semantics
-// (custom wins over default) are implemented at the caller — the resolver
-// just answers "what position does this exact key combo map to in the
-// user's custom map?".
+// O(1) lookup on each keydown via `lookupBinding()`. `resolvePositionKey()`
+// adds the default keys on top (custom wins over default); both editors,
+// docked and pop-out, call it, so they cannot drift apart (FT-032).
 //
 // Serialization format: `Ctrl:Alt:Shift:<code>` — modifiers sorted into
 // canonical order so the same (code, mods) always serializes the same
@@ -49,6 +48,14 @@ export const RESERVED_EDITOR_KEYS = [
   { code: 'KeyW', mods: {} },  // waveform toggle
   { code: 'KeyE', mods: {} },  // editor toggle
   { code: 'KeyD', mods: {} },  // device simulator
+  // New points only (2026-11-04). A custom position bound to bare N BEFORE
+  // this was reserved still loads and still wins (buildResolverMap does not
+  // filter reserved keys; Dave, Q2: no migration). Only new bindings refused.
+  { code: 'KeyN', mods: {} },
+  // Fill with pattern (pattern library, 2026-11-17). Same rule as N: a custom
+  // position bound to bare P before this still loads and still wins (design
+  // §f); only new bindings are refused.
+  { code: 'KeyP', mods: {} },
   // Editor commands (Ctrl+letter) — bare keys are free for typing
   { code: 'KeyZ', mods: { ctrl: true } },  // undo
   { code: 'KeyY', mods: { ctrl: true } },  // redo
@@ -170,6 +177,49 @@ export function lookupBinding(resolverMap, pressed) {
   const key = serializeBinding(pressed);
   if (!key) return null;
   return resolverMap.has(key) ? resolverMap.get(key) : null;
+}
+
+// The default position keys as the docked editor has always read them.
+// Number row and numpad 0-9 → 0-90 (OFS's round 10s), bare only: Shift+1..9
+// place nothing. Position 100 (community fix 2026-05-30) is Shift+0 (the
+// modifier promotes the 0 floor to the ceiling, Photoshop's opacity
+// convention), `-` (Minus, the number-row neighbour of 0) or Numpad- (for
+// numpad workflows); those two without Ctrl or Alt.
+const DIGIT_POSITIONS = {
+  Digit0: 0, Digit1: 10, Digit2: 20, Digit3: 30, Digit4: 40,
+  Digit5: 50, Digit6: 60, Digit7: 70, Digit8: 80, Digit9: 90,
+  Numpad0: 0, Numpad1: 10, Numpad2: 20, Numpad3: 30, Numpad4: 40,
+  Numpad5: 50, Numpad6: 60, Numpad7: 70, Numpad8: 80, Numpad9: 90,
+};
+const TOP_KEYS = new Set(['Minus', 'NumpadSubtract']);
+
+/**
+ * The position a key press places at, or null when it is not a position key.
+ * The ONE resolver for both editors (FT-032): the docked editor's canvas and
+ * the pop-out window. Order (SCOPE-editor-custom-position-keys.md §2 #2):
+ *   1. the user's custom map (Settings → Editor → Position keys) wins;
+ *   2. the defaults above;
+ *   3. null — the caller's command switch handles the key.
+ * Physical keys (`e.code`), so a layout never moves a binding.
+ *
+ * @param {{code?: string, shiftKey?: boolean, ctrlKey?: boolean, metaKey?: boolean, altKey?: boolean}} e
+ *   a KeyboardEvent (Meta counts as Ctrl, as everywhere in the editor)
+ * @param {Map<string, number>} [customMap] — from buildResolverMap
+ * @returns {number|null} 0-100
+ */
+export function resolvePositionKey(e, customMap) {
+  const code = typeof e?.code === 'string' ? e.code : '';
+  if (!code) return null;
+  const shift = !!e.shiftKey;
+  const ctrl = !!(e.ctrlKey || e.metaKey);
+  const alt = !!e.altKey;
+  const custom = lookupBinding(customMap, { code, mods: { shift, ctrl, alt } });
+  if (custom !== null) return custom;
+  // Shift+0 with any other modifier, as the docked editor always took it.
+  if (shift && (code === 'Digit0' || code === 'Numpad0')) return 100;
+  if (TOP_KEYS.has(code) && !ctrl && !alt) return 100;
+  if (code in DIGIT_POSITIONS && !shift && !ctrl && !alt) return DIGIT_POSITIONS[code];
+  return null;
 }
 
 /**

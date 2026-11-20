@@ -186,3 +186,76 @@ export class FillerTestPlayer {
     }
   }
 }
+
+/**
+ * One Test at a time for every pattern block in Settings (Gap Filler, Orgasm
+ * Switch, Edge Hold: one shared block, Dave 2026-11-19). Each block plays its
+ * own rendered sample through the SAME existing path (app.js's
+ * `onTestFillerPattern` -> FillerTestPlayer above, which refuses while a video
+ * drives the devices and reports 'busy'), so three blocks share one player.
+ *
+ * Without this, a second block's Test restarted the player and the first
+ * block's button stayed on "Stop" with its playhead frozen: the player only
+ * ever calls the hooks of the run that is current. Here the block that owned
+ * the earlier run is told it ended, and a hook from a run that is no longer
+ * current (the restart's own stop, the first tick before 'started' came back)
+ * is ignored.
+ *
+ * @param {object} deps
+ * @param {(actions: Array, hooks: {onProgress: Function, onEnd: Function}) => string} deps.start
+ *   'started' | 'busy' | 'no-devices' (anything else reads as 'no-devices')
+ * @param {() => void} [deps.stop] idles the devices (FillerTestPlayer.stop)
+ */
+export function createPatternTestSession({ start, stop } = {}) {
+  let current = null; // { owner, token, hooks }
+
+  const end = (run) => {
+    try { run.hooks.onEnd?.(); } catch { /* a block that is gone */ }
+  };
+
+  const session = {
+    /** The owner whose sample is playing, or null. */
+    get activeOwner() { return current ? current.owner : null; },
+
+    /**
+     * Play `actions` for `owner`, ending any other owner's run first.
+     * @returns {'started'|'busy'|'no-devices'|'empty'}
+     */
+    start(owner, actions, hooks = {}) {
+      if (current) session.stop();
+      if (!Array.isArray(actions) || actions.length < 2) return 'empty';
+      if (typeof start !== 'function') return 'no-devices';
+      const token = {};
+      const live = () => current !== null && current.token === token;
+      let status;
+      try {
+        status = start(actions, {
+          onProgress: (progress, pos) => { if (live()) hooks.onProgress?.(progress, pos); },
+          onEnd: () => {
+            if (!live()) return;
+            const run = current;
+            current = null;
+            end(run);
+          },
+        });
+      } catch {
+        status = 'no-devices';
+      }
+      if (status === 'started') {
+        current = { owner, token, hooks };
+        return 'started';
+      }
+      return status === 'busy' ? 'busy' : 'no-devices';
+    },
+
+    /** Stop the run (only `owner`'s when given) and tell its block. */
+    stop(owner) {
+      if (!current || (owner !== undefined && current.owner !== owner)) return;
+      const run = current;
+      current = null;
+      try { stop?.(); } catch { /* best-effort, as FillerTestPlayer.stop */ }
+      end(run);
+    },
+  };
+  return session;
+}

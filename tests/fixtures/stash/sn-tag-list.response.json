@@ -1,0 +1,78 @@
+{
+  "note": "Every tag with its aliases and parents, one page. Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library seeded for the next lot, no password) on 2026-11-19 by stage sn-main, with the document from electron/stash-queries.js.",
+  "operationName": "FunSyncTagList",
+  "documentSha256": "915706cde930b55a7c6836c912addfcd65bf3670665d7e835a33c1f4a6f735bd",
+  "variables": {
+    "page": 1,
+    "perPage": 1000
+  },
+  "status": 200,
+  "headers": {
+    "content-type": "application/graphql-response+json"
+  },
+  "body": {
+    "data": {
+      "findTags": {
+        "count": 6,
+        "tags": [
+          {
+            "id": "1",
+            "name": "Synthetic Tag A",
+            "aliases": [
+              "syn-a-two",
+              "synthetic-a"
+            ],
+            "parents": []
+          },
+          {
+            "id": "2",
+            "name": "Synthetic Tag B",
+            "aliases": [
+              "synthetic-child"
+            ],
+            "parents": [
+              {
+                "id": "3"
+              }
+            ]
+          },
+          {
+            "id": "3",
+            "name": "Synthetic Parent Tag",
+            "aliases": [
+              "synthetic-parent"
+            ],
+            "parents": [
+              {
+                "id": "5"
+              }
+            ]
+          },
+          {
+            "id": "4",
+            "name": "Synthetic Marker Tag",
+            "aliases": [],
+            "parents": []
+          },
+          {
+            "id": "5",
+            "name": "Synthetic Grandparent Tag",
+            "aliases": [
+              "syn-gp",
+              "synthetic-grand"
+            ],
+            "parents": []
+          },
+          {
+            "id": "6",
+            "name": "Synthetic Tag C",
+            "aliases": [
+              "synthetic-c"
+            ],
+            "parents": []
+          }
+        ]
+      }
+    }
+  }
+}

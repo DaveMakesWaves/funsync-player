@@ -49,6 +49,10 @@ describe('device simulator opacity — the three layers agree', () => {
   });
 
   it('notifies the app when the slider moves, not only on close', () => {
+    // Source text only, and it stayed green while the constructor dropped
+    // the callback and the slider applied nothing (app test V71). The
+    // behaviour is pinned in settings-panel-callbacks.test.js, which moves
+    // the real slider through app.js's real wiring.
     expect(PANEL).toContain('onDeviceSimOpacityChanged');
     expect(APP).toContain('onDeviceSimOpacityChanged:');
     // Live-apply: the callback must be wired to the input event, since the

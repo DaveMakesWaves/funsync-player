@@ -42,7 +42,7 @@
 // invalidation: a cached URL was built with a specific cutoff, so changing
 // the sliders must drop the cache (keyed on the cutoff at upload time).
 
-import { clampRawScriptContent } from './device-transform-stack.js';
+import { clampRawScriptContent, invertRawScriptContent } from './device-transform-stack.js';
 
 /** Tiled length target (~10 min of finisher) and a hard action-count cap. */
 export const TILE_TARGET_MS = 600000;
@@ -94,6 +94,41 @@ export function tileFinisherContent(rawContent, targetMs = TILE_TARGET_MS, maxAc
   return JSON.stringify({ ...parsed, actions: tiled });
 }
 
+/** How long an ending's last position is held on the device: as long as a tiled loop lasts. */
+export const HOLD_END_MS = TILE_TARGET_MS;
+
+/**
+ * Hold an ending's last position on the Handy (device session 2026-11-20,
+ * step 37). An ending plays once and is never tiled, and an HSSP script that
+ * REACHES ITS END does not stay where it finished: Dave's Handy (FW 4.2.1)
+ * went to the last point's RAW position, ignoring the stroke zone (Sprint to
+ * the end ends at 2: the slider sank to 4 mm with a 35-65 zone, ~38-71 mm,
+ * and stayed there until X was let go). So the upload carries the last
+ * position on for `holdMs` more: while the key is held the script is still
+ * playing, and the stroke zone (and every limit baked in after this) still
+ * applies. Returns the input unchanged when it can't be parsed or has no
+ * actions — the upload then behaves exactly as before.
+ *
+ * @param {string} rawContent — the ending's funscript JSON
+ * @param {number} [holdMs]
+ * @returns {string}
+ */
+export function holdFinisherEnd(rawContent, holdMs = HOLD_END_MS) {
+  if (typeof rawContent !== 'string' || rawContent.length === 0) return rawContent;
+  let parsed;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return rawContent;
+  }
+  const actions = Array.isArray(parsed?.actions) ? parsed.actions
+    .filter((a) => a && Number.isFinite(a.at) && Number.isFinite(a.pos))
+    .sort((a, b) => a.at - b.at) : null;
+  if (!actions || actions.length === 0 || !(holdMs > 0)) return rawContent;
+  const last = actions[actions.length - 1];
+  return JSON.stringify({ ...parsed, actions: [...actions, { ...last, at: last.at + holdMs }] });
+}
+
 /**
  * Engage the Handy finisher loop. Fire-and-forget from onActivate; returns a
  * status string for tests/diagnosis:
@@ -111,18 +146,32 @@ export function tileFinisherContent(rawContent, targetMs = TILE_TARGET_MS, maxAc
  *   upload. Caller must only pass a URL whose upload used the CURRENT cutoff.
  * @param {{min: number, max: number}|null} [deps.cutoff] — per-device output
  *   limit; baked into the upload so the device-side loop respects it
+ * @param {boolean} [deps.inverted] — Handy invert (`handy.inverted`); flipped
+ *   after tiling and BEFORE the clamp, so a floor still holds. A cached URL
+ *   is only valid for the invert it was uploaded with (caller keys on it).
+ * @param {boolean} [deps.once] — an ending from the pattern library: NOT
+ *   tiled, so the HSSP plays it once; its last position is carried on in the
+ *   upload (holdFinisherEnd), because a device left at the END of an HSSP
+ *   script does not hold it (2026-11-20). A cached URL is only valid for the
+ *   same choice (the caller keys on it).
  * @param {(url: string) => void} [deps.onUrlCached] — persist a fresh upload's URL
  * @param {() => boolean} deps.isCurrent — false once the user released this
  *   activation (a stale engage must never clobber the restore)
  * @returns {Promise<string>}
  */
-export async function engageHandyFinisher({ handyManager, content, cachedUrl, cutoff, onUrlCached, isCurrent }) {
+export async function engageHandyFinisher({ handyManager, content, cachedUrl, cutoff, inverted = false, once = false, onUrlCached, isCurrent }) {
   try {
     let url = cachedUrl;
     if (!url && content) {
-      // Tile first (device-side "loop"), then clamp to the output limit.
+      // Tile first (device-side "loop"; an ending is never tiled: it plays
+      // once, then its last position is held: holdFinisherEnd), then invert,
+      // then clamp to the output limit — the per-tick stack's order (invert
+      // before cutoff).
       url = await handyManager.uploadScriptOnly(
-        clampRawScriptContent(tileFinisherContent(content), cutoff ?? null),
+        clampRawScriptContent(
+          invertRawScriptContent(once === true ? holdFinisherEnd(content) : tileFinisherContent(content), inverted === true),
+          cutoff ?? null,
+        ),
       );
       if (url) onUrlCached?.(url);
     }

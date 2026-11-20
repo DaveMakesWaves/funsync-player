@@ -47,6 +47,14 @@ const STRONG_TOKENS = [
   'mkx200','mkx220','rf52','fisheye190','vrca220',
   'fb360','eac360','eac',
   '180x180','360x180',
+  // `180_mono` / `mono_180` / `360_mono` / `mono_360` (any separator): the
+  // mono forms the backend's detect_vr_format serves as a dome / sphere. A
+  // bare `180` is deliberately NOT here, on either side: "Episode 180" is
+  // not VR (V61).
+  `180${SEP}mono`, `mono${SEP}180`, `360${SEP}mono`, `mono${SEP}360`,
+  // `180` + a full-resolution SBS / TB suffix (HereSphere convention). The
+  // backend's 180° patterns accept these too.
+  `180${SEP}(?:lrf|sbsf|fullsbs|tbf|ouf)`,
 ];
 
 const STRONG_RE = new RegExp(
@@ -128,14 +136,17 @@ function _check(s) {
 // (HereSphere convention) — full means each eye is already at the
 // container's natural aspect; half means the eye is horizontally
 // compressed and needs a 2× horizontal scale-up.
-const STEREO_SBS_HALF = /(?:^|[_\-. \/\\])(?:sbs|lr|3dh|180x180|180_lr|180_sbs|mono180)(?=$|[_\-. \/\\])/i;
+const STEREO_SBS_HALF = /(?:^|[_\-. \/\\])(?:sbs|lr|3dh|180x180|180_lr|180_sbs)(?=$|[_\-. \/\\])/i;
 const STEREO_SBS_FULL = /(?:^|[_\-. \/\\])(?:sbsf|lrf|sbs_full|fullsbs|180x360)(?=$|[_\-. \/\\])/i;
 const STEREO_TB_HALF  = /(?:^|[_\-. \/\\])(?:tb|ou|3dv|tb_half)(?=$|[_\-. \/\\])/i;
 const STEREO_TB_FULL  = /(?:^|[_\-. \/\\])(?:tbf|ouf|tb_full)(?=$|[_\-. \/\\])/i;
 // Fisheye / equirect / mkx projections — non-planar, naive crop would
 // still look distorted. We DETECT them so the UI can disable the flatten
 // affordance for these inputs (extension point for v2: WebGL shader).
-const STEREO_NONPLANAR = /(?:^|[_\-. \/\\])(?:mkx\d+|rf52|fisheye\d+|vrca\d+|eac|eac360|fb360|360x180|mono360)(?=$|[_\-. \/\\])/i;
+// Mono 180 / 360 belong here too: one picture, nothing side by side.
+// `mono180` used to sit in STEREO_SBS_HALF, so Shift+R cut a mono frame in
+// half and stretched one half across the screen (V62).
+const STEREO_NONPLANAR = /(?:^|[_\-. \/\\])(?:mkx\d+|rf52|fisheye\d+|vrca\d+|eac|eac360|fb360|360x180|mono360|mono180|180[_\-. ]mono|mono[_\-. ]180|360[_\-. ]mono|mono[_\-. ]360)(?=$|[_\-. \/\\])/i;
 
 /**
  * Classify the stereo packing of a VR file by filename + path.

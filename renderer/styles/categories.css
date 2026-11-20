@@ -56,6 +56,12 @@
   flex: 1;
 }
 
+/* Shuffle All borrows the playlist Loop button, which is icon-only and has
+   no gap; its label gets Play All's 4px (#381). */
+.categories__shuffle-all-btn {
+  gap: 4px;
+}
+
 /* Grid wrapper */
 .categories__grid-wrapper {
   flex: 1;
@@ -503,4 +509,87 @@
   width: 10px;
   height: 10px;
   border-radius: 50%;
+}
+
+/* ── Unavailable (drive unplugged) ──────────────────────────────────────────
+ * Mirrors playlists.css. A video whose drive is offline stays ASSIGNED — it is
+ * dimmed, not removed (absence is never destructive; app test V01). The
+ * thumbnail and badges stay visible: blanking them would look like data loss. */
+.categories__video--unavailable {
+  opacity: 0.45;
+  filter: grayscale(0.85);
+  cursor: not-allowed;
+}
+
+.categories__video--unavailable .categories__video-overlay {
+  display: none;
+}
+
+/* The remove button is the one deliberate way to unassign, so it stays live. */
+.categories__video--unavailable .categories__video-remove-btn,
+.categories__video--unavailable .categories__card-action-btn {
+  opacity: 1;
+  filter: none;
+  cursor: pointer;
+}
+
+.categories__unavailable-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.72);
+  color: var(--text-secondary, #b8b8c0);
+  filter: none;
+}
+
+.categories__unavailable-badge--inline {
+  position: static;
+  width: 18px;
+  height: 18px;
+  background: transparent;
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+
+.categories__unavailable-notice {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #33333d);
+  background: var(--bg-elevated, #232330);
+  color: var(--text-primary, #e8e8ee);
+  font-size: 13px;
+}
+
+.categories__unavailable-notice svg {
+  flex-shrink: 0;
+  color: var(--text-secondary, #b8b8c0);
+}
+
+.categories__unavailable-hint {
+  color: var(--text-secondary, #b8b8c0);
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* The remove (X) button shows for a keyboard user who tabs to it, not only
+ * on hover (same rule as playlists.css, V67). */
+.categories__video-card:focus-within .categories__video-remove-btn {
+  opacity: 1;
+}
+
+.categories__video-remove-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }

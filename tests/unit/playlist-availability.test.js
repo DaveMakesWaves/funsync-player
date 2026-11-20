@@ -64,6 +64,18 @@ describe('probeAvailability', () => {
     expect(set.size).toBe(2);
   });
 
+  // `files-exist` answers null for a path that missed its time budget — a
+  // spun-down disk, a NAS share. That is unknown, not absent: greying the
+  // video turns a click on something that would play into a "reconnect the
+  // drive" toast. Only an explicit false is unavailable.
+  it('fails OPEN per path when a check times out (null)', async () => {
+    const filesExist = vi.fn().mockResolvedValue([null, false, true]);
+    const set = await probeAvailability([E('slow.mp4'), E('gone.mp4'), C('here.mp4')], { filesExist });
+    expect(set.has(E('slow.mp4'))).toBe(true);
+    expect(set.has(E('gone.mp4'))).toBe(false);
+    expect(set.has(C('here.mp4'))).toBe(true);
+  });
+
   it('falls back to per-path fileExists on an older bridge', async () => {
     const fileExists = vi.fn().mockImplementation((p) => Promise.resolve(p.startsWith('C:')));
     const set = await probeAvailability([C('a.mp4'), E('b.mp4')], { fileExists });

@@ -1,0 +1,16 @@
+{
+  "note": "findScenes(ids: [1, 3, 999]) with one id that does not exist: the WHOLE query fails (data null). This is why details are fetched as aliased findScene, never by an id list. Recorded from the LOCAL test Stash (v0.32.0, 127.0.0.1:9999, synthetic library, no password) on 2026-11-18 by the design pass (stage design-stash, 03-find-by-ids.json); copied by s1-1a-client.",
+  "document": "query($ids:[ID!]){ findScenes(ids:$ids, filter:{per_page:-1}) { count scenes { id title } } }",
+  "status": 200,
+  "body": {
+    "errors": [
+      {
+        "message": "scene with id 999 not found",
+        "path": [
+          "findScenes"
+        ]
+      }
+    ],
+    "data": null
+  }
+}

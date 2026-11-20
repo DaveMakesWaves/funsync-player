@@ -116,7 +116,8 @@
 /* Shuffle All — icon-only header button, same shape as the refresh
    button so the right-side control cluster reads as a unit. Plays the
    currently-visible videos in a random no-repeat queue. */
-.library__shuffle-btn {
+.library__shuffle-btn,
+.library__play-options-btn {
   background: transparent;
   border: none;
   color: var(--text-secondary, #a0a0a0);
@@ -130,13 +131,20 @@
   padding: 0;
   transition: background 150ms, color 150ms;
 }
-.library__shuffle-btn:hover {
+.library__shuffle-btn:hover,
+.library__play-options-btn:hover {
   background: var(--surface-overlay);
   color: var(--text-primary, #e0e0e0);
 }
-.library__shuffle-btn:focus-visible {
+.library__shuffle-btn:focus-visible,
+.library__play-options-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+/* Play options (#381) in use: accent, so a non-default Shuffle All is
+   visible before it is pressed. */
+.library__play-options-btn--on {
+  color: var(--accent);
 }
 @media (prefers-reduced-motion: no-preference) {
   .library__refresh-btn--spinning svg {
@@ -1405,6 +1413,43 @@ html, body {
   opacity: 0.9;
 }
 
+/* Positioning box for the strip and its optional playhead (#381). Takes the
+   strip's place in the column, so the layout is the same with or without it. */
+.inline-viz__heatmap-wrap {
+  position: relative;
+}
+
+/* HM playhead marker (Settings > Playback, off by default): a 2px line with a
+   small triangle on top, shaped like the TL cursor (ActionGraph._drawCursor).
+   An element over the canvas, never paint in it, so the strip keeps the seek
+   bar's exact colours. `left` is set by InlineViz.
+   Colour (FT-027): a white core with a dark 1px outline, not the TL cursor's
+   #4caf50, which all but vanished over the heatmap's green (2:1 against pure
+   green). White carries the blue and red ends, the outline the green and
+   yellow, so one of them is at least 3:1 against every heatmap colour
+   (inline-viz-hm-playhead.test.js). The pop-out uses this sheet too. */
+.inline-viz__hm-playhead {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 2px;
+  margin-left: -1px;
+  background: #fff;
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.85);
+  pointer-events: none;
+}
+.inline-viz__hm-playhead::before {
+  content: '';
+  position: absolute;
+  top: -6px;
+  left: -4px;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 6px solid #fff;
+  filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85)) drop-shadow(0 0 0.5px rgba(0, 0, 0, 0.85));
+}
+
 .inline-viz__timeline {
   width: 100%;
   height: 92px;
@@ -1500,6 +1545,21 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   display: block;
   background: #ff9800;
   animation: pulse 1s ease-in-out infinite;
+}
+
+/* Connected but not obeying commands. Red, not the amber of "connecting":
+   amber says wait, this says look. `display: block` matters — this LED is
+   hidden by default, and an unresponsive device is precisely when it must
+   show. */
+.handy-led--unresponsive {
+  display: block;
+  background: #f44336;
+  box-shadow: 0 0 4px #f44336;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .handy-led--unresponsive { animation: none; }
 }
 
 /* Volume Slider */
@@ -1676,9 +1736,23 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   background: var(--surface-overlay);
 }
 
+/* The variation that plays (FN-03): tint, an accent bar, bold and a tick, so
+   it reads in both themes and not by colour alone. The name stays in the
+   primary text colour: accent text on the light theme's tint was too faint
+   for 13px. Inline menu and pop-out share it. */
 .variant-selector__item--active {
   background: var(--accent-soft);
+  color: var(--text-primary);
+  font-weight: 600;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.variant-selector__check {
+  flex: 0 0 14px;
+  width: 14px;
+  text-align: center;
   color: var(--accent);
+  font-weight: 700;
 }
 
 .variant-selector__item-label {
@@ -1686,6 +1760,18 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* "main": the script the video opens on, its assigned one (FN-03). */
+.variant-selector__main-tag {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 /* Pin-as-default star at the trailing edge of each variant row. */
@@ -1898,6 +1984,17 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   font-size: 12px;
   color: var(--text-secondary);
   margin-bottom: 6px;
+}
+
+/* Helper text under a control: a hint, a value readout, a status line. The
+   class had no rule, so Devices > Buttplug.io > Output tuning's
+   #bp-tuning-hint rendered at the browser's 16px, larger than the rest of
+   the panel (block C verifier 1; also in v0.9.2). Inline styles on some
+   uses still win. */
+.connection-panel__hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
 }
 
 .connection-panel__input-row {
@@ -2663,6 +2760,24 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   flex-shrink: 0;
 }
 
+/* "This video" per-video sync offset (#380): Sync tab + VR modal. */
+.video-sync-offset {
+  margin-top: 8px;
+}
+.video-sync-offset__value {
+  min-width: 64px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.video-sync-offset__reset {
+  margin-left: auto;
+}
+.video-sync-offset__hint {
+  margin: 4px 0 0;
+  font-size: 11px;
+  opacity: 0.7;
+}
+
 .connection-panel__setting-select {
   flex: 1;
 }
@@ -2710,6 +2825,15 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
      the bar, its border and the readout fade together. Default matches the
      inline-viz overlay so the two video overlays agree out of the box. */
   opacity: var(--device-sim-opacity, 0.8);
+}
+
+/* Only over the player. The widget is fixed on #app, so once shown it used
+   to stay over the Library, Playlists and Categories too; now that it is
+   remembered across restarts it would sit over the Library at every launch.
+   Its on/off state (and the ⋮ menu's tick) is untouched: it comes back with
+   the player view. app.js `_onEnterView` sets #app[data-view]. */
+#app:not([data-view="player"]) .device-sim {
+  display: none;
 }
 
 /* Shape follows OpenFunscripter's simulator (OFS_ScriptSimulator.cpp): a
@@ -2863,20 +2987,29 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 
 /* === Backend-disconnected banner ===
  * Persistent in-app surface for the case where the Python backend
- * dies / hangs / fails to start. Pinned to the top of the viewport
- * above all content (z-index above modals so it never gets occluded).
- * Was completely silent pre-2026-04-28 — Library scans / thumbnails /
- * speed-stats just stopped working with no user-facing signal.
- * Apply Nielsen #1 visibility + #9 actionable recovery + Shneiderman
- * #3 informative feedback.
+ * dies / hangs / fails to start. Was completely silent pre-2026-04-28 —
+ * Library scans / thumbnails / speed-stats just stopped working with no
+ * user-facing signal. Apply Nielsen #1 visibility + #9 actionable
+ * recovery + Shneiderman #3 informative feedback.
+ *
+ * Placement (V80, Dave): it used to be `position: fixed; top: 0` with a
+ * see-through tint, so it sat ON the nav bar (the nav labels showed
+ * through its text) and under the Windows caption buttons (its dismiss X
+ * was where the window's close button is). It is now a row of #app's flex
+ * column, under the nav bar (index.html), and the view below gives it the
+ * room: nothing is drawn over it and it covers nothing. In the player view,
+ * where the nav is hidden, it is the top row and the player takes the rest
+ * (rule below). Opaque: the soft tint is laid over the nav's own surface.
+ * z-index keeps it above a dialog's backdrop (1000) and toasts (2000), as
+ * before; app.js publishes its bottom edge (--backend-banner-bottom) so
+ * dialogs and the floating panels centre below it instead of under it.
  */
 .backend-banner {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
+  position: relative;
+  flex-shrink: 0;
   z-index: 9000; /* above modals (1000) and toasts (2000); below dropzone (9999) */
-  background: var(--state-error-soft);
+  background-color: var(--bg-secondary);
+  background-image: linear-gradient(var(--state-error-soft), var(--state-error-soft));
   border-bottom: 1px solid var(--state-error);
   color: var(--text-primary);
   font-size: 13px;
@@ -2885,7 +3018,10 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 .backend-banner__inner {
   display: flex;
   align-items: center;
-  gap: 12px;
+  /* Narrow window (or a large interface size): the buttons drop to their
+     own row, right-aligned, rather than squeezing the text to a sliver. */
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 10px 16px;
   max-width: 1400px;
   margin: 0 auto;
@@ -2897,11 +3033,40 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 }
 
 .backend-banner__body {
-  flex: 1;
+  flex: 1 1 260px;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+/* Player view: the nav bar is hidden, so the banner is the window's top row
+   and the Windows caption buttons (min/max/close) are drawn over its right
+   end. Reserve their strip, as the nav bar does, and let the banner drag the
+   window like the title bar it stands in for. */
+html.has-wco #app[data-view="player"] > .backend-banner {
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw));
+  -webkit-app-region: drag;
+}
+html.has-wco #app[data-view="player"] > .backend-banner :is(button, a, [tabindex]) {
+  -webkit-app-region: no-drag;
+}
+
+/* The player fills what is left under the banner instead of a full 100vh,
+   which pushed its controls bar off the bottom of the window. The docked
+   mini-player and OS fullscreen size themselves. */
+.backend-banner:not([hidden]) ~ .player-container:not(.player-container--mini) {
+  height: auto;
+  flex: 1 1 0;
+  min-height: 0;
+}
+
+/* Floating panels in #app centre in the space under the banner, not under
+   it. Child of #app only: in fullscreen they move into the fullscreen
+   element, where the banner is not drawn. */
+html.backend-banner-shown #app > .connection-panel {
+  top: calc(50% + var(--backend-banner-bottom, 0px) / 2);
+  max-height: calc(90vh - var(--backend-banner-bottom, 0px));
 }
 
 .backend-banner__title {
@@ -2919,6 +3084,7 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .backend-banner__btn {
@@ -2983,7 +3149,7 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
    restart attempt so it doesn't look alarming while we're already
    fixing the problem. */
 .backend-banner--restarting {
-  background: var(--state-warning-soft);
+  background-image: linear-gradient(var(--state-warning-soft), var(--state-warning-soft));
   border-bottom-color: var(--state-warning);
 }
 .backend-banner--restarting .backend-banner__icon,
@@ -3086,6 +3252,16 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
   pointer-events: none;
 }
 
+/* While a menu that opens upward from the control bar is open (variant
+   dropdown, speed popover, overflow menu), the toasts sit at the top of the
+   player instead, under the nav bar: at bottom:80px a persistent error toast
+   covered the dropdown's items (FT-073). app.js
+   `_wireControlsPopoverToasts` sets the class from the menus' `hidden`. */
+body.controls-popover-open .toast-container {
+  top: 56px;
+  bottom: auto;
+}
+
 /* Toasts overlay the player (and other surfaces) — kept white-on-dark
    on both themes for legibility against dark video.
    Post-redesign: explicit close button + body slot, so the layout is
@@ -3109,6 +3285,11 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 
 .toast__body {
   flex: 1;
+  /* A long path or URL has no spaces to wrap at: it ran past the box's
+     right edge, over the top-right panel button (verify-1, 2026-11-07).
+     min-width: 0 lets the flex item shrink below that word; anywhere breaks it. */
+  min-width: 0;
+  overflow-wrap: anywhere;
   cursor: pointer;
   text-align: left;
   line-height: 1.4;
@@ -3585,9 +3766,10 @@ html.has-wco .player__top-bar :is(button, input, select, a, [role="button"], [ta
 }
 @keyframes ppo-spin { to { transform: rotate(360deg); } }
 
-/* Detached-player keyboard-shortcuts overlay. */
+/* Detached-player keyboard-shortcuts overlay. At the modal layer: at 30 the
+   centre play button (z-index 40) drew on top of the card (R3 fix-up). */
 .ppo-shortcuts {
-  position: fixed; inset: 0; z-index: 30;
+  position: fixed; inset: 0; z-index: 1000;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.6); cursor: pointer;
 }

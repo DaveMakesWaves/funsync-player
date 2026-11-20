@@ -5,10 +5,14 @@
  */
 // Unit tests for Script Variant Detection and Management
 import { describe, it, expect } from 'vitest';
+import { createRequire } from 'node:module';
+
+// The REAL scan's axis set (FT-047: a ten-name copy here hid that the scan
+// knew fewer axis names than the player).
+const { AXIS_SUFFIXES } = createRequire(import.meta.url)('../../electron/library-scan.js');
 
 describe('Variant Detection (scan-directory logic)', () => {
   // Simulate the variant detection logic from main.js scan-directory
-  const AXIS_SUFFIXES = new Set(['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve']);
 
   function classifyFunscript(filename) {
     const lower = filename.toLowerCase();
@@ -110,8 +114,10 @@ describe('Variant Detection (scan-directory logic)', () => {
       expect(result.axisSuffix).toBe('surge');
     });
 
-    it('all 10 axis suffixes are detected', () => {
-      const axes = ['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve'];
+    it('every axis spelling the player knows is detected (aliases and raw channels too)', () => {
+      const axes = ['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve',
+        'suck','yaw','r0','a1','forward','left','vibrate','l1','l2','r1','r2','v0','v1','a0','a2'];
+      expect(axes).toHaveLength(AXIS_SUFFIXES.size);
       for (const axis of axes) {
         const result = classifyFunscript(`video.${axis}.funscript`);
         expect(result.isAxis).toBe(true);

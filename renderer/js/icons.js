@@ -54,6 +54,8 @@ export { default as Rows3 } from '../../node_modules/lucide/dist/esm/icons/rows-
 export { default as AudioWaveform } from '../../node_modules/lucide/dist/esm/icons/audio-waveform.js';
 export { default as Activity } from '../../node_modules/lucide/dist/esm/icons/activity.js';
 export { default as Thermometer } from '../../node_modules/lucide/dist/esm/icons/thermometer.js';
+// Device simulator item in the player's overflow menu (#381).
+export { default as MoveVertical } from '../../node_modules/lucide/dist/esm/icons/move-vertical.js';
 export { default as Info } from '../../node_modules/lucide/dist/esm/icons/info.js';
 export { default as FileCheck } from '../../node_modules/lucide/dist/esm/icons/file-check.js';
 export { default as FileX } from '../../node_modules/lucide/dist/esm/icons/file-x.js';
@@ -69,6 +71,8 @@ export { default as Settings } from '../../node_modules/lucide/dist/esm/icons/se
 // Added 2026-04-27 for the desktop redesign — sort + filters trigger
 // buttons in the library header.
 export { default as ArrowDownAZ } from '../../node_modules/lucide/dist/esm/icons/arrow-down-a-z.js';
+// Playlist detail "Sort by name" button: offers Z-A once the list is A-Z (V78).
+export { default as ArrowDownZA } from '../../node_modules/lucide/dist/esm/icons/arrow-down-z-a.js';
 export { default as SlidersHorizontal } from '../../node_modules/lucide/dist/esm/icons/sliders-horizontal.js';
 // ChevronDown — replaces the raw `▾` text used in the nav-bar library
 // arrow. Real semantic icon, not a unicode glyph.

@@ -12,6 +12,7 @@
 // state when the editor closes.
 
 import { t } from '../js/i18n.js';
+import { eventBus } from '../js/event-bus.js';
 
 const STATE_KEYS = {
   idle:       'session.state.idle',
@@ -51,12 +52,17 @@ export class SessionCard {
 
     this._tracker.addEventListener('change', this._bound);
     this._tracker.addEventListener('history-changed', this._historyBound);
+    // A paused session sends no `change`, so a live language switch left
+    // the card in the old language (app test V50).
+    this._offLanguage = eventBus.on('language:changed', () => this._render());
     this._render();
   }
 
   destroy() {
     this._tracker.removeEventListener('change', this._bound);
     this._tracker.removeEventListener('history-changed', this._historyBound);
+    this._offLanguage?.();
+    this._offLanguage = null;
     if (this._el && this._el.parentElement) this._el.parentElement.removeChild(this._el);
     this._el = null;
   }

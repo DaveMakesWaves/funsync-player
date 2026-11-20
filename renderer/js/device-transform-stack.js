@@ -282,6 +282,46 @@ export function extendRawScriptContent(rawContent, enabled) {
 }
 
 /**
+ * Flip raw funscript JSON content (pos -> 100 - pos) for cloud upload
+ * (Handy HSSP). The upload-time twin of the per-tick `applyInvert` that
+ * Buttplug and T-Code already use (#276 alvinchris, #390 lonelyuber).
+ *
+ * ORDER MATTERS: call it AFTER the extender and gap filler and BEFORE
+ * `clampRawScriptContent`, i.e. the per-tick stack's extender -> invert ->
+ * ... -> cutoff. Inverting after the clamp would break the floor: with a
+ * floor of 20, a 0 is clamped to 20 and then flipped to 80, while the
+ * device should see 100 (and a 100 would become 0, below the floor).
+ *
+ * Only the main `actions` array is flipped (the Handy is single-axis).
+ * Returns the original string unchanged when `inverted` is false, the
+ * content is not valid JSON, or there is no `actions` array.
+ *
+ * @param {string} rawContent — funscript JSON
+ * @param {boolean} inverted
+ * @returns {string} flipped JSON, or the original string on no-op
+ */
+export function invertRawScriptContent(rawContent, inverted) {
+  if (!inverted) return rawContent;
+  if (typeof rawContent !== 'string' || rawContent.length === 0) return rawContent;
+  let parsed;
+  try {
+    parsed = JSON.parse(rawContent);
+  } catch {
+    return rawContent;
+  }
+  if (!parsed || !Array.isArray(parsed.actions) || parsed.actions.length === 0) {
+    return rawContent;
+  }
+  return JSON.stringify({
+    ...parsed,
+    actions: parsed.actions.map((a) => {
+      if (!a || typeof a.pos !== 'number') return a;
+      return { ...a, pos: applyInvert(a.pos, true) };
+    }),
+  });
+}
+
+/**
  * Pre-clamp raw funscript JSON content with a floor/ceiling cutoff for
  * cloud upload (Handy HSSP, Autoblow). Cloud devices play the script
  * server-side, so the per-tick `applyCutoff` doesn't reach them — this

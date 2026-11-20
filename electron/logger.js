@@ -1,6 +1,6 @@
 // Logger — electron-log configuration for main + renderer processes
 const log = require('electron-log/main');
-const { maybeRedact } = require('./log-redact');
+const { maybeRedact, redactSecrets } = require('./log-redact');
 
 log.transports.file.maxSize = 5 * 1024 * 1024; // 5 MB
 log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}';
@@ -14,11 +14,20 @@ log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}';
 // through maybeRedact rather than captured here, because this module is
 // required BEFORE the store exists — see the ordering note at the top of
 // main.js.
+//
+// Secrets (keys, tokens, login cookies) are masked on every line, toggle or
+// not (FT-010, redactSecrets in log-redact.js).
 log.hooks.push((message) => {
   if (!Array.isArray(message.data)) return message;
-  message.data = message.data.map((d) => (typeof d === 'string' ? maybeRedact(d) : d));
+  message.data = message.data.map((d) => (typeof d === 'string' ? maybeRedact(redactSecrets(d)) : d));
   return message;
 });
+
+// An object or an Error argument (`log.warn('failed:', err)`) only becomes
+// text inside the transport, after the hook has run, so a key in a request
+// URL inside err.message would reach the file untouched. The file transport's
+// last step masks the finished line as well.
+log.transports.file.transforms.push(({ data }) => (typeof data === 'string' ? redactSecrets(data) : data));
 
 log.initialize(); // enables IPC forwarding from renderer
 

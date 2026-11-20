@@ -31,6 +31,7 @@ LOOP. A slow endpoint is fine; an unanswerable server is not.
 """
 
 import asyncio
+import json
 import os
 import sys
 import threading
@@ -58,7 +59,7 @@ def anyio_backend():
 @pytest.fixture
 async def client():
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as c:
+    async with AsyncClient(transport=transport, base_url="http://127.0.0.1:5123") as c:  # what the desktop dials (FT-009 gate checks Host)
         yield c
 
 
@@ -271,3 +272,148 @@ def test_speed_probe_worker_yields_the_gil():
 
     assert sleeps, "the speed probe never yields the GIL"
     assert all(s > 0 for s in sleeps), "sleep(0) does not hand the GIL over"
+
+
+# --- E-12: a slow stat must not hold the loop --------------------------------
+#
+# `stream_video` and `get_thumbnail` (and `get_funscript` / `get_subtitle`)
+# checked their file with `os.path.isfile` / `os.path.getsize` right on the
+# event loop. On a local disk that is microseconds; on a spun-down USB drive
+# or an offline network share the FIRST stat can take seconds, and every
+# request queued behind it, /health included, waited. The stand-in below makes
+# the first stat of one path take SLOW_STAT_S, wherever it is called from.
+
+SLOW_STAT_S = 1.5
+
+
+def _first_stat_is_slow(monkeypatch, target):
+    real_stat = os.stat
+    want = os.path.normcase(os.path.abspath(target))
+    state = {"slowed": False}
+
+    def stat(path, *args, **kwargs):
+        try:
+            p = os.path.normcase(os.path.abspath(os.fspath(path)))
+        except TypeError:   # a file descriptor
+            p = None
+        if p == want and not state["slowed"]:
+            state["slowed"] = True
+            time.sleep(SLOW_STAT_S)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    return state
+
+
+@pytest.fixture
+def slow_media(tmp_path, monkeypatch):
+    """A registered video with a script and an .srt beside it, the thumb
+    cache in tmp_path, and no real thumbnail job."""
+    video = tmp_path / "Slow Drive.mp4"
+    video.write_bytes(b"\x00" * 4096)
+    script = tmp_path / "Slow Drive.funscript"
+    script.write_text(json.dumps({"actions": [{"at": 0, "pos": 0}, {"at": 500, "pos": 100}]}))
+    sub = tmp_path / "Slow Drive.srt"
+    sub.write_text("1\n00:00:01,000 --> 00:00:02,000\nhi\n", encoding="utf-8")
+    cache = tmp_path / "thumbs"
+    cache.mkdir()
+    monkeypatch.setattr(media, "_thumb_cache_dir", str(cache))
+    monkeypatch.setattr(media, "_thumb_failed", {})
+    monkeypatch.setattr(media, "_custom_thumbs", {})
+    monkeypatch.setattr(media, "_queue_thumb_generation", lambda *a, **kw: None)
+    media.register_videos([{
+        "path": str(video), "name": video.name,
+        "funscriptPath": str(script), "subtitlePath": str(sub),
+    }])
+    yield {"id": media._path_to_id(str(video)), "video": str(video),
+           "script": str(script), "sub": str(sub)}
+    media._video_registry.clear()
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("route, file_key, headers, ok", [
+    ("stream", "video", None, 200),
+    ("stream", "video", {"Range": "bytes=0-99"}, 206),
+    ("thumb", "video", None, 200),
+    ("script", "script", None, 200),
+    ("subtitle", "sub", None, 200),
+])
+async def test_a_slow_stat_does_not_stop_health(client, slow_media, monkeypatch, route, file_key, headers, ok):
+    state =_first_stat_is_slow(monkeypatch, slow_media[file_key])
+    started = time.perf_counter()
+    req = asyncio.create_task(client.get(f"/api/media/{route}/{slow_media['id']}", headers=headers))
+    await asyncio.sleep(0.2)   # let the request reach its stat
+    health = await client.get("/health")
+    elapsed = time.perf_counter() - started
+
+    assert health.status_code == 200
+    assert elapsed < 1.0, (
+        f"/health came back {elapsed:.2f}s after a /{route} request whose "
+        f"stat takes {SLOW_STAT_S}s; the stat ran on the event loop"
+    )
+    res = await req
+    assert state["slowed"], "the slow stat never ran, the test proves nothing"
+    assert res.status_code == ok
+
+
+# --- E2-03: the VR scene routes stat off the loop too ------------------------
+#
+# `deovr_scene` and `heresphere_scene` (a headset opening one video) ran
+# `os.path.isfile` (twice when the probe cache was cold) and `os.path.getsize`
+# on the event loop for the scene's video: the same hold as E-12 on a
+# spun-down or offline drive. They now stat once in the threadpool
+# (`_regular_file_size`), and the answer serves the probe gate and the size.
+
+@pytest.fixture
+def vr_scene(slow_media, monkeypatch):
+    """slow_media's video as a VR scene, with no ffprobe run."""
+    from routes import vr_api
+    monkeypatch.setattr(vr_api, "_video_info_cache", {})
+    monkeypatch.setattr(vr_api, "_probe_pending", set())
+    probes = []
+
+    def probe(path):
+        probes.append(path)
+        return (3840, 1920, "h265")
+
+    monkeypatch.setattr(vr_api, "_probe_video_info", probe)
+    return {**slow_media, "probes": probes}
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("route", ["deovr", "heresphere"])
+async def test_a_slow_stat_on_a_vr_scene_does_not_stop_health(client, vr_scene, monkeypatch, route):
+    state = _first_stat_is_slow(monkeypatch, vr_scene["video"])
+    started = time.perf_counter()
+    req = asyncio.create_task(client.get(f"/{route}/{vr_scene['id']}"))
+    await asyncio.sleep(0.2)   # let the request reach its stat
+    health = await client.get("/health")
+    elapsed = time.perf_counter() - started
+
+    assert health.status_code == 200
+    assert elapsed < 1.0, (
+        f"/health came back {elapsed:.2f}s after a /{route} scene request whose "
+        f"stat takes {SLOW_STAT_S}s; the stat ran on the event loop"
+    )
+    res = await req
+    assert state["slowed"], "the slow stat never ran, the test proves nothing"
+    assert res.status_code == 200
+    scene = res.json()
+    # The one stat still answers what the scene needs: the file's size, and
+    # the probe ran (once) because there is a file.
+    sources = scene["encodings"][0]["videoSources"] if route == "deovr" else scene["media"][0]["sources"]
+    assert sources[0]["size"] == 4096
+    assert sources[0]["height"] == 1920
+    assert vr_scene["probes"] == [vr_scene["video"]]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("route", ["deovr", "heresphere"])
+async def test_a_vr_scene_whose_file_is_gone_is_not_probed(client, vr_scene, route):
+    os.remove(vr_scene["video"])
+    res = await client.get(f"/{route}/{vr_scene['id']}")
+    assert res.status_code == 200
+    scene = res.json()
+    sources = scene["encodings"][0]["videoSources"] if route == "deovr" else scene["media"][0]["sources"]
+    assert sources[0]["size"] == 0
+    assert vr_scene["probes"] == []

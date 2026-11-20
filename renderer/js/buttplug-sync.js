@@ -26,6 +26,18 @@ import {
   computeNaturalRange,
   RANGE_EXTENDER_THRESHOLD_PCT,
 } from './device-transform-stack.js';
+import { clampVideoSyncOffset } from './video-sync-offset.js';
+import { AXIS_DEFINITIONS } from './multi-axis.js';
+import { StallHold, isProxyStall } from './playback-stall.js';
+
+// Channels starting with A that carry an INTENSITY, not a position: suck (A1)
+// and lube (A2) are 'vibrate' axes in multi-axis.js (the valve, A0, is a
+// position). They are sent as vibrate / scalar, as suction was while it sat
+// on V2. The player feeds them since the block C fix-up (2026-11-06): its
+// loader used to drop a `.suck` companion and put lube on V1.
+const INTENSITY_AUX_AXES = new Set(
+  AXIS_DEFINITIONS.filter((a) => a.type === 'vibrate' && a.tcode.charAt(0) === 'A').map((a) => a.tcode),
+);
 
 const TICK_INTERVAL_MS = 40;     // ~25Hz polling — safe for BLE
 const MIN_SEND_INTERVAL_MS = 50; // Don't send derived-intensity commands faster than this
@@ -118,6 +130,10 @@ export class ButtplugSync {
     // further along than it actually is, which causes it to dispatch
     // the action that's coming up.
     this._offsetMs = 0;
+    // The current video's own delta (`library.syncOffsets`, #380), added on
+    // top of `_offsetMs`. Kept apart so the global slider keeps setting the
+    // global value. 0 = no entry = today.
+    this._videoOffsetMs = 0;
     // Tracks which action-boundary the linear commands have been dispatched
     // for. Separate from _lastActionIndex (which is also updated by the
     // derived-intensity path) so the two schedules don't clobber each other.
@@ -127,6 +143,23 @@ export class ButtplugSync {
 
     // Custom routing mode — when active, only explicitly assigned devices get commands
     this._customRoutingActive = false;
+
+    // FN-02 (Dave 2026-11-16: "yes everything should shop while a video
+    // buffers"). The picture can stop without a 'pause' (a starved source, a
+    // seek while playing, an error, a frozen clock, a proxy's stall). Linear
+    // devices already stood still on the frozen clock, but vibrate / rotate /
+    // oscillate / e-stim outputs kept their last level through it. A stall
+    // now turns those off (`stopSustainedOutputs`, never `stopAll`: a
+    // stroker is left where it is, no StopDeviceCmd mid-stroke) and sends
+    // nothing until the picture moves; 'playing' re-arms as it always has.
+    // FN-05: only past a grace window (STALL_GRACE_MS); a hiccup inside it
+    // turns nothing off and the outputs carry on as they were.
+    this._stall = new StallHold({
+      getPlayer: () => this.player,
+      onHold: (reason) => this._holdForStall(reason),
+      onRelease: () => this._handlePlaying(),
+      tag: '[ButtplugSync]',
+    });
 
     // Callbacks
     this.onSyncStatus = null; // (status: 'synced'|'idle') => {}
@@ -141,6 +174,7 @@ export class ButtplugSync {
     if (this._active) return;
 
     this._active = true;
+    this._stall.clear();   // a new player or video: no hold carried over (FN-02)
     this._cacheActions();
     this._bindVideoEvents();
 
@@ -169,6 +203,7 @@ export class ButtplugSync {
    */
   stop() {
     this._active = false;
+    this._stall.clear();
     this._unbindVideoEvents();
     this._stopScheduler();
     this._lastActionIndex = -1;
@@ -250,6 +285,79 @@ export class ButtplugSync {
     if (this._active) return false;
     if (!this.buttplug?.connected) return false;
     this._sendLinearToDevices(position, durationMs, prevPosition);
+    return true;
+  }
+
+  /**
+   * Move ONE linear device to a position from outside the video clock, for
+   * the range-slider live preview.
+   *
+   * Per-device, unlike `sendLinearNow`, precisely because the range sliders
+   * are per-device: dragging device A's minimum should not also jog device B.
+   *
+   * Applies invert → range → cutoff so 0 and 100 land on the exact boundaries
+   * the slider is showing — that IS the feedback being asked for. It
+   * deliberately skips the Range Extender, which stretches a script's natural
+   * range and has no meaning with no script loaded.
+   *
+   * @param {number} deviceIndex
+   * @param {number} position 0-100, PRE-transform
+   * @param {number} durationMs
+   * @returns {boolean} false when refused (playback owns the devices, device
+   *   gone, or it cannot move linearly)
+   */
+  previewDevicePosition(deviceIndex, position, durationMs) {
+    if (this._active) return false;
+    if (!this.buttplug?.connected) return false;
+    const dev = (this.buttplug.devices || []).find((d) => d.index === deviceIndex);
+    if (!dev || !dev.canLinear) return false;
+
+    let pos = this._invertedDevices.has(deviceIndex) ? 100 - position : position;
+    pos = applyRange(pos, this._rangeMap.get(deviceIndex));
+    pos = applyCutoff(pos, this._cutoffMap.get(deviceIndex));
+    this.buttplug.sendLinear(deviceIndex, pos, durationMs);
+    return true;
+  }
+
+  /**
+   * Drive ONE flywheel machine (oscillate only) from a position outside the
+   * video clock: the Orgasm Switch and Edge Hold loops (Dave, 2026-11-17:
+   * machines follow them). Exactly the oscillate branch of _sendToDevices:
+   * invert, range and cutoff, the device's oscillate mode ('speed' = the
+   * stroke's velocity over `sinceLastMs`), then the Max cap and the ramp-up.
+   * The ramp counts from `rampStartMs` (the hold's start), not from the
+   * video's start, so a machine never jumps to full speed when a hold
+   * begins. Skips the Range Extender, as previewDevicePosition does (it
+   * stretches a script's own range; a loop has none).
+   *
+   * @param {number} deviceIndex
+   * @param {number} position 0-100, PRE-transform
+   * @param {number} prevPosition 0-100, PRE-transform
+   * @param {number} sinceLastMs time since the previous send
+   * @param {number} [rampStartMs] performance.now() clock
+   * @returns {boolean} false when refused (playback owns the devices, the
+   *   device is gone, or it is not an oscillate-only device)
+   */
+  oscillateNow(deviceIndex, position, prevPosition, sinceLastMs, rampStartMs) {
+    if (this._active) return false;
+    if (!this.buttplug?.connected) return false;
+    const dev = (this.buttplug.devices || []).find((d) => d && d.index === deviceIndex);
+    if (!dev || !dev.canOscillate || dev.canLinear) return false;
+    const inverted = this._invertedDevices.has(dev.index);
+    const range = this._rangeMap.get(dev.index);
+    const cutoff = this._cutoffMap.get(dev.index);
+    const tf = (v) => applyCutoff(applyRange(inverted ? 100 - v : v, range), cutoff);
+    const mode = this._oscillateModeMap.get(dev.index) || 'speed';
+    const ms = Number.isFinite(sinceLastMs) && sinceLastMs > 0 ? sinceLastMs : MIN_SEND_INTERVAL_MS;
+    let speed = this._computeVibeIntensity(mode, tf(position), tf(prevPosition ?? position), ms);
+    const videoRamp = this._rampUpStartTime;
+    if (Number.isFinite(rampStartMs)) this._rampUpStartTime = rampStartMs;
+    try {
+      speed = this._applyScalarSafety(dev.index, speed);
+    } finally {
+      this._rampUpStartTime = videoRamp;
+    }
+    this.buttplug.sendOscillate(dev.index, speed);
     return true;
   }
 
@@ -353,12 +461,21 @@ export class ButtplugSync {
     this._onSeeked = () => this._handleSeeked();
     this._onEnded = () => this._handleEnded();
     this._onEmptied = () => this._handleSourceChange();
+    // FN-02: the picture stops without a 'pause'. Each holds (see _stall).
+    this._onWaiting = () => { if (this._active) this._stall.enter('waiting'); };
+    this._onStalled = () => { if (this._active) this._stall.enter('stalled'); };
+    this._onSeeking = () => { if (this._active) this._stall.enter('seeking'); };
+    this._onError = () => { if (this._active) this._stall.enter('error'); };
 
     video.addEventListener('playing', this._onPlaying);
     video.addEventListener('pause', this._onPause);
     video.addEventListener('seeked', this._onSeeked);
     video.addEventListener('ended', this._onEnded);
     video.addEventListener('emptied', this._onEmptied);
+    video.addEventListener('waiting', this._onWaiting);
+    video.addEventListener('stalled', this._onStalled);
+    video.addEventListener('seeking', this._onSeeking);
+    video.addEventListener('error', this._onError);
   }
 
   _unbindVideoEvents() {
@@ -368,6 +485,10 @@ export class ButtplugSync {
     if (this._onSeeked) video.removeEventListener('seeked', this._onSeeked);
     if (this._onEnded) video.removeEventListener('ended', this._onEnded);
     if (this._onEmptied) video.removeEventListener('emptied', this._onEmptied);
+    if (this._onWaiting) video.removeEventListener('waiting', this._onWaiting);
+    if (this._onStalled) video.removeEventListener('stalled', this._onStalled);
+    if (this._onSeeking) video.removeEventListener('seeking', this._onSeeking);
+    if (this._onError) video.removeEventListener('error', this._onError);
   }
 
   /**
@@ -399,6 +520,7 @@ export class ButtplugSync {
    */
   _handleSourceChange() {
     if (!this._active) return;
+    this._stall.clear();   // the stopAll below owns every output now
     // Logged at `log` level (forwarded to main.log; `debug` is not) and paired
     // with the RE-ARMED line in _handlePlaying. This hook is new as of
     // 2026-08-06, so if it breaks a previously-working setup the report needs
@@ -428,7 +550,21 @@ export class ButtplugSync {
   }
 
   _handlePlaying() {
+    // 'playing' means the picture moves: a stall hold is over (FN-02). The
+    // re-arm below is the one every 'playing' has always run: nothing was
+    // stopped on a linear device, so its boundary command is re-sent to the
+    // target it already has, and the sustained outputs come back on the next
+    // tick (their dirty checks are reset here), eased in by the ramp.
+    const stall = this._stall.end('playing');
     if (!this._active) return;
+    // FN-05: a hiccup over inside its grace window turned nothing off and
+    // moved nowhere: the scheduler is still running on the same targets, so
+    // carry on. The re-arm's ramp would take a flywheel or an e-stim box
+    // back to zero and up again over 2 s: the stutter the window is for.
+    if (stall && !stall.held && !stall.seeked && !this._awaitingResume && this._intervalId) {
+      this._emitStatus('synced');
+      return;
+    }
     this._resetIndex();
     this._resetVibIndex();
     this._resetAxisIndices();
@@ -462,6 +598,15 @@ export class ButtplugSync {
 
   _handlePause() {
     if (!this._active) return;
+    // A proxy reports a STALL as a 'pause' (the player pop-out, the headset):
+    // hold, as the inline element's 'waiting' does, rather than stopAll, so a
+    // stroker is not stopped mid-stroke on every pop-out seek (FN-02). Its
+    // 'playing' re-arms.
+    if (isProxyStall(this.player?.video)) {
+      this._stall.enter('proxy');
+      return;
+    }
+    this._stall.clear('pause');
     this._stopScheduler();
     this.buttplug.stopAll();
     this._lastSentPos = -1;
@@ -483,11 +628,35 @@ export class ButtplugSync {
 
   _handleEnded() {
     if (!this._active) return;
+    this._stall.clear();
     this._stopScheduler();
     this.buttplug.stopAll();
     this._lastSentPos = -1;
     this._lastVibSentIntensity = -1;
     this._emitStatus('idle');
+  }
+
+  /**
+   * A stall hold began (FN-02): turn every sustained output off and leave
+   * position alone. Not `stopAll()`: that is a StopDeviceCmd to a stroker
+   * mid-stroke on every seek while playing. Fire-and-forget like stop(), so
+   * a slow client does not hold up the event.
+   */
+  _holdForStall(reason) {
+    const timeMs = Math.round((Number(this.player?.currentTime) || 0) * 1000);
+    console.log(`[ButtplugSync] picture stopped (${reason}) at ${timeMs}ms — sustained outputs off until it moves`);
+    if (!this.buttplug?.connected || typeof this.buttplug.stopSustainedOutputs !== 'function') return;
+    // Called now, not deferred: each device's first zero leaves in this task,
+    // before any tick a quick 'playing' could run.
+    const failed = (err) => {
+      // error, not debug: this is the path that leaves a motor running.
+      console.error(`[ButtplugSync] stall stop FAILED — outputs may still be running: ${err?.message || err}`);
+    };
+    try {
+      Promise.resolve(this.buttplug.stopSustainedOutputs()).catch(failed);
+    } catch (err) {
+      failed(err);
+    }
   }
 
   // --- Scheduler (setInterval — survives tab backgrounding) ---
@@ -561,6 +730,10 @@ export class ButtplugSync {
 
     this._intervalId = setInterval(() => {
       if (!this._active || this.player.paused) return;
+      // FN-02: the picture is not moving. Send nothing: the sustained outputs
+      // were turned off when the hold began, and a linear device stands on
+      // the frozen clock as it would have anyway.
+      if (this._stall.sample()) return;
       this._sendPendingActions();
       if (this._vibActions) this._sendPendingVibActions();
       if (this._axisActions.size > 0) this._sendPendingAxisActions();
@@ -806,7 +979,14 @@ export class ButtplugSync {
       // vibrate one: vibrate has no cap and no ramp, while a machine needs
       // both — full power is dangerous and a flywheel has real inertia.
       // Same treatment e-stim gets, for the same reason.
-      if (dev.canOscillate && !this._vibActions) {
+      //
+      // `!dev.canLinear`: position wins on hardware exposing both on one
+      // motor (Lovense Solace Pro, Kinky Makers OSSM: feature 0 carries
+      // hw_position_with_duration AND oscillate in the Buttplug device
+      // config). Driving both sent a LinearCmd per stroke and a speed every
+      // tick to the same motor, and they fought (brokenobj #379: "jerky").
+      // The position command is the one that follows the script.
+      if (dev.canOscillate && !dev.canLinear && !this._vibActions) {
         const mode = this._oscillateModeMap.get(dev.index) || 'speed';
         let speed = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
         speed = this._applyScalarSafety(dev.index, speed);
@@ -972,7 +1152,8 @@ export class ButtplugSync {
     for (const [tcode, state] of this._axisActions) {
       if (!state.actions || state.actions.length < 2) continue;
 
-      const featureType = tcode.charAt(0); // L, R, V, A, C (custom)
+      // L, R, V, A, C (custom); A1 / A2 drive an intensity like V.
+      const featureType = INTENSITY_AUX_AXES.has(tcode) ? 'V' : tcode.charAt(0);
       const useActionBoundary = this._linearStrategy === 'action-boundary' &&
         (featureType === 'L' || featureType === 'A' || featureType === 'C');
 
@@ -1035,6 +1216,12 @@ export class ButtplugSync {
           else if (dev.canVibrate) this.buttplug.sendVibrate(dev.index, this._safe(dev, pos));
           else if (dev.canRotate) this.buttplug.sendRotate(dev.index, this._safe(dev, pos), pos >= 50);
           else if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
+          // A flywheel machine (oscillate only) got nothing on a route,
+          // though the routing dialog offers it (block C verifier 2; also
+          // in v0.9.2). Same capped, ramped scalar-safety path as the main
+          // stroke's oscillate. Never on a device that also takes position
+          // (FT-051: position wins on one motor).
+          else if (dev.canOscillate && !dev.canLinear) this.buttplug.sendOscillate(dev.index, this._applyScalarSafety(dev.index, pos));
         } else if (featureType === 'L' || featureType === 'A') {
           if (dev.canLinear) this.buttplug.sendLinear(dev.index, pos, duration);
           if (dev.canScalar) this.buttplug.sendScalar(dev.index, this._applyScalarSafety(dev.index, pos));
@@ -1359,12 +1546,21 @@ export class ButtplugSync {
   }
 
   /**
+   * The playing video's own delta (Pudknocker #380), added on top of the
+   * global offset above. Live, like setOffsetMs. app.js sets it on every
+   * video load from `library.syncOffsets`; 0 is today's behaviour.
+   */
+  setVideoOffsetMs(ms) {
+    this._videoOffsetMs = clampVideoSyncOffset(ms);
+  }
+
+  /**
    * Effective video time in ms — real player time shifted by the
-   * configured offset. Centralised so adding/changing the formula
-   * affects every read site uniformly.
+   * configured offset (global + this video's delta). Centralised so
+   * adding/changing the formula affects every read site uniformly.
    */
   _currentTimeMs() {
-    return this.player.currentTime * 1000 - this._offsetMs;
+    return this.player.currentTime * 1000 - this._offsetMs - this._videoOffsetMs;
   }
 
   /**

@@ -52,13 +52,37 @@
 // than loose sibling sniffing or inline) but below A/B (which are the
 // most widely-documented formats and win precedence ties).
 //
+// Format F — funscript 2.0 `channels` object, keyed by AXIS NAME:
+//   {
+//     "version": "funscript@2.0.0-alpha.1",
+//     "actions": [...],
+//     "channels": {
+//       "stroke": { "actions": [...] },
+//       "twist":  { "actions": [...], "range": [10, 90] }
+//     }
+//   }
+// Dimava's spec from the Single-file multi-axis RFC (EroScripts topic
+// 267449 #34), and what the site's "download as 2.0" button emits since
+// MFP v1.33.9 / XTP v0.55b. Requested by dio_likes_jojo (#311), who found
+// a 2.0 download played the stroke axis and nothing else.
+//
+// Two things separate it from Format E: the container is an OBJECT keyed by
+// axis NAME rather than an array keyed by TCode id, and a channel may carry
+// its own `range: [min, max]`. Per the spec `channels.stroke` OVERRIDES the
+// top-level `actions` for multi-axis devices, so it is handled by the caller
+// as the main script rather than as a companion axis.
+//
 // Returns a `Map<suffix, actions>` keyed by the standard FunSync axis
 // suffix (matches `multi-axis.js::AXIS_DEFINITIONS`). Suffixes:
 // surge / sway / twist / roll / pitch / vib / lube / pump / suction / valve.
 
-/** TCode-axis identifier → suffix mapping. Inverse of the SUFFIX_TO_TCODE
- *  in app.js. R0/R1/R2 are rotation; L1/L2 are linear surge/sway; V0/V1/V2
- *  vibration; A0 the auxiliary valve. */
+/** TCode-axis identifier → suffix mapping, the inverse of multi-axis.js
+ *  AXIS_DEFINITIONS (app.js resolves the suffix back to its channel with
+ *  `getAxisBySuffix`). R0/R1/R2 are rotation; L1/L2 linear surge/sway;
+ *  V0 vibe, V1 pump; A0 valve, A1 suction, A2 lube (TCode v0.3, as MFP).
+ *  V1 used to say lube and A1/A2 were missing: when app.js stopped mapping
+ *  lube to V1 (block C fix-up, 2026-11-06), a `V1` channel would have moved
+ *  to A2, and an `A1` / `A2` one was never read. */
 const TCODE_TO_SUFFIX = Object.freeze({
   L0: null,    // L0 IS the main stroke — never extracted as a separate axis
   L1: 'surge',
@@ -67,9 +91,11 @@ const TCODE_TO_SUFFIX = Object.freeze({
   R1: 'roll',
   R2: 'pitch',
   V0: 'vib',
-  V1: 'lube',  // (V1 doubles as pump in the spec — we pick lube as primary)
-  V2: 'suction',
+  V1: 'pump',
+  V2: 'suction', // where older tools (and FunSync before 2026-08-16) put suction; plays on A1
   A0: 'valve',
+  A1: 'suction',
+  A2: 'lube',
 });
 
 /** Lowercase name (any of: suffix name, alternative spelling, full label)
@@ -151,6 +177,24 @@ export function extractEmbeddedAxes(parsed) {
       // Earlier-format precedence — Format A/B win if both present.
       if (out.has(suffix)) continue;
       out.set(suffix, entry.actions);
+    }
+  }
+
+  // --- Format F: funscript 2.0 `channels` object -------------------
+  // Placed after E and before C: it is as explicit as E (a named container
+  // that can only mean multi-axis) and must beat C, whose sibling-key
+  // sniffing would otherwise never see these because they are nested.
+  if (parsed.channels && typeof parsed.channels === 'object' && !Array.isArray(parsed.channels)) {
+    for (const [name, channel] of Object.entries(parsed.channels)) {
+      // `stroke` is the main axis, not a companion — see the header note.
+      if (typeof name === 'string' && name.toLowerCase().trim() === 'stroke') continue;
+      const suffix = normaliseAxisName(name) || normaliseAxisName(TCODE_TO_SUFFIX[name] || '');
+      if (!suffix) continue;
+      // A channel is `{ actions, range? }`; tolerate a bare array too, since
+      // the format is still alpha and writers vary.
+      const actions = Array.isArray(channel) ? channel : channel?.actions;
+      if (!isValidActionArray(actions)) continue;
+      if (!out.has(suffix)) out.set(suffix, actions);
     }
   }
 

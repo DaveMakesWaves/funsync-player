@@ -93,6 +93,41 @@ describe('showToast', () => {
     expect(toast.classList.contains('toast--out')).toBe(true);
   });
 
+  // A keydown's default action on a focused button IS its activation (Enter
+  // clicks on keypress, Space on keyup), so a toast that cancelled every
+  // Enter / Space under it closed itself and the Undo never ran (V78 review).
+  it('Enter / Space on a button IN the toast (an Undo) is left to the button, and goes no further', () => {
+    const body = document.createElement('div');
+    const undo = document.createElement('button');
+    undo.textContent = 'Undo';
+    let undone = 0;
+    undo.addEventListener('click', () => { undone++; });
+    body.appendChild(undo);
+    showToast(body, 'info', 8000);
+    const toast = document.querySelector('.toast');
+    const reachedDocument = [];
+    const onDoc = (e) => reachedDocument.push(e.key);
+    document.addEventListener('keydown', onDoc);
+    try {
+      for (const key of ['Enter', ' ']) {
+        undo.focus();
+        const e = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+        undo.dispatchEvent(e);
+        expect(e.defaultPrevented, `${JSON.stringify(key)} was cancelled`).toBe(false);
+        expect(toast.classList.contains('toast--out')).toBe(false);
+      }
+      // ...and the player's shortcuts on `document` never saw it.
+      expect(reachedDocument).toEqual([]);
+    } finally {
+      document.removeEventListener('keydown', onDoc);
+    }
+    // The browser's activation, then: the button's click, which bubbles on
+    // to the body and closes the toast.
+    undo.click();
+    expect(undone).toBe(1);
+    expect(toast.classList.contains('toast--out')).toBe(true);
+  });
+
   it('hovering the toast pauses the auto-dismiss timer', () => {
     showToast('Hi');
     const toast = document.querySelector('.toast');

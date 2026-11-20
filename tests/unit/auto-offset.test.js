@@ -60,13 +60,18 @@ describe('lookupVrPreset', () => {
     expect(lookupVrPreset('heresphere', 100)?.key).toBe('heresphere:wifi-slowest');
   });
 
-  it('all preset values are negative (early-fire convention)', () => {
+  it('every preset fires early: negative for VR and the scheduled devices, positive for the Handy and Autoblow (their own APIs)', () => {
     for (const v of Object.values(VR_OFFSET_PRESETS)) {
       expect(v).toBeLessThan(0);
     }
-    for (const v of Object.values(DEVICE_OFFSET_PRESETS)) {
-      expect(v).toBeLessThan(0);
+    // Early in each device's own convention (VIDEO_SYNC_OFFSET_DEVICE_SIGN:
+    // -1 = its own offset fires earlier as it goes POSITIVE).
+    const ownSign = { handy: -1, autoblow: -1 };
+    for (const [device, v] of Object.entries(DEVICE_OFFSET_PRESETS)) {
+      expect((ownSign[device] ?? 1) * v, device).toBeLessThan(0);
     }
+    expect(DEVICE_OFFSET_PRESETS.handy).toBeGreaterThan(0);
+    expect(DEVICE_OFFSET_PRESETS.autoblow).toBeGreaterThan(0);
   });
 });
 

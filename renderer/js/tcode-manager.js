@@ -99,8 +99,9 @@ export class TCodeManager {
 
         // Listen for unexpected disconnects from main process
         this._disconnectCleanup = window.funsync.onTcodeDisconnected(() => {
+          const wasConnected = this._connected;
           this._connected = false;
-          if (this.onDisconnect) this.onDisconnect();
+          if (wasConnected && this.onDisconnect) this.onDisconnect(); // once per link
         });
 
         const summary = this._describeTransport(kind, opts);
@@ -126,9 +127,35 @@ export class TCodeManager {
   }
 
   /**
-   * Disconnect from the serial port.
+   * Where the link goes, for logs: `COM3 @ 115200 baud`, `192.168.1.42:8000`
+   * or the WebSocket URL. Empty before the first connect.
+   */
+  get endpointSummary() {
+    if (!this._transportKind) return '';
+    const summary = this._describeTransport(this._transportKind, this._transportOpts || {});
+    return this._transportKind === 'serial' ? `${summary} baud` : summary;
+  }
+
+  /** The endpoint alone (the device's label): COM port, host:port or URL. */
+  get endpoint() {
+    const opts = this._transportOpts || {};
+    if (this._transportKind === 'udp') return `${opts.host || '?'}:${opts.port || '?'}`;
+    if (this._transportKind === 'websocket' || this._transportKind === 'ws') return opts.url || '?';
+    return this._portPath;
+  }
+
+  /**
+   * Disconnect (any transport). A user disconnect is a disconnect: when the
+   * link was up, `onDisconnect` fires exactly as it does for a dropped link,
+   * so the app stops the sync engine and the nav bar stops saying
+   * "Connected" (CB-15: it never fired here, and both stayed as they were).
+   * Once: the dropped-link listener is removed first, and `_connected` drops
+   * before the await, so a second call or a late main-process notice does
+   * not fire it again.
    */
   async disconnect() {
+    const wasConnected = this._connected;
+    this._connected = false;
     if (this._disconnectCleanup) {
       this._disconnectCleanup();
       this._disconnectCleanup = null;
@@ -140,7 +167,7 @@ export class TCodeManager {
       console.warn('[TCode] Disconnect error:', err.message);
     }
 
-    this._connected = false;
+    if (wasConnected && this.onDisconnect) this.onDisconnect();
   }
 
   /**

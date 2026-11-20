@@ -22,6 +22,10 @@
 import { detectGaps } from './gap-filler.js';
 import { generatePattern } from './script-modifiers.js';
 import { computeNaturalRange } from './device-transform-stack.js';
+// A pattern from the library (pattern settings unification, 2026-11-19): the
+// six simple shapes stay on the path below; any other pattern is filled by
+// filler-pattern.js with the same guarantees (joins, threshold, trailing gap).
+import { buildLibraryFillerActions } from './filler-pattern.js';
 
 /**
  * Maximum speed, in position units per second, that filler is allowed to
@@ -210,6 +214,9 @@ export function buildGapFiller(gap, posBefore, posAfter, opts = {}) {
     max = 100,
     maxJoinSpeed = DEFAULT_MAX_JOIN_SPEED,
     restPos = null,
+    // Reverse (2026-11-19): the shape mirrored inside its band BEFORE the
+    // slew limiter and the joins, so both stay exactly as they are.
+    reversed = false,
   } = opts;
 
   const reserve = joinReserveMs(maxJoinSpeed);
@@ -225,8 +232,9 @@ export function buildGapFiller(gap, posBefore, posAfter, opts = {}) {
   // harmless; a gap filled with a violent jump into or out of it is not.
   if (interiorEnd - interiorStart < MIN_PATTERN_MS) return [];
 
-  const raw = generatePattern(pattern, interiorStart, interiorEnd, bpm, min, max);
-  if (!raw || raw.length < 2) return [];
+  const drawn = generatePattern(pattern, interiorStart, interiorEnd, bpm, min, max);
+  if (!drawn || drawn.length < 2) return [];
+  const raw = reversed ? drawn.map((a) => ({ at: a.at, pos: min + max - a.pos })) : drawn;
 
   const limited = limitSlewRate(raw, maxJoinSpeed);
   if (limited.length < 2) return [];
@@ -268,12 +276,27 @@ export function buildFillerActions(authoredActions, opts = {}) {
     centrePct = null,
     absoluteDepth = null,
     maxJoinSpeed = DEFAULT_MAX_JOIN_SPEED,
+    reversed = false,
+    // A pattern from the library that is not a simple shape: the choice of
+    // pattern-choice.js resolveGapFillerOptions ({ id, speed, reversed,
+    // rangeMode, min, max, depthPct, centrePct }).
+    library = null,
   } = opts;
 
   if (!(thresholdMs > 0)) return [];
 
   const gaps = detectGaps(authored, thresholdMs, totalDurationMs);
   if (!gaps.length) return [];
+
+  if (library && typeof library.id === 'string') {
+    return buildLibraryFillerActions(authored, gaps, {
+      library,
+      // 'Follow the script': the band resolveDepth gives this script, as below.
+      scriptBand: (depth, centre) => resolveDepth(authored, { depthPct: depth, centrePct: centre }),
+      maxJoinSpeed,
+      minPatternMs: MIN_PATTERN_MS,
+    });
+  }
 
   const depth = resolveDepth(authored, {
     depthPct,
@@ -299,6 +322,7 @@ export function buildFillerActions(authoredActions, opts = {}) {
         max: depth.max,
         maxJoinSpeed,
         restPos: depth.min,
+        reversed,
       },
     ));
   }

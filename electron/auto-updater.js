@@ -3,13 +3,19 @@ const { autoUpdater } = require('electron-updater');
 const log = require('./logger');
 
 let _mainWindow = null;
+// The other windows that show the update notices, asked at each send: the
+// detached player window, whenever it is open (FT-101).
+let _getExtraWindows = () => [];
 
 /**
  * Initialize auto-updater. Call once after the main window is created.
  * @param {BrowserWindow} mainWindow
+ * @param {{ getExtraWindows?: () => Array<BrowserWindow|null> }} [opts]
+ *   other windows to tell as well (null or destroyed ones are skipped)
  */
-function initAutoUpdater(mainWindow) {
+function initAutoUpdater(mainWindow, { getExtraWindows } = {}) {
   _mainWindow = mainWindow;
+  if (typeof getExtraWindows === 'function') _getExtraWindows = getExtraWindows;
 
   // Log to electron-log
   autoUpdater.logger = log;
@@ -105,11 +111,18 @@ function quitAndInstall() {
 }
 
 /**
- * Send an event to the renderer process.
+ * Send an event to the main window and to every other live window that shows
+ * the update notices (the player pop-out, FT-101: it only ever reached the
+ * main window, so someone watching in the pop-out never saw an update).
  */
 function _send(channel, data) {
-  if (_mainWindow && !_mainWindow.isDestroyed()) {
-    _mainWindow.webContents.send(channel, data);
+  let extra = [];
+  try { extra = _getExtraWindows() || []; } catch { extra = []; }
+  const sent = new Set();
+  for (const win of [_mainWindow, ...extra]) {
+    if (!win || sent.has(win) || win.isDestroyed()) continue;
+    sent.add(win);
+    try { win.webContents.send(channel, data); } catch { /* window going away */ }
   }
 }
 

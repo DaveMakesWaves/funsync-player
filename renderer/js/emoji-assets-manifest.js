@@ -740,5 +740,5 @@ export const BUNDLED_EMOJI_ASSETS = [
   "2795",
   "2796",
   "2b50",
-  "2b55"
+  "2b55",
 ];

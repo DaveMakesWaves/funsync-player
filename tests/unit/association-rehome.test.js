@@ -20,12 +20,12 @@ const plan = (storedPaths, scannedPaths, isUnavailable) =>
 describe('planAssociationRehome — the move it is meant to catch', () => {
   it('re-homes a video that moved to a different source', () => {
     expect(plan(['D:/old/Scene.mp4'], ['E:/new/Scene.mp4']))
-      .toEqual([{ from: 'D:/old/Scene.mp4', to: 'E:/new/Scene.mp4' }]);
+      .toEqual([{ from: 'D:/old/Scene.mp4', to: 'E:/new/Scene.mp4', keepSource: true }]);
   });
 
   it('matches case-insensitively and across path separators', () => {
     expect(plan(['D:\\old\\SCENE.mp4'], ['/mnt/new/scene.mp4']))
-      .toEqual([{ from: 'D:\\old\\SCENE.mp4', to: '/mnt/new/scene.mp4' }]);
+      .toEqual([{ from: 'D:\\old\\SCENE.mp4', to: '/mnt/new/scene.mp4', keepSource: true }]);
   });
 
   it('re-homes several independent moves at once', () => {
@@ -34,8 +34,55 @@ describe('planAssociationRehome — the move it is meant to catch', () => {
       ['E:/new/a.mp4', 'E:/new/b.mp4'],
     );
     expect(moves).toHaveLength(2);
-    expect(moves).toContainEqual({ from: 'D:/old/a.mp4', to: 'E:/new/a.mp4' });
-    expect(moves).toContainEqual({ from: 'D:/old/b.mp4', to: 'E:/new/b.mp4' });
+    expect(moves).toContainEqual({ from: 'D:/old/a.mp4', to: 'E:/new/a.mp4', keepSource: true });
+    expect(moves).toContainEqual({ from: 'D:/old/b.mp4', to: 'E:/new/b.mp4', keepSource: true });
+  });
+});
+
+describe('planAssociationRehome — deleting the old key needs evidence', () => {
+  // The re-home COPIES the association onto the new path. Whether it also
+  // DELETES the old key is a separate decision, and it is the destructive
+  // one: a removed source and a moved file are indistinguishable from here
+  // (neither is in the scan, neither is "offline"), so deleting on that
+  // basis means re-adding the source brings the video back with its
+  // association silently attached to a different video.
+  //
+  // Welliambrisk's log (2026-08-27) is the case: a video under a source he
+  // had removed, and it was the only one there with a manual association.
+  it('keeps the original entry when nothing proves the file is gone', () => {
+    const moves = planAssociationRehome({
+      storedPaths: ['F:/removed/Daisuki.mp4'],
+      scannedPaths: ['E:/live/Daisuki.mp4'],
+      // No isProvablyGone: the source that held it is not being scanned.
+    });
+    expect(moves).toEqual([
+      { from: 'F:/removed/Daisuki.mp4', to: 'E:/live/Daisuki.mp4', keepSource: true },
+    ]);
+  });
+
+  it('deletes the original entry when the scan walked its folder and it was not there', () => {
+    // A real move: D:/old IS a configured source, it scanned fine, and the
+    // file is not in the results. Absence WITH evidence.
+    const moves = planAssociationRehome({
+      storedPaths: ['D:/old/Scene.mp4'],
+      scannedPaths: ['E:/new/Scene.mp4'],
+      isProvablyGone: (path) => path.startsWith('D:/old/'),
+    });
+    expect(moves).toEqual([
+      { from: 'D:/old/Scene.mp4', to: 'E:/new/Scene.mp4', keepSource: false },
+    ]);
+  });
+
+  it('still refuses outright for an offline source, rather than copying', () => {
+    // isUnavailable outranks everything: the drive may come back, and the
+    // entry must be waiting for it at its ORIGINAL path with no duplicate
+    // sitting on an unrelated video in the meantime.
+    expect(planAssociationRehome({
+      storedPaths: ['D:/offline/Scene.mp4'],
+      scannedPaths: ['E:/new/Scene.mp4'],
+      isUnavailable: (path) => path.startsWith('D:/offline/'),
+      isProvablyGone: () => true,
+    })).toEqual([]);
   });
 });
 

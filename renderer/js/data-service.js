@@ -112,6 +112,25 @@ class DataService {
     eventBus.emit('settings:changed', { path, value });
   }
 
+  /**
+   * A value MAIN has already saved (the View menu's zoom keys write
+   * `player.uiScale`, V79): update the cache and tell listeners, without
+   * sending it back. An echo through set() would race a second key press
+   * (main at 125%, the echo of 110% arriving after it).
+   */
+  applySavedSetting(path, value) {
+    const keys = path.split('.');
+    let obj = this._cache.settings;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (!(keys[i] in obj) || typeof obj[keys[i]] !== 'object') {
+        obj[keys[i]] = {};
+      }
+      obj = obj[keys[i]];
+    }
+    obj[keys[keys.length - 1]] = value;
+    eventBus.emit('settings:changed', { path, value });
+  }
+
   addRecentFile(filePath) {
     const recent = this.get('player.recentFiles') || [];
     const filtered = recent.filter((f) => f !== filePath);
@@ -194,12 +213,38 @@ class DataService {
    * must be a reordering of the existing paths. Updates cache synchronously
    * + fire-and-forget IPC (last write wins; callers debounce rapid moves).
    */
-  setPlaylistVideoPaths(id, newVideoPaths) {
+  /**
+   * Reorder a playlist. The cache shows the new order at once, as before,
+   * and then follows main's answer: store.js accepts only a pure reorder and
+   * answers with the order it kept, so a refused write (a stale or partial
+   * list) used to leave the cache showing an order config.json never got,
+   * until a restart (CB-14). Only the latest write for a playlist is
+   * reconciled; an earlier answer is settled by the one after it.
+   */
+  async setPlaylistVideoPaths(id, newVideoPaths) {
     const playlist = this._cache.playlists.find((p) => p.id === id);
     if (playlist && Array.isArray(newVideoPaths)) {
       playlist.videoPaths = [...newVideoPaths];
     }
-    window.funsync.setPlaylistVideoPaths(id, newVideoPaths);
+    this._playlistWrites = this._playlistWrites || new Map();
+    const write = (this._playlistWrites.get(id) || 0) + 1;
+    this._playlistWrites.set(id, write);
+    const sent = window.funsync.setPlaylistVideoPaths(id, newVideoPaths);
+    eventBus.emit('playlist:changed', { action: 'reorder', id });
+    let stored;
+    try {
+      stored = await sent;
+    } catch (err) {
+      console.warn('[DataService] playlist reorder failed:', err?.message || err);
+      return;
+    }
+    if (this._playlistWrites.get(id) !== write || !Array.isArray(stored)) return;
+    const current = this._cache.playlists.find((p) => p.id === id);
+    if (!current) return;
+    const same = current.videoPaths.length === stored.length
+      && current.videoPaths.every((p, i) => p === stored[i]);
+    if (same) return;
+    current.videoPaths = [...stored];
     eventBus.emit('playlist:changed', { action: 'reorder', id });
   }
 
@@ -219,6 +264,37 @@ class DataService {
     }
     window.funsync.removeVideoFromPlaylist(id, videoPath);
     eventBus.emit('playlist:changed', { action: 'removeVideo', id, videoPath });
+  }
+
+  /**
+   * Several videos added or removed with ONE write in main, where a call per
+   * video rewrote config.json once each (a playlist's Select-mode Remove and
+   * its Undo, FT-104). Added paths go on the end, as addVideoToPlaylist does.
+   */
+  addVideosToPlaylist(id, videoPaths) {
+    const paths = Array.isArray(videoPaths) ? videoPaths.slice() : [];
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) {
+      const have = new Set(playlist.videoPaths);
+      for (const p of paths) {
+        if (typeof p !== 'string' || have.has(p)) continue; // as store.js
+        playlist.videoPaths.push(p);
+        have.add(p);
+      }
+    }
+    window.funsync.addVideosToPlaylist(id, paths);
+    eventBus.emit('playlist:changed', { action: 'addVideos', id, videoPaths: paths });
+  }
+
+  removeVideosFromPlaylist(id, videoPaths) {
+    const paths = Array.isArray(videoPaths) ? videoPaths.slice() : [];
+    const drop = new Set(paths);
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) {
+      playlist.videoPaths = playlist.videoPaths.filter((p) => !drop.has(p));
+    }
+    window.funsync.removeVideosFromPlaylist(id, paths);
+    eventBus.emit('playlist:changed', { action: 'removeVideos', id, videoPaths: paths });
   }
 
   // --- Categories ---
@@ -302,6 +378,25 @@ class DataService {
 
   getVideoCategories(videoPath) {
     return this._cache.videoCategories[videoPath] || [];
+  }
+
+  /**
+   * Every video's categories, `{ [videoPath]: [catId, ...] }`. A COPY, so a
+   * caller cannot edit the cache behind assignCategory/unassignCategory's
+   * back (their IPC is what keeps main's store in step). An entry that is not
+   * an array (a hand-edited or damaged config) is left out.
+   *
+   * The map lives at the config ROOT, not under settings, so
+   * `get('library.videoCategories')` is always undefined. Used by the scan's
+   * re-home of a moved video's categories (FT-005) and the library search's
+   * category names (FT-046).
+   */
+  getAllVideoCategories() {
+    const out = {};
+    for (const [path, ids] of Object.entries(this._cache.videoCategories || {})) {
+      if (Array.isArray(ids)) out[path] = [...ids];
+    }
+    return out;
   }
 
   getVideosByCategory(catId) {
