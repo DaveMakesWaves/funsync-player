@@ -4,7 +4,8 @@ import argparse
 import os
 import sys
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -16,6 +17,7 @@ from routes.vr_api import router as vr_api_router
 from routes.remote import router as remote_router
 from routes.remote_sync import router as remote_sync_router
 from routes.locale import router as locale_router, set_user_data_dir
+from routes.downloads import router as downloads_router
 
 app = FastAPI(title="FunSync Backend", version="0.1.0")
 
@@ -35,6 +37,7 @@ app.include_router(vr_api_router, tags=["vr"])
 app.include_router(remote_router, prefix="/api/remote", tags=["remote"])
 app.include_router(remote_sync_router, prefix="/api/remote", tags=["remote-sync"])
 app.include_router(locale_router, prefix="/api/remote", tags=["locale"])
+app.include_router(downloads_router, prefix="/api/downloads", tags=["downloads"])
 
 # Web remote SPA served at /remote/ — static files live in backend/web-remote/.
 # Resolve relative to this file so it works both in dev (python main.py) and
@@ -80,6 +83,44 @@ if _locales_dir:
     app.mount("/locales", StaticFiles(directory=_locales_dir), name="locales")
 
 
+# The phone's "Flat view" (#426, 2026-11-22) runs the desktop's own VR
+# un-projection: renderer/js/vr-projection-renderer.js and its shaders, served
+# here so there is one copy of the GLSL. Only these four files, never the rest
+# of renderer/js. In packaged builds the spec ships them as <_MEIPASS>/vr-flatten/.
+VR_FLATTEN_FILES = frozenset({
+    "vr-projection-renderer.js",
+    "shaders/_passthrough.vert.js",
+    "shaders/equirect.frag.js",
+    "shaders/fisheye.frag.js",
+})
+
+
+def _resolve_vr_flatten_dir() -> str | None:
+    candidates = []
+    if hasattr(sys, "_MEIPASS"):
+        candidates.append(os.path.join(sys._MEIPASS, "vr-flatten"))
+    here = os.path.dirname(os.path.abspath(__file__))
+    candidates.append(os.path.abspath(os.path.join(here, "..", "renderer", "js")))
+    for c in candidates:
+        if os.path.isfile(os.path.join(c, "vr-projection-renderer.js")):
+            return c
+    return None
+
+
+_vr_flatten_dir = _resolve_vr_flatten_dir()
+
+
+@app.get("/vr-flatten/{name:path}")
+async def vr_flatten_file(name: str):
+    if name not in VR_FLATTEN_FILES or not _vr_flatten_dir:
+        raise HTTPException(status_code=404)
+    return FileResponse(
+        os.path.join(_vr_flatten_dir, *name.split("/")),
+        media_type="text/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
 def apply_user_data_dir(user_data_dir: str) -> None:
     """Point the backend's per-user state at Electron's userData dir.
 
@@ -95,6 +136,13 @@ def apply_user_data_dir(user_data_dir: str) -> None:
     """
     set_user_data_dir(user_data_dir)
     set_thumb_cache_dir(os.path.join(user_data_dir, "thumb-cache"))
+    # Convert to play's copies: kept with the app's data, not in temp (2026-11-26).
+    from services import ffmpeg as ffmpeg_service
+    ffmpeg_service.set_converted_dir(os.path.join(user_data_dir, "converted"))
+    # The EroScripts tab's downloads outlive FunSync: one running when it
+    # closed comes back paused, with Resume (2026-11-25).
+    from services import video_downloader
+    video_downloader.manager.set_store(os.path.join(user_data_dir, "downloads.json"))
 
 
 @app.get("/health")

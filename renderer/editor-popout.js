@@ -24,14 +24,19 @@
 
 import { t, initI18n, setLocale, translatePage } from './js/i18n.js';
 import { eventBus } from './js/event-bus.js';
+import { applySeason } from './js/holiday.js';
 import { EditableScript } from './js/editable-script.js';
 import { ActionGraph } from './js/action-graph.js';
+import { startDragMove, dragMoveStep } from './js/editor-drag-move.js';
 import { PopoutVideoPlayerStub } from './js/editor-popout-video-stub.js';
 import {
   icon, Undo2, Redo2, Save, ZoomIn, ZoomOut, Magnet, Trash2,
   FlipVertical2, Spline, Scissors, AudioWaveform, Music,
-  WandSparkles, BookmarkPlus, FileText, Rows3,
+  WandSparkles, BookmarkPlus, FileText, Rows3, Plus, FileOutput, Layers2, CircleDot, Gamepad2, History, FileCheck, Activity,
 } from './js/icons.js';
+import { openGamepadRecordMenu, gamepadTargetAxes } from './components/gamepad-record-menu.js';
+import { cleanPadName, DEFAULT_GAMEPAD_MAPPING } from './js/gamepad-recorder.js';
+import { AXIS_DEFINITIONS } from './js/multi-axis.js';
 import { openKeyboardHelp, getEditorShortcutGroups } from './js/keyboard-help.js';
 import { watchWcoClass } from './js/wco.js';
 import { showToast } from './js/toast.js';
@@ -42,6 +47,11 @@ import {
   PatternFillDrawer, fillDrawerKeyVerdict, rangeFromBand, fillRangeKey, windowSignature,
 } from './components/pattern-fill-drawer.js';
 import { openContextMenu, closeContextMenu, activeContextMenu } from './js/editor-context-menu.js';
+import { selectionStatsText } from './js/selection-stats.js';
+import { openScriptBackupsDialog } from './components/script-backups-dialog.js';
+import { openScriptCheck } from './components/script-check-panel.js';
+import { openUndoHistoryMenu } from './components/undo-history-menu.js';
+import { openVibratePanel } from './components/vibrate-panel.js';
 import {
   TIME_TICK, VIDEO_META, INITIAL_STATE, ACTIONS_CHANGED, SCRIPTS_CHANGED, THEME, SETTINGS, TOAST, LOCALE,
   READY, msg, editOp,
@@ -51,8 +61,8 @@ import {
   OP_INSERT_ALTERNATING, OP_REPEAT_LAST_STROKE, OP_MOVE_SELECTED_TO,
   OP_BEGIN_BATCH, OP_END_BATCH,
   OP_SELECT_BY_POSITION, OP_APPLY_MODIFIER, OP_MOVE_ACTIONS,
-  OP_ADD_BOOKMARK, OP_SELECT_CREATED, OP_SELECT_EVERY_NTH, OP_PLACE_AT, OP_FILL_RANGE, FILL_RESULT,
-  SAVE, VIDEO_SET_RATE, SET_SETTING, VIDEO_PLAY, VIDEO_PAUSE,
+  OP_ADD_BOOKMARK, OP_SELECT_CREATED, OP_SELECT_EVERY_NTH, OP_PLACE_AT, OP_FILL_RANGE, FILL_RESULT, OP_RIPPLE_DELETE, OP_UNDO_STEPS, OP_REDO_STEPS,
+  SAVE, VIDEO_SET_RATE, SET_SETTING, VIDEO_PLAY, VIDEO_PAUSE, STOP_ALL,
   REQUEST_METADATA, REQUEST_FILL_GAPS, REQUEST_BEATS, REQUEST_SIMPLIFY,
   REQUEST_REMAP_RANGE, REQUEST_OFFSET_TIME, REQUEST_REMOVE_PAUSES,
   REQUEST_RANGE_EXTEND, REQUEST_GENERATE_PATTERN, REQUEST_EXPORT_HEATMAP,
@@ -85,6 +95,13 @@ function applyTheme(t) {
 function applyStyle(s) {
   // No-op on undefined so a theme-only message can't reset the style.
   if (s === 'classic' || s === 'modern') document.documentElement.dataset.style = s;
+}
+
+// The Holiday style's palette (v0.10.1): the main window sends its season with
+// the style. No snow in a pop-out. No-op on undefined, like applyStyle.
+function applyPopoutSeason(season) {
+  if (season === undefined) return;
+  applySeason(season === 'holiday' ? 'holiday' : null, document, { snow: false });
 }
 
 host.classList.add('script-editor', 'script-editor--popout-window');
@@ -144,6 +161,62 @@ scriptSelect.addEventListener('change', () => {
 
 const btnUndo   = makeBtn(Undo2,       'editor.btn.undo',         () => send(editOp(OP_UNDO)));
 const btnRedo   = makeBtn(Redo2,       'editor.btn.redo',         () => send(editOp(OP_REDO)));
+// The undo history (work list 4.5): the parent's, sent with every ACTIONS_CHANGED.
+let lastHistory = { undo: [], redo: [] };
+function openPopoutHistory(e, anchor) {
+  e?.preventDefault?.();
+  const r = anchor.getBoundingClientRect();
+  const fromPointer = e?.type === 'contextmenu' && Number.isFinite(e.clientX);
+  openUndoHistoryMenu({
+    x: fromPointer ? e.clientX : r.left, y: fromPointer ? e.clientY : r.bottom,
+    history: lastHistory,
+    // Earlier versions (work list 3.1), under the undo steps (they sat in the
+    // Export menu): the dialog opens here, on this monitor; the parent lands
+    // the version (one undo step) if it still edits that file.
+    extra: [{
+      label: t('editor.backups.menuItem'), hint: t('editor.backups.menuHint'), disabled: !backupFile(),
+      onSelect: () => { const path = backupFile(); openScriptBackupsDialog({ path, onRestore: (content) => send(msg('restore-backup', { path, content })) }); },
+    }],
+    onPick: (kind, steps) => send(editOp(kind === 'undo' ? OP_UNDO_STEPS : OP_REDO_STEPS, { steps })),
+    returnFocus: canvas,
+  });
+}
+btnUndo.addEventListener('contextmenu', (e) => openPopoutHistory(e, btnUndo));
+btnRedo.addEventListener('contextmenu', (e) => openPopoutHistory(e, btnRedo));
+const btnHistory = makeBtn(History, 'editor.history.button', (e) => openPopoutHistory(e, btnHistory));
+// Vibrate (Dave, 2026-11-24): the panel and its live preview here, on this
+// window's copy; Apply asks the parent, which lands it as one undo step.
+let vibrateLast = null;
+const btnVibrate = makeBtn(Activity, 'editor.vibrate.button', () => {
+  openVibratePanel({
+    anchor: btnVibrate,
+    graph,
+    getActions: () => editable.actions,
+    getSelected: () => editable.selectedIndices,
+    getMaxSpeed: () => 0,                               // no cap (Dave): the mark is only said
+    getMarkSpeed: () => ActionGraph.speedLimits?.max || 0,
+    initial: vibrateLast,
+    onRemember: (o) => { vibrateLast = o; },
+    onApply: (opts) => send(editOp(OP_APPLY_MODIFIER, { name: 'vibrate', args: [opts] })),
+    returnFocus: canvas,
+  });
+});
+// Check script (work list 4.2), on this window's copy; a pick selects in the parent.
+const btnCheck = makeBtn(FileCheck, 'editor.check.button', () => {
+  openScriptCheck({
+    actions: editable.actions,
+    getActions: () => editable.actions,
+    limits: { ...(ActionGraph.speedLimits || {}), frameMs: popoutFrameMs },
+    onJump: (at) => {
+      graph.centerOnTime(at);
+      player.video.currentTime = at / 1000;
+      graph.setCursorTime?.(at);
+      graph.draw();
+      updateScrubber();
+    },
+    onSelect: (indices) => send(editOp(OP_SELECT, { indices })),
+  });
+});
 const btnDelete = makeBtn(Trash2,      'editor.btn.delete',       () => send(editOp(OP_DELETE)));
 const btnCut    = makeBtn(Scissors,    'editor.btn.cut',          () => send(editOp(OP_CUT)));
 const btnInvert = makeBtn(FlipVertical2, 'editor.btn.invert',     () => send(editOp(OP_INVERT)));
@@ -215,7 +288,7 @@ const modifySelect = document.createElement('select');
 modifySelect.className = 'editor__speed-select';
 stamp(modifySelect, { title: 'editor.modify.title', aria: 'editor.modify.title' });
 [
-  '', 'halfSpeed', 'doubleSpeed', 'reverse', 'remapRange', 'offsetTime',
+  '', 'halfSpeed', 'doubleSpeed', 'reverse', 'fadeIn', 'fadeOut', 'rippleDelete', 'fromStroke', 'remapRange', 'offsetTime',
   'removePauses', 'rangeExtend', 'generatePattern', 'fillPattern', 'exportHeatmap',
 ].forEach((value) => {
   const opt = document.createElement('option');
@@ -232,6 +305,10 @@ modifySelect.addEventListener('change', () => {
     case 'halfSpeed':   send(editOp(OP_APPLY_MODIFIER, { name: 'halfSpeed' })); break;
     case 'doubleSpeed': send(editOp(OP_APPLY_MODIFIER, { name: 'doubleSpeed' })); break;
     case 'reverse':     send(editOp(OP_APPLY_MODIFIER, { name: 'reverse' })); break;
+    case 'fadeIn':      send(editOp(OP_APPLY_MODIFIER, { name: 'fadeIn' })); break;
+    case 'fadeOut':     send(editOp(OP_APPLY_MODIFIER, { name: 'fadeOut' })); break;
+    case 'rippleDelete': send(editOp(OP_RIPPLE_DELETE)); break;
+    case 'fromStroke':  send(msg('request-from-stroke')); break;
     case 'remapRange':       send(msg(REQUEST_REMAP_RANGE)); break;
     case 'offsetTime':       send(msg(REQUEST_OFFSET_TIME)); break;
     case 'removePauses':     send(msg(REQUEST_REMOVE_PAUSES)); break;
@@ -247,6 +324,38 @@ modifySelect.addEventListener('change', () => {
 // waveform data sync is Tier-B work). Marked as a toggle button so
 // future state-broadcast can flip aria-pressed via _setToggleState. Its own
 // key: it says where the waveform shows (the docked one's does not need to).
+// Recording mode on the toolbar (work list 4.6): the parent owns it; the
+// SETTINGS echo flips this button with the REC indicator.
+const btnRecord = makeBtn(CircleDot, 'editor.btn.record', () =>
+  send(msg(SET_SETTING, { key: 'recordingMode', value: recordingIndicator.hidden })));
+btnRecord.setAttribute('aria-pressed', 'false');
+btnRecord.classList.add('editor__btn--record');
+// Gamepad recording (work list 2.6): the main window records on the real
+// video's time; this window only asks (SET_SETTING) and shows its state.
+let gamepadRecording = false;
+let gamepadMapping = { ...DEFAULT_GAMEPAD_MAPPING };
+function popoutPadName() {
+  try {
+    const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+    return pads.length ? cleanPadName(pads[0].id) : null;
+  } catch { return null; }
+}
+function openPopoutGamepadMenu() {
+  const r = btnGamepad.getBoundingClientRect();
+  openGamepadRecordMenu({
+    x: r.left, y: r.bottom,
+    axes: gamepadTargetAxes({ present: axesPresent, withMain: axisTools }),
+    current: gamepadMapping,
+    padName: popoutPadName(), getPadName: popoutPadName,
+    recording: gamepadRecording,
+    onPick: (m) => send(msg(SET_SETTING, { key: 'gamepadMapping', value: m })),
+    onStart: axisTools ? (m) => { send(msg(SET_SETTING, { key: 'gamepadMapping', value: m })); send(msg(SET_SETTING, { key: 'gamepadRecording', value: true })); } : undefined,
+    onStop: () => send(msg(SET_SETTING, { key: 'gamepadRecording', value: false })),
+    returnFocus: btnGamepad,
+  });
+}
+const btnGamepad = makeBtn(Gamepad2, 'editor.gamepad.button', openPopoutGamepadMenu);
+btnGamepad.setAttribute('aria-pressed', 'false');
 const btnWaveform = makeBtn(AudioWaveform, 'editor.popout.waveformTitle', () =>
   send(msg(REQUEST_TOGGLE_WAVEFORM))
 );
@@ -329,13 +438,43 @@ let parentDirty = false;
 // Used to snap pop-out gesture timestamps before sending them.
 let popoutSnapToFrame = true;
 let popoutFrameMs = 1000 / 30;
+// Where the video's frame grid starts (the docked editor's _framePhaseMs):
+// frames sit at phase + n x popoutFrameMs, not always at n x popoutFrameMs.
+let popoutFramePhaseMs = 0;
 // Ctrl+Left/Right and Ctrl+Shift+Left/Right step this many frames: the docked
 // editor's `editor.fastStepFrames` (the parent sends it in INITIAL_STATE and
 // SETTINGS). It was a literal 6 here, whatever the setting said (D-02).
 let popoutFastStepFrames = 6;
 function snapTime(timeMs) {
   if (!popoutSnapToFrame) return timeMs;
-  return Math.round(timeMs / popoutFrameMs) * popoutFrameMs;
+  return popoutFramePhaseMs + Math.round((timeMs - popoutFramePhaseMs) / popoutFrameMs) * popoutFrameMs;
+}
+
+// Moving the selection by `frames` frames (Shift / Ctrl+Shift+Left/Right), as
+// the docked editor's _frameMoveDeltaMs: with Snap to frame on, the first
+// selected point lands exactly on the frame start that many frames away. A
+// bare frames x duration was rounded to the ms on each press and drifted off
+// the frames, about 1 ms every 3 presses at 29.97 fps (B031).
+function frameMoveDeltaMs(frames) {
+  const raw = frames * popoutFrameMs;
+  if (!popoutSnapToFrame) return raw;
+  const times = [...editable.selectedIndices].map((i) => editable.actions[i]?.at).filter(Number.isFinite);
+  if (!times.length) return raw;
+  const first = Math.min(...times);
+  return snapTime(snapTime(first) + raw) - first;
+}
+
+// The frame grid from INITIAL_STATE / SETTINGS (a new video's rate or grid),
+// and the speed limits the graph marks (the docked editor's _speedLimits).
+function applyFrameGrid(m) {
+  if (m.speedLimits && typeof m.speedLimits === 'object') {
+    ActionGraph.setSpeedLimits(m.speedLimits);
+    graph?.draw?.();
+  }
+  if (typeof m.frameDurationMs === 'number' && m.frameDurationMs > 0) popoutFrameMs = m.frameDurationMs;
+  if (typeof m.framePhaseMs === 'number' && m.framePhaseMs >= 0 && m.framePhaseMs < popoutFrameMs) {
+    popoutFramePhaseMs = m.framePhaseMs;
+  }
 }
 
 // Dock-back is the pop-out's `Pop out` button — sits in the same
@@ -351,12 +490,78 @@ btnDock.className = 'editor__btn editor__btn--active editor__btn--dock';
 stamp(btnDock, { text: 'editor.popout.dock', title: 'editor.btn.dock', aria: 'editor.btn.dock' });
 btnDock.addEventListener('click', () => window.funsync.editorPopoutClose());
 
+// ===== The video's axes (multi-axis editing, 2026-11-24) ===================
+// The docked editor's New axis, Export and stacked lanes, in this window. The
+// parent owns every axis (its session, its Save); this window asks for the
+// work and draws what it is sent.
+let axisTools = false;          // a script is loaded and the list is axes (not Custom Routing routes)
+let axesPresent = new Set();    // the axes the video has (canonical suffixes)
+let lanesOn = false;
+// The tracks' pace during playback (syncLanes).
+const LANE_FRAME_MS = 12;
+let lanesDrawnAt = -Infinity;
+let lanesAlignedAt = -Infinity;
+let lanesAlignDirty = true;
+let lanesRaf = 0;
+const btnNewAxis = makeBtn(Plus, 'editor.btn.newAxis', () => {
+  const r = btnNewAxis.getBoundingClientRect();
+  openContextMenu({
+    x: r.left, y: r.bottom,
+    ariaLabel: t('editor.newAxis.menu'),
+    returnFocus: btnNewAxis,
+    items: AXIS_DEFINITIONS.map((def) => ({
+      label: `${def.label} (${def.tcode})`,
+      disabled: axesPresent.has(def.suffix),
+      hint: axesPresent.has(def.suffix) ? t('editor.newAxis.have') : '',
+      onSelect: () => send(msg('axis-create', { suffix: def.suffix })),
+    })),
+  });
+});
+const btnExportAxes = makeBtn(FileOutput, 'editor.btn.exportAxes', () => {
+  const r = btnExportAxes.getBoundingClientRect();
+  openContextMenu({
+    x: r.left, y: r.bottom,
+    ariaLabel: t('editor.export.menu'),
+    returnFocus: btnExportAxes,
+    items: [
+      { heading: t('editor.export.thisScript') },
+      { label: t('editor.export.saveAs'), hint: t('editor.export.saveAsHint'), onSelect: () => send(msg('save-as')) },
+      { heading: t('editor.export.everyAxis') },
+      { label: t('editor.export.combined'), hint: t('editor.export.combinedHint'), onSelect: () => send(msg('axes-export', { kind: 'combined' })) },
+      { label: t('editor.export.separate'), hint: t('editor.export.separateHint'), onSelect: () => send(msg('axes-export', { kind: 'separate' })) },
+    ],
+  });
+});
+/**
+ * What Save writes for this video, as the parent says (into the combined file,
+ * each axis to its own file, or plain Save): the button's tooltip and name, and
+ * its keys for a later language change.
+ */
+function applySaveKey(key) {
+  if (!key) return;
+  stamp(btnSave, { title: key, aria: key });
+  btnSave.title = t(key);
+  btnSave.setAttribute('aria-label', t(key));
+}
+
+/** The script FILE of the script on screen (an axis in a combined file is in it); never a stream. */
+function backupFile() {
+  const p = activePath;
+  if (typeof p !== 'string' || !p || p.startsWith('stream:')) return null;
+  const i = p.indexOf('#embedded=');
+  return i >= 0 ? p.slice(0, i) : p;
+}
+const btnStacked = makeBtn(Layers2, 'editor.btn.stacked', () => setLanes(!lanesOn));
+btnNewAxis.hidden = true;
+btnExportAxes.hidden = true;
+btnStacked.hidden = true;
+
 toolbar.append(
-  scriptSelect, makeSep(true),
-  btnUndo, btnRedo, makeSep(),
-  btnDelete, btnCut, btnInvert, btnSimplify, makeSep(),
+  scriptSelect, btnStacked, btnNewAxis, btnExportAxes, makeSep(true),
+  btnUndo, btnRedo, btnHistory, makeSep(),
+  btnDelete, btnCut, btnInvert, btnSimplify, btnVibrate, makeSep(),
   selectMenu, modifySelect, makeSep(),
-  btnMetadata, btnBookmark, btnFillGaps, btnWaveform, btnBeats, makeSep(true),
+  btnMetadata, btnBookmark, btnFillGaps, btnCheck, btnWaveform, btnBeats, btnRecord, btnGamepad, makeSep(true),
   btnZoomIn, btnZoomOut, btnFitAll, makeSep(true),
   speedGroup, makeSep(true),
   btnSave, btnDock, snapLabel, splineLabel, recordingIndicator, statusEl,
@@ -392,6 +597,203 @@ const player = new PopoutVideoPlayerStub({ send });
 const graph = new ActionGraph(canvas, editable);
 let hydrated = false;
 let activePath = null;
+
+// The stacked lanes: the video's other axes, read-only, above this window's
+// timeline and locked to its view; a click edits that axis (as the docked
+// editor's Stacked View). The parent sends their points while they show.
+const lanesContainer = document.createElement('div');
+lanesContainer.className = 'editor__stacked-lanes';
+lanesContainer.hidden = true;
+host.insertBefore(lanesContainer, canvasContainer);
+// The tracks keep their order (fixed-order tracks, Dave 2026-11-24): the one
+// being edited is this window's timeline in its own place, the ones before it
+// above, the ones after it here below; its name sits in the timeline's gutter.
+const lanesAfter = document.createElement('div');
+lanesAfter.className = 'editor__stacked-lanes editor__stacked-lanes--after';
+lanesAfter.hidden = true;
+canvasContainer.after(lanesAfter);
+const trackLabel = document.createElement('span');
+trackLabel.className = 'editor__track-label';
+canvasContainer.appendChild(trackLabel);
+const TRACK_GUTTER_PX = 92;
+// The graph follows its box (the lanes coming and going, a window resize):
+// the docked editor has the same watcher (_resizeObserver).
+if (typeof ResizeObserver !== 'undefined') {
+  let rsFrame = 0;
+  new ResizeObserver(() => {
+    if (rsFrame) return;
+    rsFrame = requestAnimationFrame(() => { rsFrame = 0; try { graph.resize(); graph.draw(); } catch { /* not ready */ } });
+  }).observe(canvasContainer);
+}
+const lanes = [];
+
+function setLanes(on) {
+  lanesOn = !!on;
+  btnStacked.setAttribute('aria-pressed', String(lanesOn));
+  btnStacked.classList.toggle('editor__btn--active', lanesOn);
+  lanesContainer.hidden = !lanesOn;
+  lanesAfter.hidden = !lanesOn;
+  host.classList.toggle('script-editor--stacked', lanesOn);
+  graph.setGutter?.(lanesOn ? TRACK_GUTTER_PX : 40);
+  try { graph.draw(); } catch { /* not hydrated yet */ }
+  if (!lanesOn) {
+    lanesContainer.innerHTML = '';
+    lanesAfter.innerHTML = '';
+    lanes.length = 0;
+  }
+  send(msg('lanes-wanted', { on: lanesOn }));
+}
+
+// Lanes hidden with a right-click (work list 2.2), for this window; the
+// last list the parent sent, to draw again after a hide or a show.
+const hiddenLanes = new Set();
+let lastLanes = [];
+function openLaneMenu(e, l) {
+  e.preventDefault();
+  e.stopPropagation();
+  openContextMenu({
+    x: e.clientX, y: e.clientY,
+    ariaLabel: t('editor.lanes.menu'),
+    items: [
+      { label: t('editor.lanes.hide', { name: l.label }), onSelect: () => { hiddenLanes.add(l.path); renderLanes(lastLanes); } },
+      { label: t('editor.lanes.showAll'), disabled: hiddenLanes.size === 0, onSelect: () => { hiddenLanes.clear(); renderLanes(lastLanes); } },
+    ],
+  });
+}
+
+function renderLanes(list) {
+  lanesContainer.innerHTML = '';
+  lanesAfter.innerHTML = '';
+  lanes.length = 0;
+  lastLanes = list || [];
+  if (!lanesOn) return;
+  // The parent's list is in the tracks' order, the one being edited marked.
+  const activeAt = lastLanes.findIndex((l) => l.active);
+  trackLabel.textContent = activeAt >= 0 ? (lastLanes[activeAt].label || '') : '';
+  const shown = lastLanes.filter((l) => !l.active && !hiddenLanes.has(l.path));
+  for (const l of shown) {
+    const container = document.createElement('div');
+    container.className = 'editor__lane editor__lane--inactive';
+    container.title = t('editor.lanes.clickToEdit', { name: l.label });
+    const label = document.createElement('span');
+    label.className = 'editor__lane-label';
+    label.textContent = l.label;
+    const laneCanvas = document.createElement('canvas');
+    laneCanvas.className = 'editor__lane-canvas';
+    container.append(label, laneCanvas);
+    const laneScript = new EditableScript();
+    laneScript._actions = (l.actions || []).map((a) => ({ at: a.at, pos: a.pos }));
+    const laneGraph = new ActionGraph(laneCanvas, laneScript);
+    laneGraph.setCompact(true);
+    container.addEventListener('click', () => {
+      send(msg('script-switch', { path: l.path }));
+      // The keys go to this window's timeline (as the docked editor's).
+      try { canvas.focus({ preventScroll: true }); } catch { /* not shown */ }
+    });
+    container.addEventListener('contextmenu', (e) => openLaneMenu(e, l));
+    (activeAt >= 0 && lastLanes.indexOf(l) < activeAt ? lanesContainer : lanesAfter).appendChild(container);
+    try { laneGraph.resize(); } catch { /* not visible yet */ }
+    lanes.push({ path: l.path, graph: laneGraph });
+  }
+  const hiddenCount = lastLanes.filter((l) => !l.active).length - shown.length;
+  if (hiddenCount > 0) {
+    const show = document.createElement('button');
+    show.type = 'button';
+    show.className = 'editor__lanes-show-hidden';
+    show.textContent = t('editor.lanes.showHidden', { count: hiddenCount });
+    show.addEventListener('click', () => { hiddenLanes.clear(); renderLanes(lastLanes); });
+    lanesAfter.appendChild(show);
+  }
+  // Laid out with the Show hidden row in (it counts in the height: it went
+  // below the fold with room to spare, fit-on-screen pass).
+  layoutPopoutLanes(shown.length);
+  // Short of room the boxes scroll: they open on the tracks next to the one
+  // being edited (the box above at its end, the box below at its top).
+  lanesContainer.scrollTop = lanesContainer.scrollHeight;
+  lanesAfter.scrollTop = 0;
+  // Sized now: the lane canvases take their new height.
+  for (const l of lanes) { try { l.graph.resize(); } catch { /* not visible yet */ } }
+  syncLanes();
+}
+
+/**
+ * Every lane fits (Dave, 2026-11-24: in the pop-out the last lane went off
+ * screen): the lanes area takes at most 40% of the editor host, the lanes
+ * share it (56 px each down to 30), and more than fit scroll. Re-run on a
+ * window resize.
+ */
+function layoutPopoutLanes(n = lanes.length) {
+  lanesAlignDirty = true;
+  const boxes = [lanesContainer, lanesAfter];
+  const shownBoxes = boxes.filter((b) => b.childElementCount > 0);
+  for (const b of boxes) if (!b.childElementCount) b.style.height = '';
+  if (!lanesOn || !shownBoxes.length) return;
+  const lanesIn = (b) => b.querySelectorAll('.editor__lane').length;
+  // Of the room the lanes share with the main graph (the window less its
+  // title strip, the toolbar's rows and the scrubber), at most 45%, and never
+  // so much that the main graph drops under 160 px: past that the lanes scroll
+  // (a 720x460 window left the main graph 99 px, fit-on-screen pass).
+  const host = document.getElementById('editor-popout-host');
+  const total = host?.getBoundingClientRect?.().height || window.innerHeight || 700;
+  const fixed = (toolbar?.offsetHeight || 0) + (scrubber?.offsetHeight || 0);
+  const room = Math.max(0, total - fixed);
+  const cap = Math.max(72, Math.min(Math.round(room * 0.45), room - 160));
+  // A box's padding and border, and the Show hidden row (+ its gap).
+  const chromeOf = (b) => {
+    const bar = b.querySelector('.editor__lanes-show-hidden')?.offsetHeight || 0;
+    return 5 + (bar ? bar + 1 : 0);
+  };
+  const chrome = shownBoxes.reduce((sum, b) => sum + chromeOf(b), 0);
+  const lanesTotal = Math.min(n * 57 + chrome, cap);
+  const laneH = n ? Math.max(30, Math.min(56, Math.floor((lanesTotal - chrome) / n) - 1)) : 30;
+  // Each box its lanes at that height; short of room, shared out (each scrolls).
+  const natural = shownBoxes.map((b) => lanesIn(b) * (laneH + 1) + chromeOf(b));
+  const sum = natural.reduce((a, b) => a + b, 0);
+  shownBoxes.forEach((b, i) => {
+    const h = sum <= lanesTotal ? natural[i]
+      : Math.max(Math.min(natural[i], chromeOf(b) + laneH + 1), Math.floor((lanesTotal * natural[i]) / sum));
+    b.style.height = `${h}px`;
+    b.style.setProperty('--lane-h', `${laneH}px`);
+  });
+}
+window.addEventListener('resize', () => {
+  if (!lanesOn || (!lanes.length && !lanesAfter.childElementCount)) return;
+  layoutPopoutLanes(lanes.length);
+  for (const l of lanes) { try { l.graph.resize(); } catch { /* hidden */ } }
+  syncLanes();
+});
+
+// During playback the tracks draw at most every LANE_FRAME_MS and line up with
+// the plot again only after a layout change or twice a second, as the docked
+// editor's (script-editor.js _syncInactiveLanes; Dave, 2026-11-25: "speed up
+// the player when in editor"). Paused, every redraw is at once.
+function syncLanes() {
+  if (!lanesOn) return;
+  const playing = player.paused === false;
+  const now = performance.now();
+  if (playing && now - lanesDrawnAt < LANE_FRAME_MS) {
+    if (!lanesRaf) lanesRaf = requestAnimationFrame(() => { lanesRaf = 0; syncLanes(); });
+    return;
+  }
+  lanesDrawnAt = now;
+  const align = !playing || lanesAlignDirty || now - lanesAlignedAt > 500;
+  if (align) { lanesAlignDirty = false; lanesAlignedAt = now; }
+  for (const l of lanes) {
+    l.graph.setVideoDuration(graph._videoDurationMs);
+    if (align || !l.aligned) { l.graph.alignTo(graph); l.aligned = true; }
+    l.graph.setViewport(graph.viewStartMs, graph.viewEndMs);
+    l.graph.setCursorTime(graph._cursorMs);
+    l.graph._splineMode = graph._splineMode;
+    l.graph.draw();
+  }
+}
+// Every redraw of this window's timeline moves the lanes with it.
+const drawTimeline = graph.draw.bind(graph);
+graph.draw = (...args) => {
+  const r = drawTimeline(...args);
+  syncLanes();
+  return r;
+};
 
 // ===== Fill with pattern (pattern library, Round 2) =======================
 // The docked editor's drawer, in this window, beside this window's timeline.
@@ -740,12 +1142,15 @@ canvas.addEventListener('mousedown', (e) => {
       sel.add(hitIdx);
       send(editOp(OP_SELECT, { indices: [hitIdx] }));
     }
+    // The grabbed point leads, by the cursor's travel since the press, and
+    // the steps go as OP_MOVE_ACTIONS on the selection (editor-drag-move.js).
+    // OP_UPDATE by the press-time index moved the NEIGHBOUR once the point
+    // passed it, and dropped a point on the path mid-drag (B032).
+    const cursorAt = graph.xToTime?.(x);
+    const cursorPos = graph.yToPos?.(y);
     dragState = {
       mode: 'move',
-      indices: [...sel],
-      anchorMs: action.at,
-      anchorPos: action.pos,
-      originals: [...sel].map(i => ({ idx: i, at: editable.actions[i].at, pos: editable.actions[i].pos })),
+      move: startDragMove({ anchorAt: action.at, anchorPos: action.pos, cursorAt, cursorPos }),
       lastSendAt: 0,
     };
     send(editOp(OP_BEGIN_BATCH));
@@ -781,20 +1186,13 @@ canvas.addEventListener('mousemove', (e) => {
     const now = performance.now();
     if (now - dragState.lastSendAt < DRAG_THROTTLE_MS) return;
     dragState.lastSendAt = now;
-    const newTimeMs = graph.xToTime?.(x);
-    const newPos = graph.yToPos?.(y);
-    if (typeof newTimeMs !== 'number' || typeof newPos !== 'number') return;
-    const deltaT = newTimeMs - dragState.anchorMs;
-    const deltaP = newPos - dragState.anchorPos;
-    for (const o of dragState.originals) {
-      send(editOp(OP_UPDATE, {
-        idx: o.idx,
-        fields: {
-          at: Math.max(0, Math.round(o.at + deltaT)),
-          pos: Math.max(0, Math.min(100, Math.round(o.pos + deltaP))),
-        },
-      }));
-    }
+    // Snapped to the frame with Snap to frame on, as a click or a key (B031).
+    const step = dragMoveStep(dragState.move, {
+      cursorAt: graph.xToTime?.(x),
+      cursorPos: graph.yToPos?.(y),
+      snap: popoutSnapToFrame ? snapTime : null,
+    });
+    if (step) send(editOp(OP_MOVE_ACTIONS, step));
   } else if (dragState.mode === 'rubber') {
     dragState.currentX = x;
     dragState.currentY = y;
@@ -884,6 +1282,8 @@ function clearRubberBand() {
 // key reached 100 and custom keys did nothing here.
 
 let customPositionKeyMap = new Map();
+// The bindings themselves, for the ? list (it reads no settings store here).
+let customPositionKeys = [];
 
 window.addEventListener('keydown', (e) => {
   if (!hydrated) return;
@@ -941,7 +1341,7 @@ window.addEventListener('keydown', (e) => {
       } else if (e.shiftKey && editable.selectedIndices.size > 0) {
         // Shift+Left → move selected by ±frame; Ctrl+Shift+Left → ±N frames
         const frames = ctrl ? popoutFastStepFrames : 1;
-        send(editOp(OP_MOVE_ACTIONS, { deltaAt: -frames * popoutFrameMs }));
+        send(editOp(OP_MOVE_ACTIONS, { deltaAt: frameMoveDeltaMs(-frames) }));
       } else if (ctrl) {
         player.stepFrames(-popoutFastStepFrames);
       } else {
@@ -954,7 +1354,7 @@ window.addEventListener('keydown', (e) => {
         runSelectCommand('afterPlayhead');
       } else if (e.shiftKey && editable.selectedIndices.size > 0) {
         const frames = ctrl ? popoutFastStepFrames : 1;
-        send(editOp(OP_MOVE_ACTIONS, { deltaAt: frames * popoutFrameMs }));
+        send(editOp(OP_MOVE_ACTIONS, { deltaAt: frameMoveDeltaMs(frames) }));
       } else if (ctrl) {
         player.stepFrames(popoutFastStepFrames);
       } else {
@@ -968,9 +1368,10 @@ window.addEventListener('keydown', (e) => {
         // Shift+Up → nudge position +5 (Ctrl: +1)
         send(editOp(OP_MOVE_ACTIONS, { deltaPos: ctrl ? 1 : 5 }));
       } else {
-        // Plain Up → select previous action (and seek video). Local
+        // Plain Up → the NEXT action (and seek), as in OpenFunscripter
+        // (TedBaxter, Discord, 2026-11-22: it was the previous one). Local
         // lookup against the pop-out's mirror of actions, then dispatch.
-        selectAdjacentAction(-1);
+        selectAdjacentAction(1);
       }
       break;
     case 'ArrowDown':
@@ -978,7 +1379,8 @@ window.addEventListener('keydown', (e) => {
       if (e.shiftKey && editable.selectedIndices.size > 0) {
         send(editOp(OP_MOVE_ACTIONS, { deltaPos: ctrl ? -1 : -5 }));
       } else {
-        selectAdjacentAction(1);
+        // Down → the PREVIOUS action (OFS prev_action).
+        selectAdjacentAction(-1);
       }
       break;
     // Space plays / pauses the video that plays (the player window's while it
@@ -990,6 +1392,8 @@ window.addEventListener('keydown', (e) => {
       if (ctrl || e.altKey || e.repeat) break;
       if (e.target?.closest?.('button, select, input, textarea, [contenteditable="true"]')) break;
       e.preventDefault();
+      // Shift+Space: Stop all (DESIGN.md §2.15), as in the main window.
+      if (e.shiftKey) { send(msg(STOP_ALL)); break; }
       send(msg(player.paused ? VIDEO_PLAY : VIDEO_PAUSE));
       break;
     case '+': case '=':
@@ -1002,8 +1406,20 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'Delete': case 'Backspace':
       e.preventDefault();
-      send(editOp(OP_DELETE));
+      // Shift+Del: ripple delete (close the gap; work list 4.3).
+      send(editOp(e.shiftKey && e.key === 'Delete' ? OP_RIPPLE_DELETE : OP_DELETE));
       break;
+    // PageUp / PageDown: the previous / next script in the list (OFS; work
+    // list 2.1). The parent switches, as a pick in the list would.
+    case 'PageUp': case 'PageDown': {
+      const paths = [...scriptSelect.options].map((o) => o.value);
+      if (paths.length < 2) break;
+      e.preventDefault();
+      const i = Math.max(0, paths.indexOf(activePath));
+      const next = paths[(i + (e.key === 'PageDown' ? 1 : -1) + paths.length) % paths.length];
+      if (next && next !== activePath) send(msg('script-switch', { path: next }));
+      break;
+    }
     case 'Escape':
       e.preventDefault();
       // A marked fill range goes too (the docked editor's Esc).
@@ -1057,7 +1473,8 @@ window.addEventListener('keydown', (e) => {
         e.preventDefault();
         // Toggle recording mode in parent — SETTINGS echo flips the
         // REC indicator visibility on this side.
-        send(msg(SET_SETTING, { key: 'recordingMode', value: !recordingIndicator.hidden ? false : true }));
+        if (e.shiftKey) openPopoutGamepadMenu();   // Shift+R: record with a gamepad (work list 2.6)
+        else send(msg(SET_SETTING, { key: 'recordingMode', value: !recordingIndicator.hidden ? false : true }));
       }
       break;
 
@@ -1076,6 +1493,10 @@ window.addEventListener('keydown', (e) => {
       }
       break;
 
+    // T: the stroke behind an axis off / on (work list 2.3); the parent owns it.
+    case 't': case 'T':
+      if (!ctrl && !e.altKey) { e.preventDefault(); send(msg('reference-toggle')); }
+      break;
     case 'w': case 'W':
       if (!ctrl) {
         e.preventDefault();
@@ -1099,7 +1520,8 @@ window.addEventListener('keydown', (e) => {
       }
       break;
     case 's': case 'S':
-      if (ctrl) { e.preventDefault(); send(msg(SAVE)); }
+      // Ctrl+Shift+S: Save As (belgriffinite #439), done by the parent.
+      if (ctrl) { e.preventDefault(); send(e.shiftKey ? msg('save-as') : msg(SAVE)); }
       break;
     case 'e': case 'E':
       if (!ctrl) { e.preventDefault(); send(editOp(OP_EQUALIZE)); }
@@ -1276,7 +1698,7 @@ function stepSpeed(direction) {
 
 /** ? — the docked editor's shortcut list (_openKeyboardHelp), same title. */
 function openHelp() {
-  openKeyboardHelp(t('editor.keyboardHelpTitle'), getEditorShortcutGroups());
+  openKeyboardHelp(t('editor.keyboardHelpTitle'), getEditorShortcutGroups({ customPositionKeys }));
 }
 
 // ===== Language (FT-103) ==================================================
@@ -1318,18 +1740,22 @@ window.funsync.onEditorPopoutEvent((event) => {
   switch (m.type) {
     case THEME: {
       applyTheme(m.theme);
-      applyStyle(m.uiStyle);
+      applyStyle(m.uiStyle); applyPopoutSeason(m.season);
       break;
     }
     case INITIAL_STATE: {
       if (m.theme) applyTheme(m.theme);
-      applyStyle(m.uiStyle);
+      applyStyle(m.uiStyle); applyPopoutSeason(m.season);
       // The main window's language (FT-103). The window is labelled in
       // English by now; setLocale walks the keys and retranslateWindow()
       // redoes the status line, once the bundle is in.
       if (typeof m.locale === 'string' && m.locale) applyLocale(m.locale);
       activePath = m.activePath || null;
       updateScriptSelect(m.scripts || [], activePath);
+      applySaveKey(m.saveKey);
+      // The stroke behind an axis (work list 2.3): the parent decides.
+      graph.setReference?.(m.reference || null);
+      applyAxisTools(m);
       if (Array.isArray(m.actions)) {
         editable.loadFromData({ version: '1.0', actions: m.actions });
       }
@@ -1352,15 +1778,22 @@ window.funsync.onEditorPopoutEvent((event) => {
       }
       if (typeof m.recordingMode === 'boolean') {
         recordingIndicator.hidden = !m.recordingMode;
+        btnRecord.setAttribute('aria-pressed', String(m.recordingMode));
+        btnRecord.classList.toggle('editor__btn--active', m.recordingMode);
       }
-      if (typeof m.frameDurationMs === 'number' && m.frameDurationMs > 0) {
-        popoutFrameMs = m.frameDurationMs;
+      if (typeof m.gamepadRecording === 'boolean') {
+        gamepadRecording = m.gamepadRecording;
+        btnGamepad.setAttribute('aria-pressed', String(gamepadRecording));
+        btnGamepad.classList.toggle('editor__btn--active', gamepadRecording);
       }
+      if (m.gamepadMapping && typeof m.gamepadMapping === 'object') gamepadMapping = { ...DEFAULT_GAMEPAD_MAPPING, ...m.gamepadMapping };
+      applyFrameGrid(m);
       if (Number.isInteger(m.fastStepFrames) && m.fastStepFrames > 0) {
         popoutFastStepFrames = m.fastStepFrames;
       }
       if (Array.isArray(m.customPositionKeys)) {
         customPositionKeyMap = buildResolverMap(m.customPositionKeys);
+        customPositionKeys = m.customPositionKeys;
       }
       if (m.patternFill !== undefined) patternFillOptions = m.patternFill;
       if (typeof m.videoRate === 'number') {
@@ -1412,16 +1845,26 @@ window.funsync.onEditorPopoutEvent((event) => {
       }
       if (typeof m.recordingMode === 'boolean') {
         recordingIndicator.hidden = !m.recordingMode;
+        btnRecord.setAttribute('aria-pressed', String(m.recordingMode));
+        btnRecord.classList.toggle('editor__btn--active', m.recordingMode);
       }
+      if (typeof m.gamepadRecording === 'boolean') {
+        gamepadRecording = m.gamepadRecording;
+        btnGamepad.setAttribute('aria-pressed', String(gamepadRecording));
+        btnGamepad.classList.toggle('editor__btn--active', gamepadRecording);
+      }
+      if (m.gamepadMapping && typeof m.gamepadMapping === 'object') gamepadMapping = { ...DEFAULT_GAMEPAD_MAPPING, ...m.gamepadMapping };
       if (typeof m.playbackRate === 'number' && speedSelect.value !== String(m.playbackRate)) {
         speedSelect.value = String(m.playbackRate);
       }
       if (Array.isArray(m.customPositionKeys)) {
         customPositionKeyMap = buildResolverMap(m.customPositionKeys);
+        customPositionKeys = m.customPositionKeys;
       }
       if (Number.isInteger(m.fastStepFrames) && m.fastStepFrames > 0) {
         popoutFastStepFrames = m.fastStepFrames;
       }
+      applyFrameGrid(m);
       if (m.patternFill !== undefined) patternFillOptions = m.patternFill;
       break;
     }
@@ -1477,6 +1920,7 @@ window.funsync.onEditorPopoutEvent((event) => {
         editable._bookmarks = m.bookmarks.map(b => ({ ...b }));
       }
       if (typeof m.dirty === 'boolean') parentDirty = m.dirty;
+      if (m.history && Array.isArray(m.history.undo)) lastHistory = m.history;
       // A marked fill range holds once the band's selection is back, and ends
       // with any other selection or an edit there (its key).
       followFillRange();
@@ -1492,6 +1936,14 @@ window.funsync.onEditorPopoutEvent((event) => {
       if (m.activePath && m.activePath !== activePath) fillDrawer?.close('cancel');
       if (m.activePath) activePath = m.activePath;
       updateScriptSelect(m.scripts || [], activePath);
+      // What Save writes, as the docked editor's tooltip says it.
+      applySaveKey(m.saveKey);
+      if (m.reference !== undefined) { graph.setReference?.(m.reference || null); graph.draw(); }
+      applyAxisTools(m);
+      break;
+    }
+    case 'lanes': {
+      renderLanes(m.lanes);
       break;
     }
     case FILL_RESULT: {
@@ -1520,9 +1972,22 @@ function updateStatus() {
   let text = selected > 0
     ? t('editor.statusSelected', { count, selected })
     : t('editor.status', { count });
+  // The docked editor's selection statistics (work list 4.1).
+  const stats = selected > 1 ? selectionStatsText(editable.actions, editable.selectedIndices, t) : '';
+  if (stats) text += ` · ${stats}`;
   if (parentDirty) text += ' *';
   statusEl.textContent = text;
   statusEl.className = parentDirty ? 'editor__status editor__status--dirty' : 'editor__status';
+}
+
+/** New axis / Export / Stacked, as the docked editor shows them (multi-axis editing). */
+function applyAxisTools(m) {
+  axisTools = m.axisTools === true;
+  axesPresent = new Set(Array.isArray(m.axesPresent) ? m.axesPresent : []);
+  btnNewAxis.hidden = !axisTools;
+  btnExportAxes.hidden = !axisTools;
+  btnStacked.hidden = (m.scripts || []).length < 2;
+  if (btnStacked.hidden && lanesOn) setLanes(false);
 }
 
 function updateScriptSelect(scripts, active) {

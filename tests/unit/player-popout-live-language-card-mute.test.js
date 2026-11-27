@@ -97,7 +97,7 @@ describe('an open shortcut card follows a language switch (FT-065)', () => {
     expect(c.title).toBe(DE.player.keyboardShortcuts);
     expect(c.rows[0]).toEqual({ keys: [DE.keys.space, 'K'], text: DE.player.play });
     expect(c.rows[1].text).toBe(DE.kbd.seek5s);
-    expect(c.rows).toHaveLength(8);
+    expect(c.rows).toHaveLength(9); // + Shift+Space, Stop all (2026-11-23)
     expect(document.querySelectorAll('#ppo-shortcuts')).toHaveLength(1);
 
     await switchTo('en');

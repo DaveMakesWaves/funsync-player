@@ -86,6 +86,18 @@ export function resolveLocale(rawCode) {
  * @param {Object} [params] interpolation values for ICU MessageFormat
  * @returns {string}
  */
+/**
+ * The ENGLISH text of a key whatever the locale, or null. For search terms
+ * only (Settings search, 2026-11-23): English words people know (feed,
+ * hotkey, Handy) find a setting in every language. Never for display.
+ * @param {string} key
+ * @returns {string|null}
+ */
+export function tEnglish(key) {
+  const v = _lookup(_enDict, key);
+  return typeof v === 'string' ? v : null;
+}
+
 export function t(key, params) {
   const tpl = _lookup(_dict, key) ?? _lookup(_enDict, key);
   if (tpl == null) return key;

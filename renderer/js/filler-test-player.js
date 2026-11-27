@@ -63,7 +63,9 @@ export class FillerTestPlayer {
   /**
    * True when a video is already driving the devices. Testing then would put
    * two writers on one device and leave whichever lost holding a stale value,
-   * so the caller is expected to refuse rather than fight.
+   * so the caller is expected to refuse rather than fight. A loaded but PAUSED
+   * video is not driving (the engines' isDriving), so the Test runs then; if
+   * the video starts while a Test runs, the Test stops itself (_tick).
    */
   get blockedByPlayback() {
     return !!(this.buttplugSync?.isDriving?.() || this.tcodeSync?.isDriving?.());
@@ -105,7 +107,7 @@ export class FillerTestPlayer {
    * output holds its last value until something tells it otherwise, which is
    * the exact failure the Orgasm Switch release hit on 2026-08-14.
    */
-  stop() {
+  stop(reason = '') {
     if (this._handle !== null) {
       this._clearInterval(this._handle);
       this._handle = null;
@@ -116,11 +118,18 @@ export class FillerTestPlayer {
     this._lastInterp = -1;
     try { this.buttplugSync?.stopTestOutput?.(); } catch { /* best-effort */ }
     try { this.tcodeSync?.stopTestOutput?.(); } catch { /* best-effort */ }
-    if (this.onEnd) this.onEnd();
+    if (this.onEnd) this.onEnd(reason);
   }
 
   _tick() {
     if (!this._actions) return;
+    // The paused video was started: playback owns the devices again. Hand
+    // them over at once (stopTestOutput then sends nothing, the video is
+    // driving) rather than write over it.
+    if (this.blockedByPlayback) {
+      this.stop('playback');
+      return;
+    }
     const elapsed = this._now() - this._startedAt;
     if (elapsed >= this._durationMs) {
       if (this.onProgress) this.onProgress(1, this._lastInterp);

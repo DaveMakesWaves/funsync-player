@@ -375,6 +375,42 @@ describe('ButtplugSync', () => {
       expect(mockButtplug.stopAll).toHaveBeenCalled();
     });
 
+    // brokenobj #431 (2026-11-22): a Lovense Solace Pro kept going at its last
+    // speed on pause. Its one motor takes position AND an oscillate speed, and
+    // the StopDeviceCmd alone left the speed set: every sustained output is
+    // zeroed explicitly as well, on pause, at the end and on stop().
+    it('pause, ended and stop() zero every sustained output as well as StopDeviceCmd', async () => {
+      const real = new (await import('../../renderer/js/buttplug-manager.js')).ButtplugManager();
+      const sent = [];
+      real._client = { stopAllDevices: vi.fn(async () => { sent.push('StopDeviceCmd'); }) };
+      real._connected = true;
+      // The device config's Solace Pro: feature 0 is hw_position_with_duration AND oscillate.
+      Object.defineProperty(real, 'devices', { value: [{ index: 0, name: 'Lovense Solace Pro', canLinear: true, canOscillate: true, canVibrate: false, canRotate: false, canScalar: false }] });
+      real.sendOscillate = vi.fn(async (i, v) => { sent.push(`Oscillate ${i}=${v}`); });
+      real.sendVibrate = vi.fn();
+      real.sendRotate = vi.fn();
+      real.sendScalar = vi.fn();
+      for (const run of [(s) => s._handlePause(), (s) => s._handleEnded(), (s) => s.stop()]) {
+        sent.length = 0;
+        const s = new ButtplugSync({ videoPlayer: mockPlayer, buttplugManager: real, funscriptEngine: mockFunscript });
+        s.start();
+        run(s);
+        await new Promise((r) => setTimeout(r, 0));
+        expect(sent).toContain('Oscillate 0=0');
+        expect(sent).toContain('StopDeviceCmd');
+      }
+    });
+
+    it('a failing zero still sends the StopDeviceCmd', async () => {
+      mockButtplug.stopSustainedOutputs = vi.fn(() => { throw new Error('gone'); });
+      const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+      sync.start();
+      sync._handlePause();
+      expect(mockButtplug.stopAll).toHaveBeenCalled();
+      expect(err.mock.calls.some((c) => /ZERO-OUTPUTS FAILED on pause/.test(c[0]))).toBe(true);
+      err.mockRestore();
+    });
+
     it('emits sync status', () => {
       const onStatus = vi.fn();
       sync.onSyncStatus = onStatus;
@@ -455,5 +491,19 @@ describe('ButtplugSync', () => {
       expect(() => sync.clearDeviceState(42)).not.toThrow();
       expect(sync.getAxisAssignment(42)).toBe('L0');
     });
+  });
+});
+
+describe('the lookahead reaches as far as the engine (brokenobj #431, 2026-11-22)', () => {
+  it('the slider goes to 500 ms, the engine\'s own limit', async () => {
+    const fs = await import('node:fs');
+    const src = fs.readFileSync('renderer/components/connection-panel.js', 'utf8');
+    expect(src).toMatch(/id="bp-lookahead"[^>]*max="500"/);
+    const { ButtplugSync } = await import('../../renderer/js/buttplug-sync.js');
+    const s = new ButtplugSync({ videoPlayer: { video: { addEventListener() {}, removeEventListener() {} } }, buttplugManager: {}, funscriptEngine: {} });
+    s.setLinearLookaheadMs(450);
+    expect(s.getLinearLookaheadMs?.() ?? s._linearLookaheadMs).toBe(450);
+    s.setLinearLookaheadMs(900);
+    expect(s._linearLookaheadMs).toBe(500);
   });
 });

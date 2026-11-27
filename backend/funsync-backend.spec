@@ -24,6 +24,10 @@ a = Analysis(
     datas=[
         ('web-remote', 'web-remote'),
         ('../renderer/locales', 'locales'),
+        # The phone's Flat view (#426) runs the desktop's VR renderer and its
+        # shaders, served at /vr-flatten/ (main.py VR_FLATTEN_FILES).
+        ('../renderer/js/vr-projection-renderer.js', 'vr-flatten'),
+        ('../renderer/js/shaders', 'vr-flatten/shaders'),
     ],
     hiddenimports=[
         'uvicorn.logging',

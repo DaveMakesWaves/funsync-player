@@ -23,7 +23,9 @@ let _active = null;
  * @param {object} o
  * @param {number} o.x
  * @param {number} o.y
- * @param {Array<{label: string, disabled?: boolean, hint?: string, onSelect?: Function}>} o.items
+ * @param {Array<{label: string, disabled?: boolean, hint?: string, onSelect?: Function} | {heading: string}>} o.items
+ *   a `{ heading }` is a section title over the items after it (no button:
+ *   the arrow keys pass it by)
  * @param {string} o.ariaLabel — the menu's accessible name
  * @param {HTMLElement|null} [o.returnFocus] — focused again when the menu
  *   closes without a choice (Esc, Tab, a click elsewhere in the window)
@@ -41,6 +43,15 @@ export function openContextMenu({ x, y, items, ariaLabel, returnFocus = null, do
 
   const buttons = [];
   items.forEach((item, i) => {
+    if (item.heading) {
+      const h = doc.createElement('div');
+      h.className = 'editor-context-menu__heading';
+      h.setAttribute('role', 'separator');
+      h.setAttribute('aria-label', item.heading);
+      h.textContent = item.heading;
+      menu.appendChild(h);
+      return;
+    }
     const btn = doc.createElement('button');
     btn.type = 'button';
     btn.className = 'editor-context-menu__item';

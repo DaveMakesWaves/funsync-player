@@ -217,7 +217,7 @@ describe('TCodeManager.disconnect — a user disconnect tears down like a droppe
         }),
       },
     };
-    Indicators ||= liftAppClass(['_updateDeviceIndicators', '_getConnectedDeviceCount'], {
+    Indicators ||= liftAppClass(['_updateDeviceIndicators', '_getConnectedDeviceCount', '_connectedDevices', '_paintNavDevices'], {
       document: { getElementById: () => null },
       t: (k) => k,
     });
@@ -228,7 +228,8 @@ describe('TCodeManager.disconnect — a user disconnect tears down like a droppe
   function appWith(manager) {
     const app = Object.assign(new Indicators(), {
       tcodeManager: manager,
-      navBar: { said: null, setHandyStatus(state, count) { this.said = `${state} (${count})`; } },
+      // What the Devices pill is handed (NavBar.setDeviceStatus, 2026-11-25).
+      navBar: { said: null, setDeviceStatus({ devices }) { this.said = devices.map((d) => `${d.label}: ${d.state}`).join(', ') || 'none'; } },
       tcodeSync: { stop: vi.fn() },
       _updatePlayerSyncChip() {},
     });
@@ -245,10 +246,10 @@ describe('TCodeManager.disconnect — a user disconnect tears down like a droppe
     const m = new TCodeManager();
     const app = appWith(m);
     await m.connect('udp', { host: '127.0.0.1', port: 8000 });
-    expect(app.navBar.said).toBe('connected (1)');
+    expect(app.navBar.said).toBe('TCode (127.0.0.1:8000): connected');
 
     await m.disconnect();
-    expect(app.navBar.said).toBe('disconnected (0)');
+    expect(app.navBar.said).toBe('none');
     expect(app.tcodeSync.stop).toHaveBeenCalledTimes(1);
 
     // A late notice from main, or a second press, does not tear down again.
@@ -264,7 +265,7 @@ describe('TCodeManager.disconnect — a user disconnect tears down like a droppe
     const drop = dropLink;
     drop();
     drop();
-    expect(app.navBar.said).toBe('disconnected (0)');
+    expect(app.navBar.said).toBe('none');
     expect(app.tcodeSync.stop).toHaveBeenCalledTimes(1);
     await m.disconnect(); // the user presses Disconnect on the dead link
     expect(app.tcodeSync.stop).toHaveBeenCalledTimes(1);

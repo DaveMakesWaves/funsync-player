@@ -174,3 +174,24 @@ export function breadcrumbOf(index, folderPath) {
   }
   return trail;
 }
+
+/**
+ * The folder-jump label's parts: the language's text around the path, and
+ * the path itself in a <strong> (FT-104, 2026-11-22). The message used to
+ * hold the <strong>, which the phone's ICU formatter reads as a rich-text
+ * tag; it failed and the page showed "In folder: {path}" unfilled. Text nodes
+ * only, so a folder name is never read as HTML.
+ *
+ * @param {(key: string, vars?: object) => string} t
+ * @param {string} trail   the breadcrumb, e.g. "Library › Clips"
+ * @returns {Array<string|HTMLElement>}
+ */
+export function folderJumpLabelParts(t, trail) {
+  const MARK = '⁣⁣';             // invisible separators, never in a translation
+  const text = String(t('webRemote.folderJump.label', { path: MARK }));
+  const strong = document.createElement('strong');
+  strong.textContent = trail;
+  const at = text.indexOf(MARK);
+  if (at < 0) return [text, ' ', strong];  // a translation without {path}: still show it
+  return [text.slice(0, at), strong, text.slice(at + MARK.length)].filter((p) => p !== '');
+}

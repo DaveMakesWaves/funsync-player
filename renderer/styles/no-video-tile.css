@@ -1,0 +1,93 @@
+/* The no-picture tile (renderer/js/no-video-tile.js): a file with no video
+ * track (an audio file, N-05) or a saved stream with no picture. Moved out
+ * of library.css (TODO triage 2026-11-23) so every surface that shows a
+ * thumbnail can use it: the Library card and list, Playlists, Categories,
+ * the queue panel, the Up Next card (also in the player pop-out). */
+.library__thumb-novideo {
+  --novideo-bg: #24242c;
+  --novideo-logo-opacity: 0.8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6%;
+  width: 100%;
+  height: 100%;
+  padding: 6% 8%;
+  box-sizing: border-box;
+  background: var(--novideo-bg);
+  overflow: hidden;
+}
+
+:root[data-theme="light"] .library__thumb-novideo {
+  --novideo-bg: #e4e4e9;
+  --novideo-logo-opacity: 0.65;
+}
+
+.library__thumb-novideo-logo {
+  flex: 0 0 auto;
+  height: 46%;
+  aspect-ratio: 1;
+  background: url('../assets/logo-muted.png') center / contain no-repeat;
+  opacity: var(--novideo-logo-opacity);
+}
+
+.library__thumb-novideo-title {
+  max-width: 100%;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+
+
+/* A small thumb (a queue row): the logo only. */
+.library__thumb-novideo--compact {
+  padding: 3px;
+}
+
+.library__thumb-novideo--compact .library__thumb-novideo-logo {
+  height: 100%;
+}
+
+.library__thumb-novideo--compact .library__thumb-novideo-title {
+  display: none;
+}
+
+/* A script with no video (the Library's Scripts filter, a playlist's script
+   entry; 2026-11-26): the same tile, a coral line along its foot like the
+   heat strip, and a "Script" chip in its corner. */
+.library__thumb-novideo--script {
+  position: relative;
+  box-shadow: inset 0 -3px 0 var(--accent);
+}
+/* An audio file (2026-11-26): the same tile with an "Audio" chip. */
+.library__thumb-novideo--audio {
+  position: relative;
+}
+.library__thumb-novideo-mark {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgb(0 0 0 / 0.45);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  letter-spacing: 0.2px;
+}
+.library__thumb-novideo--compact .library__thumb-novideo-mark {
+  top: 2px;
+  left: 2px;
+  padding: 0 4px;
+  font-size: 9px;
+  line-height: 13px;
+}

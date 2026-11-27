@@ -397,8 +397,11 @@ export class UpNextEngine {
   }
 
   _shouldShow() {
-    if (!this._playContext || !this._playContext.list) return false;
-    if (this._playContext.index < 0) return false;
+    // A video with no list (a dropped or opened file) still offers a video
+    // you queued (FT-074 follow-up, 2026-11-22): it used to wait, unoffered,
+    // until the next Library play. With no queue it offers nothing, as before.
+    const hasList = !!(this._playContext?.list && this._playContext.index >= 0);
+    if (!hasList && !this._priorityNext()) return false;
 
     const durationMs = (this.player?.duration || 0) * 1000;
     if (!isFinite(durationMs) || durationMs <= 0) return false;

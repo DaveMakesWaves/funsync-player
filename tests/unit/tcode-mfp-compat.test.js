@@ -148,7 +148,9 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
     await m.connect('websocket', { url: 'ws://restim.local:81' });
     m.stop();
     expect(sent[0]).toBe('DSTOP\n');
-    expect(sent[1]).toMatch(/^L0500 L1500 L2500 R0500 R1500 R2500 V0000 V1000 A0000 A1000 A2000\n$/);
+    // Positions (the valve A0 included) glide to the middle over 2 s; a bare
+    // frame slams a WiFi OSR / SR6 (FT-095, Dave 2026-11-20). Intensities: off at once.
+    expect(sent[1]).toBe('L0500I2000 L1500I2000 L2500I2000 R0500I2000 R1500I2000 R2500I2000 A0500I2000 V0000 V1000 A1000 A2000\n');
   });
 
   // A stop must actually stop. Centring a position axis is right; "centring" a
@@ -159,11 +161,12 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
     m.stop();
     const frame = sent[1].trim().split(' ');
     const value = (axis) => frame.find((f) => f.startsWith(axis)).slice(axis.length);
-    for (const axis of ['L0', 'L1', 'L2', 'R0', 'R1', 'R2']) {
-      expect(value(axis), `${axis} should centre`).toBe('500');
+    // A0 is the valve: a POSITION, centred as in TCodeSync and Go home.
+    for (const axis of ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'A0']) {
+      expect(value(axis), `${axis} should centre, timed`).toBe('500I2000');
     }
-    for (const axis of ['V0', 'V1', 'A0', 'A1', 'A2']) {
-      expect(value(axis), `${axis} should be off, not half power`).toBe('000');
+    for (const axis of ['V0', 'V1', 'A1', 'A2']) {
+      expect(value(axis), `${axis} should be off at once, not half power`).toBe('000');
     }
   });
 
@@ -185,7 +188,7 @@ describe('TCodeManager — stop emits portable neutral frame', () => {
     m.setPrecision(4);
     await m.connect('websocket', { url: 'ws://restim.local:81' });
     m.stop();
-    expect(sent[1]).toMatch(/^L05000 .* A20000\n$/);
+    expect(sent[1]).toMatch(/^L05000I2000 .* A05000I2000 V00000 .* A20000\n$/);
   });
 
   it('stop is a no-op when not connected', () => {

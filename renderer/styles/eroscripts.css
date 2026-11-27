@@ -1,5 +1,9 @@
 /* === EroScripts Panel === */
 
+/* Fills and edges are drawn in the theme's ink, rgb(var(--ink-rgb) / a)
+   (player.css): white on the dark page, black on the light one (test day
+   2026-11-24, B030). They were white overlays that vanished in light. */
+
 .eroscripts-panel {
   position: fixed;
   top: 50%;
@@ -8,7 +12,7 @@
   width: 480px;
   max-height: 80vh;
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgb(var(--ink-rgb) / 0.1);
   border-radius: 12px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
   z-index: 100;
@@ -29,7 +33,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
   align-items: center;
   gap: 8px;
   padding: 12px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / 0.08);
   flex-shrink: 0;
 }
 
@@ -73,7 +77,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
   align-items: center;
   gap: 8px;
   padding: 8px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / 0.06);
   flex-shrink: 0;
 }
 
@@ -96,7 +100,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 
 .eroscripts-login-modal {
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgb(var(--ink-rgb) / 0.1);
   border-radius: 12px;
   width: 420px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
@@ -110,7 +114,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / 0.08);
 }
 
 .eroscripts-login-modal__close {
@@ -153,7 +157,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 .eroscripts-login-modal__2fa {
   margin-bottom: 12px;
   padding-top: 8px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgb(var(--ink-rgb) / 0.08);
 }
 
 .eroscripts-login-modal__2fa label {
@@ -182,8 +186,8 @@ html.backend-banner-shown #app > .eroscripts-panel {
 .eroscripts-login-modal__otp-digit {
   width: 42px;
   height: 50px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 2px solid rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink-rgb) / 0.06);
+  border: 2px solid rgb(var(--ink-rgb) / 0.15);
   border-radius: 8px;
   color: var(--text-primary);
   font-size: 22px;
@@ -203,7 +207,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 .eroscripts-login-modal__otp-sep {
   width: 10px;
   height: 2px;
-  background: rgba(255, 255, 255, 0.2);
+  background: rgb(var(--ink-rgb) / 0.2);
   border-radius: 1px;
   flex-shrink: 0;
 }
@@ -228,8 +232,8 @@ html.backend-banner-shown #app > .eroscripts-panel {
 
 .eroscripts-panel__input {
   flex: 1;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgb(var(--ink-rgb) / 0.08);
+  border: 1px solid rgb(var(--ink-rgb) / 0.12);
   border-radius: 5px;
   padding: 6px 10px;
   color: var(--text-primary);
@@ -272,12 +276,12 @@ html.backend-banner-shown #app > .eroscripts-panel {
 }
 
 .eroscripts-panel__btn--secondary {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink-rgb) / 0.08);
   color: var(--text-primary);
 }
 
 .eroscripts-panel__btn--secondary:hover {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink-rgb) / 0.15);
 }
 
 .eroscripts-panel__error {
@@ -289,7 +293,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 /* Search */
 .eroscripts-panel__search {
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid rgb(var(--ink-rgb) / 0.06);
   flex-shrink: 0;
 }
 
@@ -339,7 +343,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 }
 
 .eroscripts-panel__result:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink-rgb) / 0.04);
 }
 
 /* Fills the row's height rather than sitting as a small fixed box — the
@@ -394,7 +398,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink-rgb) / 0.06);
   color: var(--text-secondary);
 }
 
@@ -404,13 +408,27 @@ html.backend-banner-shown #app > .eroscripts-panel {
   position: relative;
 }
 
+/* A post with no funscript attached says so on the result (v0.10.1). */
+.eroscripts-panel__result-note {
+  margin-top: 6px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+/* Opens DOWNWARD and the results scroll to show it whole (2026-11-22): it
+   opened upward inside the scrolling results, so on a post with many files
+   (8 on topic 323989) only the last 3 names showed, cut at the list's top
+   edge. A long list scrolls inside its own height. */
 .eroscripts-panel__attachment-list {
   position: absolute;
-  bottom: 100%;
+  top: 100%;
   left: 0;
-  margin-bottom: 4px;
+  margin-top: 4px;
+  max-height: 260px;
+  overflow-y: auto;
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgb(var(--ink-rgb) / 0.12);
   border-radius: 6px;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
   padding: 2px;
@@ -436,7 +454,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 }
 
 .eroscripts-panel__attachment-item:hover {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink-rgb) / 0.08);
 }
 
 /* Scrollbar */
@@ -449,7 +467,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 }
 
 .eroscripts-panel__results::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgb(var(--ink-rgb) / 0.15);
   border-radius: 3px;
 }
 
@@ -466,7 +484,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 .eroscripts-inline__result {
   border-radius: 6px;
   margin-bottom: 4px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink-rgb) / 0.03);
 }
 
 .eroscripts-inline__result-head {
@@ -488,7 +506,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
 }
 
 .eroscripts-inline__result-head:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgb(var(--ink-rgb) / 0.05);
 }
 
 .eroscripts-inline__badge {
@@ -513,7 +531,7 @@ html.backend-banner-shown #app > .eroscripts-panel {
   padding: 8px 10px;
   margin-top: 6px;
   border-left: 2px solid var(--accent);
-  background: rgba(255, 255, 255, 0.03);
+  background: rgb(var(--ink-rgb) / 0.03);
   border-radius: 0 4px 4px 0;
 }
 
@@ -602,3 +620,1029 @@ html.backend-banner-shown #app > .eroscripts-panel {
   opacity: 0.5;
   cursor: not-allowed;
 }
+
+/* === The EroScripts tab (2026-11-22) ======================================
+   #eroscripts-container: the search panel docked across the top (search,
+   All / Free / Paid, login), the results as cards shaped like the library's
+   (grey until the video is here), a Downloads list behind a button, and the
+   download window (.es-dl, a Modal). Flat, as the other views: no glow. */
+.es-view {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.es-view[hidden] { display: none !important; }
+.es-view__top {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 20px 10px;
+  border-bottom: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.08));
+}
+.es-view__search { flex: 1; min-width: 0; }
+.es-view__body { flex: 1; min-height: 0; overflow-y: auto; padding: 16px 20px 40px; }
+.es-view__empty { margin: 24px 0; text-align: center; color: var(--text-secondary); font-size: 13px; }
+.es-view__heading { margin: 0 0 12px; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.es-view__more { display: block; margin: 20px auto 0; padding: 8px 22px; }
+
+/* The panel in the view: no float, no frame; search left, login right, its
+   messages (searching, nothing found, log in) underneath. */
+.eroscripts-panel.eroscripts-panel--docked {
+  position: static;
+  transform: none;
+  width: auto;
+  max-height: none;
+  height: auto;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  z-index: auto;
+  background: transparent;
+  overflow: visible;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "search auth" "msg msg";
+  column-gap: 16px;
+  align-items: center;
+}
+.eroscripts-panel--docked .eroscripts-panel__header { display: none; }
+.eroscripts-panel--docked .eroscripts-panel__search { grid-area: search; padding: 0; border: 0; }
+.eroscripts-panel--docked .eroscripts-panel__auth-bar { grid-area: auth; padding: 0; border: 0; }
+.eroscripts-panel--docked .eroscripts-panel__results { grid-area: msg; overflow: visible; padding: 0; }
+.eroscripts-panel--docked .eroscripts-panel__results:empty { display: none; }
+.eroscripts-panel--docked .eroscripts-panel__placeholder { padding: 28px 16px 12px; }
+.eroscripts-panel--docked .eroscripts-panel__input-row { max-width: 760px; }
+
+/* All / Free / Paid */
+.es-seg {
+  display: inline-flex;
+  flex-shrink: 0;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+.es-seg__btn {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.es-seg__btn:hover { color: var(--text-primary); }
+.es-seg__btn--on { background: rgb(var(--ink-rgb) / 0.14); color: var(--text-primary); font-weight: 500; }
+
+/* Paste a link: its button beside Downloads, and its window */
+.es-view__paste-btn {
+  flex-shrink: 0;
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 5px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.es-view__paste-btn:hover { background: rgb(var(--ink-rgb) / 0.14); }
+.es-paste__label { display: flex; flex-direction: column; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.es-paste__input, .es-paste__name { width: 100%; box-sizing: border-box; }
+.es-paste__result { display: flex; flex-direction: column; gap: 12px; }
+.es-paste__result:empty { display: none; }
+.es-paste__forum { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 12px 16px; border-radius: 10px; background: var(--bg-primary); }
+.es-paste__forum-head { display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.es-paste__forum-head .es-card__price { position: static; }
+.es-paste__forum-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* Downloads: a button, its list underneath */
+.es-view__dl-wrap { position: relative; flex-shrink: 0; }
+.es-view__dl-btn {
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--text-primary);
+  border: none;
+  border-radius: 5px;
+  padding: 6px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.es-view__dl-btn:hover { background: rgb(var(--ink-rgb) / 0.14); }
+.es-view__dl-btn--active { color: var(--accent); font-weight: 500; }
+.es-view__dl-pop {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  width: min(560px, 90vw);
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--bg-secondary);
+  border: 1px solid rgb(var(--ink-rgb) / 0.1);
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 20;
+}
+.es-view__downloads-head { display: flex; align-items: center; gap: 12px; padding: 10px 16px; }
+.es-view__h { margin: 0; font-size: 13px; flex: 1; }
+.es-view__jobs { list-style: none; margin: 0; padding: 0 16px 12px; display: flex; flex-direction: column; gap: 6px; }
+.es-view__job {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(60px, 1fr) minmax(0, 1.4fr) auto;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+.es-view__job--empty { display: block; color: var(--text-secondary); }
+.es-view__job-actions { display: inline-flex; gap: 6px; justify-self: end; }
+.es-view__job-actions:empty { display: none; }
+.es-view__job-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-view__job-status { color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-view__job--error .es-view__job-status { color: var(--danger, #e57373); }
+.es-view__bar { height: 6px; border-radius: 3px; background: rgb(var(--ink-rgb) / 0.08); overflow: hidden; }
+.es-view__bar-fill { display: block; height: 100%; background: var(--accent); transition: width 0.4s linear; }
+.es-view__job--done .es-view__bar-fill { background: var(--success, #4caf50); }
+
+/* Result cards: the library card's shape; grey until the video is here */
+.es-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 16px;
+  align-content: start;
+}
+.es-card {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-secondary);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform var(--transition-fast, 120ms), box-shadow var(--transition-fast, 120ms);
+}
+.es-card:hover { transform: translateY(-2px); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4); }
+.es-card__thumb {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #111;
+  overflow: hidden;
+  border-radius: 8px 8px 0 0;
+}
+.es-card__img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: grayscale(1);
+  opacity: 0.45;
+  transition: filter 200ms, opacity 200ms;
+}
+.es-card:hover .es-card__img,
+.es-card--busy .es-card__img { filter: grayscale(0.5); opacity: 0.75; }
+.es-card--have .es-card__img { filter: none; opacity: 1; }
+.es-card__price {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+}
+.es-card__price--free { background: #2e7d4f; }
+/* Paid is the forum's own Paid Scripts purple (category colour 8D33B5, 2026-11-23, Dave:
+   "on the forum the paid colour is purple"); white text on it is 6.4:1. */
+.es-card__price--paid { background: var(--eroscripts-paid); }
+.es-card__progress { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(0, 0, 0, 0.55); }
+.es-card__progress-fill { height: 100%; width: 0; background: var(--accent); transition: width 0.4s linear; }
+.es-card__info { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 8px 10px 10px; }
+.es-card__title { font-size: 13px; font-weight: 500; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.es-card:not(.es-card--have) .es-card__title { color: var(--text-secondary); }
+.es-card__meta { min-height: 14px; font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.es-card__foot { display: flex; align-items: center; gap: 8px; min-height: 26px; margin-top: 4px; }
+.es-card__status { font-size: 11px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Video and Script, each on its own: grey outline = not here, accent =
+   downloading, green with a tick = here (Dave, 2026-11-22). */
+.es-card__parts { flex: 1; min-width: 0; display: flex; gap: 6px; overflow: hidden; }
+.es-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid rgb(var(--ink-rgb) / 0.14);
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.es-part__icon { display: inline-flex; }
+/* Too narrow for the words beside the button (eroscripts-view.js _fitParts): icons only. */
+.es-card__parts--compact .es-part { padding: 2px 6px; }
+.es-card__parts--compact .es-part__text { display: none; }
+.es-part__icon--done { display: none; }
+.es-part--busy { color: var(--accent); border-color: var(--accent); }
+.es-part--done { color: #fff; background: #2e7d4f; border-color: transparent; }
+.es-part--done .es-part__icon--type { display: none; }
+.es-part--done .es-part__icon--done { display: inline-flex; }
+.es-card--failed .es-card__status { color: var(--danger, #e57373); }
+.es-card__have { display: inline-flex; align-items: center; gap: 3px; color: var(--success, #4caf50); font-weight: 500; }
+
+/* The download window */
+.modal-panel.es-dl-panel { width: min(640px, 92vw); }
+.es-dl { display: flex; flex-direction: column; gap: 14px; }
+.es-dl__head { display: flex; align-items: center; gap: 10px; }
+.es-dl__head .es-card__price { position: static; }
+.es-dl__creator { flex: 1; margin: 0; font-size: 12px; color: var(--text-secondary); }
+.es-dl__open-post { margin-left: auto; }
+.es-dl__already { margin: 0; font-size: 12px; color: var(--success, #4caf50); }
+.es-dl__rows {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 18px;
+  padding: 14px 16px;
+  border-radius: 10px;
+  background: var(--bg-primary);
+}
+.es-dl__label { font-size: 12px; color: var(--text-secondary); }
+.es-dl__value { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; min-width: 0; }
+.es-dl__value .es-card__have { color: var(--text-primary); font-size: 13px; font-weight: 400; overflow-wrap: anywhere; }
+.es-dl__value .es-card__have svg { color: var(--success, #4caf50); }
+.es-dl__text { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 13px; }
+.es-dl__text--muted { color: var(--text-secondary); }
+.es-dl__sub { margin: 0; font-size: 11px; color: var(--text-secondary); }
+.es-dl__sub--warn { color: #d9a441; }
+.es-dl__note { margin: 8px 0; font-size: 13px; color: var(--text-secondary); }
+.es-dl__actions { display: flex; justify-content: flex-end; gap: 8px; flex-wrap: wrap; }
+.es-dl__main { padding: 9px 22px; font-size: 13px; border-radius: 8px; }
+.es-dl__more summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.es-dl__more[open] summary { margin-bottom: 4px; }
+.es-dl .es-view__folder { width: 100%; }
+
+/* Works / Link dead / Not checked / Checking */
+.es-dot { display: inline-block; flex-shrink: 0; width: 8px; height: 8px; border-radius: 50%; background: var(--text-secondary); opacity: 0.5; }
+.es-dot--ok { background: var(--success, #4caf50); opacity: 1; }
+.es-dot--dead { background: var(--danger, #e57373); opacity: 1; }
+.es-dot--checking { animation: es-dot-pulse 0.9s ease-in-out infinite alternate; }
+@keyframes es-dot-pulse { to { opacity: 0.15; } }
+@media (prefers-reduced-motion: reduce) { .es-dot--checking { animation: none; } }
+
+/* More options: scripts, links, folder, tube sites */
+.es-view__section { margin: 14px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-secondary); }
+.es-view__note, .es-view__why { margin: 0; color: var(--text-secondary); font-size: 12px; }
+.es-view__scripts { display: flex; flex-direction: column; gap: 4px; }
+.es-view__script { display: flex; align-items: center; gap: 8px; font-size: 13px; overflow-wrap: anywhere; }
+.es-view__links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.es-view__link {
+  display: grid;
+  grid-template-columns: 8px auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg-primary);
+}
+.es-view__link .es-view__why { grid-column: 2 / -1; }
+.es-view__badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgb(var(--ink-rgb) / 0.06);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.es-view__link--tube .es-view__badge { color: var(--accent); }
+.es-view__link-text { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-view__folder { display: flex; gap: 8px; align-items: center; }
+.es-view__folder-select {
+  flex: 1;
+  min-width: 0;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+.es-view__tube { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 12px; color: var(--text-secondary); }
+
+/* Round 3 (2026-11-22): sort and filters, chips, picking several, the selection
+   bar, Play in the Saved message, the room on the disk, a paused download. */
+.es-view__toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; margin: 0 0 14px; }
+.es-view__toolbar-gap { flex: 1; }
+.es-tool { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); }
+.es-tool__select {
+  padding: 4px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.es-tool__select--set { border-color: var(--accent); color: var(--accent); }
+.es-card__tags { position: absolute; left: 6px; bottom: 8px; display: flex; gap: 4px; max-width: calc(100% - 12px); overflow: hidden; }
+.es-chip { padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 600; color: #fff; background: rgba(0, 0, 0, 0.7); white-space: nowrap; }
+.es-card__check {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #fff;
+  background: rgba(0, 0, 0, 0.45);
+  color: transparent;
+}
+.es-view--selecting .es-card__check { display: inline-flex; }
+.es-card--selected { outline: 2px solid var(--accent); outline-offset: 0; }
+.es-card--selected .es-card__check { background: var(--accent); border-color: var(--accent); color: #fff; }
+.es-view__selbar {
+  position: absolute;
+  left: 50%;
+  bottom: 20px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 10px 18px;
+  border-radius: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid rgb(var(--ink-rgb) / 0.12);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+  z-index: 15;
+}
+.es-view__selbar[hidden] { display: none; }
+.es-view__selbar-text { font-size: 13px; color: var(--text-primary); white-space: nowrap; }
+.es-view { position: relative; }
+.es-toast { display: inline-flex; align-items: center; gap: 12px; }
+/* "Downloaded … and its script" with Play: a long title must never squeeze the
+   button into "Pl / ay" (Dave, 2026-11-23, seen in the sneak-peek recording). */
+.es-toast__play {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 5px 14px;
+  border: none;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.es-toast__play:hover { background: var(--accent-hover, var(--accent)); }
+.es-dl__space { margin-top: 2px; }
+.es-dl__sub--bad { color: var(--danger, #e57373); }
+.es-card__progress--paused .es-card__progress-fill { background: var(--text-secondary); }
+
+/* Feeds (2026-11-22): chips above the sort and filter bar, a count on each. */
+.es-view__feeds { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.es-feed {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.14));
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  max-width: 260px;
+}
+.es-feed:hover { color: var(--text-primary); }
+.es-feed--on { background: rgb(var(--ink-rgb) / 0.12); color: var(--text-primary); border-color: transparent; font-weight: 500; }
+.es-feed--add { border-style: dashed; }
+.es-feed__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-feed__badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.es-chip--new { background: var(--accent); }
+.es-tool__select:disabled { opacity: 0.7; cursor: default; }
+.es-seg__btn:disabled { cursor: default; }
+.es-feedform .es-tool__select, .es-feedform .eroscripts-panel__input { width: 100%; box-sizing: border-box; }
+.es-feedform__actions { gap: 8px; }
+.es-feedform__delete { margin-right: auto; }
+
+/* The list view (2026-11-22): rows like the forum's topic list. */
+.es-view__mode { margin-left: 4px; }
+.es-view__mode-btn { display: inline-flex; align-items: center; padding: 4px 8px; }
+.es-grid.es-grid--list { display: flex; flex-direction: column; gap: 0; }
+.es-list__head, .es-row {
+  display: grid;
+  /* The last column a fixed width: the title row has no buttons, and an auto
+     column would size differently there and push its titles off the numbers. */
+  grid-template-columns: 96px minmax(0, 1fr) 72px 72px 88px 236px;
+  align-items: center;
+  gap: 0 14px;
+}
+.es-list__head {
+  padding: 0 10px 8px;
+  border-bottom: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.1));
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.es-list__head .es-row__main { grid-column: 1 / 3; }
+.es-row {
+  padding: 10px;
+  border-bottom: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.06));
+  cursor: pointer;
+}
+.es-row:hover { background: rgb(var(--ink-rgb) / 0.03); }
+.es-row__thumb { position: relative; width: 96px; aspect-ratio: 16 / 9; border-radius: 6px; overflow: hidden; background: #111; }
+.es-row__img { display: block; width: 100%; height: 100%; object-fit: cover; filter: grayscale(1); opacity: 0.5; transition: filter 200ms, opacity 200ms; }
+.es-row:hover .es-row__img, .es-row.es-card--busy .es-row__img { filter: grayscale(0.5); opacity: 0.8; }
+.es-row.es-card--have .es-row__img { filter: none; opacity: 1; }
+.es-row .es-card__check { top: 4px; right: 4px; width: 18px; height: 18px; }
+.es-row.es-card--selected { outline: 2px solid var(--accent); outline-offset: -2px; }
+.es-row__main { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.es-row__title { font-size: 15px; font-weight: 500; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-row:not(.es-card--have) .es-row__title { color: var(--text-secondary); }
+.es-row__sub { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; font-size: 11px; color: var(--text-secondary); }
+.es-row__cat { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.es-row__cat::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: currentColor; }
+.es-row__cat--free { color: #4caf7a; }
+/* The square is the forum's purple; the word a lighter one on dark themes (5.4:1 on a card),
+   the exact one on light (6.4:1 on white): the exact purple is 2.6:1 on dark navy. */
+.es-row__cat--paid { color: #c08ae0; }
+.es-row__cat--paid::before { background: var(--eroscripts-paid); }
+:root[data-theme="light"] .es-row__cat--paid { color: var(--eroscripts-paid); }
+.es-row__tag { padding: 1px 6px; border-radius: 3px; background: rgb(var(--ink-rgb) / 0.08); color: var(--text-secondary); }
+.es-row__by { margin-left: 4px; }
+.es-row__num { font-size: 13px; color: var(--text-secondary); text-align: center; white-space: nowrap; }
+.es-row__acts { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.es-row .es-card__btn { min-width: 84px; }
+@media (max-width: 1100px) {
+  .es-list__head, .es-row { grid-template-columns: 80px minmax(0, 1fr) 64px 236px; }
+  .es-list__head > :nth-child(3), .es-list__head > :nth-child(4), .es-row > .es-row__num:nth-of-type(n+2) { display: none; }
+  .es-row__thumb { width: 80px; }
+}
+
+/* The tag box (2026-11-22): chips, a text box, suggestions under it. */
+.es-taginput {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 34px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  background: var(--bg-secondary);
+  cursor: text;
+}
+.es-taginput:focus-within { border-color: var(--accent); }
+.es-taginput__chips { display: contents; }
+.es-taginput__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px 2px 8px;
+  border-radius: 4px;
+  background: rgb(var(--ink-rgb) / 0.12);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.es-taginput__chip--unknown { background: rgba(229, 115, 115, 0.18); color: var(--danger, #e57373); }
+.es-taginput__x { border: none; background: none; color: inherit; cursor: pointer; font-size: 14px; line-height: 1; padding: 0 4px; opacity: 0.7; }
+.es-taginput__x:hover { opacity: 1; }
+.es-taginput__input { flex: 1; min-width: 120px; border: none; outline: none; background: transparent; color: var(--text-primary); font-size: 13px; padding: 3px 2px; }
+.es-taginput__list {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid rgb(var(--ink-rgb) / 0.12);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.45);
+  max-height: 220px;
+  overflow-y: auto;
+}
+.es-taginput__opt { padding: 5px 8px; border-radius: 5px; font-size: 13px; cursor: pointer; color: var(--text-primary); }
+.es-taginput__opt--on, .es-taginput__opt:hover { background: rgb(var(--ink-rgb) / 0.1); }
+
+/* Marked like the views since 2026-11-25: white label, coral underline (nav-bar.css). */
+.nav-bar__eroscripts--active,
+.nav-bar__eroscripts--active:hover { color: var(--text-primary); }
+
+@media (max-width: 760px) {
+  .eroscripts-panel.eroscripts-panel--docked { grid-template-columns: minmax(0, 1fr); grid-template-areas: "search" "auth" "msg"; row-gap: 8px; }
+  .eroscripts-panel--docked .eroscripts-panel__input-row { flex-wrap: wrap; }
+}
+
+/* The Downloads list's Pause / Play / X (2026-11-22): square icon buttons, the
+   words as their tooltip. X turns red on hover. */
+.es-view__icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: rgb(var(--ink-rgb) / 0.08);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.es-view__icon-btn:hover { background: rgb(var(--ink-rgb) / 0.15); }
+.es-view__icon-btn--danger:hover { color: var(--danger, #e57373); }
+.es-view__icon-btn:disabled { opacity: 0.5; cursor: default; }
+.es-view__icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Watch's steps under the window's buttons (2026-11-23): what it is doing,
+   with Cancel; on a failure, why, with Open in browser. */
+.es-dl__watch-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgb(var(--ink-rgb) / 0.05);
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.es-dl__watch-text { flex: 1; min-width: 0; }
+.es-dl__watch-spin {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+.es-dl__watch-status--failed { color: var(--danger, #e57373); background: rgba(229, 115, 115, 0.08); }
+
+/* Refresh (2026-11-23): an icon and a word; the icon turns while it loads. */
+.es-view__refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.es-view__refresh svg { flex: none; }
+.es-view__refresh--busy svg { animation: es-refresh-spin 0.9s linear infinite; }
+@keyframes es-refresh-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .es-view__refresh--busy svg { animation: none; }
+}
+
+/* Modern-only pieces (2026-11-23; styled in modern-polish.css): the logo
+   tile under a card's picture and the loading skeletons. Classic keeps its
+   plain plate and its loading line. */
+.es-card__nothumb,
+.es-skel { display: none; }
+
+/* The filter bar's Tags and Hide boxes (Dave, 2026-11-23: "search by tag",
+   "no results with for example pmv or animation"): the feed editor's chip
+   box, compact. A set box gets the accent edge, as a set select does. */
+.es-tool--tags { display: inline-flex; align-items: center; gap: 6px; }
+.es-tool__tags { min-width: 150px; max-width: 320px; min-height: 30px; padding: 2px 6px; }
+.es-tool__tags .es-taginput__input { min-width: 90px; font-size: 12px; }
+.es-tool__tags--set { border-color: var(--accent); }
+.es-tool__tags--hide.es-tool__tags--set { border-color: var(--text-secondary); }
+.es-tool__tags--hide .es-taginput__chip { text-decoration: line-through; text-decoration-thickness: 1px; }
+.es-taginput--disabled { opacity: 0.7; }
+.es-feed--add:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* A post known to have no video link (or no script file) we can download
+   (eroscripts-probe.js, 2026-11-23): its chip struck through and faded. */
+.es-part[data-state="none"] { opacity: 0.45; text-decoration: line-through; border-style: dashed; }
+
+/* Judging a post before downloading it (the first-use review's 2.1-2.5,
+   2026-11-23): the script's heatmap and numbers, who posted what, the
+   lengths, and the post itself. */
+.es-dl__preview { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; }
+.es-dl__heat { display: block; width: 100%; max-width: 480px; height: 22px; border-radius: 4px; background: var(--bg-tertiary, rgb(var(--ink-rgb) / 0.05)); }
+.es-dl__prov--scripter { color: var(--accent); }
+.es-dl__len-verdict.es-dl__sub--warn { font-weight: 600; }
+
+.es-dl__post { border-top: 1px solid var(--border, rgb(var(--ink-rgb) / 0.08)); padding-top: 10px; }
+.es-dl__post > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.es-dl__post[open] > summary { margin-bottom: 8px; }
+.es-post { font-size: 13px; line-height: 1.5; color: var(--text-primary); overflow-wrap: anywhere; }
+.es-post p, .es-post ul, .es-post ol, .es-post blockquote, .es-post pre, .es-post table { margin: 0 0 8px; }
+.es-post ul, .es-post ol { padding-left: 20px; }
+.es-post .es-post__h { font-weight: 700; font-size: 14px; }
+.es-post pre, .es-post code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 12px; }
+.es-post pre { padding: 8px; border-radius: 6px; background: var(--bg-tertiary, rgb(var(--ink-rgb) / 0.05)); overflow: auto; white-space: pre-wrap; }
+.es-post table { border-collapse: collapse; }
+.es-post td, .es-post th { border: 1px solid var(--border, rgb(var(--ink-rgb) / 0.08)); padding: 2px 6px; }
+.es-post__link { color: var(--accent); text-decoration: underline; cursor: pointer; }
+.es-post__attachment { font-weight: 600; }
+.es-post__quote { margin: 0 0 8px; padding: 4px 10px; border-left: 3px solid var(--border, rgb(var(--ink-rgb) / 0.15)); color: var(--text-secondary); }
+.es-post__quote-by { display: block; font-size: 11px; font-weight: 600; }
+.es-post__spoiler { filter: blur(4px); transition: filter 0.15s; }
+.es-post__spoiler:hover, .es-post__spoiler:focus-within { filter: none; }
+.es-post__img { display: block; max-width: 100%; margin: 6px 0; min-height: 24px; border-radius: 6px; background: var(--bg-tertiary, rgb(var(--ink-rgb) / 0.04)); }
+.es-post__img[style*="aspect-ratio"] { width: min(100%, 480px); }
+.es-post__img img { display: block; max-width: 100%; max-height: 360px; border-radius: 6px; }
+.es-post__img[data-state="done"] { background: none; width: auto; }
+.es-post__img[data-state="ask"], .es-post__img[data-state="failed"] { padding: 8px; }
+.es-post__img-failed { font-size: 12px; }
+.es-post__replies { margin-top: 10px; }
+.es-post__replies > summary { cursor: pointer; font-size: 12px; color: var(--text-secondary); }
+.es-post__reply { padding: 8px 0; border-top: 1px solid var(--border, rgb(var(--ink-rgb) / 0.06)); }
+.es-post__reply-head { font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; }
+.es-post__reply--op .es-post__reply-head { color: var(--accent); font-weight: 600; }
+.es-post__body > :last-child { margin-bottom: 0; }
+
+/* Suggested (2026-11-24): the tags it used under the heading, each can be
+   left out; on each card, why it is suggested and Not interested. */
+.es-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: -4px 0 12px; }
+.es-suggest__from { margin: 0; font-size: 12px; color: var(--text-secondary); }
+.es-suggest__tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px 2px 9px; border-radius: 999px; font-size: 12px; background: var(--bg-tertiary, rgb(var(--ink-rgb) / 0.06)); color: var(--text-primary); }
+.es-suggest__out { display: inline-flex; padding: 2px; border: 0; border-radius: 50%; background: none; color: var(--text-secondary); cursor: pointer; }
+.es-suggest__out:hover, .es-suggest__out:focus-visible { color: var(--text-primary); background: var(--bg-secondary); }
+.es-suggest__back { font-size: 12px; padding: 2px 10px; }
+.es-card__why { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 11px; color: var(--text-secondary); }
+.es-card__why-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.es-card__not { flex-shrink: 0; display: inline-flex; padding: 2px; border: 0; border-radius: 50%; background: none; color: var(--text-secondary); cursor: pointer; }
+.es-card__not:hover, .es-card__not:focus-visible { color: var(--text-primary); background: var(--bg-secondary); }
+.es-suggest__tag--avoid { text-decoration: line-through; color: var(--text-secondary); }
+.es-suggest__from--avoid { margin-left: 8px; }
+
+/* The bar, tidied (Dave, 2026-11-25: "put the filter and sort options under a
+   menu ... so that the results are the main feature of the page"). One row:
+   the list's title, then Sort, Filters (a count; the choices in a popover, as
+   the Library's), the view, Refresh as an icon, Select. What is set shows as
+   chips under it. The Library's picker / chip classes give the same look. */
+.es-view__toolbar { gap: 8px 10px; margin: 0 0 10px; }
+.es-view__toolbar .es-view__heading { margin: 0; font-size: 15px; }
+.es-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.es-tool--sort { position: relative; gap: 0; }
+.es-tool--sort .es-tool__icon { position: absolute; left: 9px; display: inline-flex; color: var(--text-secondary); pointer-events: none; }
+.es-tool--sort .es-tool__select { height: 30px; padding: 0 8px 0 28px; font-size: 13px; }
+.es-view__filters-btn { height: 30px; }
+.es-view__filters-pop {
+  width: 360px;
+  max-width: min(360px, calc(100vw - 32px));
+  gap: 12px;
+}
+.es-view__filters-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px 12px; }
+.es-view__filters-pop .es-tool { display: flex; flex-direction: column; align-items: stretch; gap: 4px; min-width: 0; }
+.es-view__filters-pop .es-tool__select { width: 100%; height: 30px; }
+.es-view__filters-pop .es-tool__tags { width: 100%; }
+.es-view__chips { padding: 0; margin: -2px 0 12px; align-items: center; }
+.es-view__chips-clear {
+  border: 0;
+  background: none;
+  padding: 4px 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-decoration: underline;
+  cursor: pointer;
+}
+.es-view__chips-clear:hover { color: var(--text-primary); }
+.es-view__refresh { padding-left: 9px; padding-right: 9px; }
+/* The feeds share the bar (left), the controls sit right; on a narrow window
+   the controls wrap under the feeds. The list's title said what the lit feed
+   chip and Sort already say: it stays for screen readers only. */
+.es-view__toolbar .es-view__feeds { margin: 0; flex: 0 1 auto; min-width: 0; }
+/* The controls move as one group: on a narrow window they wrap under the
+   feeds together, right-aligned (Select alone on a second line, 800 px). */
+.es-view__controls { display: flex; align-items: center; gap: 8px 10px; margin-left: auto; }
+
+/* A post's tags in its window (Dave, 2026-11-25), under the scripter line. */
+.es-dl__tags { display: flex; flex-wrap: wrap; gap: 4px 6px; margin: 8px 0 12px; padding: 0; list-style: none; }
+.es-dl__tag {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 1.6;
+  background: var(--bg-tertiary, rgb(var(--ink-rgb) / 0.06));
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+/* The top row, tidied (Dave, 2026-11-25). The search box is the Library's
+   (eroscripts-panel.js _dockSearchBox: its size, not stretched across the
+   row; Enter searches, so no Search button here); All / Free / Paid beside
+   it; Paste and Downloads as icons with tooltips; the account far right. The
+   panel's own login line is the floating panel's only. */
+.es-view__top { align-items: center; }
+.eroscripts-panel.eroscripts-panel--docked { grid-template-columns: minmax(0, 1fr); grid-template-areas: "search" "msg"; }
+.eroscripts-panel--docked .eroscripts-panel__auth-bar { display: none; }
+.eroscripts-panel--docked .eroscripts-panel__input-row { max-width: none; gap: 10px; }
+.eroscripts-panel--docked #es-search-btn { display: none; }
+.eroscripts-panel--docked .library__search-input { height: 32px; box-sizing: border-box; }
+.es-view__icon-btn {
+  position: relative;
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  border-radius: 6px;
+  background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.08));
+  color: var(--text-primary);
+  cursor: pointer;
+}
+.es-view__icon-btn:hover { background: var(--surface-overlay-strong, rgb(var(--ink-rgb) / 0.14)); }
+.es-view__icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.es-view__dl-btn.es-view__dl-btn--active { color: var(--accent); }
+.es-view__dl-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.es-view__dl-badge--paused { background: var(--text-secondary); }
+.es-view__account { position: relative; flex-shrink: 0; display: flex; align-items: center; margin-left: 4px; }
+.es-view__login { white-space: nowrap; }
+.es-view__me-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 36px;
+  padding: 2px 6px 2px 2px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.es-view__me-btn:hover, .es-view__me-btn[aria-expanded="true"] { background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.08)); color: var(--text-primary); }
+.es-view__me-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.es-view__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  overflow: hidden;
+  background: var(--accent);
+  flex-shrink: 0;
+}
+.es-view__avatar-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.es-view__avatar-letter { color: #fff; font-size: 13px; font-weight: 700; }
+.es-view__me-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 190px;
+  padding: 6px;
+  background: var(--surface-elevated, var(--bg-secondary));
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  border-radius: 8px;
+  box-shadow: var(--shadow-modal, 0 8px 24px rgba(0, 0, 0, 0.45));
+  z-index: 30;
+}
+.es-view__me-name {
+  margin: 0;
+  padding: 6px 10px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.1));
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.es-view__me-item {
+  display: block;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-family);
+  text-align: left;
+  cursor: pointer;
+}
+.es-view__me-item:hover, .es-view__me-item:focus-visible { background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.08)); outline: none; }
+/* Clickable: the posts with that tag (2026-11-25). */
+.es-dl__tags li { display: contents; }
+.es-dl__tag { border: 1px solid transparent; font-family: var(--font-family); cursor: pointer; }
+.es-dl__tag:hover { color: var(--text-primary); border-color: var(--accent); }
+.es-dl__tag:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Feeds on the top row beside All / Free / Paid; the applied filters' chips
+   where the feeds were, the controls right of them (Dave, 2026-11-25: "now
+   that theres more space on the top bar ... put the feeds up there too",
+   "then we can move the applied filters up a row"). */
+.es-view__top .es-view__search { flex: 0 1 auto; }
+.es-view__top .es-view__feeds { margin: 0; flex: 1 1 auto; min-width: 0; align-items: center; }
+.es-view__toolbar .es-view__chips { margin: 0; padding: 0; flex: 1 1 auto; min-width: 0; }
+.es-view__toolbar .es-view__chips[hidden] { display: none; }
+/* The search group never shrinks under its own width (at 800 px the feeds
+   overlapped All / Free / Paid); on a narrower window the feeds take a line
+   of their own under the search row. */
+.es-view__top .es-view__search { flex: 0 0 auto; }
+/* Paste, Downloads and the account stay at the right edge, the feeds beside or under the search. */
+.es-view__top .es-view__paste-btn { margin-left: auto; }
+
+/* Three parts on the top row, the space between them even (Dave, 2026-11-25:
+   "justify between on the search section, feeds section and the avatar
+   section so weve got 3 equidistant bits"): the search with All / Free /
+   Paid; the feeds; Paste, Downloads and the account. None grows to fill. */
+.es-view__top { justify-content: space-between; }
+.es-view__top .es-view__feeds { flex: 0 1 auto; }
+.es-view__top .es-view__paste-btn { margin-left: 0; }
+.es-view__actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+
+/* Paste, Downloads and the account as one button group (Dave, 2026-11-25:
+   "can we make the avatar and download section a button group"): one frame,
+   a divider between the parts, each part its own hover. Scoped to the top
+   row's own buttons (the Downloads list's row buttons keep their look);
+   nothing is clipped, so the Downloads list, the account menu and the count
+   badge still show outside the frame. */
+.es-view__top .es-view__actions {
+  gap: 0;
+  height: 36px;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  border-radius: 8px;
+  background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.06));
+}
+.es-view__top .es-view__actions > .es-view__dl-wrap,
+.es-view__top .es-view__actions > .es-view__account {
+  height: 100%;
+  margin-left: 0;
+  border-left: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+}
+.es-view__top .es-view__actions > .es-view__paste-btn,
+.es-view__top .es-view__actions > .es-view__dl-wrap > .es-view__dl-btn {
+  width: 40px;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.es-view__top .es-view__actions > .es-view__paste-btn { border-radius: 7px 0 0 7px; }
+.es-view__top .es-view__actions > .es-view__paste-btn:hover,
+.es-view__top .es-view__actions > .es-view__dl-wrap > .es-view__dl-btn:hover,
+.es-view__top .es-view__actions .es-view__me-btn:hover,
+.es-view .es-view__top .es-view__actions .es-view__login:hover:not(:disabled) {
+  background: var(--surface-overlay-strong, rgb(var(--ink-rgb) / 0.12));
+}
+.es-view__top .es-view__actions .es-view__me,
+.es-view__top .es-view__actions .es-view__me-btn,
+.es-view__top .es-view__actions .es-view__login {
+  height: 100%;
+}
+.es-view__top .es-view__actions .es-view__me-btn {
+  border: 0;
+  border-radius: 0 7px 7px 0;
+  padding: 0 8px 0 4px;
+  background: transparent;
+}
+.es-view__top .es-view__actions .es-view__me-btn[aria-expanded="true"] { background: var(--surface-overlay-strong, rgb(var(--ink-rgb) / 0.12)); }
+.es-view__top .es-view__actions .es-view__avatar { width: 26px; height: 26px; }
+/* .es-view in front: Modern's .eroscripts-panel__btn rules (0,3,0) never win here. */
+.es-view .es-view__top .es-view__actions .es-view__login {
+  border: 0;
+  border-radius: 0 7px 7px 0;
+  padding: 0 14px;
+  background: transparent;
+  box-shadow: none;
+}
+.es-view__top .es-view__actions :is(.es-view__paste-btn, .es-view__dl-btn, .es-view__me-btn, .es-view__login):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.es-view__top .es-view__actions .es-view__dl-badge { top: 2px; right: 2px; }
+
+/* The bar (the applied filters' chips and the controls) as far from the top
+   row as from the cards: 10 px each side, the Library's chip-row pattern
+   (library.css .library__chips: "symmetric (10px top AND bottom) ...
+   asymmetric padding looked top-heavy"). It sat 16 px under the top row
+   (the body's padding) and 10 px over the cards (Dave, 2026-11-25: "the
+   applied filter section has more space above than below"). */
+.es-view__body { padding-top: 10px; }
+.es-view__toolbar { margin-bottom: 10px; }
+
+/* Feeds as one pill group on one line, styled as All / Free / Paid (.es-seg);
+   what does not fit goes into the ▾ menu at its end (Dave, 2026-11-25). The
+   feeds box takes the room between the search and the button group and
+   centres the group in it, so the three parts keep even gaps. */
+.es-view__top .es-view__feeds { flex: 1 1 0; min-width: 0; display: flex; justify-content: center; }
+.es-feeds {
+  display: inline-flex;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+.es-feeds > .es-feed,
+.es-feeds__more {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-family);
+  line-height: 1.5;
+  cursor: pointer;
+  max-width: 220px;
+}
+.es-feeds > .es-feed[hidden], .es-feeds__more-wrap[hidden] { display: none; }
+.es-feeds > .es-feed:hover, .es-feeds__more:hover { color: var(--text-primary); }
+.es-feeds > .es-feed--on, .es-feeds__more--on { background: rgb(var(--ink-rgb) / 0.14); color: var(--text-primary); font-weight: 500; }
+.es-feeds > .es-feed--add { border-style: none; color: var(--text-secondary); opacity: 0.85; }
+.es-feeds > .es-feed:focus-visible, .es-feeds__more:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.es-feeds__more-wrap { position: relative; flex-shrink: 0; display: inline-flex; }
+.es-feeds__more { padding: 4px 8px; }
+.es-feeds__more-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+.es-feeds__more-name[hidden] { display: none; }
+.es-feeds__menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  min-width: 200px;
+  max-height: min(60vh, 420px);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--surface-elevated, var(--bg-secondary));
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  border-radius: 8px;
+  box-shadow: var(--shadow-modal, 0 8px 24px rgba(0, 0, 0, 0.45));
+  z-index: 40;
+}
+.es-feeds__menu[hidden] { display: none; }
+.es-feeds__item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--font-family);
+  text-align: left;
+  cursor: pointer;
+}
+.es-feeds__item:hover:not(:disabled), .es-feeds__item:focus-visible { background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.08)); outline: none; }
+.es-feeds__item--on { font-weight: 600; color: var(--accent); }
+.es-feeds__item--add { color: var(--text-secondary); }
+.es-feeds__item:disabled { opacity: 0.5; cursor: default; }
+.es-feeds__item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The feeds stay on the top row at every width (Dave, 2026-11-25: "mine is
+   still getting shoved onto the row below" at a small window): the pill group
+   never wraps, the ▾ takes what does not fit. The under-1100 px own line (and
+   its wrap) is gone; a rule-order slip there had once put the feeds AFTER the
+   button group. */

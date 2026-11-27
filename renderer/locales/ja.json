@@ -2,10 +2,9 @@
   "remoteVideo": {
     "title": "URLから読み込み",
     "openAria": "URLから読み込み",
-    "navLabel": "URL読み込み",
     "inputLabel": "動画ページのリンクまたは直接の動画URLを貼り付け",
     "load": "読み込み",
-    "inputHint": "実験的機能 — ほとんどの2Dチューブサイト（Pornhub、xHamster など）で動作します。VR やログイン/DRM サイト（SLR、OnlyFans）は不可。直接の動画ファイルリンクは常に動作します。",
+    "inputHint": "XVideos、Eporner、Rule34Video、FapTap、PMVHaven、Pixeldrain と動画への直接リンクに対応しています。一部のサイト（Pornhub、SpankBang）はアプリを拒否します。VR サイトやログインが必要なサイトは使えません。",
     "finding": "動画を検索中…",
     "untitled": "リモート動画",
     "script": "スクリプト",
@@ -21,8 +20,12 @@
       "geo": "この動画はお住まいの地域では利用できません。",
       "live": "ライブ配信は同期できません — 録画済みの動画を試してください。",
       "unavailable": "この動画は利用できません（削除済みまたは非公開）。",
-      "error": "このリンクを読み込めませんでした。サイトが未対応か、動画にログインが必要な可能性があります。"
-    }
+      "error": "このリンクを読み込めませんでした。サイトが未対応か、動画にログインが必要な可能性があります。",
+      "refused": "このサイトは FunSync のようなアプリを拒否します。ブラウザで開いてください。",
+      "notUrl": "ウェブアドレスではありません。https:// で始まるリンクを貼り付けてください。"
+    },
+    "saveToLibrary": "ライブラリに保存",
+    "addToQueue": "キューに追加"
   },
   "i18n": {
     "offer": {
@@ -43,6 +46,8 @@
     "toggleAria": "キューパネルを切り替え",
     "toggleTooltip": "キュー (Shift+Q)",
     "closeAria": "キューパネルを閉じる",
+    "dockAria": "動画の横にドッキング（動画が小さくなります）",
+    "undockAria": "動画の上に重ねて表示",
     "sectionHistory": "以前に視聴した動画",
     "sectionNowPlaying": "再生中",
     "sectionUserQueue": "あなたのキュー",
@@ -125,7 +130,9 @@
       "statusPaused": "一時停止",
       "statusMuted": "ミュート",
       "statusError": "エラー",
-      "statusDisconnected": "切断"
+      "statusDisconnected": "切断",
+      "testBuzzPauseTitle": "テストするには動画を一時停止してください",
+      "testBuzzUnmuteTitle": "テストするにはこの視聴者のミュートを解除してください"
     },
     "toast": {
       "selfKey": "それはあなた自身の Handy です — すでに Handy タブから制御されています。",
@@ -145,12 +152,15 @@
     "eroscriptsTitle": "EroScripts を検索",
     "deviceConnection": "デバイス接続",
     "devices": "デバイス",
-    "device": "デバイス",
-    "deviceCount": "{count} 台接続済み",
     "connecting": "接続中…",
     "notConnected": "未接続",
     "connected": "接続済み",
     "devicesAria": "デバイス: {status}",
+    "noDevices": "デバイスなし",
+    "deviceTotal": "デバイス {count} 台",
+    "deviceNotResponding": "{name}: 応答なし",
+    "deviceSlow": "応答が遅い",
+    "connectionsGroup": "接続",
     "webRemote": "ウェブリモート",
     "webRemoteTitle": "ウェブリモート — 電話で開く",
     "webRemotePhoneConnected": "ウェブリモート — 電話が接続されました",
@@ -170,7 +180,9 @@
     "edit": "編集",
     "addSourceFolder": "+ ソースフォルダを追加…",
     "newCollection": "+ 新しいコレクション…",
-    "notResponding": "応答なし"
+    "notResponding": "応答なし",
+    "stopAll": "すべてのデバイスを停止",
+    "stopAllTitle": "すべてのデバイスを停止 (Shift+Space)"
   },
   "common": {
     "ok": "OK",
@@ -267,7 +279,55 @@
     "windowHungClose": "プレーヤーウィンドウを閉じる",
     "windowRecovered": "プレーヤーウィンドウが再び応答するようになりました。一時停止中です。再生を押すとデバイスが再び動き出します。",
     "stashMarker": "Stash マーカー: {title}",
-    "stashMarkerUntitled": "Stash マーカー"
+    "stashMarkerUntitled": "Stash マーカー",
+    "quality": {
+      "label": "画質",
+      "auto": "自動",
+      "autoNow": "自動 · {height}p",
+      "level": "{height}p"
+    },
+    "stream": {
+      "starting": "ストリームを開始しています…",
+      "loading": "読み込み中…",
+      "reconnecting": "リンクの期限が切れました。再接続しています…",
+      "slow": "この接続では {height}p が読み込みで何度も止まります。",
+      "useAuto": "自動に切り替える",
+      "cutPastEnd": "スクリプトは {script} まで続きますが、この動画は {end} で終わります。別の編集版かもしれません。タイミングがずれる場合は、デバイスでこの動画のオフセットを設定してください。",
+      "cutShorter": "このコピーはスクリプト元の動画より {diff} 短いです。別の編集版かもしれません。タイミングがずれる場合は、デバイスでこの動画のオフセットを設定してください。",
+      "cutLonger": "このコピーはスクリプト元の動画より {diff} 長いです。別の編集版かもしれません。タイミングがずれる場合は、デバイスでこの動画のオフセットを設定してください。",
+      "tryLower": "{height}p に切り替える"
+    },
+    "scriptPreview": {
+      "readout": "{pos}% · {speed} ユニット/秒"
+    },
+    "subtitles": {
+      "off": "オフ",
+      "track": "トラック {n}",
+      "pictures": "画像のため表示できません",
+      "pictureOnly": "この動画の字幕は画像（PGS / VobSub）のため、プレーヤーで表示できません。",
+      "loadFailed": "その字幕を読み込めませんでした。"
+    },
+    "convert": {
+      "offer": "FunSync は {codec} の動画を直接再生できません。再生用に変換しますか？元のファイルはそのままです。",
+      "button": "変換して再生",
+      "progress": "再生用に変換中… {pct}%",
+      "stopping": "停止中…",
+      "cancelled": "変換を停止しました。何も保存されていません。",
+      "failed": "この動画を変換できませんでした: {error}",
+      "unknownError": "ffmpeg が停止しました",
+      "unknownCodec": "この",
+      "lost": "変換が中断されました",
+      "noEncoder": "この ffmpeg は H.264 動画を作成できないため、FunSync はこのファイルを変換できません。",
+      "readyLater": "{name} の変換が完了しました。次に開いたときに再生されます。"
+    },
+    "edgeCarry": {
+      "release": "Z を離すとスクリプトが始まります",
+      "press": "Z を押すとスクリプトを再開します"
+    },
+    "orgasmCarry": {
+      "release": "X を離すとスクリプトが始まります",
+      "stop": "X を押すとデバイスが停止します"
+    }
   },
   "backend": {
     "title": "バックエンドが応答していません",
@@ -310,6 +370,9 @@
     "filterAll": "すべて",
     "filterMatched": "一致あり",
     "filterUnmatched": "一致なし",
+    "filterScripts": "スクリプト",
+    "scriptCount": "スクリプト {count} 件",
+    "scriptCountFiltered": "スクリプト {filtered} 件 / {total}",
     "filterVR": "VR",
     "filterVROnly": "VR のみ",
     "filterNonVR": "VR 以外",
@@ -390,6 +453,80 @@
     "searchEverywhere": "すべての場所を検索中",
     "showingFolder": "表示中: {folder}",
     "openFileLocation": "ファイルの場所を開く",
+    "disabled": {
+      "allDisabled": "ここの動画はすべて無効になっています。手動で再生するか、ライブラリ ▾ 無効な動画 で有効にしてください。",
+      "enabledToast": "有効にしました。再び自動再生の対象になります。",
+      "skippedToast": "無効にしました。FunSync はもう選びません。次の動画に進みます。",
+      "disabledNothingNext": "無効にしました。FunSync はもう選びません。次に再生するものはありません。",
+      "menuAria": "無効: 自動では再生しない",
+      "menuLabel": "無効",
+      "cardDescription": "無効: 自動では再生しない",
+      "cardTitle": "無効: FunSync が自動で再生することはありません。手動では再生できます。",
+      "listTitle": "無効な動画",
+      "listIntro": "FunSync はこれらを自動では再生しません。すべて再生、シャッフル、次の動画、次へ / 前へ の対象外です。手動では再生できます。",
+      "listCount": "{count} 本の動画",
+      "listEmpty": "無効な動画はありません。動画のオプション (⋮) か、再生中にプレーヤーのメニューから無効にできます。",
+      "enableAll": "すべて有効にする",
+      "notInLibrary": "現在ライブラリにありません",
+      "playAria": "{name} を再生",
+      "enable": "有効にする",
+      "enableAria": "{name} を有効にする",
+      "enabledNamed": "{name} を有効にしました。",
+      "deleteAria": "{name} を削除…",
+      "enabledAll": "{count} 本の動画を有効にしました。",
+      "navItem": "無効な動画"
+    },
+    "favourites": {
+      "playlistName": "お気に入り",
+      "add": "{name} をお気に入りに追加",
+      "remove": "{name} をお気に入りから外す",
+      "addThis": "お気に入りに追加",
+      "removeThis": "お気に入りから外す",
+      "added": "お気に入りに追加しました",
+      "removed": "お気に入りから外しました",
+      "emptyTitle": "お気に入りはまだありません",
+      "emptyHint": "ライブラリや再生中に動画のハートをクリックすると、ここに追加されます。"
+    },
+    "deleteFiles": {
+      "title": "「{name}」を削除しますか?",
+      "intro": "削除するものを選んでください。FunSync はこの動画をプレイリスト、カテゴリ、コレクションからも外します。",
+      "introScript": "このスクリプトを使っている動画はありません。",
+      "listAria": "削除するファイル",
+      "kindVideo": "動画",
+      "kindScript": "スクリプト",
+      "kindAxis": "軸ファイル({label})",
+      "kindVariant": "バリエーション({label})",
+      "kindVariantPlain": "バリエーション",
+      "kindSubtitle": "字幕",
+      "sizeUnknown": "サイズ不明",
+      "shared": "{names} でも使われているため残します",
+      "outside": "場所: {folder}",
+      "total": "{count, plural, =0 {何も選ばれていません} other {# 個のファイル、{size}}}",
+      "how": "方法",
+      "toBin": "{os, select, win {ごみ箱} other {ゴミ箱}}に移動",
+      "toBinHint": "{os, select, win {ごみ箱} other {ゴミ箱}}から元に戻せます。",
+      "permanent": "完全に削除",
+      "permanentHint": "元に戻せません。",
+      "noBin": "ネットワークドライブには{os, select, win {ごみ箱} other {ゴミ箱}}がないため、これらのファイルは完全に削除するしかありません。",
+      "warning": "{count} 個のファイル({size})を完全に削除します。{os, select, win {ごみ箱} other {ゴミ箱}}には移動されず、復元できません。",
+      "understand": "{count, plural, other {復元できないことを理解しました}}",
+      "btnBin": "{os, select, win {ごみ箱} other {ゴミ箱}}に移動",
+      "btnPermanent": "完全に削除",
+      "doneBin": "{count} 個のファイル({size})を{os, select, win {ごみ箱} other {ゴミ箱}}に移動しました。",
+      "donePermanent": "{count} 個のファイル({size})を完全に削除しました。",
+      "someFailed": "{count} 個のファイルを削除できませんでした: {reasons}。",
+      "failedAll": "何も削除されませんでした: {error}",
+      "reason": {
+        "inUse": "使用中です(再生しているものを閉じてから、もう一度お試しください)",
+        "outside": "ライブラリのフォルダー外です",
+        "noBin": "{os, select, win {ごみ箱} other {ゴミ箱}}のないネットワークドライブ上です",
+        "gone": "すでにありません",
+        "other": "削除できませんでした"
+      },
+      "forgetDownload": "EroScripts からダウンロードした記録も消す",
+      "forgetDownloadHint": "「{title}」は EroScripts タブで未ダウンロードとして表示されます。",
+      "forgetDownloadHintMany": "{count} 件の投稿が EroScripts タブで未ダウンロードとして表示されます。"
+    },
     "customThumbSet": "サムネイルのフレームを設定…",
     "customThumbUpload": "サムネイル画像をアップロード…",
     "customThumbUploadFailed": "この画像は使用できませんでした",
@@ -436,8 +573,6 @@
     "bulkMarkedVR": "{count, plural, other {# 本の動画}}を VR としてマークしました",
     "bulkMarkedFlat": "{count, plural, other {# 本の動画}}を平面としてマークしました",
     "bulkVrReset": "{count, plural, other {# 件の VR 上書き}}をリセットしました",
-    "videoAlreadyInAll": "この動画はすでにすべてのライブラリに含まれています",
-    "libraryDeleted": "ライブラリは削除されました",
     "noLibrariesYet": "まずナビゲーションバーのライブラリドロップダウンからライブラリを作成してください",
     "createPlaylistFirstTitle": "まずプレイリストを作成",
     "createPlaylistFirstLabel": "プレイリスト名",
@@ -445,8 +580,6 @@
     "addToCollectionTitle": "ライブラリに追加",
     "assignCategoryTitle": "カテゴリを割り当て",
     "newCategoryInlineLabel": "+ 新しいカテゴリ",
-    "allAssignedTitle": "すべて割り当て済み",
-    "allAssignedBody": "この動画にはすでにすべてのカテゴリが割り当てられています。",
     "setVRTitle": "VR 分類を設定",
     "vrOptionMark": "VR としてマーク",
     "vrOptionMarkSub": "ヒューリスティックを上書き — VR として扱う",
@@ -524,15 +657,58 @@
     "filterStashRatingAny": "評価を問わない",
     "filterStashRatingAtLeast": "{count, plural, other {評価 ★# 以上}}",
     "filterStashOrganised": "Stash で整理済み",
-    "filterChipStashRating": "{count, plural, other {Stash: ★# 以上}}"
+    "filterChipStashRating": "{count, plural, other {Stash: ★# 以上}}",
+    "streams": {
+      "unavailable": "「{name}」を再生できませんでした: {reason}",
+      "badge": "ストリーミング: このコンピューターにはありません",
+      "badgeSite": "{site} からストリーミング: このコンピューターにはありません",
+      "filterTitle": "再生元",
+      "filterLocal": "このコンピューター",
+      "filterStreams": "ストリーミング",
+      "saved": "ライブラリに保存しました",
+      "page": "ページ",
+      "from": "配信元",
+      "copyLink": "リンクをコピー",
+      "remove": "ライブラリから削除",
+      "removeTitle": "このストリームを削除しますか?",
+      "removeMessage": "「{name}」をライブラリ、プレイリスト、カテゴリから外します。ページ自体には何もしません。",
+      "removed": "ライブラリから削除しました"
+    },
+    "scripts": {
+      "tileLabel": "動画のないスクリプト",
+      "mark": "スクリプト",
+      "play": "再生",
+      "pair": "動画と関連付ける…",
+      "showInFolder": "フォルダーで表示",
+      "delete": "削除…",
+      "menuAria": "{name} のオプション",
+      "emptyTitle": "動画のないスクリプトはありません",
+      "emptyHint": "ライブラリのスクリプトはすべて動画と関連付けられています。自分の動画がないスクリプトはここに表示され、再生やプレイリストへの追加ができます。",
+      "scopeAria": "表示するスクリプト",
+      "scopeUnassigned": "未割り当て",
+      "scopeAll": "すべて",
+      "pairedWith": "{video} と関連付け",
+      "emptyAllTitle": "ライブラリにスクリプトがありません",
+      "emptyAllHint": "ソースフォルダーのスクリプトは、動画の有無にかかわらずここに表示されます。"
+    },
+    "folderCount": "{count, plural, other {# 個のフォルダー}}",
+    "sourcesOfflineHint": "ドライブまたはフォルダーが再び使えるようになると、動画は自動的に戻ります。",
+    "sourceCount": "{count, plural, other {# 個のソース}}",
+    "audioTile": {
+      "label": "音声ファイル（映像なし）",
+      "mark": "音声"
+    }
   },
   "playlists": {
     "title": "プレイリスト",
     "newPlaylist": "新しいプレイリスト",
+    "searchPlaceholder": "プレイリストを検索",
+    "searchNoMatches": "「{query}」に一致するプレイリストはありません",
     "playlistNamePlaceholder": "プレイリスト名",
     "emptyTitle": "プレイリストはまだありません",
     "emptyCta": "最初のプレイリストを作成",
     "videoCount": "{count, plural, other {# 件の動画}}",
+    "scriptCount": "スクリプト {count} 件",
     "playAll": "すべて再生",
     "loopOnTitle": "ループ オン — 最後の動画の後、項目 1 から再開",
     "loopOffTitle": "ループ オフ — 最後の動画の後に停止",
@@ -556,6 +732,28 @@
     "listView": "リスト表示",
     "detailEmpty": "このプレイリストに動画はありません",
     "detailEmptyHint": "ライブラリから動画を追加: 動画のオプション (⋮) を開き、「整理」でこのプレイリストにチェックを入れてください。",
+    "follow": {
+      "title": "「{name}」が追従する対象",
+      "intro": "追従するプレイリストは自動で埋まります。条件に合う動画は、今も新しく見つかったときも追加されます。",
+      "legend": "追従",
+      "none": "なし (動画は自分で追加)",
+      "category": "カテゴリ",
+      "source": "ライブラリのフォルダー",
+      "folder": "ほかのフォルダー",
+      "noFolder": "フォルダーが選ばれていません",
+      "browse": "参照…",
+      "note": "手動で外した動画が戻ることはなく、ドライブがオフラインでも何も外されません。動画の追加・削除・並べ替えは今まで通りできます。",
+      "followsCategory": "カテゴリに追従: {name}",
+      "followsSource": "ライブラリのフォルダーに追従: {name}",
+      "followsFolder": "フォルダーに追従: {name}",
+      "followsGone": "存在しなくなったものに追従しています",
+      "cardTitle": "条件に合う新しい動画は、このプレイリストに自動で追加されます",
+      "button": "追従…",
+      "buttonTitle": "カテゴリやフォルダーからこのプレイリストを埋める",
+      "change": "このプレイリストの追従先を変更",
+      "saved": "{count, plural, =0 {追従を設定しました。今追加するものはありません。} other {追従を設定しました: # 本の動画を追加しました。}}",
+      "stopped": "追従をやめました。入っている動画はそのままです。"
+    },
     "advanced": {
       "openTitle": "プレイリストの詳細設定",
       "title": "プレイリストの詳細設定",
@@ -580,7 +778,7 @@
     "continueNamed": "{name} の続きから",
     "unavailableCount": "{count, plural, other {# 本の動画が利用できません}}",
     "unavailableOnVolume": "{count, plural, other {{volume} にある # 本の動画が利用できません}}",
-    "unavailableHint": "ドライブを再接続すると再生できます。プレイリストからは削除されません。",
+    "unavailableHint": "{count, plural, other {ドライブを再接続すると再生できます。プレイリストからは削除されません。}}",
     "unavailableTooltip": "現在利用できません: {path}",
     "sortAzTitle": "名前で並べ替え (A-Z)",
     "sortZaTitle": "名前で並べ替え (Z-A)",
@@ -610,7 +808,16 @@
       "copyTitle": "これらの動画で自分のプレイリストを作ります。自由に編集でき、Stash には連動しません。",
       "copied": "「{name}」をプレイリストに追加しました",
       "copyFailed": "プレイリストを作成できませんでした。もう一度お試しください。"
-    }
+    },
+    "coverSet": "カバー画像を設定",
+    "coverRemove": "カバー画像を削除",
+    "coverSaved": "カバー画像を設定しました",
+    "coverFailed": "この画像はカバーに使えませんでした",
+    "unavailableScriptsOnVolume": "{count, plural, other {{volume} にある # 本のスクリプトが利用できません}}",
+    "unavailableScriptsCount": "{count, plural, other {# 本のスクリプトが利用できません}}",
+    "unavailableEntriesOnVolume": "{count, plural, other {{volume} にある # 件の項目が利用できません}}",
+    "unavailableEntriesCount": "{count, plural, other {# 件の項目が利用できません}}",
+    "unavailableMovedHint": "{count, plural, other {元の場所にありません。名前の変更、移動、または削除をしましたか？プレイリストからは削除されません。}}"
   },
   "categories": {
     "title": "カテゴリ",
@@ -630,7 +837,7 @@
     "gridView": "グリッド表示",
     "listView": "リスト表示",
     "detailEmpty": "このカテゴリに動画はありません",
-    "unavailableHint": "ドライブを再接続すると再生できます。カテゴリからは削除されません。",
+    "unavailableHint": "{count, plural, other {ドライブを再接続すると再生できます。カテゴリからは削除されません。}}",
     "detailEmptyHint": "ライブラリから動画を割り当て: 動画のオプション (⋮) を開き、「整理」でこのカテゴリにチェックを入れてください。",
     "iconLabel": "アイコン",
     "iconModeColor": "色",
@@ -640,7 +847,8 @@
     "iconPreview": "プレビュー",
     "editCategory": "カテゴリを編集",
     "iconEmojiSearch": "グループを検索",
-    "iconEmojiNone": "該当なし"
+    "iconEmojiNone": "該当なし",
+    "unavailableMovedHint": "{count, plural, other {元の場所にありません。名前の変更、移動、または削除をしましたか？カテゴリからは削除されません。}}"
   },
   "stroke": {
     "rangeLabel": "ストローク範囲",
@@ -699,11 +907,11 @@
     "videoErrorAborted": "動画の読み込みが中止されました",
     "videoErrorNetwork": "動画の読み込み中にネットワークエラーが発生しました",
     "videoErrorDecode": "動画のデコードに失敗しました — 未対応のコーデック？",
-    "videoErrorDecodeCodec": "動画のデコードに失敗しました: このシステムは {codec} に対応していません。H.264 8ビット (yuv420p) に変換してみてください。",
+    "videoErrorDecodeCodec": "FunSync は {codec} の動画を再生できません。ここで再生するには H.264 8 ビット (yuv420p) に変換してください。",
     "videoErrorFormat": "サポートされていない動画形式です",
     "remuxPreparing": "{format} を再生用に準備しています…",
-    "orgasmNotConfigured": "オーガズムスクリプトが未設定です — 設定 ▸ 再生 で選択してください",
-    "fillerTestBusy": "先に動画を停止してください。すでにデバイスを制御しています。",
+    "orgasmNotConfigured": "オーガズムスクリプトが未設定です — 設定 ▸ デバイスの動き で選択してください",
+    "fillerTestBusy": "先に動画を一時停止してください。デバイスで再生中です。",
     "fillerTestNoDevices": "デバイスを接続してから「テスト」を押すとパターンを体感できます。",
     "orgasmInvalidScript": "そのファイルは有効な funscript ではありません",
     "orgasmScriptSet": "オーガズムスクリプトを設定しました: {name}",
@@ -740,6 +948,7 @@
     "sourceDisconnected": "ソースが切断されました: {names}",
     "sourceReconnected": "ソースが再接続されました: {names}",
     "autoPromotedMulti": "{count, plural, other {# 本の動画をマルチ軸再生に自動割り当てしました}}",
+    "autoPromotedMultiReverted": "{count, plural, other {# 本の動画を元のスクリプト（単軸）に戻しました}}",
     "remoteConnected": "{ip} からリモートが接続されました",
     "remoteDisconnected": "リモートが切断されました",
     "remoteTakenOver": "{ip} によってリモートが引き継がれました",
@@ -774,7 +983,6 @@
     "vrConnected": "VR コンパニオンが接続されました — デバイス同期中",
     "restartFailed": "再起動に失敗しました: {error}",
     "logsOpenFailed": "ログファイルを開けませんでした: {error}",
-    "handyAutoFailed": "Handy 自動接続に失敗しました — H キーで手動接続してください",
     "sourceDisconnectedFile": "ソースが切断されました — ファイルが利用できません",
     "videoFileMissing": "{name} が見つかりません。移動または名前の変更が行われたか、保存先のドライブが接続されていない可能性があります。",
     "multiAxisFailed": "マルチ軸: {suffix} スクリプトの読み込みに失敗 ({error})",
@@ -788,9 +996,18 @@
     "playlistAllUnavailable": "これらの動画はいずれも現在利用できません。ドライブを再接続してください。",
     "playlistSkippedUnavailable": "{count, plural, other {利用できない動画 # 本をスキップしました}}",
     "nextAllUnavailable": "その方向に再生できる動画がありません。残りを再生するにはドライブを再接続してください。",
-    "settingsRecovered": "設定を最近のバックアップから復元しました。バックアップ履歴は「設定 → データ」で確認できます。",
-    "settingsNotRecovered": "設定を復元できませんでした。初期状態で起動します — バックアップファイルから復元するには「設定 → データ → バックアップファイルをインポート」を使ってください。",
-    "patternTestHandyFailed": "Handy でテストを再生できませんでした。接続を確認して、もう一度お試しください。"
+    "settingsRecovered": "設定を最近のバックアップから復元しました。バックアップ履歴は「設定 → データとプライバシー」で確認できます。",
+    "settingsNotRecovered": "設定を復元できませんでした。初期状態で起動します — バックアップファイルから復元するには「設定 → データとプライバシー → バックアップファイルをインポート」を使ってください。",
+    "patternTestHandyFailed": "Handy でテストを再生できませんでした。接続を確認して、もう一度お試しください。",
+    "stopAllDone": "すべてのデバイスを停止しました。再生を押すと再開します。",
+    "stopAllNoDevices": "一時停止しました。接続中のデバイスはありません。",
+    "stopAllPhoneKeptPlaying": "スマホの再生が続いているため、スマホで一時停止するまでデバイスは停止したままです。",
+    "stopAllHeadsetKeptPlaying": "ヘッドセットの再生が続いているため、ヘッドセットで一時停止するまでデバイスは停止したままです。",
+    "gapNothingAhead": "この先にスキップできる箇所はありません",
+    "devicesConnected": "接続しました: {devices}",
+    "extractMissingPaths": "抽出できません: 動画または funscript のパスがありません",
+    "extractNoAxes": "この funscript に埋め込み軸は見つかりませんでした",
+    "extractFailed": "抽出に失敗しました ({axes})"
   },
   "modal": {
     "noItemsAvailable": "利用可能な項目がありません",
@@ -898,7 +1115,7 @@
       "unnamed": "（名称未設定）"
     },
     "folderJump": {
-      "label": "フォルダー内：<strong>{path}</strong>"
+      "label": "フォルダー内：{path}"
     },
     "empty": {
       "loadingLibrary": "ライブラリを読み込み中…",
@@ -940,6 +1157,9 @@
       "seek": "シーク",
       "mute": "ミュート",
       "fullscreen": "全画面",
+      "flatView": "フラット表示",
+      "flatViewHint": "この VR 動画を 1 枚の平面映像として表示します。ドラッグで見回し、ピンチでズーム",
+      "flatViewUnavailable": "このスマートフォンではフラット表示を使えません（ブラウザが WebGL2 に対応していません）",
       "loopAB": "A-Bループ",
       "useNativeControls": "ブラウザの操作画面を使う",
       "useCustomControls": "FunSync の操作画面を使う",
@@ -949,6 +1169,7 @@
       "orgasmRiding": "離すと戻ります",
       "orgasmTap": "Orgasm Switch - タップ",
       "orgasmStop": "タップで停止",
+      "orgasmStarting": "Handy で開始中…",
       "upNextIn": "次は {seconds}秒後",
       "upNextPlayNow": "今すぐ再生",
       "upNextCancel": "キャンセル",
@@ -961,7 +1182,12 @@
       "edgeHold": "寸止めホールド - 長押し",
       "edgeRelease": "離すと再開します",
       "edgeTap": "寸止めホールド - タップ",
-      "edgeResume": "タップで再開"
+      "stopAll": "停止",
+      "stopAllAria": "すべてのデバイスを停止",
+      "edgeResume": "タップで再開",
+      "subtitles": "字幕",
+      "subtitlesNow": "字幕: {label}",
+      "cantPlay": "このブラウザーはこの動画の形式を再生できません。PC の FunSync で一度開くと (尋ねられたら「変換して再生」を選んでください)、ここでも再生できます。"
     }
   },
   "hevc": {
@@ -1073,6 +1299,8 @@
   },
   "settingsPanel": {
     "modalTitle": "設定",
+    "hintMore": "続きを表示",
+    "hintLess": "閉じる",
     "tabsAria": "設定セクション",
     "tabSources": "ソース",
     "tabPlayback": "再生",
@@ -1117,7 +1345,9 @@
       "recheckedAll": "すべてのソースにアクセスできます。",
       "recheckedSome": "{count, plural, other {# 件のソースにはまだアクセスできません}}",
       "working": "処理中...",
-      "scanning": "ライブラリをスキャン中..."
+      "scanning": "ライブラリをスキャン中...",
+      "foldersHeader": "フォルダー",
+      "cardsHeader": "カードとリスト"
     },
     "multiAxisConfirm": {
       "title": "マルチ軸をデフォルトに切り替えますか?",
@@ -1157,7 +1387,7 @@
       "preferMulti": "利用可能な場合はマルチ軸 (デフォルト)",
       "preferResetTitle": "デフォルトにリセット (マルチ軸)",
       "preferResetAria": "デフォルトの再生をリセット",
-      "multiHint": "マルチ軸に設定すると、FunSync はコンパニオンファイル (twist、surge など) が検出された動画にマルチ軸再生を自動割り当てします。既に設定されている動画は現在の選択を保持します。シングルに戻しても自動割り当ては元に戻りません — 個別の動画でファンスクリプトを変更して取り消してください。",
+      "multiHint": "マルチ軸にすると、FunSync は動画のコンパニオンファイル (twist、surge など) が見つかったときに一緒に再生します。シングル軸に切り替えると、FunSync が自動でペアにした動画は自身のスクリプトに戻ります。自分で作ったセットは変更されません。",
       "smoothingHeader": "モーションスムージング",
       "fieldInterpolation": "補間",
       "smoothLinear": "リニア (デフォルト)",
@@ -1184,6 +1414,7 @@
       "orgasmScriptClear": "オーガズムスクリプトをクリア",
       "orgasmScriptNone": "なし",
       "orgasmScriptHint": "再生中に X を押し続けると、この短いループスクリプトにデバイスを切り替えます。離すと元に戻ります。Handy、Buttplug、T-Code に対応。",
+      "orgasmScriptHintToggle": "再生中に X を押すと、この短いループスクリプトにデバイスを切り替えます。もう一度 X を押すと停止します。Handy、Buttplug、T-Code に対応。",
       "orgasmModeLabel": "X キーの動作",
       "orgasmModeHold": "押している間だけ再生(離すと戻る)",
       "orgasmModeToggle": "押して仕上げ(その後停止)",
@@ -1203,6 +1434,7 @@
       "globalHotkeyPlayPause": "再生 / 一時停止",
       "globalHotkeyOrgasm": "Orgasm Switch",
       "globalHotkeyEdge": "寸止めホールド",
+      "globalHotkeyStopAll": "すべてのデバイスを停止",
       "globalHotkeyClear": "{action} のホットキーを削除",
       "globalHotkeyNeedsModifier": "{key} を割り当てると、他のすべてのアプリでそのキーが入力できなくなります。Ctrl+Alt+Shift と組み合わせてみてください",
       "globalHotkeyAppShortcut": "{key} は他のアプリが使うショートカット（コピー、貼り付け、元に戻す、保存、再読み込みなど）で、割り当てるとそのすべてで使えなくなります。Ctrl+Alt+Shift と組み合わせるか、F13〜F24 を使ってください",
@@ -1228,18 +1460,34 @@
       "bpHint": "ストロークごとはアクションごとに1つのコマンドを送信しデバイスのファームウェアに補間させます — Handy の WiFi API (HSSP) の感触に近くなります。先読みは BLE の往復時間を補償します。最小ストロークは短すぎるストロークを伸ばして BLE が実行できるようにします。接続コード (HSSP) 経由の Handy では効果はありません。",
       "orgasmSummaryMulti": "多軸（{count}軸）",
       "orgasmSummaryCustom": "カスタムルーティング（{count}ルート）",
+      "inlineVizPlacementLabel": "タイムラインとヒートマップ",
+      "inlineVizPlacementOverlay": "動画の上",
+      "inlineVizPlacementBelow": "動画の下",
+      "inlineVizPlacementHint": "「動画の下」では画面全体が隠れません。動画が少し小さくなり、タイムラインとヒートマップはその下の帯に表示されます。プレーヤーの TL と HM でオンにします。下の不透明度は「動画の上」のときの設定です。",
+      "inlineTimelineWindowLabel": "タイムラインの表示範囲",
+      "inlineTimelineWindowSeconds": "{seconds} 秒",
+      "inlineTimelineAnchorLabel": "タイムラインの再生位置",
+      "inlineTimelineAnchorCentre": "中央",
+      "inlineTimelineAnchorLeft": "左寄り（これからの部分を多く表示）",
+      "inlineTimelineHint": "ビデオ上のタイムライン（TL）用です。範囲を長くすると、スクリプトを一度に多く表示します。左寄りにすると、過ぎた部分よりこれからの部分を多く表示します。",
       "inlineVizOpacityLabel": "オーバーレイの不透明度",
       "inlineVizOpacityResetTitle": "既定の不透明度に戻す",
       "deviceSimOpacityLabel": "デバイスシミュレーターの不透明度",
       "deviceSimOpacityHint": "動画の上に重なるストローク表示の濃さです。D キーまたはプレーヤーの ⋮ メニューから表示できます。",
+      "deviceSimHint": "プレーヤーでシミュレーターをドラッグすると移動、角をドラッグするとサイズ変更、端のつまみをドラッグすると回転、右クリックで向きと色を変えられます。",
       "deviceSimOpacityResetTitle": "既定の不透明度に戻す",
       "inlineVizOpacityHint": "動画の上に重なるスクリプトタイムラインとヒートマップの濃さです。プレーヤーの ⋮ メニューから表示できます。",
+      "seekFrameStripLabel": "シークバーのフレーム表示",
+      "seekFrameStripHint": "シークバーの上に動画のフレームを並べて、どこへ飛ぶか見えるようにします。再生中に動画そのものから少しずつ描きます。ローカルファイルのみ。大きな VR 動画は時間がかかります。",
       "heatmapPlayheadLabel": "ヒートマップバーに再生位置を表示",
       "heatmapPlayheadHint": "タイムラインのカーソルと同じように、ヒートマップバーの現在位置に線を表示します。バーはプレーヤーの ⋮ メニューから表示できます。",
       "orgasmScriptMissing": "(ファイルが見つかりません)",
       "playbackHeader": "再生",
       "orgasmHeader": "Orgasm Switch",
       "videoHeader": "ビデオとパフォーマンス",
+      "smoothOverlaysLabel": "オーバーレイ表示中も滑らかに再生",
+      "smoothOverlaysHint": "既定でオフ。FunSync で Windows の DirectComposition をオフにします。タイムライン、ヒートマップのマーカー、デバイスシミュレーターの表示中に、数秒ごとに映像が一瞬止まる場合に試してください。ほかのアプリも同じように止まる場合は PC 側(ドライバーや常駐ツール)が原因で、この設定では改善しません。アプリの再起動後に有効になります。",
+      "smoothOverlaysRestart": "表示方法の変更を適用するには FunSync を再起動してください。",
       "rememberSpeedLabel": "再生速度を記憶",
       "rememberSpeedHint": "別の動画を読み込んでも現在の速度を維持します。既定はオフで、各動画は1倍速で始まります。",
       "openFullscreenLabel": "動画を全画面で開く",
@@ -1275,7 +1523,14 @@
       "orgasmLibraryNone": "パターンがまだ選択されていません。選択するまで、Xはこれまでどおりスクリプトファイルを再生します。",
       "edgePatternNone": "パターンがまだ選択されていないため、Zは「デバイスを停止」と同じくデバイスを停止します。上でパターンを選択してください。",
       "fillerThreshold": "この長さを超えるギャップを埋める",
-      "fillerResetThresholdAria": "ギャップフィラーのしきい値をデフォルトにリセット (10秒)"
+      "fillerResetThresholdAria": "ギャップフィラーのしきい値をデフォルトにリセット (10秒)",
+      "playerHeader": "プレーヤー",
+      "motionHeader": "スムージングと範囲",
+      "overlayHeader": "タイムラインとヒートマップ",
+      "edgeCarryLabel": "次の動画でも Z をオンのままにする",
+      "edgeCarryHint": "オフ: 新しい動画は Z がオフの状態で始まり、スクリプトが再生されます。オン: 次の動画が始まっても Z はオンのまま (キューの再生中に便利)、デバイスは待機し、動画上の表示でスクリプトの開始方法を案内します。",
+      "orgasmCarryLabel": "次の動画でも X をオンのままにする",
+      "orgasmCarryHint": "オフ: 新しい動画で X は終了し、その動画のスクリプトが再生されます。オン: ループスクリプトは次の動画でも続き (キューの再生中に便利)、その動画のスクリプトは待機し、動画上の表示で終了方法を案内します。"
     },
     "appearance": {
       "themeHeader": "テーマ",
@@ -1287,11 +1542,15 @@
       "themeLight": "ライト",
       "themeLightDesc": "オフホワイトの背景、ダークテキスト",
       "styleHeader": "インターフェーススタイル",
-      "styleHint": "クラシックな外観のままにするか、より奥行きと洗練さのあるモダンなスタイルに切り替えます。色はどちらも同じです。",
+      "styleHint": "クラシックのままにするか、奥行きと仕上げを加えたモダンにするか、ホリデーで季節らしくするかを選べます。クラシックとモダンは同じ配色です。",
       "styleClassic": "クラシック",
       "styleClassicDesc": "FunSync のオリジナルデザイン",
       "styleModern": "モダン",
       "styleModernDesc": "より柔らかな奥行き、余白、モーション",
+      "styleHoliday": "ホリデー",
+      "styleHolidayDesc": "お祝いの配色、サンタ帽のロゴ、少しの雪。ダークとライトの両方で使えます。",
+      "holidaySnowLabel": "雪を降らせる",
+      "holidaySnowHint": "ゆっくり降る少しの雪。動画の上には表示されず、システムで視差効果を減らす設定のときはオフになります。",
       "scaleHeader": "インターフェースのサイズ",
       "scaleHint": "メインウィンドウ全体を拡大・縮小します。Ctrl+= と Ctrl+- でも変更でき、Ctrl+0 で 100% に戻ります。VR 動画を開いている間は、これらのキーは動画のズームになります。",
       "scaleOption": "{percent}%",
@@ -1347,6 +1606,11 @@
       "exportHeader": "エクスポートとインポート",
       "exportBlurb": "設定、プレイリスト、カテゴリ、関連付け、カスタムサムネイルをポータブルファイルに保存します — 別のマシンへの移行や追加のオフホストバックアップに便利です。",
       "export": "バックアップファイルをエクスポート",
+      "exportDialogTitle": "バックアップファイルをエクスポート",
+      "exportDialogBody": "プレイリスト、カテゴリ、タグ、関連付け、設定を1つのファイルに保存します。後で、または別のPCで復元できます。",
+      "exportSecretsLabel": "キーとログイン情報を含める",
+      "exportSecretsHint": "Handy のキー、Autoblow のトークン、EroScripts のログイン、Audience のキーです。推奨しません：ファイルを持つ人なら誰でも使えます。含めない場合は、別のPCで復元した後に入力し直します。",
+      "exportDialogGo": "エクスポート…",
       "exporting": "エクスポート中…",
       "exportSaved": "バックアップを保存しました: {path}",
       "exportFailed": "エクスポートに失敗しました",
@@ -1357,7 +1621,7 @@
       "importFailed": "インポートに失敗しました",
       "importFailedReason": "インポートに失敗しました: {error}",
       "importConfirmTitle": "バックアップファイルをインポートしますか?",
-      "importConfirmBody": "次に FunSync のバックアップファイルを選択します。ファイル内のプレイリスト、カテゴリ、関連付けは現在のものに追加され(既にあるプレイリストはそのまま残ります)、設定は現在の設定を置き換えます。ここに既にあるキーとログイン情報は保持されます。最初に再生とすべてのデバイスが停止します。現在の状態はスナップショットとして保存されるため、「バックアップから復元」で元に戻せます。結果を読み込むためにアプリが再起動します。",
+      "importConfirmBody": "次に FunSync のバックアップファイルを選択します。ファイル内のプレイリスト、カテゴリ、関連付けは現在のものに追加され(既にあるプレイリストはそのまま残ります。ただし「お気に入り」にはバックアップのお気に入りが追加されます)、設定は現在の設定を置き換えます。ここに既にあるキーとログイン情報は保持されます。最初に再生とすべてのデバイスが停止します。現在の状態はスナップショットとして保存されるため、「バックアップから復元」で元に戻せます。結果を読み込むためにアプリが再起動します。",
       "triggerStartup": "起動時",
       "triggerDebounced": "自動保存",
       "triggerPreAction": "{label} の前",
@@ -1381,7 +1645,17 @@
       "relMinutesAgo": "{count, plural, other {# 分前}}",
       "relHoursAgo": "{count, plural, other {# 時間前}}",
       "relYesterday": "昨日",
-      "relDaysAgo": "{count, plural, other {# 日前}}"
+      "relDaysAgo": "{count, plural, other {# 日前}}",
+      "convertedHeader": "変換済みコピー",
+      "convertedBlurb": "動画の形式をそのまま再生できない場合、「変換して再生」で再生可能なコピーをここに保存します。元の動画は変更されません。削除したコピーは、その動画を次に再生するときに作り直されます。",
+      "convertedNone": "変換済みコピーはありません。",
+      "convertedInfo": "{count, plural, other {# 件のコピー}}、合計 {size}。",
+      "convertedClear": "変換済みコピーを削除…",
+      "convertedClearTitle": "変換済みコピーを削除",
+      "convertedClearBody": "{count, plural, other {# 件の変換済みコピー}} ({size}) を削除しますか？元の動画はそのままです。次に再生するときに再び変換されます。",
+      "convertedClearGo": "削除",
+      "convertedCleared": "{count, plural, other {# 件のコピー}}を削除しました ({size})。",
+      "convertedKept": "{count, plural, other {# 件のコピーは使用中のため残しました。}}"
     },
     "help": {
       "logsHeader": "診断ログ",
@@ -1596,6 +1870,154 @@
       "summaryNone": "まだパターンが選ばれていません",
       "statsWithInstant": "平均 {avg} ユニット/秒、最大 {max} ユニット/秒、瞬間ジャンプあり",
       "statsInstantOnly": "瞬間ジャンプ（デバイスの最高速度で動きます）"
+    },
+    "tabLibrary": "ライブラリ",
+    "tabMotion": "デバイスの動き",
+    "tabKeyboard": "キーボード",
+    "tabDataPrivacy": "データとプライバシー",
+    "motion": {
+      "devicesNote": "デバイスの接続、同期オフセット、ストローク範囲、出力制限は「デバイス」にあります。",
+      "openDevices": "デバイスを開く"
+    },
+    "search": {
+      "placeholder": "設定を検索",
+      "aria": "すべての設定を検索",
+      "clear": "検索をクリア",
+      "count": "{count, plural, other {# 件}}",
+      "none": "「{query}」に一致する項目はありません。",
+      "noneHint": "別の言葉で試すか、左のエリアを選んでください。",
+      "elsewhereHeader": "FunSync のほかの場所",
+      "open": "開く",
+      "aliases": {
+        "sources": "フォルダー, ソース, ディレクトリ, ドライブ, パス, フォルダーを追加, 動画の場所, スキャン, 再確認, 外付けドライブ, ネットワーク",
+        "library": "ライブラリ, カード, サムネイル, プレビュー, グリッド, リスト, ヒートマップ, タグ, 続きから, 進捗バー, 重複した名前, バリエーション",
+        "duplicates": "重複, コピー, 同じ動画, ディスク容量, 削除, ごみ箱, 整理",
+        "stash": "stash, サーバー, APIキー, マーカー, 出演者, スタジオ, リンク",
+        "playback": "プレーヤー, 動画, 開く, 自動再生, 開始, 全画面, フルスクリーン, 速度, 記憶, ミニプレーヤー, ピクチャーインピクチャー, 再生を続ける, バックグラウンド",
+        "upnext": "次の動画, 自動再生, カウントダウン, 続ける, キュー, プレイリスト, ランダム, バリエーション",
+        "gapskip": "ギャップ, 空白, スキップ, 待機, 一時停止, 無音, スクリプトなし, 空の部分, イントロ",
+        "multiaxis": "マルチ軸, 多軸, 軸, ピッチ, ロール, ツイスト, チャンネル",
+        "video": "動画, パフォーマンス, ハードウェア, デコード, GPU, なめらか, カクつき, 遅延",
+        "motion": "スムージング, 補間, なめらか, 速度制限, 速い, ストローク, 範囲, 伸ばす, 短いストローク, プレビュー, デバイス, 動き, カーブ",
+        "gapfiller": "ギャップ, 空白, 埋める, フィラー, パターン, 待機, 動かし続ける, スクリプトなし",
+        "orgasm": "オーガズム, フィニッシュ, 絶頂, Xキー, ボタン, スクリプト, パターン",
+        "edge": "エッジ, 寸止め, ホールド, 停止, Zキー, 焦らし",
+        "theme": "テーマ, ダーク, ライト, ダークモード, 夜, 色, システム",
+        "style": "スタイル, 見た目, デザイン, クラシック, モダン, ホリデー, クリスマス, 雪",
+        "scale": "サイズ, ズーム, 拡大, 縮小, 大きく, 小さく, 文字サイズ, 画面サイズ",
+        "language": "言語, 翻訳, 日本語, 英語",
+        "overlay": "タイムライン, ヒートマップ, オーバーレイ, グラフ, 再生位置, 不透明度, 透明度, シミュレーター, 動画の下",
+        "nav": "ナビゲーション, ナビゲーションバー, 上部バー, メニュー, ボタン, 隠す, 表示",
+        "global-hotkeys": "ホットキー, グローバル, ショートカット, キーボード, キー, 割り当て, メディアキー, ほかのアプリ",
+        "position-keys": "エディター, 位置, キー, テンキー, 割り当て, スクリプトエディター",
+        "editor-speed": "最高速度, 最大速度, 速度制限, 速すぎ, 遅すぎ, 最低速度, OFS, 薄紫, 破線, 単位/秒, スクリプトエディター, エディター、フレーム移動、高速移動、ctrl 左、ctrl 右、フレーム",
+        "shortcuts": "キーボード, ショートカット, キー, 一覧, ヘルプ",
+        "backup": "バックアップ, 復元, スナップショット, 元に戻す, 消えた設定, 履歴",
+        "export": "エクスポート, インポート, 移行, 新しいパソコン, バックアップファイル",
+        "log-privacy": "プライバシー, ログ, ファイル名, 隠す, セキュリティ",
+        "report": "報告, バグ, 問題, フィードバック, クラッシュ, 不具合",
+        "logs": "ログ, ログファイル, 診断, デバッグ, フォルダー",
+        "about": "について, バージョン, ライセンス, 更新, ソースコード",
+        "support": "支援, 寄付, コーヒー, コミュニティ, ヘルプ",
+        "converted": "変換, 変換済み, コピー, トランスコード, ディスク容量, キャッシュ, コーデック, xvid, divx",
+        "vr-zoom-keys": "VR, ズーム, 拡大, 縮小, プラス, マイナス, キー, ショートカット, キー割り当て, Ctrlなし, 魚眼"
+      },
+      "elsewhere": {
+        "handy": {
+          "title": "Handy",
+          "where": "デバイス › Handy：接続キー、同期オフセット、ストローク範囲、反転、出力制限",
+          "aliases": "接続キー, キー, 接続, オフセット, 遅延, レイテンシ, ストローク範囲, 反転, 制限"
+        },
+        "buttplug": {
+          "title": "Intiface (Buttplug.io)",
+          "where": "デバイス › Buttplug：ポート、方式、先読み、最小ストローク；安全上限、ランプアップ、マシン速度モード",
+          "aliases": "バイブ, おもちゃ, Bluetooth, ポート, 安全上限, ランプアップ, マシン速度モード, 回転モード, 電気刺激モード, ヒーター, このデバイスを駆動するもの"
+        },
+        "tcode": {
+          "title": "OSR2 / SR6 (T-Code)",
+          "where": "デバイス › T-Code：シリアルポート、ボーレート、ネットワーク、精度、更新レート、軸の範囲",
+          "aliases": "シリアル, COMポート, USB, ボーレート, ネットワーク, 軸の範囲"
+        },
+        "autoblow": {
+          "title": "Autoblow",
+          "where": "デバイス › Autoblow：デバイストークン、デバイス、出力制限",
+          "aliases": "トークン, デバイス"
+        },
+        "audience": {
+          "title": "オーディエンス",
+          "where": "デバイス › オーディエンス：ほかの人の Handy があなたの動画に合わせて動きます",
+          "aliases": "オーディエンス, 共有, 視聴者, 友だち, パートナー, ルーム, 一緒に"
+        },
+        "deviceSync": {
+          "title": "同期と遅延",
+          "where": "デバイス › 同期：測定した遅延とデバイスごとのオフセット",
+          "aliases": "同期, 遅延, レイテンシ, オフセット, タイミング, 早い, 遅い, 調整"
+        },
+        "feeds": {
+          "title": "フィードとその通知",
+          "where": "EroScripts タブ › フィード：「フィードを編集」に「新しいスレッドが来たら知らせる」があります。フィードは15分ごとに確認されます",
+          "aliases": "フィード, 通知, お知らせ, ベル, バッジ, 新しいスクリプト, タグ"
+        },
+        "eroscriptsDownloads": {
+          "title": "EroScripts のダウンロード",
+          "where": "EroScripts タブ › 投稿のダウンロード：保存先、動画サイト、マルチ軸スクリプトの全軸",
+          "aliases": "ダウンロード, 保存先, フォルダー, 動画サイト, マルチ軸, 全軸"
+        },
+        "eroscriptsLogin": {
+          "title": "EroScripts へのログイン",
+          "where": "EroScripts タブ：ログインするとスクリプトを検索・ダウンロードできます",
+          "aliases": "ログイン, サインイン, アカウント, パスワード, フォーラム"
+        },
+        "streams": {
+          "title": "リンクから再生",
+          "where": "URL読み込み：ライブラリに保存、キューに追加。再生中はプレーヤーバーの画質ボタン",
+          "aliases": "リンク, URL, ストリーム, 配信, ウェブ, オンライン, 画質, 解像度, 視聴"
+        },
+        "webRemote": {
+          "title": "ウェブリモート",
+          "where": "ウェブリモート：スマホやタブレットから再生を操作します",
+          "aliases": "リモコン, スマホ, 携帯, タブレット, QRコード, ブラウザー"
+        },
+        "vr": {
+          "title": "VR ヘッドセット",
+          "where": "VR：HereSphere と、ヘッドセットの同期オフセット",
+          "aliases": "VR, ヘッドセット, ゴーグル, Quest, 仮想現実"
+        },
+        "videoOptions": {
+          "title": "1本の動画だけの設定",
+          "where": "ライブラリで動画の ⋮ メニュー › オプション：スクリプト、タグ、同期オフセット、VR形式",
+          "aliases": "この動画, 動画ごと, 動画のオプション, スクリプト, タグ, オフセット, VR形式, バリエーション"
+        },
+        "librarySort": {
+          "title": "ライブラリの並べ替えと絞り込み",
+          "where": "ライブラリのバー：並べ替え、フィルター、グリッドまたはリスト",
+          "aliases": "並べ替え, 順番, フィルター, 絞り込み, グリッド, リスト表示"
+        }
+      }
+    },
+    "positionKeysHeader": "エディターの位置キー",
+    "editorSpeed": {
+      "header": "エディターの速度制限とフレーム移動",
+      "hint": "デバイスが追従できないストロークをスクリプトエディターのタイムラインで示します。0 で表示しません。",
+      "max": "これより速いと薄紫（ユニット/秒）",
+      "min": "これより遅いと破線（ユニット/秒）",
+      "note": "640 は対応するトイの中で最速の速さです(オーバークロックした Handy 2 Pro、フルストローク)。標準の Handy 2 は約 320、Handy 2 Pro は 360 が上限です。約 33 より遅い動きでは Handy が止まることがあります。静止は印を付けません。",
+      "fastStep": "Ctrl+左 / 右 の移動量(フレーム)",
+      "fastStepHint": "スクリプトエディターで Ctrl+左 / 右 が移動する量。OpenFunscripter の既定は 6 フレームです。"
+    },
+    "vrZoomKeys": {
+      "header": "VRズームキー",
+      "in": "拡大",
+      "out": "縮小",
+      "hint": "再生中のVR動画をCtrlなしでズームします。テンキーの+と−でもズームでき、Ctrl+ホイールとCtrl+0（元に戻す）も引き続き使えます。",
+      "reset": "{action}：{key} に戻す",
+      "clear": "{action}のキーなし",
+      "clash": {
+        "system": "{key} は移動やシステム用のキーです。別のキーを選んでください。",
+        "menu": "{key} はメニューのショートカットです。Ctrlなしのキーを選んでください。",
+        "player": "{key} はプレーヤーで既に使われています。別のキーを選んでください。",
+        "same": "{key} は既にもう一方のズームキーです。"
+      }
     }
   },
   "feedback": {
@@ -1653,7 +2075,8 @@
     "savingScript": "スクリプトを保存中…",
     "scriptSaved": "スクリプトを保存しました",
     "upToDate": "すでに最新です",
-    "noAttachments": "このトピックにはファンスクリプトの添付ファイルがありません",
+    "noScriptFile": "スクリプトファイルなし",
+    "noScriptFileNote": "この投稿にはファンスクリプトが添付されていません。投稿内にリンクがあるかもしれません。「表示」で投稿を開いてください。",
     "downloadFailed": "ダウンロードに失敗しました",
     "downloadFailedStatus": "ダウンロードに失敗しました (HTTP {status})",
     "saveNotAFile": "{name} を保存できません: 同じ名前のフォルダーがあります。",
@@ -1669,7 +2092,7 @@
     "notReplaced": "{name} は保存されませんでした: 別のファイルがすでにあります。",
     "notDownloaded": "{name} は保存されませんでした: ダウンロードできませんでした。",
     "trashFailed": "{name} を{os, select, win {ごみ箱} other {ゴミ箱}}に移動できなかったため、ダウンロードは上書き保存されていません。",
-    "sessionExpired": "EroScripts セッションの有効期限が切れました — EroScripts パネルから再度ログインしてください",
+    "sessionExpired": "EroScripts のログインの有効期限が切れました。EroScripts タブから再度ログインしてください。",
     "error": {
       "rateLimited": "EroScripts がリクエストを制限しています。しばらくしてからもう一度お試しください。",
       "accessDenied": "アクセスが拒否されました。もう一度ログインしてください。",
@@ -1691,7 +2114,379 @@
       "zipNote": "{count} 件の zip 添付はまだ開けません",
       "loadingPost": "投稿を読み込み中..."
     },
-    "loginToSearch": "検索するには EroScripts にログインしてください。"
+    "loginToSearch": "検索するには EroScripts にログインしてください。",
+    "tab": {
+      "videosBtn": "動画…",
+      "downloadsHeading": "ダウンロード",
+      "tubeToggle": "動画サイト（実験的）",
+      "clearFinished": "完了分を消去",
+      "openPost": "投稿を開く",
+      "postFailed": "この投稿を読み込めませんでした。",
+      "scriptsHeading": "スクリプト",
+      "noScripts": "この投稿には .funscript が添付されていません。動画はダウンロードできます。",
+      "videosHeading": "この投稿の動画",
+      "noVideoLinks": "この投稿には動画のリンクがありません。",
+      "download": "ダウンロード",
+      "openInBrowser": "ブラウザーで開く",
+      "tubeOffHint": "ここからダウンロードするには、下の「動画サイト」をオンにしてください。",
+      "saveTo": "保存先",
+      "suggest": {
+        "chip": "おすすめ",
+        "from": "投稿にリンクした {count} 本の動画のタグから：",
+        "leaveOut": "{tag} をおすすめから外す",
+        "bringBack": "{count} 個のタグを戻す",
+        "avoiding": "ライブラリにないものは除外：",
+        "allow": "{tag} の投稿もおすすめする",
+        "avoidAgain": "{count} 個のタグを再び除外",
+        "because": "{tags} が好きなので",
+        "notInterested": "興味なし",
+        "dismissed": "今後これはおすすめしません",
+        "none": "おすすめは、動画にリンクした EroScripts の投稿のタグから作られます。いくつかリンクすると（スクリプトを取得、または動画のオプションで EroScripts からタグを取得）、ここに表示されます。",
+        "nothingHere": "ここに新しいおすすめはありません：このページの投稿はすべて持っているかリンク済みです。"
+      },
+      "post": {
+        "title": "投稿を読む",
+        "replies": "返信 {count} 件",
+        "showing": "{total} 件中、最初の {shown} 件の返信を表示しています。残りは「投稿を開く」から。",
+        "showImage": "{host} の画像を表示",
+        "imageFailed": "{host} の画像を読み込めませんでした：ブラウザで開く",
+        "empty": "投稿に本文がありません。",
+        "scripter": "作者"
+      },
+      "preview": {
+        "loading": "スクリプトを読み込み中…",
+        "failed": "ダウンロード前にスクリプトを読み込めませんでした",
+        "stats": "{length} · {count} アクション · 平均 {avg} u/s · 最速 {max} u/s",
+        "fast": "ところどころ非常に速い（{limit} u/s 超）：デバイスが追いつかない場合があります",
+        "channels": "ほかに含むもの：{list}",
+        "aria": "スクリプトのヒートマップ"
+      },
+      "lenCheck": {
+        "fromHost": "動画の長さ {length}（{host} より）",
+        "fromPost": "投稿によると動画の長さは {length}",
+        "pastEnd": "スクリプトは {script} まで続きますが、動画は {video} です：別の編集版の可能性が高いです",
+        "length": "スクリプトは {script} の動画用ですが、この動画は {video} です：別の編集版の可能性が高いです",
+        "muchLonger": "動画がスクリプトより {gap} 長いです：別の編集版か、スクリプトが一部だけです",
+        "match": "長さが一致しています：スクリプトは {script} の動画用で、この動画は {video} です",
+        "fits": "スクリプトは {script} で終わります。動画は {video} です",
+        "reupUnknown": "このリンクは再アップロードなので、実際の長さはダウンロード後にしか分かりません",
+        "afterDownload": "{name}：動画は {video} ですが、スクリプトは {script} です。別の編集版かもしれません。同期を確認するか、別のリンクを試してください。"
+      },
+      "fGet": {
+        "any": "すべて",
+        "video": "動画あり",
+        "script": "スクリプトあり",
+        "both": "動画とスクリプトあり"
+      },
+      "fHide": {
+        "label": "非表示",
+        "placeholder": "例: pmv, animation",
+        "aria": "これらのタグのスレッドを隠す"
+      },
+      "fTags": {
+        "label": "タグ",
+        "placeholder": "例: blowjob",
+        "aria": "すべてのスレッドに必要なタグ"
+      },
+      "chooseFolder": "フォルダーを選択…",
+      "noDownloads": "ダウンロード中のものはありません。",
+      "showInFolder": "フォルダーに表示",
+      "saved": "{name} をダウンロードしました",
+      "savedWithScript": "{name} とスクリプトをダウンロードしました",
+      "kind": {
+        "filehost": "ファイル共有",
+        "tube": "動画サイト",
+        "direct": "動画ファイル",
+        "unsupported": "非対応",
+        "store": "有料スクリプト",
+        "videohost": "動画ホスト"
+      },
+      "status": {
+        "queued": "待機中",
+        "resolving": "ファイルを検索中…",
+        "downloading": "{size} の {percent}% · {speed}/秒",
+        "downloadingUnknown": "これまでに {done}",
+        "done": "完了 · {size}",
+        "cancelled": "キャンセルしました",
+        "paused": "一時停止中 · {size} の {percent}%",
+        "pausedUnknown": "一時停止中 · {done}",
+        "interrupted": "{size} の {percent}% · FunSync の終了で停止",
+        "interruptedUnknown": "{done} · FunSync の終了で停止",
+        "stalled": "ネットワーク待ち: {seconds} 秒間データなし",
+        "stopping": "停止しています…"
+      },
+      "err": {
+        "notFound": "ファイルが削除されています",
+        "denied": "ホストに拒否されました",
+        "rateLimited": "ホストが混み合っています。後でお試しください",
+        "login": "ログインが必要です",
+        "geo": "お住まいの地域では利用できません",
+        "playlist": "そのページには複数の動画があります",
+        "badFolder": "そのフォルダーは存在しません",
+        "tubeOff": "動画サイトはオフです",
+        "noVideo": "そのリンクに動画がありません",
+        "incomplete": "ダウンロードが途中で止まりました",
+        "unsupported": "非対応",
+        "megaFolder": "Mega のフォルダーにはまだ対応していません",
+        "browserOnly": "ブラウザーでのみ利用できます",
+        "failed": "問題が発生しました",
+        "noSpace": "ディスクの空き容量が足りません",
+        "notResumable": "再開できるものがありません：別のリンクを試してください",
+        "password": "このフォルダーにはパスワードが必要です：ブラウザで開いてください",
+        "timeout": "ホストの応答が遅すぎます：少ししてからもう一度お試しください",
+        "needsApp": "このリンクは EroScripts タブからのみダウンロードできます"
+      },
+      "noScriptsPaid": "この投稿のスクリプトは有料です。下のショップのリンクをご覧ください。",
+      "price": {
+        "free": "無料",
+        "paid": "有料"
+      },
+      "filter": {
+        "label": "表示",
+        "all": "すべて",
+        "free": "無料",
+        "paid": "有料",
+        "none": {
+          "free": "この結果に無料スクリプトはありません。",
+          "paid": "この結果に有料スクリプトはありません。"
+        },
+        "noneTags": "このフィルターに合うものはありません。"
+      },
+      "card": {
+        "download": "ダウンロード",
+        "play": "再生",
+        "tryAnother": "別のリンクを試す",
+        "script": "スクリプト",
+        "video": "動画",
+        "videoState": {
+          "missing": "動画は未ダウンロード",
+          "busy": "動画をダウンロード中",
+          "done": "動画はダウンロード済み",
+          "paused": "動画は一時停止中",
+          "none": "この投稿には動画のダウンロードがありません"
+        },
+        "scriptState": {
+          "missing": "スクリプトは未ダウンロード",
+          "done": "スクリプトはダウンロード済み",
+          "none": "この投稿にはスクリプトファイルがありません"
+        },
+        "pause": "一時停止",
+        "resume": "再開"
+      },
+      "dl": {
+        "loading": "投稿を確認しています…",
+        "script": "スクリプト",
+        "video": "動画",
+        "from": "{host} から",
+        "fromReply": "{user} による代わりのリンク（{date}）",
+        "moreScripts": "ほかに {count} 個のスクリプトが「その他のオプション」にあります",
+        "scriptFromScripter": "作者による更新版スクリプト（返信 #{post}、{date}）",
+        "scriptFromOther": "@{user} の返信より（作者ではありません）、返信 #{post}、{date}",
+        "scriptReplyLabel": "@{user} の返信 #{post}",
+        "byScripter": "作者より、返信 #{post}、{date}",
+        "reupBy": "@{user} による再アップロード（作者ではありません）、返信 #{post}、{date}",
+        "likes": "いいね {count}",
+        "sizeDiffers": "投稿のリンクとサイズが違います（{size} / {original}）：別のファイルかもしれません",
+        "paid": "有料スクリプト：{host} で購入",
+        "buy": "購入",
+        "noScript": "この投稿にスクリプトはありません",
+        "noVideo": "ダウンロードできる動画リンクがありません",
+        "allDead": "この投稿の動画リンクはもう使えません",
+        "checking": "リンクを確認しています…",
+        "both": "動画とスクリプトをダウンロード",
+        "videoOnly": "動画をダウンロード",
+        "scriptOnly": "スクリプトをダウンロード",
+        "more": "その他のオプション",
+        "replyLinks": "返信内のリンク（新しい順）",
+        "replyBy": "返信 #{post}（{user}、{date}）",
+        "already": "ダウンロード済み：{name}",
+        "scriptSaved": "{name} を保存しました",
+        "slow": "{host} は今日は低速です：無料の1日の上限に達しました",
+        "multiAxis": "マルチ軸: {axes}",
+        "allAxes": "すべての軸 ({count} ファイル)",
+        "combinedAxes": "マルチ軸のタグがありますが、軸ごとのファイルはありません。軸はおそらくこのスクリプト内にあり、再生時に FunSync が適用します。",
+        "tagShow": "「{tag}」タグの投稿を表示"
+      },
+      "check": {
+        "ok": "使用可能",
+        "dead": "リンク切れ",
+        "unknown": "未確認",
+        "checking": "確認中…"
+      },
+      "downloadsActive": "ダウンロード（{count}）",
+      "paste": {
+        "button": "リンクを貼り付け…",
+        "title": "リンクからダウンロード",
+        "label": "動画のリンク",
+        "hint": "FapTap、PMVHaven、Pixeldrain、Mega、または動画ファイルへのリンク。チューブサイトはオンのときのみ。",
+        "checking": "リンクを確認しています…",
+        "unsupported": "このリンクはここではダウンロードできません",
+        "saveAs": "保存名",
+        "namePlaceholder": "ファイル名",
+        "noScript": "含まれません：リンクから取得できるのは動画のみです。",
+        "ftNone": "この動画には FapTap 上のスクリプトがありません。",
+        "ftPaid": "含まれません：このスクリプトは有料です。作者が {host} で販売しています。",
+        "ftNotIncluded": "含まれません：FapTap はこのスクリプトを自サイト上でのみ再生し、ダウンロードはできません。",
+        "ftDownloadable": "含まれません：ログインしたユーザーは FapTap 上でこのスクリプトをダウンロードできます。",
+        "ftOpen": "FapTap で開く",
+        "pairHint": "スクリプトを入手したら、ダウンロードの「スクリプトを関連付け…」を使ってください。",
+        "forum": "EroScripts 上",
+        "forumSearching": "EroScripts で探しています…",
+        "forumUse": "この投稿を使う",
+        "forumHint": "この投稿にスクリプトがあれば、動画と一緒にダウンロードできます。",
+        "inDownloads": "ダウンロードにあります: {status}",
+        "downloadAgain": "もう一度ダウンロード"
+      },
+      "pair": {
+        "button": "スクリプトを関連付け…",
+        "done": "{name} を動画の横に保存しました",
+        "failed": "スクリプトを動画の横に保存できませんでした"
+      },
+      "latest": {
+        "all": "最新のスクリプト",
+        "free": "最新の無料スクリプト",
+        "paid": "最新の有料スクリプト",
+        "more": "さらに表示",
+        "loading": "スクリプトを読み込んでいます…",
+        "loginNeeded": "最新のスクリプトを見るには EroScripts にログインしてください。",
+        "failed": "最新のスクリプトを読み込めませんでした。",
+        "none": "まだスクリプトはありません。"
+      },
+      "sort": {
+        "newest": "新着順",
+        "topWeekly": "今週のトップ",
+        "topMonthly": "今月のトップ",
+        "topYearly": "今年のトップ",
+        "topAll": "歴代トップ"
+      },
+      "tool": {
+        "sort": "並べ替え",
+        "video": "動画",
+        "length": "長さ",
+        "device": "デバイス",
+        "tags": "タグ",
+        "hide": "非表示",
+        "get": "ダウンロード"
+      },
+      "fVideo": {
+        "any": "VR または 2D",
+        "vr": "VR",
+        "flat": "2D"
+      },
+      "fLength": {
+        "any": "すべての長さ"
+      },
+      "len": {
+        "0_2": "2 分未満",
+        "2_5": "2〜5 分",
+        "5_10": "5〜10 分",
+        "10_25": "10〜25 分",
+        "25_60": "25〜60 分",
+        "60_plus": "1 時間以上"
+      },
+      "fDevice": {
+        "any": "すべてのデバイス",
+        "multi": "マルチ軸",
+        "handy": "The Handy"
+      },
+      "chip": {
+        "vr": "VR",
+        "flat": "2D",
+        "multi": "マルチ軸",
+        "hide": "非表示: {tag}"
+      },
+      "top": {
+        "all": "トップのスクリプト",
+        "free": "トップの無料スクリプト",
+        "paid": "トップの有料スクリプト"
+      },
+      "select": {
+        "button": "選択",
+        "done": "完了",
+        "count": "{count} 件選択",
+        "download": "{count} 件ダウンロード",
+        "starting": "{count} 件中 {done} 件を開始中…",
+        "summary": "{started} 件のダウンロードを開始しました",
+        "summarySkipped": "{started} 件開始、{skipped} 件はダウンロードできるものがありませんでした"
+      },
+      "space": {
+        "free": "空き {free}",
+        "fits": "{size} · 空き {free}",
+        "short": "容量不足：{need} 必要、空き {free}"
+      },
+      "discard": "破棄",
+      "toastPlay": "再生",
+      "notify": {
+        "title": "ダウンロード完了"
+      },
+      "feeds": {
+        "all": "すべてのスクリプト",
+        "add": "+ 新しいフィード",
+        "edit": "フィードを編集",
+        "new": "新着",
+        "newCount": "新着 {count}",
+        "newTitle": "新しいフィード",
+        "editTitle": "フィードを編集",
+        "name": "名前",
+        "price": "価格",
+        "tags": "タグ",
+        "tagsHint": "フォーラムのタグ（pmv、hentai…）。スレッドはすべてのタグを持つ必要があります。",
+        "hideHint": "これらのタグのどれかが付いたスレッドは、フィードとその件数から外れます。",
+        "full": "フィードは {max} 個までです。追加するには 1 つ削除してください。",
+        "words": "語句",
+        "wordsHint": "任意の検索語",
+        "notify": "新しいスレッドが来たら知らせる",
+        "save": "フィードを保存",
+        "delete": "フィードを削除",
+        "deleteTitle": "{name} を削除しますか？",
+        "deleteMessage": "フィードは消えますが、スレッドは EroScripts に残ります。",
+        "tooManyTags": "タグは合計 {max} 個まで（フィルターを含む）。",
+        "notifyBody": "新しいスクリプト {count} 件",
+        "badgeLabel": "フィードに新しいスクリプト {count} 件",
+        "tagsPlaceholder": "タグを入力してカンマか Enter",
+        "removeTag": "{tag} を外す",
+        "unknownTag": "EroScripts のタグではありません：このフィードでは何も見つかりません",
+        "refresh": "更新",
+        "refreshFeedTitle": "「{name}」の最新スレッドを今すぐ読み込む",
+        "refreshAllTitle": "最新スレッドを今すぐ読み込む",
+        "groupAria": "フィード",
+        "more": "他 {count} 件のフィード"
+      },
+      "view": {
+        "cards": "カード",
+        "list": "リスト"
+      },
+      "list": {
+        "topic": "トピック",
+        "replies": "返信",
+        "views": "閲覧",
+        "activity": "アクティビティ"
+      },
+      "watch": {
+        "now": "今すぐ見る",
+        "button": "見る",
+        "finding": "検索中…",
+        "failed": "再生できませんでした: {reason}",
+        "noScript": "スクリプトをダウンロードできなかったため、スクリプトなしで再生します。",
+        "stepFinding": "動画を探しています…(最大 20 秒ほどかかります)",
+        "stepScript": "スクリプトを取得しています…",
+        "stepNext": "そのリンクは使えませんでした。{host} を試しています ({n}/{total})…",
+        "failedAll": "この投稿のリンクはどれも再生できませんでした: {reason}",
+        "nextLink": "そのリンクは使えませんでした。代わりに {host} を試します。",
+        "noMoreLinks": "ダウンロードに失敗し、この投稿にはほかのリンクがありません: {reason}"
+      },
+      "downloadsPaused": "ダウンロード（{count} 件一時停止中）",
+      "interrupted": {
+        "one": "{name} は FunSync の終了により {percent}% で停止しました。「再開」でその続きからダウンロードできます。",
+        "oneUnknown": "{name} は FunSync の終了により停止しました。「再開」でその続きからダウンロードできます。",
+        "many": "{count} 件のダウンロードが FunSync の終了により停止しました。「再開」でそれぞれ止まったところから続けられます。",
+        "show": "表示"
+      },
+      "filtersClear": "すべてクリア",
+      "account": {
+        "aria": "EroScripts アカウント: {user}"
+      }
+    }
   },
   "upNext": {
     "regionAria": "次の動画",
@@ -1808,7 +2603,7 @@
   "editor": {
     "toolbarAria": "スクリプトエディタツール",
     "mainAxisLabel": "メイン (L0)",
-    "embeddedAxisLabel": "{axis} (埋め込み): 抽出して編集…",
+    "embeddedAxisLabel": "{axis}(このファイル内)",
     "btn": {
       "undo": "元に戻す (Ctrl+Z)",
       "redo": "やり直し (Ctrl+Y)",
@@ -1827,12 +2622,19 @@
       "save": "保存 (Ctrl+S)",
       "stacked": "スタック表示 — すべての軸を表示",
       "popout": "エディタを別ウィンドウにポップアウト",
-      "dock": "エディタをメインウィンドウに戻す"
+      "dock": "エディタをメインウィンドウに戻す",
+      "newAxis": "新しい軸 — この動画にまだない軸を追加",
+      "exportAxes": "名前を付けて保存 / エクスポート — このスクリプトを別名で、またはすべての軸を1つの結合ファイルか個別のファイルに",
+      "record": "記録モード(R):再生中、数字キーで再生位置にポイントを追加します",
+      "saveEach": "保存 (Ctrl+S)：各軸をそれぞれのファイルへ",
+      "saveCombined": "保存 (Ctrl+S)：すべての軸を結合ファイルへ"
     },
     "unsaved": {
       "title": "{name} への変更を保存しますか？",
       "message": "このスクリプトの編集内容は保存されていません。保存しないと、編集内容は失われます。",
-      "dontSave": "保存しない"
+      "dontSave": "保存しない",
+      "titleMany": "{count, plural, other {# 個のスクリプトの変更を保存しますか?}}",
+      "messageMany": "これらのスクリプトの変更は保存されていません。保存しないと失われます。"
     },
     "modify": {
       "title": "スクリプトを変更",
@@ -1846,7 +2648,12 @@
       "rangeExtend": "範囲を拡張/圧縮…",
       "generatePattern": "パターンを生成…",
       "fillPattern": "パターンで埋める…",
-      "exportHeatmap": "ヒートマップ PNG をエクスポート…"
+      "exportHeatmap": "ヒートマップ PNG をエクスポート…",
+      "fadeIn": "フェードイン",
+      "fadeOut": "フェードアウト",
+      "rippleDelete": "リップル削除(隙間を詰める)",
+      "fromStroke": "ストロークから作成…",
+      "vibrate": "振動"
     },
     "select": {
       "title": "ポイントを選択",
@@ -1978,7 +2785,29 @@
       "saveFailed": "保存に失敗しました: {error}",
       "created": "{name} を作成しました",
       "remoteScriptNotShown": "スマホまたは VR ヘッドセットが独自のスクリプトを再生しているため、エディタには表示されません。エディタはこのウィンドウの動画を編集します。",
-      "popoutUnavailable": "エディタをポップアウトできません: ウィンドウとアプリの連携機能が見つかりません。"
+      "popoutUnavailable": "エディタをポップアウトできません: ウィンドウとアプリの連携機能が見つかりません。",
+      "savedAs": "{name} として保存しました",
+      "appliedFadeIn": "フェードインしました",
+      "appliedFadeOut": "フェードアウトしました",
+      "rippleNeedsSelection": "先に切り取るポイントを選択してください",
+      "rippleDone": "{count} 個のポイントを切り取り、それ以降を {seconds} 秒前に詰めました",
+      "referenceOn": "ストロークを他の軸の後ろに表示します",
+      "referenceOff": "他の軸の後ろのストロークを非表示にしました(T で表示)",
+      "stackedNeedsMulti": "スタック表示には複数のスクリプトが必要です (マルチ軸またはカスタムルーティング)",
+      "moveOneToPlayhead": "再生ヘッドへ移動するアクションを 1 つだけ選択してください",
+      "repeatNeedsTwo": "ストロークを繰り返すには 2 つ以上のアクションが必要です",
+      "strokeRepeated": "ストロークを繰り返しました",
+      "playbackRate": "再生 {rate}×",
+      "noBookmarks": "移動できるブックマークがありません",
+      "multiBandLoaded": "マルチバンド波形を読み込みました",
+      "multiBandFailed": "マルチバンド波形を読み取れませんでした",
+      "voiceDetected": "音声を検出: {count, plural, other {# 区間}} (合計 {seconds} 秒)",
+      "voiceFailed": "音声区間を読み取れませんでした",
+      "exportEmpty": "エクスポートするものがありません: スクリプトが空です",
+      "exportNoDuration": "動画の長さがまだ分かりません: 先に動画を読み込んでください",
+      "heatmapUnavailable": "ヒートマップの書き出しは利用できません",
+      "heatmapFailed": "ヒートマップの書き出しに失敗しました",
+      "heatmapExported": "ヒートマップを書き出しました"
     },
     "extractingWaveform": "波形を抽出中…",
     "extractingWaveformPct": "波形を抽出中… {pct}%",
@@ -2052,7 +2881,191 @@
       "failed": "この埋め方は作成できませんでした。別のパターンか設定を試してください。",
       "changed": "このプレビューの後にスクリプトまたは選択範囲が変わりました。何も埋めていません。",
       "editingPaused": "適用またはキャンセルするまで、編集キーは一時停止します。",
-      "updating": "プレビューを更新しています…"
+      "updating": "プレビューを更新しています…",
+      "tempo": "テンポ",
+      "tempoFromBeats": "ビートから",
+      "tempoNoBeats": "この範囲にビートがありません。先に「ビートから生成」を実行するか、BPM を入力してください",
+      "tempoRange": "テンポは {min}〜{max} BPM です",
+      "tempoSet": "{bpm} BPM:1 ビートにほぼ 1 ストロークの速度にしました({speed} 単位/秒)"
+    },
+    "newAxis": {
+      "menu": "新しい軸",
+      "have": "この動画にはすでにあります"
+    },
+    "export": {
+      "saveAs": "名前を付けて保存…",
+      "saveAsHint": "このスクリプトを新しいファイルに保存し、以後は新しいほうを編集します。元のファイルはそのままです。",
+      "menu": "エクスポート",
+      "combined": "1つの結合ファイルとして…",
+      "combinedHint": "すべての軸を1つのファイルに(新しいマルチ軸形式)。MultiFunPlayer と XTPlayer が読み込めます。",
+      "separate": "個別のファイルとして…",
+      "separateHint": "軸ごとに1ファイル。メインスクリプトと同じ名前で、選んだフォルダーに保存します。",
+      "needStroke": "結合ファイルにはストロークが必要です。先にメインスクリプトにポイントを追加してください。",
+      "done": "{count, plural, other {# 個のファイルをエクスポートしました}}",
+      "replaceTitle": "{count, plural, other {# 個のファイルを置き換えますか?}}",
+      "replaceBody": "{count, plural, other {そのフォルダーには同じ名前のファイルがすでにあります: {names}。置き換えますか?}}",
+      "replaceConfirm": "置き換える",
+      "thisScript": "このスクリプト",
+      "everyAxis": "すべての軸"
+    },
+    "statusStats": "{seconds} 秒 · 平均 {avg} · 最大 {top} 単位/秒",
+    "statusSpan": "{seconds} 秒",
+    "lanes": {
+      "menu": "レーン",
+      "hide": "{name} を非表示",
+      "showAll": "すべてのレーンを表示",
+      "showHidden": "非表示のレーン {count} 本を表示",
+      "clickToEdit": "{name}：クリックして編集"
+    },
+    "fromStroke": {
+      "title": "この軸をストロークから作成",
+      "shift": "時間のずらし(ミリ秒)",
+      "scale": "深さ(%)",
+      "centre": "中心(0–100)",
+      "invert": "上下反転",
+      "hint": "ストロークの周期の 4 分の 1({ms} ミリ秒)ずらすと、この軸はストロークの 4 分の 1 回転後を動きます(一般的なロール)。0 ならストロークと同時に動きます。",
+      "result": "{axis} に {count} ポイント",
+      "resultReplace": "{axis} に {count} ポイント(今の {existing} ポイントと置き換え)。元に戻すで取り消せます。",
+      "done": "{axis} をストロークから作成しました({count} ポイント)",
+      "pickAxis": "先に軸を選んでください。表示中の軸をストロークから作成します",
+      "noStroke": "ストロークに軸を作るためのポイントがありません"
+    },
+    "backups": {
+      "menuItem": "以前のバージョンを復元…",
+      "menuHint": "このスクリプトが上書きされる前に FunSync が保存したバージョンです。",
+      "title": "以前のバージョン",
+      "intro": "復元すると、そのバージョンがエディターに読み込まれ、「元に戻す」で取り消せます。保存するまでファイルには何も書き込まれません。",
+      "restore": "復元",
+      "restoreAria": "{when} のバージョンを復元",
+      "today": "今日 {time}",
+      "yesterday": "昨日 {time}",
+      "dateTime": "{date} {time}",
+      "points": "{count, plural, other {# ポイント}}",
+      "emptyTitle": "以前のバージョンはまだありません。",
+      "emptyHint": "FunSync は、セッション中にスクリプトが初めて上書きされるときに 1 つ保存し、その後は 10 分ごとに保存します。",
+      "listFailed": "以前のバージョンを一覧表示できませんでした。しばらくしてからもう一度お試しください。",
+      "readFailed": "そのバージョンを読み込めませんでした。削除された可能性があります。",
+      "restoredToast": "以前のバージョンを読み込みました。「元に戻す」で取り消せます。保存するまでファイルには何も書き込まれません。",
+      "noScript": "以前のバージョンはスクリプトファイルごとに保存されます。先にこのスクリプトを保存してください。"
+    },
+    "gamepad": {
+      "menu": "ゲームパッドで記録",
+      "button": "ゲームパッド記録",
+      "pad": "ゲームパッド: {name}",
+      "noPad": "ゲームパッドが見つかりません: 接続して、いずれかのボタンを押してください",
+      "needPad": "先にゲームパッドを接続して、いずれかのボタンを押してください",
+      "stickX": "左右: {axis}",
+      "stickY": "上下: {axis}",
+      "pickX": "左右の記録先",
+      "pickY": "上下の記録先",
+      "axisNew": "{axis}(新規)",
+      "onOtherX": "左右がすでにこの軸に記録します",
+      "onOtherY": "上下がすでにこの軸に記録します",
+      "invertX": "左右を反転",
+      "invertY": "上下を反転",
+      "start": "記録を開始",
+      "startHint": "動画の再生中に記録します。一時停止するたびに記録した内容が追加されます。",
+      "stop": "記録を停止",
+      "hud": "ゲームパッドの位置",
+      "help": "ゲームパッドで2つの軸を記録",
+      "toast": {
+        "on": "ゲームパッド記録オン: 動画を再生してスティックを動かしてください",
+        "off": "ゲームパッド記録オフ",
+        "landed": "{axisA} と {axisB} に {count, plural, other {# 個のポイント}}を記録しました",
+        "nothing": "何も記録されていません: 記録中は動画を再生する必要があります",
+        "padLost": "ゲームパッドが切断されました: 再接続すると記録を続けます"
+      }
+    },
+    "check": {
+      "title": "スクリプトをチェック",
+      "button": "スクリプトの問題をチェック",
+      "summary": "{count, plural, other {# 件の問題が見つかりました}}",
+      "allGood": "問題なし",
+      "allGoodHint": "{count, plural, other {# 個のポイントをチェックしました。直すところはありません。}}",
+      "emptyTitle": "チェックするポイントがありません",
+      "emptyHint": "ポイントを追加してから、もう一度チェックしてください。",
+      "changed": "開いている間にスクリプトが変更されたため、もう一度チェックしました。",
+      "selectAll": "{count, plural, other {# 個のポイントをすべて選択}}",
+      "more": "{count, plural, other {…ほか # 件。上の選択に含まれます。}}",
+      "limitsHint": "速度制限は 設定 ▸ キーボード ▸ エディターの速度制限 で決まります。",
+      "kind": {
+        "outOfRange": "0–100 の範囲外、または開始前",
+        "notWhole": "整数ではない値",
+        "sameTime": "同じ時刻のポイント",
+        "tooFast": "{limit} ユニット/秒より速い",
+        "tooSlow": "{limit} ユニット/秒より遅い",
+        "shortStroke": "動画の 1 フレームより近い",
+        "longGap": "{seconds} 秒以上ポイントがない"
+      },
+      "hint": {
+        "outOfRange": "デバイスが使うのは位置 0〜100 と 0 以降の時刻だけです。",
+        "notWhole": "保存時に丸められるため、ポイントが少しずれます。",
+        "sameTime": "同じ時刻で再生できるポイントは 1 つだけで、ほかはスキップされます。",
+        "tooFast": "デバイスはこの速さで動けず、ストロークが短くなるか遅れます。",
+        "tooSlow": "この遅さで動くストロークでは Handy が止まることがあります。",
+        "shortStroke": "1 フレームより近いポイントは、別々のフレームに置けません。",
+        "longGap": "動いている部分の間に、ポイントのない長い区間があります。抜けている部分では？"
+      },
+      "detail": {
+        "speed": "{speed} ユニット/秒",
+        "sameTime": "{count, plural, other {# 個のポイント}}",
+        "invalid": "無効なポイント",
+        "pos": "位置 {pos}",
+        "time": "時刻 {at} ms",
+        "notWhole": "時刻 {at}、位置 {pos}",
+        "gap": "{seconds} 秒間ポイントなし",
+        "short": "間隔 {ms} ms(1 フレームは {frame} ms)"
+      }
+    },
+    "history": {
+      "insert": "ポイントを追加",
+      "editPoint": "ポイントを変更",
+      "delete": "{count, plural, other {# 個のポイントを削除}}",
+      "cut": "{count, plural, other {# 個のポイントを切り取り}}",
+      "rippleDelete": "{count, plural, other {# 個のポイントをリップル削除}}",
+      "move": "{count, plural, other {# 個のポイントを移動}}",
+      "drag": "ポイントをドラッグ",
+      "moveToPlayhead": "ポイントを再生位置へ移動",
+      "paste": "{count, plural, other {# 個のポイントを貼り付け}}",
+      "pasteExact": "{count, plural, other {# 個のポイントを元の時刻に貼り付け}}",
+      "equalize": "間隔を均等化",
+      "invert": "{count, plural, other {# 個のポイントを反転}}",
+      "simplify": "{count, plural, other {簡素化(# 個のポイントを削除)}}",
+      "modify": "変更",
+      "insertPoints": "{count, plural, other {# 個のポイントを追加}}",
+      "generatePattern": "パターンを生成",
+      "beats": "ビートから生成",
+      "fillGaps": "ギャップを埋める",
+      "fill": "パターンで埋める",
+      "metadata": "メタデータを編集",
+      "addBookmark": "ブックマークを追加",
+      "removeBookmark": "ブックマークを削除",
+      "restore": "以前のバージョンを復元",
+      "edit": "編集",
+      "menuAria": "元に戻す履歴",
+      "button": "元に戻す履歴",
+      "undoSteps": "{count, plural, other {# ステップ元に戻す}}",
+      "redoSteps": "{count, plural, other {# ステップやり直す}}",
+      "redoGroup": "やり直し",
+      "nothing": "元に戻す・やり直す操作はありません",
+      "toastUndone": "{count, plural, other {# ステップ元に戻しました}}",
+      "toastRedone": "{count, plural, other {# ステップやり直しました}}",
+      "versionsGroup": "保存されたバージョン"
+    },
+    "vibrate": {
+      "button": "振動:選択したポイントの間に小さな上下の動きを追加(大きさはスライダーで)",
+      "title": "ポイントの間を振動させる",
+      "size": "大きさ",
+      "rate": "速さ",
+      "rateValue": "{rate}/秒",
+      "taper": "両端でなめらかに強弱をつける",
+      "apply": "適用",
+      "summary": "{count} ポイントを追加 · 最大 {top} 単位/秒",
+      "slowed": "(最速の機器であるオーバークロックした Handy 2 Pro の上限 {max} 単位/秒を超えないよう間隔を広げました)",
+      "needRun": "先に隣り合う 2 つ以上のポイントを選択してください。",
+      "noRoom": "この速さで振動させるにはポイントの間隔が狭すぎます。",
+      "done": "振動を追加しました({count} ポイント)",
+      "overMark": "設定した速度制限({limit} 単位/秒)より速いため、正確に追従できるトイはありません。それが狙いの効果なら問題ありません。"
     }
   },
   "connection": {
@@ -2064,6 +3077,33 @@
       "invert": "<strong>反転</strong> — スクリプトの値を反転させます（0 が 100 に、100 が 0 になります）。スピードモードでは振動の強さに影響しません（速度は絶対値です）。ポジション/ハイブリッドモードでは、低位置が強くなり、高位置が弱くなります。"
     },
     "title": "デバイス接続",
+    "syncTest": {
+      "rowLabel": "Bluetooth 同期",
+      "open": "同期テスト…",
+      "rowHint": "トイの応答の遅れを測り、画面のフラッシュと合わせて体感しながらオフセットを設定します。",
+      "title": "Bluetooth トイの同期テスト",
+      "intro": "Bluetooth トイは少し遅れて反応し、その遅れはトイと接続によって違います。まず遅れを測り、次に体感して合わせてください。",
+      "noDevices": "まず Intiface でトイを接続してください (デバイス ▸ Buttplug)。フライホイール式のマシンはテストしません。",
+      "devices": "テスト対象: {names}",
+      "measureTitle": "1. 測定",
+      "measureHint": "無害な停止コマンドを 10 回送り、Intiface の応答時間を測ります。",
+      "measure": "測定",
+      "measuring": "測定中…",
+      "measureFailed": "応答がありません。トイはまだ接続されていますか?",
+      "measured": "往復 {median} ms ({min}〜{max} ms)",
+      "useSuggested": "{ms} ms を使う",
+      "feelTitle": "2. 体感",
+      "feelHint": "トイがフラッシュに合わせて 1 秒ごとに振動します。振動がフラッシュと重なるまでスライダーを動かしてください。",
+      "start": "開始",
+      "stop": "停止",
+      "offsetAria": "オフセット",
+      "offsetZero": "オフセットなし",
+      "offsetEarlier": "{ms} ms 早く",
+      "offsetLater": "{ms} ms 遅く",
+      "save": "オフセットを保存",
+      "saved": "Buttplug のオフセットを保存しました: {ms} ms",
+      "measuredTooFast": "Intiface はコマンドがトイに届く前に {median} ms で応答したため、この方法では Bluetooth の遅延を測れません。「2. 体感」でオフセットを合わせてください。"
+    },
     "closeAria": "デバイス接続を閉じる",
     "tabsAria": "デバイスタブ",
     "tabSync": "同期",
@@ -2166,6 +3206,8 @@
       "modeSpeed": "速度",
       "modePosition": "位置",
       "modeHybrid": "ハイブリッド",
+      "hybridHoldFade": "ハイブリッドは静止中にフェードしてオフ",
+      "hybridHoldFadeHint": "ハイブリッドのデバイス用:スクリプトが静止すると、出力は約0.5秒でオフまでフェードし、スクリプトが動くとすぐに戻ります。オフ:ハイブリッドは位置に応じた基本レベルを保ちます。速度モードはスクリプトの静止中は常にオフです。",
       "badgeLinear": "リニア",
       "badgeVibrate": "振動",
       "badgeRotate": "回転",
@@ -2286,7 +3328,7 @@
       "connectDeviceHint": "デバイスを接続してオフセット制御を表示してください。",
       "deviceHandy": "The Handy (WiFi)",
       "deviceButtplug": "Buttplug.io デバイス",
-      "deviceTcode": "TCode (シリアル)",
+      "deviceTcode": "TCode",
       "suggested": "推奨: {ms} ms",
       "vrModeTotal": "VR モード: {device} (デバイス) {vr} (VR) = {total} ms 実効",
       "vrModeTotalVideo": "VR モード: {device} (デバイス) {vr} (VR) {thisVideo} (この動画) = {total} ms 実効",
@@ -2368,6 +3410,7 @@
     "orgasmSwitchToggle": "オーガズムスイッチ（切り替え）",
     "edgeHold": "寸止めホールド — デバイス停止、動画は継続",
     "edgeHoldToggle": "寸止めホールド(切り替え) — デバイス停止、動画は継続",
+    "stopAll": "すべて停止 — すべてを一時停止し、全デバイスを停止",
     "scriptEditor": "スクリプトエディタを切り替え",
     "nextVariant": "次のバリアントへ切り替え",
     "prevVariant": "前のバリアントへ切り替え",
@@ -2422,7 +3465,12 @@
     "editorMoveToPlayhead": "単一選択アクションを再生ヘッドへ移動",
     "edgeHoldPattern": "寸止めホールド — 寸止めパターンを再生、動画は継続",
     "edgeHoldPatternToggle": "寸止めホールド(切り替え) — 寸止めパターンを再生、動画は継続",
-    "videoOptions": "動画オプション (フォーカス中のカード)"
+    "videoOptions": "動画オプション (フォーカス中のカード)",
+    "editorPrevNextScript": "前 / 次のスクリプト(軸)",
+    "editorRippleDelete": "リップル削除(隙間を詰める)",
+    "editorSaveAs": "新しいファイルに保存",
+    "editorReference": "軸の後ろのストロークを表示 / 非表示",
+    "vrZoomKeys": "VR動画の拡大 / 縮小（Ctrlなし）"
   },
   "orgasmConfig": {
     "title": "オーガズムスイッチ設定",
@@ -2930,6 +3978,10 @@
     },
     "organise": {
       "libraries": "ライブラリ",
+      "marks": "この動画",
+      "favourite": "お気に入り",
+      "disabled": "無効",
+      "disabledHint": "自動では再生しない",
       "noPlaylists": "プレイリストはまだありません。",
       "noCategories": "カテゴリはまだありません。",
       "newPlaylist": "新しいプレイリスト…",
@@ -2966,7 +4018,8 @@
         "notRead": "タグは未取得",
         "stashRow": "{tags, plural, other {タグ # 件}}、{performers, plural, other {出演者 # 人}}、{studios, plural, other {スタジオ # 件}}",
         "stashGone": "Stash から削除済み",
-        "stashHidden": "ファイルが変更されたため、次回の同期まで Stash のタグは非表示です"
+        "stashHidden": "ファイルが変更されたため、次回の同期まで Stash のタグは非表示です",
+        "stashSceneChanged": "Stash シーンにこのファイルがもうないため、Stash のタグは非表示です"
       },
       "viewPost": "投稿を表示",
       "pasteLink": "投稿のリンクを貼り付け…",
@@ -3095,7 +4148,8 @@
         "autoMulti": "名前でペアリング (軸ファイル付き)",
         "single": "手動で選択",
         "multi": "マルチ軸、手動で選択",
-        "custom": "カスタムルーティング、手動で選択"
+        "custom": "カスタムルーティング、手動で選択",
+        "stream": "このリンクと一緒に保存"
       },
       "status": {
         "missing": "スクリプトが見つかりません",
@@ -3119,7 +4173,8 @@
         "keepsCustom": "保持: 保存したカスタムルーティング ({count, plural, other {# ルート}})。「変更…」で再び使えます。",
         "done": "{name} のペアリングを解除しました。",
         "undone": "{name} を再びペアリングしました。",
-        "undoChanged": "元に戻せません: この動画のスクリプトはその後変更されています。"
+        "undoChanged": "元に戻せません: この動画のスクリプトはその後変更されています。",
+        "stream": "このリンクと一緒に保存されました。別のスクリプトは「変更…」で選べます。"
       },
       "removeSet": {
         "multiTitle": "マルチ軸セットを削除",
@@ -3172,6 +4227,8 @@
       "source": "ソース",
       "unknown": "不明",
       "copyPath": "パスをコピー",
+      "delete": "削除…",
+      "deleteHint": "この動画と、選べばそのスクリプトと字幕も削除します。ごみ箱か完全削除かは次の画面で選びます。",
       "copied": "パスをコピーしました。",
       "copyFailed": "パスをコピーできませんでした。"
     },
@@ -3332,5 +4389,86 @@
       "linkAria": "この動画を {name} にリンク",
       "resultsAria": "Stash のシーン"
     }
+  },
+  "scriptPlayer": {
+    "barAria": "スクリプトプレーヤー",
+    "seekAria": "スクリプト内の位置",
+    "play": "再生",
+    "pause": "一時停止",
+    "loop": "ループ",
+    "close": "スクリプトを止めて、デバイスを動画に戻す",
+    "devicesOn": "デバイスはこのスクリプトに従っています",
+    "noDevices": "接続されたデバイスはありません",
+    "noDevicesToast": "スクリプトを再生していますが、接続されたデバイスがありません。",
+    "pill": "デバイス:「{name}」に従っています",
+    "useVideoScript": "この動画のスクリプトを使う",
+    "xzUnavailable": "X と Z は今のところ動画でのみ使えます。使うにはスクリプトプレーヤーを止めてください(バーの ✕)。",
+    "readFailed": "{name} を再生できません。funscript ではないか、読み込めません。",
+    "looseTitle": "動画のないスクリプト",
+    "looseCount": "{count, plural, other {どの動画にも使われていないスクリプト # 件}}",
+    "looseEmpty": "ライブラリのすべてのスクリプトに動画があります。",
+    "playAria": "{name} をデバイスで再生",
+    "deleteAria": "{name} を削除…",
+    "pair": "関連付け…",
+    "pairPlaceholder": "関連付ける動画を検索…",
+    "noVideoMatches": "一致する動画はありません。",
+    "paired": "{script} を {title} に関連付けました。"
+  },
+  "deviceSim": {
+    "menuAria": "デバイスシミュレーター",
+    "menuDirection": "向き",
+    "dirDevice": "Handy の反転設定と同じ",
+    "dirNormal": "標準:上が 100",
+    "dirFlipped": "反転:下が 100",
+    "menuColor": "色",
+    "colorAccent": "アクセントカラー",
+    "colorSpeed": "速度の色(ヒートマップと同じ)",
+    "colorWhite": "白",
+    "colorRed": "赤",
+    "colorOrange": "オレンジ",
+    "colorYellow": "黄",
+    "colorGreen": "緑",
+    "colorCyan": "シアン",
+    "colorBlue": "青",
+    "colorPurple": "紫",
+    "colorPink": "ピンク",
+    "colorCustom": "カスタムカラー…",
+    "turn": "90° 回転",
+    "reset": "サイズ・角度・位置をリセット",
+    "tooltip": "ドラッグで移動。角をドラッグでサイズ変更、端のつまみで回転。右クリックで向きと色。",
+    "menuLook": "表示",
+    "look3d": "3D レシーバー",
+    "lookDrawing": "図と数値",
+    "lookBars": "軸ごとのバー",
+    "lookGauges": "ゲージ",
+    "menuView": "視点",
+    "viewQuarter": "斜め",
+    "viewFront": "正面",
+    "viewSide": "側面",
+    "viewAbove": "上から",
+    "align": "動画に合わせる…",
+    "alignTip": "動画上でストロークの先端をクリックしてください。",
+    "alignBase": "次にストロークの根元をクリックしてください。",
+    "alignEsc": "Esc でキャンセル",
+    "alignAria": "シミュレーターを動画に合わせる",
+    "tooltipAligned": "動画に合わせ済み：ドラッグで動画上を移動。右クリックで合わせ直し、リセットで元に戻します。",
+    "axesAria": "その他の軸",
+    "receiverAria": "各軸で動くレシーバー",
+    "receiver3dAria": "3D レシーバー：ドラッグで別の方向から見る",
+    "dirDeviceShort": "Handy",
+    "dirNormalShort": "通常",
+    "dirFlippedShort": "反転",
+    "look3dShort": "3D",
+    "lookDrawingShort": "図",
+    "lookBarsShort": "バー",
+    "lookGaugesShort": "計器",
+    "axesTip": "ドラッグでシミュレーターを移動、右クリックでオプション",
+    "axesTip3d": "ドラッグで移動、スクロールで視点を回転(Shift: 上下)、角をドラッグでサイズ変更、右クリックでオプション",
+    "resize3d": "ドラッグでサイズ変更",
+    "turnBaseCcw": "台座を反時計回りに 90° 回転",
+    "turnBaseCw": "台座を時計回りに 90° 回転"
+  },
+  "splash": {
+    "slow": "FunSync を起動しています…"
   }
 }

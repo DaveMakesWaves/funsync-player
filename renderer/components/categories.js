@@ -2,12 +2,14 @@
 
 import { Modal } from './modal.js';
 import { createCategoryMark } from '../js/category-icon.js';
-import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Unplug, Shuffle, SlidersHorizontal } from '../js/icons.js';
+import { icon, Tag, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, Play, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Unplug, Shuffle, SlidersHorizontal, Link } from '../js/icons.js';
+import { isStreamPath } from '../js/saved-streams.js';
 import {
   probeAvailability,
   availabilityPredicate,
   partitionByAvailability,
   groupByVolume,
+  foldersPresent,
 } from '../js/playlist-availability.js';
 import { computeSpeedStats } from '../js/library-search.js';
 import { computeBins, queueRenderBins } from '../js/heatmap-strip.js';
@@ -15,9 +17,13 @@ import { normalizeAssociation, resolveActiveConfig } from '../js/association-sha
 import { pathToFileURL } from '../js/path-utils.js';
 import { promptCreateCategory, promptCategoryDetails, PRESET_COLORS } from '../js/category-create-modal.js';
 import { t } from '../js/i18n.js';
+import { isDisabled } from '../js/disabled-videos.js';
+import { applyDisabledMark } from './disabled-mark.js';
 import { eventBus } from '../js/event-bus.js';
 import { thumbRequestOpts, customThumbImagePath } from './library.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
+import { buildNoVideoTile, fileNameOf } from '../js/no-video-tile.js';
+import { isAudioPath, audioDuration } from '../js/video-load-check.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
 import { noticeUnreadableScript } from '../js/script-access-notice.js';
 import { createQueueToggleButton } from './queue-panel.js';
@@ -40,6 +46,12 @@ export class Categories {
     this._binsByPath = new Map();
   }
 
+  /** A video's shown name: a saved stream's title (2026-11-23), else its file name without the extension. */
+  _nameOf(videoPath) {
+    const v = isStreamPath(videoPath) ? this._library?.getVideoByPath?.(videoPath) : null;
+    return v?.name || String(videoPath).split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+  }
+
   _resolveFunscriptPath(videoPath) {
     // Library scan is the source of truth — it holds scanner-normalized
     // auto-detects (e.g. "Foo (Part B).mp4" → "Foo (Part B).funscript") AND
@@ -47,6 +59,7 @@ export class Categories {
     // normalized matches, so try library first.
     const libVideo = this._library?.getVideoByPath(videoPath);
     if (libVideo?.funscriptPath) return libVideo.funscriptPath;
+    if (isStreamPath(videoPath)) return null;          // a saved stream's script is on its record
 
     const associations = this._settings.get('library.associations') || {};
     const resolved = resolveActiveConfig(normalizeAssociation(associations[videoPath]));
@@ -58,7 +71,9 @@ export class Categories {
         if (mainRoute?.scriptPath) return mainRoute.scriptPath;
       }
     }
-    return videoPath.replace(/\.[^/.]+$/, '.funscript');
+    // The FILE's extension only: [^/\\.] also stops at a Windows separator, so
+    // C:\Lib.d\Clip never becomes C:\Lib.funscript (FT-069 / FT-070, 2026-11-22).
+    return videoPath.replace(/\.[^/\\.]+$/, '.funscript');
   }
 
   /**
@@ -217,7 +232,7 @@ export class Categories {
 
     const count = document.createElement('div');
     count.className = 'categories__card-count';
-    count.textContent = `${videoCount} video${videoCount !== 1 ? 's' : ''}`;
+    count.textContent = t('library.videoCount', { count: videoCount }); // in the language chosen (B102)
 
     body.appendChild(name);
     body.appendChild(count);
@@ -289,7 +304,7 @@ export class Categories {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'categories__detail-count';
-    countSpan.textContent = `${videoPaths.length} video${videoPaths.length !== 1 ? 's' : ''}`;
+    countSpan.textContent = t('library.videoCount', { count: videoPaths.length }); // in the language chosen (B102)
 
     header.appendChild(backBtn);
     header.appendChild(colorDot);
@@ -348,22 +363,32 @@ export class Categories {
     grid.className = 'categories__grid';
     grid.classList.toggle('categories__grid--list', this._viewMode === 'list');
 
-    for (const videoPath of validPaths) {
-      // Capture this category's full path list as the play context so Up
-      // Next can advance through the category. Snapshot is per-card so
-      // each click captures its index correctly.
+    // The category's path list as the play context, so Up Next can advance
+    // through it: ONE snapshot per render, shared by every card (contexts are
+    // never mutated, SCOPE §3.5); each card has its own index. A copy and an
+    // indexOf per card was a million steps for a 1,000-video category
+    // (DESIGN.md §2.17).
+    const contextList = validPaths.slice();
+    for (const [index, videoPath] of validPaths.entries()) {
       const playContext = {
         source: 'category',
         sourceLabel: `category "${cat.name}"`,
         sourceContext: { categoryId: cat.id },
-        list: validPaths.slice(),
-        index: validPaths.indexOf(videoPath),
+        list: contextList,
+        index,
       };
       const available = isAvailable(videoPath);
       const el = this._viewMode === 'list'
         ? this._createVideoListItem(videoPath, cat, playContext, available)
         : this._createVideoCard(videoPath, cat, playContext, available);
       if (!available) this._markUnavailable(el, videoPath);
+      // Disabled (zaikechi #381): dimmed and marked, still playable by hand.
+      if (isDisabled(this._settings, videoPath)) {
+        applyDisabledMark(el, true, {
+          thumb: el.querySelector('.categories__video-thumbnail'),
+          title: el.querySelector('.categories__list-name') || el.querySelector('.categories__video-title'),
+        });
+      }
       grid.appendChild(el);
     }
 
@@ -438,7 +463,7 @@ export class Categories {
       showToast(t('toast.playlistSkippedUnavailable', { count: unavailable.length }), 'info');
     }
     const videoList = available.map((p) => ({
-      name: p.split(/[\\/]/).pop(),
+      name: isStreamPath(p) ? this._nameOf(p) : p.split(/[\\/]/).pop(),
       path: p,
       funscriptPath: this._resolveFunscriptPath(p),
       scriptExpected: this._scriptExpected(p), // CB-12: a guess stays quiet
@@ -460,7 +485,8 @@ export class Categories {
     const notice = document.createElement('div');
     notice.className = 'categories__unavailable-notice';
     notice.setAttribute('role', 'status');
-    notice.appendChild(icon(Unplug, { width: 16, height: 16 }));
+    const mark = icon(Unplug, { width: 16, height: 16 });
+    notice.appendChild(mark);
 
     const text = document.createElement('span');
     const named = [...groupByVolume(unavailablePaths).entries()].filter(([root]) => root);
@@ -473,8 +499,17 @@ export class Categories {
 
     const hint = document.createElement('span');
     hint.className = 'categories__unavailable-hint';
-    hint.textContent = t('categories.unavailableHint');
+    // The count, so one video reads "play it. It stays" (test day B028).
+    hint.textContent = t('categories.unavailableHint', { count: unavailablePaths.length });
     notice.appendChild(hint);
+    // Their folders all there: renamed, moved or deleted, not a drive away
+    // (test day 2026-11-26, S030). Kept for tests.
+    this._unavailableHintCheck = foldersPresent(unavailablePaths).then((present) => {
+      if (!present) return false;
+      hint.textContent = t('categories.unavailableMovedHint', { count: unavailablePaths.length });
+      mark.replaceWith(icon(FileX, { width: 16, height: 16 }));
+      return true;
+    });
     return notice;
   }
 
@@ -558,7 +593,7 @@ export class Categories {
 
     const info = document.createElement('div');
     info.className = 'categories__video-info';
-    const name = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+    const name = this._nameOf(videoPath);
     const titleEl = document.createElement('div');
     titleEl.className = 'categories__video-title';
     titleEl.textContent = name;
@@ -606,6 +641,22 @@ export class Categories {
     } catch {
       this._showBrokenLink(cardEl, thumbnailEl, videoPath);
     }
+    this._markStreamTile(thumbnailEl, videoPath);
+  }
+
+  /** A saved stream's tile (2026-11-23): its link icon and its length, as its library card has. */
+  _markStreamTile(thumbnailEl, videoPath) {
+    if (!isStreamPath(videoPath) || !thumbnailEl) return;
+    const v = this._library?.getVideoByPath?.(videoPath);
+    this._addDurationBadge(thumbnailEl, v?.duration);
+    if (thumbnailEl.querySelector('.stream-tile-badge')) return;
+    const b = document.createElement('span');
+    b.className = 'library__stream-badge stream-tile-badge';
+    const label = v?.site ? t('library.streams.badgeSite', { site: v.site }) : t('library.streams.badge');
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.appendChild(icon(Link, { width: 13, height: 13, 'stroke-width': 2.5 }));
+    thumbnailEl.appendChild(b);
   }
 
   /**
@@ -619,6 +670,15 @@ export class Categories {
 
   /** Put a capture result on the tile. False when there is no image. */
   _applyThumbnail(thumbnailEl, result) {
+    // No video track (an audio file): the grey logo tile, as the Library
+    // shows it (N-05, TODO triage 2026-11-23: a black frame here).
+    if (result?.noVideo) {
+      thumbnailEl.querySelector('.categories__video-placeholder')?.remove();
+      thumbnailEl.querySelector('.library__thumb-novideo')?.remove();
+      thumbnailEl.insertBefore(buildNoVideoTile(result.name), thumbnailEl.firstChild);
+      if (result.duration) this._addDurationBadge(thumbnailEl, result.duration);
+      return true;
+    }
     const dataUrl = result?.dataUrl || result;
     if (!dataUrl) return false;
     const img = document.createElement('img');
@@ -638,6 +698,14 @@ export class Categories {
   }
 
   _showBrokenLink(cardEl, thumbnailEl, videoPath) {
+    // A saved stream with no picture of its own is not broken: the link
+    // icon, and it still plays (2026-11-23).
+    if (isStreamPath(videoPath)) {
+      const ph = thumbnailEl.querySelector('.categories__video-placeholder');
+      if (ph) { ph.innerHTML = ''; ph.appendChild(icon(Link, { width: 28, height: 28 })); }
+      cardEl.title = t('library.streams.badge');
+      return;
+    }
     // An unplugged drive also fails the thumbnail capture. Don't relabel an
     // unavailable tile "File not found" — that reads as the file being gone.
     if (cardEl.dataset.unavailable === 'true') return;
@@ -665,11 +733,15 @@ export class Categories {
     // entries, including the library's invalidation on thumbnail changes.
     const cached = thumbCache.getEntry(videoPath, 0);
     if (cached) return cached;
+    const known = this._noVideo?.get(videoPath);
+    if (known) return known;
     // Deduped: shares in-flight captures with the library/playlists views.
     const result = await dedupeThumbRequest(videoPath, () => this._captureFrameUncached(videoPath));
     const dataUrl = result?.dataUrl || result;
     if (typeof dataUrl === 'string' && dataUrl) {
       thumbCache.set(videoPath, 0, dataUrl, result?.duration);
+    } else if (result?.noVideo) {
+      (this._noVideo ||= new Map()).set(videoPath, result);
     }
     return result;
   }
@@ -685,6 +757,12 @@ export class Categories {
         const img = await window.funsync.readCustomThumbnail(imagePath);
         if (img?.dataUrl) return { dataUrl: img.dataUrl, duration: 0 };
       } catch { /* fall through to frame path */ }
+    }
+    if (isStreamPath(videoPath)) return null;          // no file to grab a frame from
+    // An audio file: its tile, never ffmpeg (a 500 for every one, every
+    // launch; Dave's log 2026-11-26) or a hidden <video>.
+    if (isAudioPath(videoPath)) {
+      return { noVideo: true, audio: true, name: fileNameOf(videoPath), duration: await audioDuration(videoPath, this._library?.getVideoByPath?.(videoPath)?.duration, window.funsync) };
     }
     const { seekPct, exact } = thumbRequestOpts(custom);
     if (window.funsync?.generateSingleThumbnail) {
@@ -717,6 +795,15 @@ export class Categories {
       const timeout = setTimeout(() => { cleanup(); resolve(null); }, 8000);
 
       video.addEventListener('loadedmetadata', () => {
+        // No video track (an audio file, N-05): a blank canvas would encode
+        // to a black JPEG, cached and shown for good. Say so instead.
+        if (!(video.videoWidth > 0 && video.videoHeight > 0)) {
+          clearTimeout(timeout);
+          const duration = isFinite(video.duration) ? video.duration : 0;
+          cleanup();
+          resolve({ dataUrl: null, duration, noVideo: true, name: fileNameOf(videoPath) });
+          return;
+        }
         video.currentTime = (typeof pinnedSeekPct === 'number' && isFinite(pinnedSeekPct))
           ? video.duration * pinnedSeekPct
           : Math.min(video.duration * 0.1, 5);
@@ -751,6 +838,10 @@ export class Categories {
     // Falls back to path-only resolution when the video has been
     // removed from any active source.
     const libVideo = this._library?.getVideoByPath?.(videoPath);
+    // A saved stream: the library plays it, in this category's order (2026-11-23).
+    if (libVideo?._stream) {
+      return this._library._playVideo({ ...libVideo, _playContextOverride: fileData._playContext || undefined });
+    }
     const funscriptPath = (libVideo?.hasFunscript && libVideo.funscriptPath)
       ? libVideo.funscriptPath
       : this._resolveFunscriptPath(videoPath);
@@ -803,6 +894,7 @@ export class Categories {
 
   async _checkFunscriptBadge(cardEl, thumbnailEl, videoPath) {
     const funscriptPath = this._resolveFunscriptPath(videoPath);
+    if (!funscriptPath) return;
     try {
       const content = await window.funsync.readFunscript(funscriptPath);
       if (!content) return;
@@ -960,7 +1052,7 @@ export class Categories {
 
     const count = document.createElement('span');
     count.className = 'categories__list-count';
-    count.textContent = `${videoCount} video${videoCount !== 1 ? 's' : ''}`;
+    count.textContent = t('library.videoCount', { count: videoCount }); // in the language chosen (B102)
 
     const actions = document.createElement('div');
     actions.className = 'categories__list-actions';
@@ -992,13 +1084,14 @@ export class Categories {
   /** @param {boolean} [available=true] see `_createVideoCard`. */
   _createVideoListItem(videoPath, category, playContext, available = true) {
     const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
+    const shown = this._nameOf(videoPath);
     const row = document.createElement('div');
     row.className = 'categories__list-item';
 
     const title = document.createElement('span');
     title.className = 'categories__list-name';
-    title.textContent = fileName.replace(/\.[^/.]+$/, '');
-    title.title = fileName;
+    title.textContent = shown;
+    title.title = isStreamPath(videoPath) ? shown : fileName;
 
     const funscriptPath = this._resolveFunscriptPath(videoPath);
     const heatmap = document.createElement('canvas');

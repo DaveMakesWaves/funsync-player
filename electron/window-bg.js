@@ -24,13 +24,21 @@ const DARK_CHROME = '#16213e';   // --surface-elevated (dark)
 const LIGHT_CHROME = '#ffffff';  // --surface-elevated (light)
 const DARK_SYMBOL = '#e0e0e6';   // caption-button glyph color on dark
 const LIGHT_SYMBOL = '#333333';
+// The Holiday interface style (v0.10.1, renderer/styles/holiday.css): its own
+// surfaces, and in Light a pine-green nav bar with white text.
+const HOLIDAY = {
+  dark: { background: '#0e1915', chrome: '#12231d', symbol: '#ece7dc' },
+  light: { background: '#f7f3ec', chrome: '#1d4636', symbol: '#ffffff' },
+};
 
 /**
- * Colors for an explicit theme value ('dark' | 'light' | 'system').
+ * Colors for an explicit theme value ('dark' | 'light' | 'system'), and the
+ * season ('holiday' for the Holiday interface style, else none).
  * @returns {{ background: string, symbol: string, dark: boolean }}
  */
-function colorsForTheme(theme) {
+function colorsForTheme(theme, season = null) {
   const dark = theme === 'dark' || (theme !== 'light' && nativeTheme.shouldUseDarkColors !== false);
+  if (season === 'holiday') return { ...HOLIDAY[dark ? 'dark' : 'light'], dark };
   return {
     background: dark ? DARK_BG : LIGHT_BG,
     chrome: dark ? DARK_CHROME : LIGHT_CHROME,
@@ -47,12 +55,52 @@ function colorsForTheme(theme) {
  */
 function resolveWindowColors() {
   let theme = 'system';
+  let season = null;
   try {
     const raw = fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8');
-    const saved = JSON.parse(raw)?.settings?.player?.theme;
+    const player = JSON.parse(raw)?.settings?.player;
+    const saved = player?.theme;
     if (saved === 'dark' || saved === 'light' || saved === 'system') theme = saved;
+    season = seasonForStyle(player?.uiStyle);
   } catch { /* no config yet → system */ }
-  return colorsForTheme(theme);
+  return colorsForTheme(theme, season);
+}
+
+/** The window chrome's season for an Interface style setting. Pure. */
+function seasonForStyle(uiStyle) {
+  return uiStyle === 'holiday' ? 'holiday' : null;
+}
+
+let _chromeSeason; // undefined until read from config.json or told by the renderer
+
+/**
+ * The season the window chrome is painted for (v0.10.1). The renderer says it
+ * when the Interface style changes (opts.season 'holiday' | 'none'); every
+ * other update-window-chrome call (dimmed, over the video, a pop-out's theme)
+ * keeps it. Until the renderer says, what config.json says, which is what the
+ * windows were created with.
+ * @param {{ season?: string }} [opts]
+ * @returns {'holiday'|null}
+ */
+function chromeSeason(opts) {
+  if (opts && (opts.season === 'holiday' || opts.season === 'none')) {
+    _chromeSeason = opts.season === 'holiday' ? 'holiday' : null;
+  }
+  if (_chromeSeason === undefined) _chromeSeason = resolveSeason();
+  return _chromeSeason;
+}
+
+/** Test helper: forget what the renderer said. */
+function _resetChromeSeasonForTests() { _chromeSeason = undefined; }
+
+/** The saved Interface style's season, from config.json (a disk read, as above). */
+function resolveSeason() {
+  try {
+    const raw = fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8');
+    return seasonForStyle(JSON.parse(raw)?.settings?.player?.uiStyle);
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -109,6 +157,6 @@ function winChromeOptions(colors) {
 }
 
 module.exports = {
-  resolveWindowColors, colorsForTheme, winChromeOptions, TITLE_BAR_HEIGHT,
+  resolveWindowColors, resolveSeason, chromeSeason, _resetChromeSeasonForTests, colorsForTheme, seasonForStyle, winChromeOptions, TITLE_BAR_HEIGHT, HOLIDAY,
   DARK_BG, LIGHT_BG, DARK_SYMBOL, LIGHT_SYMBOL, dimColor, BACKDROP_ALPHA,
 };

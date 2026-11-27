@@ -40,7 +40,7 @@ let relays;
 let pins;
 
 beforeAll(() => {
-  Lifted = liftAppClass(['_updateVariantSelector', '_showVariantDropdown', '_variantLabelText', '_streamPlayerWindowData'], {
+  Lifted = liftAppClass(['_updateVariantSelector', '_showVariantDropdown', '_markVariantItemIfMissing', '_variantLabelText', '_streamPlayerWindowData'], {
     document, window, t, PLAYERWIN,
     showToast: (text) => toasts.push(String(text)),
   });

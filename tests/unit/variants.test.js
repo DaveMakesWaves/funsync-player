@@ -116,7 +116,7 @@ describe('Variant Detection (scan-directory logic)', () => {
 
     it('every axis spelling the player knows is detected (aliases and raw channels too)', () => {
       const axes = ['surge','sway','twist','roll','pitch','vib','lube','pump','suction','valve',
-        'suck','yaw','r0','a1','forward','left','vibrate','l1','l2','r1','r2','v0','v1','a0','a2'];
+        'suck','yaw','r0','a1','forward','left','vibrate','vibe','l1','l2','r1','r2','v0','v1','a0','a2'];
       expect(axes).toHaveLength(AXIS_SUFFIXES.size);
       for (const axis of axes) {
         const result = classifyFunscript(`video.${axis}.funscript`);

@@ -149,6 +149,8 @@ describe('Test buzz from the room window (FT-119)', () => {
   it('paused: the row\'s Test buzz moves the device (70 then 20, FW4 0-1) and flashes the screen once; the viewer is set up again', async () => {
     expect(buzzBtn().disabled).toBe(false);
     expect(buzzAllBtn().disabled).toBe(false);
+    expect(buzzBtn().title).toBe('');
+    expect(buzzAllBtn().title).toBe(EN.audience.room.testBuzzAllTitle);
     buzzBtn().click();
     await until(() => hdsp().length === 2);
     expect(hdsp().map((e) => [e.position, Math.round(e.xpt * 100) / 100])).toEqual([[70, 0.7], [20, 0.2]]);
@@ -169,6 +171,9 @@ describe('Test buzz from the room window (FT-119)', () => {
     expect(rowStatus()).toBe(PLAYING);
     expect(buzzBtn().disabled).toBe(true);
     expect(buzzAllBtn().disabled).toBe(true);
+    // Greyed out, and they say why (TODO triage 2026-11-23: they said nothing).
+    expect(buzzBtn().title).toBe(EN.audience.room.testBuzzPauseTitle);
+    expect(buzzAllBtn().title).toBe(EN.audience.room.testBuzzPauseTitle);
     const before = { moves: hdsp().length, flashes };
     window.funsync.audiencePopoutRelay('to-parent', { type: AUDIENCE.TEST_BUZZ, key: KEY });
     window.funsync.audiencePopoutRelay('to-parent', { type: AUDIENCE.TEST_BUZZ_ALL });
@@ -212,6 +217,7 @@ describe('Resend from the room window (FT-121)', () => {
     muteBtn().click();
     await until(() => !deviceOf(world, KEY).playing && rowStatus() === EN.audience.room.statusMuted);
     expect(resendBtn().disabled).toBe(true);
+    expect(buzzBtn().title).toBe(EN.audience.room.testBuzzUnmuteTitle);
     const sent = world.sent.length;
     window.funsync.audiencePopoutRelay('to-parent', { type: AUDIENCE.RESEND, key: KEY });
     await wait(300);

@@ -277,8 +277,12 @@ describe('the associated file missing: the sidecar plays for now, the associatio
 describe('Remove gives the video its own script back (R4-06)', () => {
   it('the sidecar plays at once, without a rescan', async () => {
     const lib = await boot();
-    const card = document.createElement('div');
-    lib._removeAssociation(video(lib), card);
+    // As the video options dialog's Unpair does it (the ⋮ menu's Remove,
+    // `_removeAssociation`, is gone): its write, then `unpairApplied`.
+    const associations = { ...(lib._settings.get('library.associations') || {}) };
+    delete associations[VIDEO];
+    lib._settings.set('library.associations', associations);
+    lib._showUnpaired(video(lib), document.createElement('div'));
     expect(stored.library.associations[VIDEO]).toBeUndefined();
     const got = await play(lib);
     expect(got.text).toBe(SIDECAR_TEXT);

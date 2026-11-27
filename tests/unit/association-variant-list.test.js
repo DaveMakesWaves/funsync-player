@@ -115,7 +115,11 @@ describe('C-08: a fuzzy-paired own script stays in the variant menu while an ass
   it('Remove gives back the scan\'s own state (one script, no menu)', async () => {
     await boot();
     const video = lib.getVideoByPath(BRAVO);
-    lib._removeAssociation(video, document.createElement('div'));
+    // As the video options dialog's Unpair does it: its write, then `unpairApplied`.
+    const associations = { ...(lib._settings.get('library.associations') || {}) };
+    delete associations[BRAVO];
+    lib._settings.set('library.associations', associations);
+    lib._showUnpaired(video, document.createElement('div'));
     expect(video.funscriptPath).toBe(BRAVO_FUZZY);
     expect(video.variants).toEqual([]);
   });

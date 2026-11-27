@@ -38,7 +38,7 @@ import { t } from '../js/i18n.js';
 import { listFamilies, listPatterns, describePattern } from '../js/pattern-library.js';
 import { patternSpeedBounds, isOneShotPattern } from '../js/pattern-source.js';
 import {
-  normalizePatternChoice, listQuickPicks, quickPickIdFor, renderPatternSample, patternStats, RANGE_MODES,
+  normalizePatternChoice, listQuickPicks, quickPickIdFor, renderPatternSample, patternStats, RANGE_MODES, widenedBand,
 } from '../js/pattern-choice.js';
 import { PREVIEW_WINDOW_MS, PREVIEW_SCRIPT_RANGE, drawSamplePreview } from '../js/filler-preview.js';
 import { createToggleSwitch, applyToggleState } from './toggle-switch.js';
@@ -317,21 +317,13 @@ export function createPatternBlock({
     paintWidened(choice);
   };
   // The note names the band that plays: the engine's own numbers when it
-  // gives them, else where the rendered sample really goes.
+  // gives them, else where the rendered sample really goes. The summary row
+  // reads it the same way (pattern-choice.js widenedBand): a range under
+  // 5 units, Lowest = Highest included, plays 5 wide (fix 2026-11-20).
   const paintWidened = (choice) => {
-    let to = null;
-    if (choice.rangeMode !== 'own') {
-      for (const w of sample.warnings) {
-        if (w && typeof w === 'object' && w.code === 'range-widened' && Array.isArray(w.values?.to)) { to = w.values.to; break; }
-        if (w === 'range-widened' && sample.actions.length) {
-          const pos = sample.actions.map((a) => a.pos);
-          to = [Math.min(...pos), Math.max(...pos)];
-          break;
-        }
-      }
-    }
+    const to = widenedBand(choice, sample.warnings, sample.actions);
     widened.hidden = !to;
-    widened.textContent = to ? t('settingsPanel.playback.patternRangeWidened', { lo: Math.round(to[0]), hi: Math.round(to[1]) }) : '';
+    widened.textContent = to ? t('settingsPanel.playback.patternRangeWidened', { lo: to[0], hi: to[1] }) : '';
   };
 
   let pending = false;

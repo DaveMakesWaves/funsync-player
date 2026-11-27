@@ -42,7 +42,7 @@ vi.mock('../../renderer/js/pattern-choice.js', async (importOriginal) => {
 
 import { _setBundlesForTests } from '../../renderer/js/i18n.js';
 import { SettingsPanel, safePatternWrites } from '../../renderer/components/settings-panel.js';
-import { summarizePatternChoice, SUMMARY_GRAPH_MS } from '../../renderer/components/pattern-drawer.js';
+import { summarizePatternChoice, summaryGraphMs } from '../../renderer/components/pattern-drawer.js';
 import {
   readPatternChoice, patternChoiceWrites, listQuickPicks, normalizePatternChoice, renderPatternSample, patternStats,
   CONTRACT_UNDER_TEST,
@@ -209,7 +209,8 @@ const shown = (node, root) => {
   for (let n = node; n && n !== root.parentElement; n = n.parentElement) if (n.hidden) return false;
   return true;
 };
-const strip = (f, id) => (id || '').replace(PREFIX[f], '#');
+// Every occurrence: "Set pattern…" is described by two ids (the line and the widened note, 2026-11-20).
+const strip = (f, id) => (id || '').split(PREFIX[f]).join('#');
 
 /** Everything a user meets in a feature's drawer: its shell and the block's rows, by role. */
 function drawerSignature(f) {
@@ -387,7 +388,7 @@ describe('the summary row: the applied choice in a line, and its small graph', (
       const g = ctl(f, 'summary-graph');
       expect(g.getAttribute('aria-hidden')).toBe('true');
       expect(g.hidden).toBe(false);
-      const want = renderPatternSample(choice, { durationMs: SUMMARY_GRAPH_MS, scriptRange: { min: 0, max: 100 }, feature: f }).actions;
+      const want = renderPatternSample(choice, { durationMs: summaryGraphMs(choice, { feature: f }), scriptRange: { min: 0, max: 100 }, feature: f }).actions;
       const curve = contexts.get(g).strokes.at(-1);
       expect(curve.path.length, f).toBe(want.length);
     }
@@ -413,6 +414,78 @@ describe('the summary row: the applied choice in a line, and its small graph', (
       expect(ctx.strokes.length, `${f} apply`).toBeGreaterThan(before);
       expect(ctx.strokes.at(-1).path, f).not.toEqual(curve);
       expect(ctl(f, 'summary').textContent).toMatch(/, 90 units\/s, /);
+    }
+  });
+});
+
+/** The summary graph's curve as positions 0-100 (the last stroke drawn; the canvas is 32 px high, 4 px padding). */
+function summaryCurve(f) {
+  const path = contexts.get(ctl(f, 'summary-graph')).strokes.at(-1).path;
+  return path.map(([, y]) => (1 - (y - 4) / 24) * 100);
+}
+/** The tops of the strokes, in order. */
+function tops(curve) {
+  const out = [];
+  for (let i = 1; i < curve.length - 1; i++) if (curve[i] > curve[i - 1] + 0.5 && curve[i] >= curve[i + 1]) out.push(curve[i]);
+  return out;
+}
+
+describe('the summary graph draws the whole pattern once (2026-11-20; it drew the first 4 s)', () => {
+  it('Building (the upgraded Crescendo) climbs to the top in each section\'s graph, the Gap Filler\'s included (it was a flat line)', async () => {
+    await openPlayback(seedAll(listQuickPicks().find((q) => q.id === 'building').choice));
+    for (const f of FEATURES) {
+      expect(ctl(f, 'summary-graph').hidden, f).toBe(false);
+      const t = tops(summaryCurve(f));
+      expect(t.length, f).toBeGreaterThanOrEqual(4);
+      expect(t.every((v, i) => i === 0 || v > t[i - 1]), `${f}: ${t.map(Math.round)}`).toBe(true);
+      expect(t.at(-1), f).toBeGreaterThan(90);
+    }
+  });
+});
+
+describe('Lowest = Highest plays 5 units wide, and the summary and the drawer say so (2026-11-20, device step 35)', () => {
+  // Dave's step 35: Mixed flutters at the tip at its slowest speed, Lowest = Highest = 22.
+  const STEP35 = { id: 'mixed-flutters-tip', speed: 38, rangeMode: 'exact', min: 22, max: 22 };
+  const NOTE = 'This range is too narrow for the pattern, so it plays a little wider: 20 to 25.';
+
+  it('each section: the line keeps the range as set, the note under it names the band that plays, and the drawer says the same', async () => {
+    await openPlayback(seedAll(STEP35));
+    for (const f of FEATURES) {
+      expect(ctl(f, 'summary').textContent, f).toBe(`${EN.patterns['mixed-flutters-tip'].name}, 38 units/s, 22 to 22`);
+      const note = ctl(f, 'summary-widened');
+      expect(note.hidden, f).toBe(false);
+      expect(note.textContent, f).toBe(NOTE);
+      expect(ctl(f, 'set').getAttribute('aria-describedby').split(' ')).toContain(note.id);
+      // the graph is a flutter (it turns again and again), not a still line
+      const c = summaryCurve(f);
+      let turns = 0;
+      for (let i = 2; i < c.length; i++) if (Math.sign(c[i] - c[i - 1]) * Math.sign(c[i - 1] - c[i - 2]) < 0) turns++;
+      expect(turns, f).toBeGreaterThanOrEqual(20);
+      await openDrawer(f);
+      expect(ctl(f, 'range-widened').hidden, f).toBe(false);
+      expect(ctl(f, 'range-widened').textContent, f).toBe(NOTE);
+      await cancelDrawer(f);
+    }
+  });
+
+  it('set in the drawer (Highest, then Lowest, to 22) and applied: the note appears; a range wide enough again: it goes', async () => {
+    await openPlayback(seedAll({ ...STEP35, min: 20, max: 60 }));
+    for (const f of FEATURES) {
+      expect(ctl(f, 'summary-widened').hidden, f).toBe(true);
+      expect(ctl(f, 'summary-widened').textContent, f).toBe('');
+      await openDrawer(f);
+      await change(ctl(f, 'max'), 22);
+      await change(ctl(f, 'min'), 22);
+      expect(ctl(f, 'range-widened').textContent, f).toBe(NOTE);
+      await applyDrawer(f);
+      expect(ctl(f, 'summary').textContent, f).toMatch(/, 22 to 22$/);
+      expect(ctl(f, 'summary-widened').textContent, f).toBe(NOTE);
+      await openDrawer(f);
+      await change(ctl(f, 'max'), 40);
+      await applyDrawer(f);
+      expect(ctl(f, 'summary').textContent, f).toMatch(/, 22 to 40$/);
+      expect(ctl(f, 'summary-widened').hidden, f).toBe(true);
+      expect(ctl(f, 'summary-widened').textContent, f).toBe('');
     }
   });
 });
@@ -805,7 +878,7 @@ describe('keyboard and screen readers', () => {
     for (const f of FEATURES) {
       const name = EN.settingsPanel.playback[HEADER[f]];
       expect(ctl(f, 'set').getAttribute('aria-label')).toBe(`Set the ${name} pattern`);
-      expect(ctl(f, 'set').getAttribute('aria-describedby')).toBe(`${PREFIX[f]}-summary`);
+      expect(ctl(f, 'set').getAttribute('aria-describedby')).toBe(`${PREFIX[f]}-summary ${PREFIX[f]}-summary-widened`);
       expect(ctl(f, 'set').textContent).toBe('Set pattern…');
       await openDrawer(f);
       const sheet = drawer(f).querySelector('.pattern-drawer__sheet');

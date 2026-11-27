@@ -423,3 +423,134 @@ function _dedupeByTime(actions) {
   }
   return result;
 }
+
+/**
+ * Fade a stretch in or out (editor work list 4.4, 2026-11-24; FunGen 2 has
+ * the same tool). Fade in: the stroke depth grows from nothing to full across
+ * the points' time span; fade out: it shrinks from full to nothing. Every
+ * point keeps its time; its distance from the stretch's centre line (halfway
+ * between its lowest and highest point) is scaled by how far through the
+ * span it is. Fewer than two points, or a span of 0 ms, come back unchanged.
+ *
+ * @param {Array<{at: number, pos: number}>} actions — sorted by time
+ * @param {'in'|'out'} direction
+ * @returns {Array<{at: number, pos: number}>}
+ */
+export function fadeDepth(actions, direction = 'in') {
+  const copy = actions.map(a => ({ at: a.at, pos: a.pos }));
+  if (copy.length < 2) return copy;
+  const t0 = copy[0].at;
+  const span = copy[copy.length - 1].at - t0;
+  if (!(span > 0)) return copy;
+  let lo = 100;
+  let hi = 0;
+  for (const a of copy) { lo = Math.min(lo, a.pos); hi = Math.max(hi, a.pos); }
+  const mid = (lo + hi) / 2;
+  return copy.map((a) => {
+    const through = (a.at - t0) / span;
+    const k = direction === 'out' ? 1 - through : through;
+    return { at: a.at, pos: Math.round(Math.max(0, Math.min(100, mid + (a.pos - mid) * k))) };
+  });
+}
+
+/** Fade in: Modify > Fade in (the whole script, or the selection). */
+export function fadeIn(actions) { return fadeDepth(actions, 'in'); }
+
+/** Fade out: Modify > Fade out (the whole script, or the selection). */
+export function fadeOut(actions) { return fadeDepth(actions, 'out'); }
+
+/**
+ * Make an axis from the stroke (editor work list 2.4, 2026-11-24). The usual
+ * way to script roll or pitch by hand in OpenFunscripter is to copy the
+ * stroke into the axis and shift it in time; MultiFunPlayer can link an
+ * unscripted axis to the stroke for the same reason. One step here: every
+ * stroke point, moved by `shiftMs`, its distance from the middle scaled by
+ * `scalePct` around `centre`, upside down with `invert`. Points shifted
+ * before 0 are dropped; positions are whole numbers within 0-100.
+ *
+ * @param {Array<{at: number, pos: number}>} stroke — the main script, in time order
+ * @param {{shiftMs?: number, scalePct?: number, centre?: number, invert?: boolean}} [opts]
+ * @returns {Array<{at: number, pos: number}>}
+ */
+export function axisFromStroke(stroke, { shiftMs = 0, scalePct = 100, centre = 50, invert = false } = {}) {
+  const shift = Number.isFinite(shiftMs) ? Math.round(shiftMs) : 0;
+  const scale = (Number.isFinite(scalePct) ? scalePct : 100) / 100 * (invert ? -1 : 1);
+  const mid = Number.isFinite(centre) ? centre : 50;
+  const out = [];
+  for (const a of stroke || []) {
+    const at = Math.round(a.at + shift);
+    if (at < 0) continue;
+    out.push({ at, pos: Math.round(Math.max(0, Math.min(100, mid + (a.pos - 50) * scale))) });
+  }
+  return out;
+}
+
+/**
+ * A quarter of the stroke's typical cycle in ms (half the median time between
+ * points): the shift that puts a roll a quarter turn after the stroke, the
+ * starting value of Make from the stroke. 0 with fewer than two points.
+ */
+export function quarterCycleMs(stroke) {
+  const gaps = [];
+  for (let i = 1; i < (stroke || []).length; i++) {
+    const d = stroke[i].at - stroke[i - 1].at;
+    if (d > 0) gaps.push(d);
+  }
+  if (!gaps.length) return 0;
+  gaps.sort((a, b) => a - b);
+  return Math.round(gaps[Math.floor(gaps.length / 2)] / 2);
+}
+
+/**
+ * Vibrate between points (Dave, 2026-11-24: OFS has an add-on that fills the
+ * space between two points with vibration; "can we one up them ... with a
+ * slider to make the vibration movements larger or smaller"). Every gap
+ * between neighbouring points of the run gets small up-and-down moves around
+ * the straight line between them; the points themselves stay.
+ * What it adds over a plain filler: the size is a slider (peak to peak, in
+ * units), the rate is moves per second, Taper eases the size in and out over
+ * the first and last quarter of each gap (no jolt at the joins), and a speed
+ * cap: with `maxSpeed` (units/s) the moves are spaced so none is faster than
+ * the device limit (the editor's max speed), instead of a buzz the Handy
+ * cannot follow. Positions stay within 0-100, whole numbers, times whole ms.
+ *
+ * @param {Array<{at:number,pos:number}>} actions — a run of points, in time order
+ * @param {{size?:number, rate?:number, taper?:boolean, maxSpeed?:number}} [opts]
+ * @returns {Array<{at:number,pos:number}>} the run with the vibration added
+ */
+export function vibrateBetween(actions, { size = 12, rate = 8, taper = true, maxSpeed = 0 } = {}) {
+  const pts = (actions || []).map((a) => ({ at: a.at, pos: a.pos })).sort((a, b) => a.at - b.at);
+  const depth = Math.max(1, Math.min(100, Number(size) || 12));
+  const perSecond = Math.max(1, Math.min(60, Number(rate) || 8));
+  const spacing = vibrateSpacingMs(depth, perSecond, maxSpeed);
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    out.push(pts[i]);
+    if (i === pts.length - 1) break;
+    const a = pts[i];
+    const b = pts[i + 1];
+    const gap = b.at - a.at;
+    const n = Math.floor(gap / spacing) - 1;            // points that fit, one spacing from each end
+    if (n < 1) continue;
+    const step = gap / (n + 1);
+    for (let k = 1; k <= n; k++) {
+      const f = (step * k) / gap;
+      const line = a.pos + (b.pos - a.pos) * f;
+      let half = depth / 2;
+      if (taper) half *= Math.min(1, Math.min(f, 1 - f) / 0.25);
+      const pos = line + (k % 2 ? half : -half);
+      out.push({ at: Math.round(a.at + step * k), pos: Math.round(Math.max(0, Math.min(100, pos))) });
+    }
+  }
+  return out;
+}
+
+/**
+ * The time between vibration points: one move per 1/rate s, longer when the
+ * move would be faster than `maxSpeed` units/s (0 = no cap). Never under 20 ms.
+ */
+export function vibrateSpacingMs(size, rate, maxSpeed = 0) {
+  let ms = 1000 / Math.max(1, rate);
+  if (maxSpeed > 0) ms = Math.max(ms, (size * 1000) / maxSpeed);
+  return Math.max(20, ms);
+}

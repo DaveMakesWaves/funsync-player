@@ -1,8 +1,9 @@
 /* Up Next card — end-of-video autoplay countdown.
  *
  * Position mirrors .gap-skip (bottom-right above the controls). The card
- * sits at z-index 16 (one above .gap-skip at 15) — a safety margin in
- * case the suppression hand-off has an off-by-one frame.
+ * sits one above .gap-skip (52 over 51; both over the device simulator at
+ * 50 since 2026-11-25) — a safety margin in case the suppression hand-off
+ * has an off-by-one frame.
  *
  * Tokens are --video-overlay-* per DESIGN.md §2.2 — never theme-app
  * tokens. The video is dark content; coupling these to the app theme
@@ -30,7 +31,10 @@
   position: absolute;
   bottom: 100px;
   right: 20px;
-  z-index: 16;
+  /* Over the device simulator (z 50), one above Skip gap (51): parked in this
+     corner the simulator covered the card's Dismiss (break-it, 2026-11-25).
+     Beside an open queue panel (z 18) it moves left of it (the rule above). */
+  z-index: 52;
   width: 320px;
   max-width: calc(100% - 40px);
   background: var(--video-overlay-bg);

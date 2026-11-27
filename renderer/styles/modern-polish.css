@@ -1,0 +1,659 @@
+/* ============================================================
+   Modern polish (2026-11-23)
+
+   Dave: "look at the modern theme we have, without making it all
+   gradienty in the typical ai designed ui fashion what direction could we
+   take it in to make it appear a little more polished?", then "do all 7
+   leave an easy revert path".
+
+   REVERT: delete the one <link rel="stylesheet" href="styles/modern-polish.css">
+   line in renderer/index.html, player-popout.html, editor-popout.html and
+   audience-room.html (or delete this file). Nothing else changed for it:
+   modern.css is untouched, and every rule here is under
+   :root[data-style="modern"], so Classic never changes
+   (tests/unit/modern-polish.test.js holds both).
+
+   Polish from consistency, not decoration: no gradients, no glow, no glass.
+   The seven moves, in this file's order:
+     1. One navy, in steps (dark only; Holiday keeps its own colours)
+     2. Red rationed: the main action, "on", new / unread. Focus is neutral.
+     3. A type scale, and fixed-width digits everywhere
+     4. One control language, aligned (Settings: on/off is a switch, the
+        controls in a column on the right)
+     5. Shadows only on what floats (dialogs, menus, mini player, toasts);
+        cards in the page get a colour step and a hairline
+     6. Calmer motion: no card lift, no press-shrink, no underline glow
+     7. The heat strip is the player's signature: always on, slim, over
+        the seek bar; the controls quieter around it
+   ============================================================ */
+
+:root[data-style="modern"] {
+  /* A neutral focus ring: a red ring reads as an error. */
+  --polish-ring: rgba(228, 231, 239, 0.72);
+  --polish-hairline: rgba(255, 255, 255, 0.06);
+  /* Shorter, flatter motion (modern.css's --dur-1 is 150ms). */
+  --dur-1: 130ms;
+  --ease-spring: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+:root[data-style="modern"][data-theme="light"] {
+  --polish-ring: rgba(21, 27, 48, 0.55);
+  --polish-hairline: rgba(0, 0, 0, 0.07);
+}
+
+/* --- 1. One navy, in steps ------------------------------------------------
+   The page was #1a1a2e (a violet navy, hue 240) under panels and cards of
+   a blue navy (#16213e / #1c2a4a, hue ~222): a hue shift between layers.
+   Now every layer is the same navy, lighter as it comes forward, and the
+   greys lean a little toward it. Dark only; Holiday has its own colours. */
+:root[data-style="modern"]:not([data-theme="light"]):not([data-season="holiday"]) {
+  --surface-base: #151b30;
+  --text-primary: #e4e7ef;
+  --text-secondary: #a3abbe;
+  --text-muted: #6d7590;
+}
+/* The three "no thumbnail yet" plates hard-coded the old page colour. */
+:root[data-style="modern"]:not([data-theme="light"]) .library__card-placeholder,
+:root[data-style="modern"]:not([data-theme="light"]) .playlists__video-placeholder,
+:root[data-style="modern"]:not([data-theme="light"]) .categories__video-placeholder {
+  background: var(--surface-base);
+}
+
+/* --- 2. Red rationed ---------------------------------------------------------
+   Red stays for the main action of a view, the "on" state and new / unread
+   things. Focus rings, counts and active filters go neutral. */
+:root[data-style="modern"] .control-btn:focus-visible,
+:root[data-style="modern"] .nav-bar__action:focus-visible,
+:root[data-style="modern"] .nav-bar__item:focus-visible,
+:root[data-style="modern"] .view-toggle:focus-visible,
+:root[data-style="modern"] .library__picker-btn:focus-visible,
+:root[data-style="modern"] .library__queue-toggle:focus-visible,
+:root[data-style="modern"] .library__search-input:focus-visible,
+:root[data-style="modern"] .settings-panel__input:focus-visible,
+:root[data-style="modern"] .modal-panel button:focus-visible,
+:root[data-style="modern"] .playlists__card-action-btn:focus-visible,
+:root[data-style="modern"] .playlists__play-all-btn:focus-visible,
+:root[data-style="modern"] .playlists__loop-btn:focus-visible,
+:root[data-style="modern"] .categories__card-action-btn:focus-visible,
+:root[data-style="modern"] .queue-panel__close:focus-visible,
+:root[data-style="modern"] .queue-panel__dock:focus-visible,
+:root[data-style="modern"] .queue-panel__section-action:focus-visible,
+:root[data-style="modern"] .eroscripts-panel__btn:focus-visible,
+:root[data-style="modern"] .eroscripts-panel__input:focus-visible,
+:root[data-style="modern"] .eroscripts-panel__search-input:focus-visible,
+:root[data-style="modern"] .session-card__btn:focus-visible,
+:root[data-style="modern"] .vr-format-panel__seg-btn:focus-visible,
+:root[data-style="modern"] .vr-format-panel__select:focus-visible,
+:root[data-style="modern"] .editor__btn:focus-visible,
+:root[data-style="modern"] .settings-panel__rail-item:focus-visible,
+:root[data-style="modern"] .settings-panel__rail-group:focus-visible,
+:root[data-style="modern"] .settings-panel__search-input:focus-visible,
+:root[data-style="modern"] .settings-panel__search-clear:focus-visible,
+:root[data-style="modern"] .settings-panel__area-note-btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--polish-ring);
+}
+:root[data-style="modern"] .controls__progress:focus-visible {
+  outline: 2px solid var(--polish-ring);
+}
+:root[data-style="modern"] .stash-settings__btn:focus-visible {
+  outline-color: var(--polish-ring);
+}
+/* A text field being typed in: a brighter edge, not a red one. */
+:root[data-style="modern"] .settings-panel__input:focus,
+:root[data-style="modern"] .library__search-input:focus,
+:root[data-style="modern"] .settings-panel__search-input:focus,
+:root[data-style="modern"] .eroscripts-panel__input:focus {
+  border-color: var(--border-strong);
+  box-shadow: 0 0 0 2px var(--polish-ring);
+}
+/* The current Settings area: the red bar marks it, the words stay white. */
+:root[data-style="modern"] .settings-panel__rail-item--active {
+  color: var(--text-primary);
+  background: var(--surface-overlay);
+}
+/* While searching, results come from every area: none is "current" (as
+   modal.css says for the plain style; test day 2026-11-24, S002). */
+:root[data-style="modern"] .settings-panel__layout--searching .settings-panel__rail-item--active {
+  color: var(--text-secondary);
+  background: transparent;
+}
+:root[data-style="modern"] .settings-panel__rail-count {
+  background: var(--surface-overlay-strong);
+  color: var(--text-primary);
+}
+/* An active library filter is a state, not an alarm. Holiday keeps its
+   green chips (holiday.css: Dave's "small red and green touches"). */
+:root[data-style="modern"]:not([data-season="holiday"]) .filter-chip {
+  background: var(--surface-overlay);
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}
+/* Done: the dialog's main action, the size of a button, on the right. */
+:root[data-style="modern"] .settings-panel__done-btn {
+  width: auto;
+  min-width: 128px;
+  align-self: flex-end;
+  margin: 14px 0 0 auto;
+  border-radius: var(--radius-md);
+}
+
+/* --- 3. Type scale, fixed-width digits -------------------------------------
+   11 / 12 / 13 / 15 / 20. Weight does the work, not size jumps. Digits are
+   tabular everywhere, so a running time, a count or an offset never jitters. */
+:root[data-style="modern"] body {
+  font-variant-numeric: tabular-nums;
+}
+:root[data-style="modern"] .settings-panel__section {
+  margin-bottom: 26px;
+}
+/* Section titles: small labels; the rows under them carry the weight. */
+:root[data-style="modern"] .settings-panel__section-header {
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: none;
+  padding-bottom: 0;
+  margin: 0 0 10px;
+}
+/* A setting's name reads as the main text of its row. */
+:root[data-style="modern"] .settings-panel__field-label {
+  font-size: 13px;
+  color: var(--text-primary);
+}
+/* Hints: readable (12px, full secondary colour, was 11px at 70%). */
+:root[data-style="modern"] .settings-panel__hint {
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  opacity: 1;
+}
+/* While searching, the area over its results is the biggest title. */
+:root[data-style="modern"] .settings-panel__area-heading {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  text-transform: none;
+  color: var(--text-primary);
+}
+:root[data-style="modern"] .modal-title {
+  font-size: 15px;
+  letter-spacing: -0.005em;
+}
+
+/* --- 4. One control language, aligned (Settings) ----------------------------
+   The name on the left takes the room; the control sits in a column on the
+   right. Every on/off is the same switch (the app's own .toggle-switch
+   look: 32x18 track, 14px thumb), drawn on the real checkbox, so nothing in
+   the page changes but its look: same input, same label, same events. */
+:root[data-style="modern"] .settings-panel__field {
+  gap: 12px;
+  min-height: 34px;
+  margin-bottom: 2px;
+}
+:root[data-style="modern"] .settings-panel__field > .settings-panel__field-label {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+:root[data-style="modern"] .settings-panel__field > .settings-panel__input--select {
+  flex: 0 1 240px;
+  width: 240px;
+}
+:root[data-style="modern"] .settings-panel__field > .settings-panel__input--range {
+  flex: 0 1 200px;
+  width: 200px;
+}
+:root[data-style="modern"] .settings-panel__input--checkbox {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0 2px;
+  padding: 0;
+  border: none;
+  border-radius: 9px;
+  background: var(--polish-switch-off);
+  cursor: pointer;
+  transition: background var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .settings-panel__input--checkbox::before {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--polish-switch-thumb);
+  transition: transform var(--dur-1) var(--ease-out), background var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .settings-panel__input--checkbox:checked {
+  background: var(--accent);
+}
+/* Holiday's switches are green when on (holiday.css .toggle-switch--on);
+   these switches are the same control, so they match. */
+:root[data-style="modern"][data-season="holiday"] .settings-panel__input--checkbox:checked {
+  background: var(--holiday-green);
+}
+:root[data-style="modern"] .settings-panel__input--checkbox:checked::before {
+  transform: translateX(14px);
+  background: #fff;
+}
+:root[data-style="modern"] .settings-panel__input--checkbox:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+/* An off switch must still be seen as a control: on white the dark-theme
+   grey track nearly vanished, so light gets a darker track (3:1 against
+   the page, WCAG 1.4.11) and a white thumb. */
+:root[data-style="modern"] {
+  --polish-switch-off: rgba(255, 255, 255, 0.22);
+  --polish-switch-thumb: #d0d0d0;
+}
+:root[data-style="modern"][data-theme="light"] {
+  --polish-switch-off: rgba(21, 27, 48, 0.45);
+  --polish-switch-thumb: #ffffff;
+}
+/* Secondary buttons in Settings (+ Add Source Folder, Recheck) were dashed,
+   which reads as a draft; a plain hairline button like the rest. */
+:root[data-style="modern"] .settings-panel__add-btn {
+  border-style: solid;
+  border-color: var(--border-subtle);
+  background: var(--surface-overlay);
+  color: var(--text-primary);
+  border-radius: var(--radius-md);
+}
+:root[data-style="modern"] .settings-panel__add-btn:hover {
+  border-color: var(--border-strong);
+}
+/* Scrollbars: thin and tinted, not the bright system bar on a navy panel. */
+:root[data-style="modern"] {
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+}
+:root[data-style="modern"][data-theme="light"] {
+  scrollbar-color: rgba(0, 0, 0, 0.25) transparent;
+}
+:root[data-style="modern"] * {
+  scrollbar-width: thin;
+}
+
+/* --- 5. Shadows only on what floats -----------------------------------------
+   On a dark page a resting shadow under every card only muddies the grid.
+   Cards in the page: the card colour (one step up) and a hairline. Dialogs,
+   menus, the mini player, toasts and Up Next keep modern.css's shadows. */
+:root[data-style="modern"] .library__card,
+:root[data-style="modern"] .library__folder-card,
+:root[data-style="modern"] .library__collection-card,
+:root[data-style="modern"] .playlists__card,
+:root[data-style="modern"] .playlists__video-card,
+:root[data-style="modern"] .categories__card,
+:root[data-style="modern"] .categories__video-card {
+  box-shadow: inset 0 0 0 1px var(--polish-hairline);
+}
+:root[data-style="modern"] .library__card:hover,
+:root[data-style="modern"] .library__folder-card:hover,
+:root[data-style="modern"] .library__collection-card:hover,
+:root[data-style="modern"] .playlists__card:hover,
+:root[data-style="modern"] .playlists__video-card:hover,
+:root[data-style="modern"] .categories__card:hover,
+:root[data-style="modern"] .categories__video-card:hover {
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+/* A dark thumbnail on a dark card: a hairline inside its edge keeps them apart. */
+:root[data-style="modern"] .library__card-thumbnail img {
+  outline: 1px solid var(--polish-hairline);
+  outline-offset: -1px;
+}
+
+/* --- 6. Calmer motion -------------------------------------------------------
+   Cards no longer lift and buttons no longer shrink when pressed: hover and
+   press are told by colour, quickly. The nav underline is a plain bar
+   (no glow anywhere: Dave, "all ai think that makes it better"). */
+:root[data-style="modern"] .library__card:hover,
+:root[data-style="modern"] .library__folder-card:hover,
+:root[data-style="modern"] .library__collection-card:hover,
+:root[data-style="modern"] .playlists__card:hover,
+:root[data-style="modern"] .playlists__video-card:hover,
+:root[data-style="modern"] .categories__card:hover,
+:root[data-style="modern"] .categories__video-card:hover,
+:root[data-style="modern"] .queue-panel__row:hover {
+  transform: none;
+}
+:root[data-style="modern"] .settings-panel__theme-option:active,
+:root[data-style="modern"] .modal-panel button:active,
+:root[data-style="modern"] .nav-bar__action:active,
+:root[data-style="modern"] .nav-bar__item:active,
+:root[data-style="modern"] .control-btn:active,
+:root[data-style="modern"] .view-toggle:active,
+:root[data-style="modern"] .library__picker-btn:active,
+:root[data-style="modern"] .library__queue-toggle:active,
+:root[data-style="modern"] .playlists__card-action-btn:active,
+:root[data-style="modern"] .categories__card-action-btn:active,
+:root[data-style="modern"] .playlists__play-all-btn:active,
+:root[data-style="modern"] .playlists__loop-btn:active,
+:root[data-style="modern"] .queue-panel__close:active,
+:root[data-style="modern"] .queue-panel__dock:active,
+:root[data-style="modern"] .queue-panel__section-action:active,
+:root[data-style="modern"] .up-next__end-cta:active,
+:root[data-style="modern"] .up-next__dismiss:active,
+:root[data-style="modern"] .eroscripts-panel__btn:active,
+:root[data-style="modern"] .session-card__btn:active,
+:root[data-style="modern"] .vr-format-panel__seg-btn:active,
+:root[data-style="modern"] .editor__btn:active,
+:root[data-style="modern"] .audience-room__card-buzz-btn:active,
+:root[data-style="modern"] .audience-room__card-resend-btn:active,
+:root[data-style="modern"] .audience-room__card-mute-btn:active,
+:root[data-style="modern"] .audience-room__card-remove-btn:active,
+:root[data-style="modern"] .audience-room__card-offset-reset:active,
+:root[data-style="modern"] .audience-room__hide-keys-btn:active,
+:root[data-style="modern"] .audience-room__buzz-all-btn:active,
+:root[data-style="modern"] .audience-room__add-submit:active {
+  transform: none;
+}
+:root[data-style="modern"] .nav-bar__item--active::after,
+:root[data-style="modern"] .nav-bar__eroscripts--active::after {
+  height: 2px;
+  box-shadow: none;
+}
+
+/* --- 7. The heat strip as the player's signature ----------------------------
+   The script's heat strip showed only while the pointer was on the seek
+   bar. Now it is always there as a slim band just above the bar (clear of
+   the chapter strip below it), and grows to its full height on hover as
+   before. The controls rest a little quieter (72% white) and come up on
+   hover; a control that is ON keeps its red. */
+:root[data-style="modern"] .progress__heatmap {
+  top: 2px;
+  height: 4px;
+  opacity: 0.9;
+  transition: opacity var(--dur-1) var(--ease-out),
+              top var(--dur-1) var(--ease-out),
+              height var(--dur-1) var(--ease-out);
+}
+/* The canvas is inline by default, so it sat on a text baseline ~13px down
+   its box: clipped by a pixel at 12px tall, wholly out of sight at 4px
+   (found by testing it live, 2026-11-23). As a block it fills the band. */
+:root[data-style="modern"] .progress__heatmap canvas {
+  display: block;
+}
+:root[data-style="modern"] .controls__progress:hover .progress__heatmap,
+:root[data-style="modern"] .progress--preview .progress__heatmap {
+  top: 6px;
+  height: 12px;
+  opacity: 1;
+}
+:root[data-style="modern"] .control-btn {
+  color: var(--video-overlay-text-dim);
+}
+:root[data-style="modern"] .control-btn:hover,
+:root[data-style="modern"] .control-btn:focus-visible {
+  color: var(--video-overlay-text);
+}
+:root[data-style="modern"] .control-btn[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+/* Reduced motion: nothing here animates. */
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .settings-panel__input--checkbox,
+  :root[data-style="modern"] .settings-panel__input--checkbox::before,
+  :root[data-style="modern"] .progress__heatmap {
+    transition: none;
+  }
+}
+
+/* ============================================================
+   Round two (2026-11-23, Dave: "do it all")
+     8. EroScripts cards: one quiet Download, one badge language
+     9. EroScripts: the logo tile for a post without a picture, and
+        card-shaped skeletons while a list loads (the elements are in
+        eroscripts-view.js; eroscripts.css hides them in Classic)
+    10. Nav bar status as a dot, like Devices (no tinted labels, no glow)
+    11. Light theme: its own ladder (one cool tint, greys to match)
+    12. Device simulator: a solid track, a flat fill, no glow
+    13. Library card menu: the dots on a soft disc, darker on hover / focus
+   ============================================================ */
+
+/* --- 8. EroScripts cards ----------------------------------------------------
+   Thirty solid red Download buttons made the page a red wall. At rest the
+   button is an outline; on the card's hover or the button's focus it fills
+   red, so the one you are about to press is the red one. */
+:root[data-style="modern"] .es-card__btn:not(.eroscripts-panel__btn--secondary) {
+  background: transparent;
+  color: var(--text-primary);
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+:root[data-style="modern"] .es-card:hover .es-card__btn:not(.eroscripts-panel__btn--secondary),
+:root[data-style="modern"] .es-row:hover .es-card__btn:not(.eroscripts-panel__btn--secondary),
+:root[data-style="modern"] .es-card__btn:not(.eroscripts-panel__btn--secondary):hover,
+:root[data-style="modern"] .es-card__btn:not(.eroscripts-panel__btn--secondary):focus-visible {
+  background: var(--accent);
+  color: #fff;
+  box-shadow: none;
+}
+/* The card itself: a hairline, no lift (moves 5 and 6, for this grid too). */
+:root[data-style="modern"] .es-card {
+  box-shadow: inset 0 0 0 1px var(--polish-hairline);
+}
+:root[data-style="modern"] .es-card:hover {
+  transform: none;
+  box-shadow: inset 0 0 0 1px var(--border-strong);
+}
+/* One badge shape: Free / Paid are the dark chip with a coloured dot (was a
+   green or orange pill beside black square chips). New stays red: new. */
+:root[data-style="modern"] .es-card__price,
+:root[data-style="modern"] .es-card__price--free,
+:root[data-style="modern"] .es-card__price--paid {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 1px 7px 1px 6px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  background: rgba(0, 0, 0, 0.72);
+}
+:root[data-style="modern"] .es-card__price::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-secondary);
+}
+:root[data-style="modern"] .es-card__price--free::before { background: var(--state-connected); }
+:root[data-style="modern"] .es-card__price--paid::before { background: var(--eroscripts-paid); } /* the forum's Paid purple */
+:root[data-style="modern"] .es-chip {
+  border-radius: var(--radius-xs);
+  background: rgba(0, 0, 0, 0.72);
+}
+:root[data-style="modern"] .es-chip--new {
+  background: var(--accent);
+}
+
+/* --- 9. No picture: the logo tile; loading: skeletons -----------------------
+   The tile shows only while the picture is hidden (no picture, or it failed). */
+:root[data-style="modern"] .es-card__thumb:has(> .es-card__img[style*="display: none"]) > .es-card__nothumb {
+  display: flex;
+  position: absolute;
+  inset: 0;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-card);
+}
+:root[data-style="modern"] .es-card__nothumb::before {
+  content: '';
+  height: 42%;
+  aspect-ratio: 1;
+  background: url('../assets/logo-muted.png') center / contain no-repeat;
+  opacity: 0.55;
+}
+:root[data-style="modern"] .es-skel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 14px;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 1px var(--polish-hairline);
+  animation: polish-skel 1.2s ease-in-out infinite alternate;
+  animation-delay: calc(var(--es-skel-i, 0) * 70ms);
+}
+:root[data-style="modern"] .es-skel__thumb {
+  aspect-ratio: 16 / 9;
+  border-radius: 8px 8px 0 0;
+  background: var(--surface-overlay);
+}
+:root[data-style="modern"] .es-skel__line {
+  height: 10px;
+  width: 72%;
+  margin: 0 10px;
+  border-radius: 4px;
+  background: var(--surface-overlay);
+}
+:root[data-style="modern"] .es-skel__line--short {
+  width: 40%;
+}
+@keyframes polish-skel {
+  from { opacity: 0.5; }
+  to { opacity: 1; }
+}
+
+/* --- 10. Nav bar status: a dot, like Devices --------------------------------
+   Devices said its state with a dot and words; EroScripts turned its label
+   green, Web Remote and VR turned red. Now each keeps its normal colour and
+   carries a dot: green connected, amber waiting. The LEDs lose their glow. */
+:root[data-style="modern"] .nav-bar__eroscripts--connected:not(.nav-bar__eroscripts--active),
+:root[data-style="modern"] .nav-bar__remote-btn--connected,
+:root[data-style="modern"] .nav-bar__vr-btn--connected,
+:root[data-style="modern"] .nav-bar__vr-btn--waiting {
+  color: var(--text-secondary);
+  background: none;
+}
+:root[data-style="modern"] .nav-bar__eroscripts--connected:not(.nav-bar__eroscripts--active):hover,
+:root[data-style="modern"] .nav-bar__remote-btn--connected:hover,
+:root[data-style="modern"] .nav-bar__vr-btn--connected:hover,
+:root[data-style="modern"] .nav-bar__vr-btn--waiting:hover {
+  color: var(--text-primary);
+  background: var(--surface-overlay);
+}
+:root[data-style="modern"] .nav-bar__eroscripts--connected::before,
+:root[data-style="modern"] .nav-bar__remote-btn--connected::before,
+:root[data-style="modern"] .nav-bar__vr-btn--connected::before,
+:root[data-style="modern"] .nav-bar__vr-btn--waiting::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--state-connected);
+}
+:root[data-style="modern"] .nav-bar__vr-btn--waiting::before {
+  background: var(--state-warning);
+}
+:root[data-style="modern"] .nav-bar__handy-led--connected,
+:root[data-style="modern"] .nav-bar__handy-led--unresponsive {
+  box-shadow: none;
+}
+/* "Active" (a device moving) was a bigger glow; now a ring around the dot. */
+:root[data-style="modern"] .nav-bar__handy-led--active {
+  box-shadow: none;
+  outline: 2px solid var(--state-connected-glow);
+  outline-offset: 1px;
+}
+
+/* --- 11. Light theme: its own ladder ----------------------------------------
+   The page and the greys lean to the same cool navy as dark (they were
+   neutral greys); cards stay white, a step above the page, with hairlines. */
+:root[data-style="modern"][data-theme="light"]:not([data-season="holiday"]) {
+  --surface-base: #f3f4f8;
+  --surface-card-hover: #eceef4;
+  --text-primary: #161b2c;
+  --text-secondary: #535b6e;
+  --text-muted: #858da0;
+}
+
+/* --- 12. Device simulator ---------------------------------------------------
+   The track was 75% see-through, so it took on the video's colour (teal over
+   cyan); the fill was a gradient and the marker glowed. Solid, flat, no glow.
+   The colour the user picked is untouched: only how it is painted. */
+:root[data-style="modern"] .device-sim__track,
+:root[data-style="modern"] .device-sim__info {
+  background: rgba(12, 15, 26, 0.92);
+}
+:root[data-style="modern"] .device-sim[data-color="accent"] .device-sim__fill {
+  background: var(--accent);
+}
+:root[data-style="modern"] .device-sim[data-color="solid"] .device-sim__fill {
+  background: var(--sim-color);
+}
+:root[data-style="modern"] .device-sim__marker {
+  box-shadow: none;
+}
+
+/* --- 13. Library card menu --------------------------------------------------
+   A dark disc on every card, all the time, was heavier than the titles. At
+   rest: the dots on a small soft disc; on the card's hover or focus the disc
+   darkens. The button keeps its 36px target. */
+:root[data-style="modern"] .library__kebab-btn {
+  background: transparent;
+  opacity: 1;
+  isolation: isolate;
+}
+:root[data-style="modern"] .library__kebab-btn::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.32);
+  transition: background var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .library__kebab-btn:hover,
+:root[data-style="modern"] .library__card:hover .library__kebab-btn,
+:root[data-style="modern"] .library__folder-card:hover .library__kebab-btn {
+  background: transparent;
+}
+:root[data-style="modern"] .library__kebab-btn:hover::before,
+:root[data-style="modern"] .library__kebab-btn:focus-visible::before,
+:root[data-style="modern"] .library__card:hover .library__kebab-btn::before,
+:root[data-style="modern"] .library__card:focus-within .library__kebab-btn::before,
+:root[data-style="modern"] .library__folder-card:hover .library__kebab-btn::before,
+:root[data-style="modern"] .library__folder-card:focus-within .library__kebab-btn::before {
+  background: rgba(0, 0, 0, 0.62);
+}
+:root[data-style="modern"] .library__kebab-btn:focus-visible {
+  outline: 2px solid var(--polish-ring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root[data-style="modern"] .es-skel {
+    animation: none;
+  }
+}
+
+/* The card's heart (zaikechi #381) wears the ⋮'s smaller, softer disc in
+   Modern, so the two read as one pair of controls. */
+:root[data-style="modern"] .library__fav-btn {
+  background: transparent;
+  isolation: isolate;
+}
+:root[data-style="modern"] .library__fav-btn::before {
+  content: '';
+  position: absolute;
+  inset: 6px;
+  z-index: -1;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.32);
+  transition: background var(--dur-1) var(--ease-out);
+}
+:root[data-style="modern"] .library__fav-btn:hover { background: transparent; }
+:root[data-style="modern"] .library__fav-btn:hover::before,
+:root[data-style="modern"] .library__fav-btn:focus-visible::before,
+:root[data-style="modern"] .library__card:hover .library__fav-btn::before,
+:root[data-style="modern"] .library__card:focus-within .library__fav-btn::before {
+  background: rgba(0, 0, 0, 0.62);
+}
+:root[data-style="modern"] .library__fav-btn:focus-visible { outline: 2px solid var(--polish-ring); }

@@ -115,11 +115,12 @@ function bootApp(settings) {
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
 describe('V47: Settings has a binding row for each global hotkey', () => {
-  it('lists play/pause, Orgasm Switch and Edge Hold, each with a capture box', () => {
+  it('lists play/pause, Orgasm Switch, Edge Hold and Stop all devices, each with a capture box', () => {
     mountRows(makeSettings());
     const labels = [...document.querySelectorAll('.global-hotkeys__label')].map((n) => n.textContent);
-    expect(labels).toEqual(['Play / pause', 'Orgasm Switch', 'Edge Hold']);
-    for (const action of ['playPause', 'orgasm', 'edge']) {
+    // Stop all devices joined 2026-11-23 (DESIGN.md §2.15), unbound like the rest.
+    expect(labels).toEqual(['Play / pause', 'Orgasm Switch', 'Edge Hold', 'Stop all devices']);
+    for (const action of ['playPause', 'orgasm', 'edge', 'stopAll']) {
       expect(box(action).getAttribute('aria-label')).toBe(row(action).querySelector('.global-hotkeys__label').textContent);
       expect(clearBtn(action).hidden).toBe(true); // nothing bound yet
     }
@@ -133,17 +134,17 @@ describe('V47: Settings has a binding row for each global hotkey', () => {
     expect(clearBtn('orgasm').hidden).toBe(true);
   });
 
-  it('is in the Playback area of the REAL Settings panel, with a rail link', async () => {
+  it('is in the Keyboard area of the REAL Settings panel (since the 2026-11-23 re-sort)', async () => {
     const panel = new SettingsPanel({ settings: makeSettings({ orgasm: 'Ctrl+Alt+O' }) });
     const tab = panel._buildPlaybackTab();
     document.body.appendChild(tab);
     const section = tab.querySelector('#sp-sec-global-hotkeys');
     expect(section).toBeTruthy();
     expect(section.querySelector('.settings-panel__section-header').textContent).toBe('Global hotkeys');
-    expect(section.querySelectorAll('.global-hotkeys__row')).toHaveLength(3);
+    expect(section.querySelectorAll('.global-hotkeys__row')).toHaveLength(4);
     expect(section.querySelector('[data-action="orgasm"] .key-capture').textContent).toBe('Ctrl+Alt+O');
-    const playback = panel._railAreas().find((a) => a.id === 'playback');
-    expect(playback.groups.map((g) => g.id)).toContain('sp-sec-global-hotkeys');
+    const keyboard = panel._railAreas().find((a) => a.id === 'keyboard');
+    expect(keyboard.sections.map((g) => g.id)).toContain('sp-sec-global-hotkeys');
     await flush(); // let the tab's deferred wiring run against the DOM
   });
 
@@ -399,7 +400,7 @@ describe('V73: Settings refuses an everyday key, saying why, and never drops a s
     expect(settings.get('player.globalShortcuts')).toEqual({});
     expect(funsync.setSetting).not.toHaveBeenCalled();
     expect(funsync.setGlobalShortcuts).toHaveBeenCalledTimes(1); // boot only
-    for (const action of ['playPause', 'orgasm', 'edge']) {
+    for (const action of ['playPause', 'orgasm', 'edge', 'stopAll']) {
       expect(box(action).classList.contains('key-capture--empty'), action).toBe(true);
       expect(clearBtn(action).hidden).toBe(true);
     }

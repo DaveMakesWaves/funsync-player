@@ -14,7 +14,7 @@
 //        now reports every volume change up as a VIDEO_EVENT.
 //
 // Assertions are on the DOM a user sees and the messages main receives.
-import { describe, it, expect, vi, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
 import fs from 'node:fs';
 import * as PLAYERWIN from '../../renderer/js/player-popout-protocol.js';
 
@@ -147,6 +147,24 @@ describe('#381: the HM playhead marker follows the main window\'s setting', () =
     expect(up.slice(sentBefore).filter((m) => m.type === PLAYERWIN.SET_INLINE_VIZ)).toEqual([]);
   });
 
+  // Timeline and heatmap over or under the video (#381, Dave 2026-11-22):
+  // the pop-out follows the main window's setting, at open and live.
+  it('the strip sits over or under the video as in the main window, at open and live', () => {
+    const container = () => document.getElementById('ppo-container');
+    fromMain(PLAYERWIN.INITIAL_STATE, { inlineViz: { timeline: true, heatmap: true, playhead: false, opacity: 80, placement: 'below' } });
+    fromMain(PLAYERWIN.HEATMAP, { actions, durationMs: 4000 });
+    expect(container().classList.contains('player-container--viz-below')).toBe(true);
+    fromMain(PLAYERWIN.INLINE_VIZ_STATE, { playhead: false, opacity: 80, placement: 'overlay' });
+    expect(container().classList.contains('player-container--viz-below')).toBe(false);
+    fromMain(PLAYERWIN.INLINE_VIZ_STATE, { playhead: false, opacity: 80, placement: 'below' });
+    expect(container().classList.contains('player-container--viz-below')).toBe(true);
+    // An older main that sends no placement leaves it as it was.
+    fromMain(PLAYERWIN.INLINE_VIZ_STATE, { playhead: false, opacity: 80 });
+    expect(container().classList.contains('player-container--viz-below')).toBe(true);
+    fromMain(PLAYERWIN.INITIAL_STATE, { inlineViz: { timeline: true, heatmap: true, placement: 'overlay' } });
+    expect(container().classList.contains('player-container--viz-below')).toBe(false);
+  });
+
   it('the overlay opacity follows at once: 50 → 0.5, clamped to 20-100 like the main window', () => {
     const opacity = () => document.documentElement.style.getPropertyValue('--inline-viz-opacity');
     fromMain(PLAYERWIN.INITIAL_STATE, { inlineViz: { timeline: false, heatmap: true, playhead: false, opacity: 80 } });
@@ -262,5 +280,32 @@ describe('FN-03: the window\'s variation menu names, marks main and highlights w
     const before = up.length;
     $('variant-dropdown').querySelectorAll('.variant-selector__item')[1].click();
     expect(up.slice(before).filter((m) => m.type === PLAYERWIN.SWITCH_VARIANT).map((m) => m.label)).toEqual(['soft']);
+  });
+});
+
+// 2026-11-22: the pop-out's own variation menu marks a variation whose file is gone, as the main
+// window's menu and the video options dialog do. Only a definite "absent" marks it.
+describe('the pop-out\'s variation menu and a missing file', () => {
+  const gone = 'C:\Lib\Clip (gone).funscript';
+  const unknown = 'C:\Lib\Clip (hard).funscript';
+  const vlist = [
+    { label: 'Default', path: 'C:\Lib\Clip.funscript', text: 'Clip', main: true },
+    { label: 'gone', path: gone, text: 'gone' },
+    { label: 'hard', path: unknown, text: 'hard' },
+  ];
+  afterEach(() => { delete window.funsync.filesExist; });
+  const items = () => [...$('variant-dropdown').querySelectorAll('.variant-selector__item')];
+
+  it('dimmed, "Script not found", and a click sends no switch; the others stay as they were', async () => {
+    window.funsync.filesExist = vi.fn(async ([p]) => [p === gone ? false : p === unknown ? null : true]);
+    fromMain(PLAYERWIN.VARIANTS, { list: vlist, activeLabel: 'Default', activeIndex: 0, mainTag: 'main' });
+    await until(() => items()[1]?.disabled === true);
+    expect(items()[1].classList.contains('variant-selector__item--missing')).toBe(true);
+    expect(items()[1].querySelector('.variant-selector__missing-tag')).not.toBeNull();
+    expect(items()[0].disabled).toBe(false);
+    expect(items()[2].disabled).toBe(false);
+    const before = up.length;
+    items()[1].click();
+    expect(up.slice(before).filter((m) => m.type === PLAYERWIN.SWITCH_VARIANT)).toEqual([]);
   });
 });

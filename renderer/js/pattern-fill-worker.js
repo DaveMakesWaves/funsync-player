@@ -17,17 +17,20 @@
 // still lands only a fill whose inputs match the script and the controls as
 // they are when the user applies.
 
-import { fillRange } from './pattern-fill.js';
-import { PATTERN_SPEED_CEILING } from './pattern-library.js';
+import { fillRange, FILL_NO_CAP } from './pattern-fill.js';
 
 /**
- * The options with the speed ceiling held: the drawer sends maxSpeed 600
- * (PATTERN_SPEED_CEILING), and nothing that comes in here can lift it.
+ * The options as the drawer sent them. The editor's fill has no speed
+ * ceiling since 2026-11-24 (Dave: "lift the fill cap too"; scripters go over
+ * it on purpose): a cap asked for is kept (a lower one too), and none asked
+ * means none (FILL_NO_CAP). It held every fill to PATTERN_SPEED_CEILING (600
+ * u/s) from 2026-11-17; the live patterns (Gap Filler, X, Z) still do,
+ * elsewhere.
  */
 export function ceiledOptions(options) {
   const o = options && typeof options === 'object' ? options : {};
   const asked = Number(o.maxSpeed);
-  return { ...o, maxSpeed: asked > 0 ? Math.min(asked, PATTERN_SPEED_CEILING) : PATTERN_SPEED_CEILING };
+  return { ...o, maxSpeed: asked > 0 && Number.isFinite(asked) ? asked : FILL_NO_CAP };
 }
 
 self.onmessage = (e) => {

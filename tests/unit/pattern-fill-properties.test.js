@@ -45,10 +45,13 @@ function scenario(rng, mode, kind) {
   return { acts, sel: { startMs: acts[i0].at, endMs: acts[i1].at }, i0, i1 };
 }
 
-const CASES = [];
-beforeAll(() => {
-  let k = 0;
-  for (const id of IDS) {
+// The cases of some patterns. Each pattern's cases (and their seeds) are the same whichever group builds them: the
+// counter k runs on from the pattern's place in IDS, as it did when one hook built them all.
+const PER_PATTERN = 3 * 2 * 2 * 2;
+function buildCases(ids) {
+  const CASES = [];
+  for (const id of ids) {
+    let k = IDS.indexOf(id) * PER_PATTERN;
     const d = describePattern(id);
     for (const speed of [d.speedRange[0], null, d.speedRange[1]]) {
       for (const reversed of [false, true]) {
@@ -61,19 +64,31 @@ beforeAll(() => {
             const input = sc.acts.map((a) => ({ ...a }));
             const snapshot = JSON.stringify(input);
             const res = fillRange({ actions: input, selection: sc.sel, patternId: id, options });
-            CASES.push({ id, d, options, kind, ...sc, input, snapshot, res });
+            CASES.push({ idx: k - 1, id, d, options, kind, ...sc, input, snapshot, res });
           }
         }
       }
     }
   }
-});
+  return CASES;
+}
 
-describe('pattern-fill properties (every pattern x speeds x reversed x end fit x mode, random neighbours)', () => {
-  it('covers every pattern, and fills most cases', () => {
-    expect(CASES.length).toBe(IDS.length * 3 * 2 * 2 * 2);
-    expect(new Set(CASES.map((c) => c.id)).size).toBe(78);
-    expect(CASES.filter((c) => c.res.inserted.length > 0).length).toBeGreaterThan(CASES.length * 0.8);
+// FLAKY-TESTS row 9 (2026-11-22): one hook built all 1,872 fills (about 3.8 s alone), and a loaded run crossed the
+// 10 s hook timeout. Eight groups of patterns, each built in its own hook (about 0.5 s alone); the counts that are
+// about every pattern at once are summed here and checked once, after the last group.
+const GROUPS = [];
+for (let i = 0; i < IDS.length; i += 10) GROUPS.push({ from: i + 1, to: Math.min(IDS.length, i + 10), ids: IDS.slice(i, i + 10) });
+const TALLY = { ids: new Set(), cases: 0, filled: 0, legs: 0, i5Checked: 0, i6Checked: 0, i7Total: 0, i7Differ: 0, i8Checked: 0 };
+
+describe.each(GROUPS)('pattern-fill properties, patterns $from-$to (every pattern x speeds x reversed x end fit x mode, random neighbours)', ({ ids }) => {
+  const CASES = [];
+  beforeAll(() => { CASES.push(...buildCases(ids)); });
+
+  it('covers its patterns (counted for every pattern at the end)', () => {
+    expect(CASES.length).toBe(ids.length * PER_PATTERN);
+    for (const c of CASES) TALLY.ids.add(c.id);
+    TALLY.cases += CASES.length;
+    TALLY.filled += CASES.filter((c) => c.res.inserted.length > 0).length;
   });
 
   it('never changes the input array', () => {
@@ -147,7 +162,7 @@ describe('pattern-fill properties (every pattern x speeds x reversed x end fit x
       }
     }
     expect(bad).toEqual([]);
-    expect(legs).toBeGreaterThan(20000);
+    TALLY.legs += legs;
   });
 
   it('I5: the first leg carries on the way A is heading (A not at the band edge it heads for), or is flat within 3', () => {
@@ -168,7 +183,7 @@ describe('pattern-fill properties (every pattern x speeds x reversed x end fit x
       expect(sgn(d) === h || Math.abs(d) <= 3, `${c.id} A=${A.pos} h=${h} first=${c.res.inserted[0].pos}`).toBe(true);
       checked++;
     }
-    expect(checked).toBeGreaterThan(150);
+    TALLY.i5Checked += checked;
   });
 
   it('I6: a stretch end arrives the way B wants, with tempo 0.87-1.15', () => {
@@ -188,34 +203,47 @@ describe('pattern-fill properties (every pattern x speeds x reversed x end fit x
       expect(sgn(d) === ad || d === 0, `${c.id} B=${B.pos} ad=${ad} last=${last.pos}`).toBe(true);
       checked++;
     }
-    expect(checked).toBeGreaterThan(100);
+    TALLY.i6Checked += checked;
   });
 
   it('I7: the same inputs and seed give the same fill; another seed almost always another one', () => {
     let differ = 0, total = 0;
-    for (let i = 0; i < CASES.length; i += 11) {
-      const c = CASES[i];
-      if (!c.res.inserted.length) continue;
+    for (const c of CASES) {
+      if (c.idx % 11 || !c.res.inserted.length) continue;
       const again = fillRange({ actions: c.acts, selection: c.sel, patternId: c.id, options: c.options });
       expect(again, c.id).toEqual(c.res);
       const other = fillRange({ actions: c.acts, selection: c.sel, patternId: c.id, options: { ...c.options, seed: c.options.seed + 1000 } });
       total++;
       if (JSON.stringify(other.inserted) !== JSON.stringify(c.res.inserted)) differ++;
     }
-    expect(total).toBeGreaterThan(120);
-    expect(differ / total).toBeGreaterThan(0.9);
+    TALLY.i7Total += total;
+    TALLY.i7Differ += differ;
   });
 
   it('I8: reversed between mirrored neighbours is the exact mirror of the plain fill', () => {
     let checked = 0;
-    for (let i = 0; i < CASES.length; i += 7) {
-      const c = CASES[i];
+    for (const c of CASES) {
+      if (c.idx % 7) continue;
       const mirrored = c.acts.map((a) => ({ at: a.at, pos: 100 - a.pos }));
       const m = fillRange({ actions: mirrored, selection: c.sel, patternId: c.id, options: { ...c.options, reversed: !c.options.reversed } });
       expect(m.actions.map((a) => ({ at: a.at, pos: 100 - a.pos })), c.id).toEqual(c.res.actions);
       checked++;
     }
-    expect(checked).toBeGreaterThan(250);
+    TALLY.i8Checked += checked;
+  });
+});
+
+describe('pattern-fill properties, across every pattern (the groups above, summed)', () => {
+  it('covers every pattern, fills most cases, and samples enough for I7 and I8', () => {
+    expect(TALLY.ids.size).toBe(78);
+    expect(TALLY.cases).toBe(IDS.length * PER_PATTERN);
+    expect(TALLY.filled).toBeGreaterThan(TALLY.cases * 0.8);
+    expect(TALLY.legs).toBeGreaterThan(20000);       // I3 / I4
+    expect(TALLY.i5Checked).toBeGreaterThan(150);
+    expect(TALLY.i6Checked).toBeGreaterThan(100);
+    expect(TALLY.i7Total).toBeGreaterThan(120);
+    expect(TALLY.i7Differ / TALLY.i7Total).toBeGreaterThan(0.9);
+    expect(TALLY.i8Checked).toBeGreaterThan(250);
   });
 });
 

@@ -184,6 +184,13 @@ async def list_videos():
             # override store before the heuristic so the VR filter agrees with
             # the desktop.
             "manualVRType": v.get("manualVRType") or None,
+            # The desktop's saved spherical VR format for the phone's Flat
+            # view (#426): projection, eye, fov, yaw, pitch, roll; absent when
+            # none is saved (the phone then uses Equirectangular 180, left eye).
+            "vrFormat": v.get("vrFormat") if isinstance(v.get("vrFormat"), dict) else None,
+            # Disabled on the desktop (zaikechi #381): shown dimmed, never in
+            # the phone's Play all, Shuffle or Up Next.
+            "disabled": v.get("disabled") is True,
         })
     out.sort(key=lambda v: v["name"].lower())
     return {"videos": out}

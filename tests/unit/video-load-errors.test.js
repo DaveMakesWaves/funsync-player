@@ -28,6 +28,8 @@ import { pathToFileURL } from '../../renderer/js/path-utils.js';
 import * as loadCheck from '../../renderer/js/video-load-check.js';
 import * as PLAYERWIN from '../../renderer/js/player-popout-protocol.js';
 import { RemotePlaybackProxy } from '../../renderer/js/remote-playback-proxy.js';
+import * as convert from '../../renderer/js/convert-to-play.js';
+import { setPlayerAudioTile } from '../../renderer/js/player-audio-tile.js';
 
 const APP_SRC = fs.readFileSync('renderer/js/app.js', 'utf8');
 
@@ -97,6 +99,7 @@ const DEPS = [
   'isAutoMatch', 'showToast', 't',
   'describeVideoCodec', 'hasRealVideoStream', 'isAudioPath', 'playedSeconds', 'NO_FRAMES_GRACE_SEC',
   'PLAYERWIN',
+  'canConvert', 'convertedCopy', 'offerConversion', 'runConversion', 'setPlayerAudioTile',
 ];
 
 // eslint-disable-next-line no-new-func
@@ -141,6 +144,7 @@ const CODECS = {
   'D:\\Lib\\HEVC 444.mp4': { codec: 'hevc', profile: 'Rext', pixFmt: 'yuv444p', width: 640 },
   'D:\\Lib\\Song.mp4': { duration: 200, format: 'mov,mp4,m4a' },
   'D:\\Lib\\Cover Art.mp4': { codec: 'mjpeg', profile: 'Baseline', pixFmt: 'yuvj420p', width: 600 },
+  'D:\\Lib\\Old.mkv': { codec: 'mpeg2video', profile: 'Main', pixFmt: 'yuv420p', width: 720 },
 };
 
 let toasts;
@@ -181,6 +185,7 @@ function buildApp(overrides = {}) {
     loadCheck.describeVideoCodec, loadCheck.hasRealVideoStream, loadCheck.isAudioPath,
     loadCheck.playedSeconds, loadCheck.NO_FRAMES_GRACE_SEC,
     PLAYERWIN,
+    convert.canConvert, convert.convertedCopy, convert.offerConversion, convert.runConversion, setPlayerAudioTile,
   );
   const target = Object.assign(new Lifted(), {
     videoPlayer: {
@@ -277,6 +282,28 @@ describe('V07: one error handler per <video>, reading the CURRENT file', () => {
     video.fire('loadeddata');
     expect(video.play).toHaveBeenCalledTimes(1);
     expect(toastKeys()).toEqual(['toast.remuxPreparing']);
+  });
+
+  // Test day 2026-11-24, B027: an MPEG-2 .mkv. The backend refuses the remux
+  // because of the codec, and the toast said only "Video format not
+  // supported". It names the codec now, as a decode failure does.
+  it('a remux refused for the codec names the codec, once', async () => {
+    api.remuxVideo.mockResolvedValueOnce({ path: null, kind: 'codec' });
+    app.loadVideo(fileData('D:\\Lib\\Old.mkv'), { autoPlay: true });
+    video.fail(4, 'PipelineStatus::DEMUXER_ERROR_NO_SUPPORTED_STREAMS: FFmpegDemuxer: no supported streams');
+    await flush();
+    expect(toastKeys()).toEqual(['toast.remuxPreparing', 'toast.videoErrorDecodeCodec']);
+    expect(toasts[1].params).toEqual({ codec: 'MPEG2VIDEO Main yuv420p' });
+    video.fire('loadeddata');
+    expect(video.play).not.toHaveBeenCalled();
+  });
+
+  it('a remux that failed for another reason keeps "Video format not supported"', async () => {
+    api.remuxVideo.mockResolvedValueOnce(null);
+    app.loadVideo(fileData('D:\\Lib\\Old.mkv'));
+    video.fail(4, 'MEDIA_ELEMENT_ERROR: Format error');
+    await flush();
+    expect(toastKeys()).toEqual(['toast.remuxPreparing', 'toast.videoErrorFormat']);
   });
 
   it('a failed remux reports once and disarms autoplay', async () => {

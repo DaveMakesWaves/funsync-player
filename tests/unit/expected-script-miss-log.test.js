@@ -83,6 +83,18 @@ describe('App._readScriptResilient', () => {
     expect(app.settings.store['library.manualVariants'][VIDEO]).toHaveLength(1);
   });
 
+  it('there but unreadable (locked, no permission): says so, not "not found" (C-09, triage 2026-11-23)', async () => {
+    installBridge();
+    const app = makeApp();
+    app.library._pathStatus = vi.fn(async () => true);
+    await expect(app._readScriptResilient(SCRIPT, VIDEO)).resolves.toBeNull();
+    expect(missWarns()).toEqual([]);
+    expect(warn.mock.calls.filter((c) => String(c[0]).startsWith('[Script] expected script is there'))).toEqual([
+      ['[Script] expected script is there but could not be read:', SCRIPT],
+    ]);
+    expect(app.library._pathStatus).toHaveBeenCalledWith(SCRIPT);
+  });
+
   it('does not warn again for the same path, but does for a new one', async () => {
     installBridge();
     const app = makeApp();

@@ -167,9 +167,15 @@ describe('where the docked drawer goes (dockedDrawerPlacement)', () => {
     expect(dockedDrawerPlacement({ ...base, barTop: 600 }).mode).toBe('above');               // 550 of room over the bar
     expect(dockedDrawerPlacement({ ...base, barTop: 600 }).height).toBe(550);
     expect(dockedDrawerPlacement({ ...base, editorTop: 400, barTop: 300 }).mode).toBe('over-bar'); // 250 over the bar, 350 over the editor
+    // The side: inside the editor when it alone holds a whole drawer (stacked
+    // lanes make it that tall; the control bar stays clear), else from under
+    // the top bar (a short window).
     const side = dockedDrawerPlacement({ ...base, editorTop: 300, barTop: 200 });
     expect(side.mode).toBe('side');
-    expect(side).toEqual({ mode: 'side', top: 50, height: 950 });
+    expect(side).toEqual({ mode: 'side', top: 300, height: 700 });
+    const short = dockedDrawerPlacement({ ...base, editorTop: 800, barTop: 700, topLimit: 650 });
+    expect(short.mode).toBe('side');
+    expect(short).toEqual({ mode: 'side', top: 650, height: 350 });
   });
 
   it('never taller than its cap, and never above the window even when the window is tiny', () => {

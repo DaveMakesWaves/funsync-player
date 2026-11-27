@@ -392,7 +392,7 @@ describe('the User-Agent: the real Chromium UA plus FunSyncPlayer/<version> (Dav
 
   it('the login window and the login\'s session check in main use the same constant', () => {
     const main = fs.readFileSync(new URL('../../electron/main.js', import.meta.url), 'utf8');
-    expect(main).toMatch(/const \{ EroScriptsAPI, EROSCRIPTS_USER_AGENT(, installForumUserAgent)? \} = require\('\.\/eroscripts-api'\)/);
+    expect(main).toMatch(/const \{ EroScriptsAPI, EROSCRIPTS_USER_AGENT(, installForumUserAgent)?(, sessionAvatarUrl)? \} = require\('\.\/eroscripts-api'\)/);
     const handlerStart = main.indexOf("ipcMain.handle('eroscripts-login-window'");
     const handlerEnd = main.indexOf("ipcMain.handle('eroscripts-logout'");
     expect(handlerStart).toBeGreaterThan(0);

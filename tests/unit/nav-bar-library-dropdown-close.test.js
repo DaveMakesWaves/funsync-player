@@ -121,3 +121,71 @@ function trackDocumentPointerdown() {
 function find0() {
   return menu().querySelector('.nav-bar__library-option');
 }
+
+// Test day 2026-11-24 (B022): Escape did nothing on the open menu (the nav
+// bar had no key handling at all); the menu-button pattern closes it and
+// gives the focus back to the button that opened it. The Escape stops
+// there: the app's own Escape (leave fullscreen, clear the loop, close the
+// player view) must not fire as well.
+describe('Escape closes the library menu (B022)', () => {
+  it('closes it, focus back on the arrow, and the key goes no further', async () => {
+    await openMenu();
+    menu().querySelector('.nav-bar__library-option').focus();
+    const seen = vi.fn();
+    window.addEventListener('keydown', seen);
+    document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    window.removeEventListener('keydown', seen);
+    expectClosed();
+    expect(document.activeElement).toBe(arrow());
+    expect(seen).not.toHaveBeenCalled();
+  });
+
+  it('with the focus still on the arrow, too', async () => {
+    arrow().focus();
+    await openMenu();
+    arrow().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    expectClosed();
+    expect(document.activeElement).toBe(arrow());
+  });
+
+  it('a closed menu leaves Escape alone', () => {
+    const seen = vi.fn();
+    window.addEventListener('keydown', seen);
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    window.removeEventListener('keydown', seen);
+    expect(seen).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Test day 2026-11-26 (S023): the arrow said aria-haspopup="menu", but only
+// Tab moved through it. Now its items are menu items and the arrows move.
+describe('the Library menu from the keyboard', () => {
+  const key = (k) => document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: k, bubbles: true, cancelable: true }));
+  it('Enter on ▾: the library shown takes the focus; Down / Up / End move through the items (not the ✎ / ✕ beside a collection)', async () => {
+    bar.setCollections([{ id: 'c1', name: 'Favourites' }], 'c1', []);
+    arrow().focus();
+    arrow().dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 0 }));
+    expect(menu().getAttribute('role')).toBe('menu');
+    expect(document.activeElement.textContent).toBe('Favourites');              // the active one
+    key('ArrowUp');
+    expect(document.activeElement.textContent).toBe('All Videos');
+    key('ArrowDown');
+    key('ArrowDown');
+    expect(document.activeElement.getAttribute('role')).toBe('menuitem');
+    expect(document.activeElement.classList.contains('nav-bar__library-action')).toBe(false);
+    key('End');
+    expect(document.activeElement).toBe([...menu().querySelectorAll('[role="menuitem"]')].at(-1));
+    key('Escape');
+    expect(menu().hidden).toBe(true);
+    expect(document.activeElement).toBe(arrow());
+  });
+
+  it('a mouse click leaves the focus where it was', () => {
+    const other = document.createElement('button');
+    document.body.appendChild(other);
+    other.focus();
+    arrow().dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(menu().hidden).toBe(false);
+    expect(document.activeElement).toBe(other);
+  });
+});

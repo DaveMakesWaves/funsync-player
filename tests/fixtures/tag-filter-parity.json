@@ -142,10 +142,12 @@
   "queries": [
     { "name": "no filter returns every video", "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
     { "name": "one tag, from three different sources", "include": ["device:the-handy"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video F.mp4"] },
-    { "name": "OR within a facet", "include": ["device:the-handy", "device:sr6"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4"] },
+    { "name": "two tags of one facet: a video needs both (Dave 2026-11-22: every ticked tag)", "include": ["device:the-handy", "device:sr6"], "expect": [] },
+    { "name": "a content tag and a length: both (Dave's own example)", "include": ["content:blowjob", "length:10-25"], "expect": ["C:/Library/Video A.mp4"] },
+    { "name": "two length buckets: either (a video has one length)", "include": ["length:10-25", "length:25-60"], "expect": ["C:/Library/Video A.mp4"] },
     { "name": "AND across facets", "include": ["device:the-handy", "vr:non-vr"], "expect": ["C:/Library/Video A.mp4"] },
     { "name": "mode all needs every key", "include": ["content:blowjob", "content:pov"], "mode": "all", "expect": ["C:/Library/Video A.mp4", "C:/Library/Video E.mp4"] },
-    { "name": "the same keys in the default mode are OR (one facet)", "include": ["content:blowjob", "content:pov"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video E.mp4", "C:/Library/Video H.mp4"] },
+    { "name": "the same keys in the default mode need both, as mode all", "include": ["content:blowjob", "content:pov"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video E.mp4"] },
     { "name": "mode any needs one key", "include": ["script-type:cock-hero", "performer:jane-doe"], "mode": "any", "expect": ["C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
     { "name": "an unknown mode falls back to facets", "include": ["device:the-handy", "vr:non-vr"], "mode": "bogus", "expect": ["C:/Library/Video A.mp4"] },
     { "name": "exclude only: untagged videos stay", "exclude": ["vr:non-vr"], "expect": ["C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
@@ -167,7 +169,7 @@
     { "name": "an exclude that matches nothing keeps everything", "exclude": ["nope:thing"], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
     { "name": "empty and blank keys are no filter", "include": ["", "   ", "-", "device:"], "exclude": [""], "expect": ["C:/Library/Video A.mp4", "C:/Library/Video B.mp4", "C:/Library/Video C.mp4", "C:/Library/Sub/Video D.mp4", "C:/Library/Video E.mp4", "C:/Library/Video F.mp4", "C:/Library/Video G.mp4", "C:/Library/Video H.mp4", "C:/Library/Video I.mp4", "C:/Library/Video J.mp4", "C:/Library/Video K.mp4", "C:/Library/Video L.mp4", "C:/Library/Video M.mp4", "C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video P.mp4", "C:/Library/Video Q.mp4"] },
     { "name": "Stash S1: an identity key matches only that person (not the other Jane Doe, not a typed or file-given #)", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a"], "expect": ["C:/Library/Video J.mp4"] },
-    { "name": "Stash S1: two same-name performers are two keys: OR within the facet", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-00000000aaaa", "performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a"], "expect": ["C:/Library/Video I.mp4", "C:/Library/Video J.mp4"] },
+    { "name": "Stash S1: two same-name performers are two keys: a video needs both", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-00000000aaaa", "performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a"], "expect": [] },
     { "name": "Stash S1: an identity key folds case like any key", "include": ["Performer: Jane Doe#0B5E1C9A-0000-4000-8000-000000003F2A"], "expect": ["C:/Library/Video J.mp4"] },
     { "name": "Stash S1: the bare name matches neither identity", "include": ["performer:jane-doe"], "mode": "any", "expect": ["C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
     { "name": "Stash S1: a bare value (no facet) is not an identity key", "include": ["jane-doe"], "expect": ["C:/Library/Video C.mp4", "C:/Library/Video E.mp4"] },
@@ -178,7 +180,7 @@
     { "name": "Stash aliases: one Stash tag from a file, a post and a stash-box", "include": ["content:open-air"], "expect": ["C:/Library/Video N.mp4", "C:/Library/Video O.mp4", "C:/Library/Video Q.mp4"] },
     { "name": "Stash aliases: the alias spelling is no key of its own", "include": ["content:outside", "content:alfresco", "content:seaside"], "mode": "any", "expect": [] },
     { "name": "Stash aliases: your typed alias is the Stash tag (a bare value)", "include": ["beach-scene"], "expect": ["C:/Library/Video P.mp4"] },
-    { "name": "Stash aliases: exclude the Stash tag", "include": ["content:open-air", "content:beach-scene"], "exclude": ["content:open-air"], "expect": ["C:/Library/Video P.mp4"] },
+    { "name": "Stash aliases: exclude the Stash tag", "include": ["content:open-air", "content:beach-scene"], "exclude": ["content:open-air"], "expect": [] },
     { "name": "Stash S1: AND across facets with identity keys", "include": ["performer:jane-doe#0b5e1c9a-0000-4000-8000-000000003f2a", "studio:studio-nine#5d1e0000-0000-4000-8000-00000000c0de"], "expect": ["C:/Library/Video J.mp4"] }
   ],
   "pathless": {
@@ -229,7 +231,7 @@
       { "name": "mode all with a parent", "include": ["content:setting", "content:pov"], "mode": "all", "expect": ["C:/Library/Sub/Tag U.mp4"] },
       { "name": "mode any with a parent", "include": ["content:open-air", "content:loop-a"], "mode": "any", "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag X.mp4", "C:/Library/Sub/Tag Y.mp4"] },
       { "name": "a bare parent value", "include": ["setting"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag T.mp4", "C:/Library/Sub/Tag U.mp4"] },
-      { "name": "a parent and its sub-tag in one facet are OR", "include": ["content:setting", "content:beach-scene"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag S.mp4", "C:/Library/Sub/Tag T.mp4", "C:/Library/Sub/Tag U.mp4"] },
+      { "name": "a parent and its sub-tag: both, which is the sub-tag's videos (each has the parent too)", "include": ["content:setting", "content:beach-scene"], "expect": ["C:/Library/Sub/Tag R.mp4", "C:/Library/Sub/Tag U.mp4"] },
       { "name": "a loop in the data ends: each finds both", "include": ["content:loop-a"], "expect": ["C:/Library/Sub/Tag X.mp4", "C:/Library/Sub/Tag Y.mp4"] },
       { "name": "a tag hidden on every video is never a parent", "include": ["content:junk-parent"], "expect": [] }
     ]

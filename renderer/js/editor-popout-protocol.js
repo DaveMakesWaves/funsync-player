@@ -90,6 +90,8 @@ export const READY             = 'ready';
 export const VIDEO_SEEK        = 'video-seek';
 export const VIDEO_PLAY        = 'video-play';
 export const VIDEO_PAUSE       = 'video-pause';
+// Shift+Space in the editor pop-out (2026-11-23, DESIGN.md §2.15): Stop all.
+export const STOP_ALL          = 'stop-all';
 export const VIDEO_STEP_FRAME  = 'video-step-frame';
 export const VIDEO_STEP_FRAMES = 'video-step-frames';
 export const SCRIPT_SWITCH     = 'script-switch';
@@ -144,6 +146,9 @@ export const OP_SELECT_EVERY_NTH      = 'selectEveryNth';        // { n, start }
 // parent runs the docked editor's place-or-tweak: a second press on the
 // selected point's frame moves that point instead of stacking a duplicate,
 // and recording mode inserts (FT-032). OP_INSERT stays Alt+click's op.
+export const OP_UNDO_STEPS            = 'undoSteps';             // { steps } — the undo history menu (work list 4.5)
+export const OP_REDO_STEPS            = 'redoSteps';             // { steps }
+export const OP_RIPPLE_DELETE         = 'rippleDelete';          // Shift+Del / Modify > Ripple delete (work list 4.3)
 export const OP_PLACE_AT              = 'placeAt';               // { at, pos }
 
 // Fill with pattern (pattern library, Round 2): the pop-out's drawer renders

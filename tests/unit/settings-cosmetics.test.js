@@ -114,10 +114,14 @@ describe('(e) no ASCII-spelled umlauts or accents', () => {
     fr: /(?<![A-Za-zÀ-ÿ])(etre|definir|Opacite|opacite|apparait|declencher|Retablir|retablir|defaut|video|videos|parametres|Parametres|deja|tres)(?![A-Za-zÀ-ÿ])/,
     es: /(?<![A-Za-zÀ-ÿ])(menu|Que tan|solido|Muestralo|aqui|tambien|despues)(?![A-Za-zÀ-ÿ])/,
   };
+  // A simple placeholder ({video}, {name}) is a variable name, not text the
+  // user reads (test day 2026-11-24: "{video}" in the length-check strings
+  // was flagged as an unaccented "vidéo"). Plural / select arms stay checked.
+  const shown = (v) => v.replace(/\{\w+\}/g, '');
   it.each(Object.keys(BANNED))('%s', (locale) => {
     const hits = Object.entries(flat(bundle(locale)))
-      .filter(([, v]) => BANNED[locale].test(v))
-      .map(([k, v]) => `${k}: ${v.match(BANNED[locale])[0]}`);
+      .filter(([, v]) => BANNED[locale].test(shown(v)))
+      .map(([k, v]) => `${k}: ${shown(v).match(BANNED[locale])[0]}`);
     expect(hits).toEqual([]);
   });
 });

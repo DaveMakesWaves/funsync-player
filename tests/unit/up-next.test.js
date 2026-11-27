@@ -812,6 +812,24 @@ describe('UpNextEngine', () => {
   });
 
   describe('getPriorityNext (user queue insert)', () => {
+    // FT-074 follow-up (2026-11-22): a dropped or opened file has no list; a video you queued still plays
+    // next, so the card offers it (it used to wait until the next Library play). With no queue, nothing.
+    it('a video with no list offers your queue at its end; with nothing queued it offers nothing', () => {
+      const player = mockVideoPlayer({ currentTime: 115, duration: 120 });
+      engine = makeEngine({ player });
+      engine.setSettings('auto', 10);
+      engine.setPlayContext(null);
+      const shown = [];
+      engine.onShowNext = (path) => shown.push(path);
+      engine.check();
+      expect(shown).toEqual([]);
+      expect(engine.visible).toBe(false);
+      engine.getPriorityNext = () => 'queued.mp4';
+      engine.check();
+      expect(shown).toEqual(['queued.mp4']);
+      expect(engine.endOfListShown).toBe(false);
+    });
+
     it('_nextPath returns the priority item over the context next', () => {
       engine = makeEngine();
       engine.setSettings('auto', 10);

@@ -9,7 +9,8 @@
 // already holds; the binding form exists only for display and capture.
 
 /** The actions main.js registers (electron/global-shortcuts.js). */
-export const GLOBAL_HOTKEY_ACTIONS = ['playPause', 'orgasm', 'edge'];
+// stopAll (2026-11-23): Stop all, DESIGN.md §2.15; unbound by default like the rest.
+export const GLOBAL_HOTKEY_ACTIONS = ['playPause', 'orgasm', 'edge', 'stopAll'];
 
 // KeyboardEvent.code → accelerator key, for keys that are not a plain
 // letter, digit or F-key. Anything absent here has no accelerator form and

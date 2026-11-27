@@ -13,7 +13,7 @@
 //   Unpair re-indexes without a scan. The filter, its counts, the cards'
 //   tag line, the dialog's suggestions and "Make a category" all read it.
 // - applyTagFilter: the filter itself. Tags go through filterByTags in its
-//   `facets` mode (OR within a facet, AND across facets; exclude kept
+//   `facets` mode (every ticked tag, the length buckets OR; exclude kept
 //   reachable in code). Category (FunSync's own categories, from their own
 //   store) and Source (EroScripts / the script file / you) are two more
 //   facets: OR inside each, AND with the rest. It runs BEFORE dedupeByName

@@ -48,6 +48,20 @@
   bottom: calc(250px + var(--editor-toolbar-extra, 0px));
 }
 
+/* The script strip set to sit under the video (Settings > Playback, since
+   v0.10.0) is behind the open editor, but its rules (more specific) kept the
+   video at its full height and the control bar just above the strip: the
+   editor covered the picture's bottom and the controls (found in the
+   fit-on-screen pass, 2026-11-24; with stacked lanes it covered two thirds of
+   the picture). While the editor is open its sizes win. A backend banner's
+   rule above is more specific still and keeps winning. */
+.player-container--editor-open.player-container--viz-below:not(.player-container--mini) .player__video-wrapper {
+  height: calc(100vh - 250px - var(--editor-toolbar-extra, 0px));
+}
+.player-container--editor-open.player-container--viz-below:not(.player-container--mini) .player__controls {
+  bottom: calc(250px + var(--editor-toolbar-extra, 0px));
+}
+
 /* The mini player is the video (R4 fix-up, real-app verifier 2, also in
    v0.9.2): an open editor filled the 340x191 corner with its graph instead
    of the video, and its canvas lay over the mini bar, so Play / pause, Back
@@ -159,11 +173,18 @@
   background: rgba(0, 0, 0, 0.2);
   border-bottom: 1px solid var(--border-subtle);
   flex-shrink: 0;
+  /* Every lane fits or the area scrolls (2026-11-24: with more than three
+     axes the docked editor showed three and the pop-out pushed the last one
+     off screen). Its height and --lane-h are set by the editor (_layoutLanes). */
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
 }
 
 .editor__lane {
   position: relative;
-  height: 64px;
+  flex: 0 0 auto;
+  height: var(--lane-h, 64px);
   background: var(--surface-overlay);
   border: 1px solid transparent;
   border-radius: 3px;
@@ -181,17 +202,69 @@
   border-color: var(--accent);
 }
 
+/* Fixed-order tracks (Dave, 2026-11-24: "its hard enough to see the axis
+   names as is, i didnt even notice the tracks swapped positions"). Every
+   track keeps its place; the one being edited is the timeline, with an accent
+   edge, and its name in the same column as the lanes' names: a column the
+   width of the stacked gutter (TRACK_GUTTER_PX, 92 px), in the interface's
+   own type at a readable size, up to two lines (the tooltip has the rest). */
+.script-editor--stacked {
+  --track-gutter: 92px;
+}
 .editor__lane-label {
   position: absolute;
-  top: 4px;
+  top: 0;
+  bottom: 0;
   left: 6px;
+  width: calc(var(--track-gutter, 92px) - 18px);
   z-index: 1;
-  font: 11px/1 ui-monospace, Menlo, Consolas, monospace;
-  color: var(--accent);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  font: 600 11px/1.2 var(--font-family);
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
   pointer-events: none;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.7);
+}
+.editor__lane:hover .editor__lane-label {
+  color: var(--text-primary);
+}
+/* The track being edited: its name at the top of the gutter, clear of the
+   scale's numbers at the gutter's right, and an accent edge down its left. */
+.editor__track-label {
+  display: none;
+  position: absolute;
+  top: 6px;
+  left: 8px;
+  width: calc(var(--track-gutter, 92px) - 36px);
+  z-index: 2;
+  font: 700 12px/1.2 var(--font-family);
+  color: var(--accent);
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.script-editor--stacked .editor__track-label {
+  display: block;
+}
+.script-editor--stacked .editor__canvas-container::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+  z-index: 2;
+  pointer-events: none;
+}
+/* The tracks below the one being edited. */
+.editor__stacked-lanes--after {
+  padding: 1px 4px 4px 4px;
+  border-bottom: none;
+  border-top: 1px solid var(--border-subtle);
+}
+.editor__stacked-lanes:empty {
+  display: none;
 }
 
 .editor__lane-canvas {
@@ -424,10 +497,19 @@ body:has(.script-editor--popout-window) {
   position: relative;
   overflow: hidden;
   cursor: crosshair;
+  /* May shrink below the canvas's last size: the stacked lanes coming in
+     left the pop-out's graph at its old height, its lower half and time axis
+     below the window (fit-on-screen pass, 2026-11-24). */
+  min-height: 0;
 }
 
 .editor__canvas {
   display: block;
+  /* Out of the flow, so its pixel size (ActionGraph.resize) never props the
+     container open; the container's size is the flex layout's alone. */
+  position: absolute;
+  left: 0;
+  top: 0;
   width: 100%;
   height: 100%;
   outline: none;
@@ -1050,6 +1132,13 @@ body:has(.script-editor--popout-window) {
   box-shadow: var(--shadow-modal);
   font-family: var(--font-family);
   font-size: 13px;
+  /* Never taller than the window: the New axis list (10 axes) is 456 px, the
+     pop-out's window can be 400 (fit-on-screen pass, 2026-11-24). The
+     placement (editor-context-menu.js) then keeps it on screen. */
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  box-sizing: border-box;
 }
 
 .editor-context-menu__item {
@@ -1087,3 +1176,120 @@ body:has(.script-editor--popout-window) {
   font-size: 11px;
   color: var(--text-secondary);
 }
+
+/* A section title in an editor menu ({ heading } items: the Export menu's
+   "This script" / "Every axis", the History menu's "Saved versions";
+   2026-11-25). As the simulator menu's headings; a rule above all but the first. */
+.editor-context-menu__heading {
+  padding: 6px 10px 2px;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.editor-context-menu__heading:not(:first-child) {
+  margin-top: 4px;
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 8px;
+}
+
+/* "Show 2 hidden lanes": the stacked view's way back after a right-click >
+   Hide this lane (work list 2.2, 2026-11-24). A slim full-width row in the
+   lanes' own colours, so it reads as part of the lane stack. */
+.editor__lanes-show-hidden {
+  display: block;
+  width: 100%;
+  padding: 2px 8px;
+  border: 0;
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-primary);
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  /* Always in view at the bottom of the lanes, however far they scroll: it
+     is the only way back to a hidden lane (fit-on-screen pass, 2026-11-24). */
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
+  flex: 0 0 auto;
+}
+.editor__lanes-show-hidden:hover,
+.editor__lanes-show-hidden:focus-visible {
+  color: var(--text-primary);
+  background: var(--bg-tertiary, var(--bg-secondary));
+}
+
+/* A tick box in an editor dialog (Make from the stroke…'s Upside down; work
+   list 2.4, 2026-11-24): on one line with its words, like the modal labels. */
+.modal-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 4px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+/* Fill with pattern's Tempo row (work list 4.7, 2026-11-24): a BPM box and
+   "From the beats" on one line under Speed, the note below; the search box's
+   look, so the drawer reads as one set of controls. */
+.fill-drawer__tempo {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.fill-drawer__tempo .fill-drawer__label {
+  flex: 0 0 auto;
+}
+.fill-drawer__bpm {
+  width: 72px;
+  min-height: 28px;
+  box-sizing: border-box;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  padding: 3px 6px;
+}
+.fill-drawer__tempo .fill-drawer__sub {
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+/* The Vibrate panel (Dave, 2026-11-24): under its toolbar button, the app's
+   card surface, two sliders, a tick box, the live line and Apply / Cancel. */
+.vibrate-panel {
+  position: fixed;
+  z-index: 3000;
+  width: 260px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--surface-card, var(--bg-secondary));
+  border: 1px solid var(--border-strong, var(--border-subtle));
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 12px;
+}
+.vibrate-panel__title { font-size: 13px; font-weight: 600; }
+.vibrate-panel__row {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+.vibrate-panel__row input { width: 100%; margin: 0; accent-color: var(--accent); }
+.vibrate-panel__value { text-align: right; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.vibrate-panel__check { display: flex; align-items: center; gap: 8px; color: var(--text-primary); cursor: pointer; }
+.vibrate-panel__summary { min-height: 16px; color: var(--text-secondary); }
+.vibrate-panel__actions { display: flex; justify-content: flex-end; gap: 8px; }

@@ -202,6 +202,19 @@ export class VRBridge {
     window.funsync.vrSend(JSON.stringify({ currentTime: timeSeconds }));
   }
 
+  /**
+   * Ask the VR player to pause (Stop all, DESIGN.md §2.15). The same field
+   * the player pushes (`playerState`: 0 playing, 1 paused), sent back the way
+   * `seek` sends `currentTime`. Not yet checked on a headset (hardware list);
+   * a player that ignores it is caught by Stop all's hold.
+   * @returns {boolean} whether it was sent
+   */
+  pause() {
+    if (!this._connected) return false;
+    window.funsync.vrSend(JSON.stringify({ playerState: 1 }));
+    return true;
+  }
+
   get connected() { return this._connected; }
   /**
    * The current link (or, once torn down, the last one) has had a state

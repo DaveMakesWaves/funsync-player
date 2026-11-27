@@ -1014,8 +1014,12 @@ async def test_readable_script_is_served_byte_for_byte(client, tmp_path):
     assert res.status_code == 200
     assert res.headers["content-type"] == "application/json"
     assert res.headers["access-control-allow-origin"] == "*"
-    assert res.content == raw
-    assert int(res.headers["content-length"]) == len(raw)
+    # Served whole, byte for byte, but without the leading UTF-8 BOM, which is
+    # not JSON (2026-11-22: headsets were handed it; see
+    # test_a_bom_funscript_is_served_without_its_bom).
+    body = raw[3:]
+    assert res.content == body
+    assert int(res.headers["content-length"]) == len(body)
 
 
 @pytest.mark.anyio
@@ -1027,3 +1031,110 @@ async def test_script_path_that_is_a_folder_is_404(client, tmp_path):
     register_videos([{"path": str(video), "name": "Odd.mp4", "funscriptPath": str(folder)}])
     res = await client.get(f"/api/media/script/{_path_to_id(str(video))}")
     assert res.status_code == 404
+
+
+@pytest.mark.anyio
+async def test_a_bom_funscript_is_served_without_its_bom(client, tmp_path):
+    """FT-044 follow-up (2026-11-22): a leading UTF-8 BOM is not JSON. The
+    phone's res.json() drops it, but a headset's parser (HereSphere, DeoVR)
+    may not, so the route serves the script without it, for every caller."""
+    body = b'{"version":"1.0","actions":[{"at":0,"pos":0},{"at":500,"pos":100}]}'
+    script = tmp_path / "bom.funscript"
+    script.write_bytes(b"\xef\xbb\xbf" + body)
+    plain = tmp_path / "plain.funscript"
+    plain.write_bytes(body)
+    for path, name in ((script, "Bom.mp4"), (plain, "Plain.mp4")):
+        video = str(tmp_path / name)
+        register_videos([{"path": video, "name": name, "funscriptPath": str(path)}])
+        response = await client.get(f"/api/media/script/{_path_to_id(video)}")
+        assert response.status_code == 200
+        assert response.content == body, name
+        assert json.loads(response.content)["actions"][1]["pos"] == 100
+
+
+# --- POST /api/media/remux: why a remux was refused (test day 2026-11-24, B027) ---
+# A codec no browser decodes (MPEG-2, MPEG-4 Part 2 ...) cannot be fixed by a
+# remux. The 422 says so in a form the app reads, so its toast can name the
+# codec ("Try transcoding it to H.264") instead of "Video format not supported".
+
+@pytest.mark.anyio
+async def test_remux_refused_for_the_codec_says_so(client, monkeypatch, tmp_path):
+    from services import ffmpeg as ffmpeg_mod
+    video = tmp_path / "Old.mkv"
+    video.write_bytes(b"placeholder")
+
+    def refuse(_path):
+        raise ffmpeg_mod.RemuxCodecError("mpeg2video")
+
+    monkeypatch.setattr(ffmpeg_mod, "remux_to_mp4", refuse)
+    response = await client.post("/api/media/remux", params={"video_path": str(video)})
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    assert detail["kind"] == "codec"
+    assert detail["codec"] == "mpeg2video"
+    assert "mpeg2video" in detail["message"]
+
+
+@pytest.mark.anyio
+async def test_remux_failed_for_another_reason_stays_a_plain_422(client, monkeypatch, tmp_path):
+    from services import ffmpeg as ffmpeg_mod
+    video = tmp_path / "Broken.mkv"
+    video.write_bytes(b"placeholder")
+
+    def fail(_path):
+        raise RuntimeError("ffmpeg remux failed: Invalid data found when processing input")
+
+    monkeypatch.setattr(ffmpeg_mod, "remux_to_mp4", fail)
+    response = await client.post("/api/media/remux", params={"video_path": str(video)})
+    assert response.status_code == 422
+    assert response.json()["detail"] == "ffmpeg remux failed: Invalid data found when processing input"
+
+
+@pytest.mark.anyio
+async def test_stream_serves_the_converted_copy_when_there_is_one(client, tmp_path):
+    """Convert to play, 2026-11-26: the phone and the headset play the
+    desktop's H.264 copy of a video a browser cannot decode (an AVI here),
+    as MP4; with no copy, the original as before."""
+    from services import ffmpeg as ffmpeg_service
+    src = tmp_path / "Classic Xvid.avi"
+    src.write_bytes(b"ORIGINAL-AVI-BYTES")
+    vid_id = _path_to_id(str(src))
+    register_videos([{"path": str(src), "name": "Classic Xvid.avi"}])
+    ffmpeg_service.set_converted_dir(str(tmp_path / "converted"))
+    try:
+        response = await client.get(f"/api/media/stream/{vid_id}")
+        assert response.status_code == 200
+        assert response.content == b"ORIGINAL-AVI-BYTES"
+        assert response.headers["content-type"] == "video/x-msvideo"
+
+        copy = ffmpeg_service.transcode_out_path(str(src))
+        with open(copy, "wb") as fh:
+            fh.write(b"H264-COPY-BYTES")
+        response = await client.get(f"/api/media/stream/{vid_id}")
+        assert response.status_code == 200
+        assert response.content == b"H264-COPY-BYTES"
+        assert response.headers["content-type"] == "video/mp4"
+    finally:
+        ffmpeg_service.set_converted_dir(None)
+
+
+@pytest.mark.anyio
+async def test_stream_serves_the_remuxed_copy_too(client, tmp_path, monkeypatch):
+    """An H.264 .ts the desktop played through the remux: the phone gets that
+    MP4 (a phone browser cannot play the .ts itself)."""
+    from services import ffmpeg as ffmpeg_service
+    monkeypatch.setattr(ffmpeg_service, "tempfile", type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))}))
+    src = tmp_path / "Recording.ts"
+    src.write_bytes(b"TS-BYTES")
+    vid_id = _path_to_id(str(src))
+    register_videos([{"path": str(src), "name": "Recording.ts"}])
+    ffmpeg_service.set_converted_dir(str(tmp_path / "converted"))
+    try:
+        assert (await client.get(f"/api/media/stream/{vid_id}")).content == b"TS-BYTES"
+        with open(ffmpeg_service.remux_out_path(str(src)), "wb") as fh:
+            fh.write(b"REMUXED-MP4")
+        response = await client.get(f"/api/media/stream/{vid_id}")
+        assert response.content == b"REMUXED-MP4"
+        assert response.headers["content-type"] == "video/mp4"
+    finally:
+        ffmpeg_service.set_converted_dir(None)

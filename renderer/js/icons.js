@@ -9,6 +9,8 @@ export { createIcons } from '../../node_modules/lucide/dist/esm/lucide.js';
 // Icon node definitions (each is an array of SVG child elements)
 export { default as Play } from '../../node_modules/lucide/dist/esm/icons/play.js';
 export { default as Pause } from '../../node_modules/lucide/dist/esm/icons/pause.js';
+// Stop all (DESIGN.md §2.15): the stop sign beside the device status.
+export { default as CircleStop } from '../../node_modules/lucide/dist/esm/icons/circle-stop.js';
 export { default as Volume2 } from '../../node_modules/lucide/dist/esm/icons/volume-2.js';
 export { default as VolumeX } from '../../node_modules/lucide/dist/esm/icons/volume-x.js';
 export { default as FolderOpen } from '../../node_modules/lucide/dist/esm/icons/folder-open.js';
@@ -30,6 +32,12 @@ export { default as Tag } from '../../node_modules/lucide/dist/esm/icons/tag.js'
 export { default as EllipsisVertical } from '../../node_modules/lucide/dist/esm/icons/ellipsis-vertical.js';
 export { default as Pencil } from '../../node_modules/lucide/dist/esm/icons/pencil.js';
 export { default as Trash2 } from '../../node_modules/lucide/dist/esm/icons/trash-2.js';
+// Favourites, Disable, following playlists, the Bluetooth sync test (zaikechi #381, brokenobj #431; 2026-11-23).
+export { default as Heart } from '../../node_modules/lucide/dist/esm/icons/heart.js';
+export { default as Ban } from '../../node_modules/lucide/dist/esm/icons/ban.js';
+export { default as FolderSync } from '../../node_modules/lucide/dist/esm/icons/folder-sync.js';
+export { default as Metronome } from '../../node_modules/lucide/dist/esm/icons/metronome.js';
+export { default as PanelRight } from '../../node_modules/lucide/dist/esm/icons/panel-right.js';
 export { default as X } from '../../node_modules/lucide/dist/esm/icons/x.js';
 export { default as Clapperboard } from '../../node_modules/lucide/dist/esm/icons/clapperboard.js';
 export { default as PictureInPicture2 } from '../../node_modules/lucide/dist/esm/icons/picture-in-picture-2.js';
@@ -63,7 +71,14 @@ export { default as Gauge } from '../../node_modules/lucide/dist/esm/icons/gauge
 export { default as Music } from '../../node_modules/lucide/dist/esm/icons/music.js';
 export { default as Captions } from '../../node_modules/lucide/dist/esm/icons/captions.js';
 export { default as RotateCcw } from '../../node_modules/lucide/dist/esm/icons/rotate-ccw.js';
+// RefreshCw — the EroScripts tab's Refresh (load the open feed now, 2026-11-23).
+export { default as RefreshCw } from '../../node_modules/lucide/dist/esm/icons/refresh-cw.js';
+// ImagePlus / ImageMinus — a playlist's cover: set it, remove it (Dave 2026-08-06, built 2026-11-23).
+export { default as ImagePlus } from '../../node_modules/lucide/dist/esm/icons/image-plus.js';
+export { default as ImageMinus } from '../../node_modules/lucide/dist/esm/icons/image-minus.js';
 export { default as Download } from '../../node_modules/lucide/dist/esm/icons/download.js';
+// Save as / Export in the editor (2026-11-25: the download arrow did not say export).
+export { default as FileOutput } from '../../node_modules/lucide/dist/esm/icons/file-output.js';
 export { default as LayoutGrid } from '../../node_modules/lucide/dist/esm/icons/layout-grid.js';
 export { default as LayoutList } from '../../node_modules/lucide/dist/esm/icons/layout-list.js';
 export { default as Unplug } from '../../node_modules/lucide/dist/esm/icons/unplug.js';
@@ -73,10 +88,12 @@ export { default as Settings } from '../../node_modules/lucide/dist/esm/icons/se
 export { default as ArrowDownAZ } from '../../node_modules/lucide/dist/esm/icons/arrow-down-a-z.js';
 // Playlist detail "Sort by name" button: offers Z-A once the list is A-Z (V78).
 export { default as ArrowDownZA } from '../../node_modules/lucide/dist/esm/icons/arrow-down-z-a.js';
+export { default as ArrowDownWideNarrow } from '../../node_modules/lucide/dist/esm/icons/arrow-down-wide-narrow.js';
 export { default as SlidersHorizontal } from '../../node_modules/lucide/dist/esm/icons/sliders-horizontal.js';
 // ChevronDown — replaces the raw `▾` text used in the nav-bar library
 // arrow. Real semantic icon, not a unicode glyph.
 export { default as ChevronDown } from '../../node_modules/lucide/dist/esm/icons/chevron-down.js';
+export { default as ClipboardPaste } from '../../node_modules/lucide/dist/esm/icons/clipboard-paste.js';
 // ChevronUp + Shuffle — playlist reorder (Move up) + shuffle toggle.
 export { default as ChevronUp } from '../../node_modules/lucide/dist/esm/icons/chevron-up.js';
 export { default as Shuffle } from '../../node_modules/lucide/dist/esm/icons/shuffle.js';
@@ -119,6 +136,10 @@ export { default as EyeOff } from '../../node_modules/lucide/dist/esm/icons/eye-
 export { default as Bell } from '../../node_modules/lucide/dist/esm/icons/bell.js';
 export { default as Users } from '../../node_modules/lucide/dist/esm/icons/users.js';
 export { default as TriangleAlert } from '../../node_modules/lucide/dist/esm/icons/triangle-alert.js';
+// The editor work list (2026-11-24): recording mode on the toolbar (4.6) and
+// gamepad recording (2.6). (History and FileCheck above serve 4.5 and 4.2.)
+export { default as CircleDot } from '../../node_modules/lucide/dist/esm/icons/circle-dot.js';
+export { default as Gamepad2 } from '../../node_modules/lucide/dist/esm/icons/gamepad-2.js';
 
 /**
  * Create an SVG element from a Lucide icon node.

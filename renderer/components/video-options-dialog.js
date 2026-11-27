@@ -38,6 +38,7 @@
 
 import { Modal } from './modal.js';
 import { t, getCurrentLocale } from '../js/i18n.js';
+import { formatFileSize } from '../js/format-file-size.js';
 import * as M from '../js/video-options-model.js';
 import { mountTagsSection } from './video-options-tags.js';
 import { createVideoSyncOffsetRow } from './video-sync-offset-row.js';
@@ -48,7 +49,10 @@ import { stashVideoView, stashTagRecords } from '../js/stash-tags.js';
 import { stashSceneFields, stashActivity } from '../js/stash-scene-fields.js';
 import { openStashScenePicker, stashSceneName } from './stash-scene-picker.js';
 import { recordWithScriptPath } from '../js/script-tags.js';
-import { icon, Play, Clapperboard } from '../js/icons.js';
+import { icon, Play, Clapperboard, Heart, Ban } from '../js/icons.js';
+import { isFavourite, setFavourite, FAVOURITES_PLAYLIST_ID } from '../js/favourites.js';
+import { isDisabled, setDisabled } from '../js/disabled-videos.js';
+import { wireRailKeys } from '../js/rail-keys.js';
 
 /** Rail order (model). */
 export const SECTIONS = M.SECTIONS;
@@ -155,21 +159,8 @@ function radioRow(name, text, { value, checked, focusKey, onChange, tags = [], a
   return row;
 }
 
-/** Bytes in the active language ("1.2 GB", "1,2 Go"). */
-export function formatFileSize(bytes, locale = getCurrentLocale()) {
-  if (!Number.isFinite(bytes) || bytes < 0) return null;
-  const units = ['byte', 'kilobyte', 'megabyte', 'gigabyte', 'terabyte'];
-  let value = bytes;
-  let u = 0;
-  while (value >= 1024 && u < units.length - 1) { value /= 1024; u++; }
-  try {
-    return new Intl.NumberFormat(locale || 'en', {
-      style: 'unit', unit: units[u], unitDisplay: 'short', maximumFractionDigits: u === 0 ? 0 : 1,
-    }).format(value);
-  } catch {
-    return `${Math.round(value * 10) / 10} ${['B', 'KB', 'MB', 'GB', 'TB'][u]}`;
-  }
-}
+/** Bytes in the active language: renderer/js/format-file-size.js since 2026-11-23, re-exported. */
+export { formatFileSize };
 
 /** Resolves once no dialog is on the page (an Associate run can reopen itself). */
 function whenNoDialogs() {
@@ -353,20 +344,8 @@ class VideoOptionsUI {
     // The vertical tablist keys, as Settings' rail (Nielsen #4): Up/Down
     // wrap, Home/End jump, selection follows focus. preventDefault, so
     // keyboard.js (and the browser's own scroll) leave the press alone.
-    rail.addEventListener('keydown', (e) => {
-      const items = [...rail.querySelectorAll('.video-options__rail-item')];
-      const idx = items.indexOf(document.activeElement);
-      if (idx < 0) return;
-      let next = -1;
-      if (e.key === 'ArrowDown') next = (idx + 1) % items.length;
-      else if (e.key === 'ArrowUp') next = (idx - 1 + items.length) % items.length;
-      else if (e.key === 'Home') next = 0;
-      else if (e.key === 'End') next = items.length - 1;
-      if (next >= 0) {
-        e.preventDefault();
-        items[next].click();
-      }
-    });
+    // In the narrow layout the rail is a row: Left / Right there (rail-keys.js).
+    wireRailKeys(rail, '.video-options__rail-item');
 
     // The live line: what the last change did, with its Undo (polite).
     this.liveEl = el('div', 'video-options__live video-options__live--empty');
@@ -965,17 +944,51 @@ function renderOrganise(ui, p) {
     descendantsOf: ctx.descendantsOf,
   });
 
+  // Favourite and Disabled (zaikechi #381), first: the two marks a video
+  // carries everywhere. Favourites is a playlist underneath, so it is not
+  // listed again under Playlists.
+  const marks = block(t('videoOptions.organise.marks'));
+  const markList = el('div', 'video-options__checks');
+  const favMark = icon(Heart, { width: 14, height: 14 });
+  favMark.classList.add('video-options__mark', 'video-options__mark--fav');
+  markList.appendChild(checkRow(t('videoOptions.organise.favourite'), {
+    checked: isFavourite(settings, path),
+    focusKey: 'organise:favourite',
+    mark: favMark,
+    onChange: async (checked) => {
+      await setFavourite(settings, path, checked, t('library.favourites.playlistName'));
+      host.onMarksChanged?.(path);
+      ui.refresh('organise');
+    },
+  }));
+  const offMark = icon(Ban, { width: 14, height: 14 });
+  offMark.classList.add('video-options__mark', 'video-options__mark--off');
+  markList.appendChild(checkRow(t('videoOptions.organise.disabled'), {
+    checked: isDisabled(settings, path),
+    focusKey: 'organise:disabled',
+    mark: offMark,
+    hint: t('videoOptions.organise.disabledHint'),
+    onChange: (checked) => {
+      setDisabled(settings, path, checked);
+      host.onMarksChanged?.(path);
+      ui.refresh('organise');
+    },
+  }));
+  marks.appendChild(markList);
+  p.appendChild(marks);
+
   // Playlists
   const pls = block(t('playlists.title'));
   const plList = el('div', 'video-options__checks');
   for (const pl of view.playlists) {
+    if (pl.id === FAVOURITES_PLAYLIST_ID) continue; // the heart above
     plList.appendChild(checkRow(pl.name, {
       checked: pl.checked,
       focusKey: `playlist:${pl.id}`,
       onChange: (checked) => togglePlaylist(ui, pl.id, checked),
     }));
   }
-  if (view.playlists.length === 0) plList.appendChild(note(t('videoOptions.organise.noPlaylists')));
+  if (!view.playlists.some((pl) => pl.id !== FAVOURITES_PLAYLIST_ID)) plList.appendChild(note(t('videoOptions.organise.noPlaylists')));
   pls.appendChild(plList);
   pls.appendChild(actions(button(t('videoOptions.organise.newPlaylist'), {
     focusKey: 'organise:newPlaylist', onClick: () => newPlaylist(ui),
@@ -1162,7 +1175,7 @@ function renderScript(ui, p) {
     button(view.main ? t('videoOptions.script.change') : t('library.associateFunscriptBtn'), {
       focusKey: 'script:change', onClick: () => ui.runBig('script:change', () => host.changeScript(ui.video)),
     }),
-    host.findOnEroScripts ? button(t('videoOptions.script.findOnEroScripts'), {
+    host.findOnEroScripts && !ui.video?._stream ? button(t('videoOptions.script.findOnEroScripts'), {
       focusKey: 'script:find', onClick: () => ui.runBig('script:find', () => host.findOnEroScripts(ui.video)),
     }) : null,
   ));
@@ -1270,14 +1283,14 @@ function renderScript(ui, p) {
     vars.appendChild(fs);
     if (vv.randomOverridesPin) vars.appendChild(note(t('videoOptions.script.randomHint')));
   }
-  vars.appendChild(actions(host.addVariation ? button(t('videoOptions.script.addVariation'), {
+  vars.appendChild(actions(host.addVariation && !ui.video?._stream ? button(t('videoOptions.script.addVariation'), {
     focusKey: 'script:addVariation', onClick: () => ui.runBig('script:addVariation', () => host.addVariation(ui.video)),
   }) : null));
   p.appendChild(vars);
 
   // Embedded axes, only when found (as the ⋮ menu had it)
   const embedded = host.embeddedAxes?.(v);
-  if (embedded?.suffixes?.length > 0 && host.extractAxes) {
+  if (embedded?.suffixes?.length > 0 && host.extractAxes && !ui.video?._stream) {
     const emb = block(t('videoOptions.script.embeddedHeading'));
     const b = button(t('library.kebabExtractAxes', { count: embedded.suffixes.length }), {
       focusKey: 'script:extract', onClick: () => ui.runBig('script:extract', () => host.extractAxes(ui.video)),
@@ -1613,7 +1626,7 @@ function renderThumbnail(ui, p) {
   if (entry && typeof entry === 'object') kind = entry.type === 'image' ? 'image' : 'frame';
   sec.appendChild(note(t(`videoOptions.thumbnail.${kind}`)));
   sec.appendChild(actions(
-    host.pickFrame ? button(t('library.customThumbSet'), {
+    host.pickFrame && !ui.video?._stream ? button(t('library.customThumbSet'), {
       focusKey: 'thumbnail:pick', onClick: () => ui.runBig('thumbnail:pick', () => host.pickFrame(ui.video)),
     }) : null,
     host.uploadImage ? button(t('library.customThumbUpload'), {
@@ -1691,7 +1704,7 @@ function renderVR(ui, p) {
 
   const fmt = block(t('vrFormat.title'));
   fmt.appendChild(el('p', 'video-options__row', formatSummary(vr.format)));
-  if (host.openVRFormat) {
+  if (host.openVRFormat && !ui.video?._stream) {
     fmt.appendChild(actions(button(t('library.kebabVRFormat'), {
       focusKey: 'vr:format', onClick: () => ui.runBig('vr:format', () => host.openVRFormat(path)),
     })));
@@ -1722,6 +1735,8 @@ function fact(dl, label, value) {
 function renderFile(ui, p) {
   const { host, path } = ui;
   const v = ui.video;
+  // A saved stream (2026-11-23): its page instead of a file, and Remove.
+  if (v?._stream) { renderStreamFile(ui, p); return; }
   const fv = M.fileView({ path, size: ui.size, source: v.sourceName });
   const sec = block(t('videoOptions.rail.file'));
   const dl = el('dl', 'video-options__facts-list');
@@ -1745,6 +1760,23 @@ function renderFile(ui, p) {
   ));
   p.appendChild(sec);
 
+  // Delete (2026-11-23, EroScripts #434; DESIGN.md §2.18): its own row, apart
+  // from the harmless actions above (Fitts: no destructive button next to
+  // Copy path), in the danger style. It opens the delete dialog, which says
+  // exactly what goes and how; nothing is deleted from here.
+  if (host.deleteVideo) {
+    const del = el('div', 'video-options__actions video-options__actions--danger');
+    del.appendChild(button(t('videoOptions.file.delete'), {
+      className: 'modal-btn modal-btn--danger video-options__btn video-options__delete',
+      focusKey: 'file:delete',
+      onClick: async () => {
+        if (await host.deleteVideo(v)) ui.close?.();
+      },
+    }));
+    del.appendChild(el('p', 'video-options__hint', t('videoOptions.file.deleteHint')));
+    sec.appendChild(del);
+  }
+
   // Stash S1: the block under the file facts (nothing while Stash is off).
   const stash = renderStash(ui);
   if (stash) p.appendChild(stash);
@@ -1757,6 +1789,43 @@ function renderFile(ui, p) {
       if (ui.body?.isConnected) ui.refresh('file');
     }, () => {});
   }
+}
+
+/**
+ * A saved stream's File section: the page it plays from, where, and Remove
+ * from library (out of its playlists and categories too, after a question;
+ * the page itself is not touched).
+ */
+function renderStreamFile(ui, p) {
+  const { host } = ui;
+  const v = ui.video;
+  const sec = block(t('videoOptions.rail.file'));
+  const dl = el('dl', 'video-options__facts-list');
+  fact(dl, t('library.streams.page'), v.pageUrl || '—').classList.add('video-options__path');
+  fact(dl, t('library.streams.from'), v.site || '—');
+  sec.appendChild(dl);
+  sec.appendChild(actions(
+    host.openExternal && v.pageUrl ? button(t('eroscripts.tab.openInBrowser'), {
+      focusKey: 'file:open', onClick: () => host.openExternal(v.pageUrl),
+    }) : null,
+    button(t('library.streams.copyLink'), {
+      focusKey: 'file:copy',
+      onClick: async () => {
+        let ok = false;
+        try { ok = (await host.copyText?.(v.pageUrl || '')) !== false; } catch { ok = false; }
+        ui.announce(t(ok ? 'videoOptions.file.copied' : 'videoOptions.file.copyFailed'));
+      },
+    }),
+    host.removeStream ? button(t('library.streams.remove'), {
+      focusKey: 'file:remove',
+      onClick: async () => {
+        const yes = await confirmDialog(t('library.streams.removeTitle'), t('library.streams.removeMessage', { name: v.name }), t('library.streams.remove'));
+        if (!yes) return;
+        if (await host.removeStream(v.path)) ui.close?.();
+      },
+    }) : null,
+  ));
+  p.appendChild(sec);
 }
 
 // ---- File > Stash (Stash S1) ----

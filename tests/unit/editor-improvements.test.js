@@ -472,9 +472,9 @@ describe('OFS-style arrow-key remap', () => {
           const delta = ctrl ? 1 : 5;
           script.moveActions(sel, 0, delta);
         } else if (ctrl) {
-          selectAdjacentAcross(-1);
+          selectAdjacentAcross(1);
         } else {
-          selectAdjacent(-1);
+          selectAdjacent(1);
         }
         return;
       case 'ArrowDown':
@@ -482,9 +482,9 @@ describe('OFS-style arrow-key remap', () => {
           const delta = ctrl ? -1 : -5;
           script.moveActions(sel, 0, delta);
         } else if (ctrl) {
-          selectAdjacentAcross(1);
+          selectAdjacentAcross(-1);
         } else {
-          selectAdjacent(1);
+          selectAdjacent(-1);
         }
         return;
     }
@@ -528,12 +528,14 @@ describe('OFS-style arrow-key remap', () => {
 
   // --- action navigation ---
 
-  it('plain Up/Down call _selectAdjacentAction with prev/next direction', () => {
+  // Up = NEXT, Down = PREVIOUS, as in OpenFunscripter (TedBaxter, Discord, 2026-11-22).
+  // This block is a copy; editor-up-is-next.test.js reads the real editors.
+  it('plain Up/Down call _selectAdjacentAction with next/prev direction', () => {
     const deps = makeDeps();
     dispatchArrow('ArrowUp', {}, deps);
+    expect(deps.selectAdjacent).toHaveBeenLastCalledWith(1);
     dispatchArrow('ArrowDown', {}, deps);
-    expect(deps.selectAdjacent).toHaveBeenCalledWith(-1);
-    expect(deps.selectAdjacent).toHaveBeenCalledWith(1);
+    expect(deps.selectAdjacent).toHaveBeenLastCalledWith(-1);
   });
 
   it('Ctrl+Up/Down call the across-scripts variant', () => {

@@ -858,3 +858,16 @@ html[data-theme="light"] .modal-panel--video-options {
 @media (max-width: 480px) {
   .stash-picker__result { flex-direction: column; align-items: stretch; }
 }
+
+/* Video options ▸ File: Delete sits on its own row under the harmless actions
+   (Fitts: no destructive button next to Copy path), in the danger style. */
+.video-options__actions--danger {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px solid var(--border-subtle);
+  flex-wrap: wrap; align-items: center;
+}
+.video-options__actions--danger .video-options__hint { margin: 0; font-size: 12px; color: var(--text-secondary); flex: 1 1 220px; }
+
+/* Organise ▸ Favourite / Disabled (zaikechi #381). */
+.video-options__mark { flex-shrink: 0; color: var(--text-secondary); }
+.video-options__mark--fav { color: var(--accent); }

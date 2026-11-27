@@ -119,6 +119,10 @@ class TestErrorHandling:
         ("Unsupported URL: http://foo", "unsupported"),
         ("Unable to extract video data", "unsupported"),
         ("This video is not available in your country", "geo"),
+        # 2026-11-23: a site that answers an app with no (Pornhub, SpankBang).
+        ("ERROR: [PornHub] 64e8791e46f17: Unable to download webpage: HTTP Error 410: Gone", "refused"),
+        ("ERROR: [SpankBang] x: Unable to download webpage: HTTP Error 403: Forbidden", "refused"),
+        ("HTTP Error 404: Not Found", "unavailable"),
         ("Some totally novel failure", "error"),
     ])
     def test_categorises_yt_dlp_errors(self, monkeypatch, msg, kind):

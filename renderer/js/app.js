@@ -1,11 +1,12 @@
 // FunSync Player — App Entry Point
 
-import { VideoPlayer, PLAYBACK_RATE_PRESETS, frameStepTime } from './video-player.js';
+import { readVRZoomKeys, VR_ZOOM_KEYS_SETTING } from './vr-zoom-keys.js';
+import { VideoPlayer, PLAYBACK_RATE_PRESETS, frameStepTime, exactFrameRate } from './video-player.js';
 import { eventBus } from './event-bus.js';
 import { ProgressBar } from './progress-bar.js';
 import { FunscriptEngine, isAutoMatch, stripBOM } from './funscript-engine.js';
 import { extractEmbeddedAxes, buildCompanionFiles, companionPathMap } from './embedded-multi-axis.js';
-import { getAxisBySuffix } from './multi-axis.js';
+import { getAxisBySuffix, sameFolderCompanions, parseAxisSuffix } from './multi-axis.js';
 import { sourcesToProbe } from './source-state.js';
 import { BackendBannerState } from './backend-banner-state.js';
 
@@ -50,7 +51,7 @@ import { ConnectionPanel } from '../components/connection-panel.js';
 import { DragDrop } from './drag-drop.js';
 import { KeyboardHandler } from './keyboard.js';
 import { dataService } from './data-service.js';
-import { showToast } from './toast.js';
+import { showToast, showUndoToast } from './toast.js';
 import { showUpdateAvailableToast, showUpdateReadyToast } from './update-toasts.js';
 import { maybeShowHevcGuidance } from './hevc-detect.js';
 import { describeVideoCodec, hasRealVideoStream, isAudioPath, playedSeconds, NO_FRAMES_GRACE_SEC } from './video-load-check.js';
@@ -63,26 +64,40 @@ import { resolveFillerOptions } from './filler-presets.js';
 import { FillerTestPlayer } from './filler-test-player.js';
 import { normalizeAssociation, buildAssociationEntry, resolveActiveConfig } from './association-shape.js';
 import { pathToFileURL, canonicalPath, isSubpath } from './path-utils.js';
+import { askSourceOverlap } from './source-overlap-ask.js';
 import { Library, thumbRequestOpts, customThumbImagePath } from '../components/library.js';
 import { QueuePanel } from '../components/queue-panel.js';
 import { NavBar } from '../components/nav-bar.js';
 import { Modal } from '../components/modal.js';
 import { rankFunscriptMatches } from './fuzzy-match.js';
+import { cleanSearchName, titleMatchesQuery } from './search-name-clean.js';
+import { DeviceGate, installDeviceGate } from './device-gate.js';
+import { ScriptPlayer, isPlayableFunscript } from './script-player.js';
+import { looseScripts } from './loose-scripts.js';
+import { ScriptPlayerBar } from '../components/script-player-bar.js';
+import { showLooseScriptsDialog } from '../components/loose-scripts-dialog.js';
 import { Playlists } from '../components/playlists.js';
 import { Categories } from '../components/categories.js';
 import { ScriptEditor } from '../components/script-editor.js';
-import { DeviceSimulator } from '../components/device-simulator.js';
+import { DeviceSimulator, resolveSimOptions } from '../components/device-simulator.js';
 import { GapSkipEngine } from './gap-skip.js';
 import { UpNextEngine } from './up-next.js';
 import { UpNextCard } from '../components/up-next-card.js';
 import { EroScriptsPanel } from '../components/eroscripts-panel.js';
+import { EroScriptsView } from '../components/eroscripts-view.js';
 import {
   createIcons, icon, Play, Pause, Volume2, VolumeX, Volume1, FolderOpen, Bluetooth, Cable,
   EllipsisVertical, Keyboard, Gauge, ChevronDown, Goggles, Repeat1,
   Maximize, Maximize2, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
-  Pencil, FileCheck, Captions, RotateCcw, Columns2, X, Activity, Thermometer, MoveVertical,
+  Pencil, FileCheck, Captions, RotateCcw, Columns2, X, Activity, Thermometer, MoveVertical, Link, BookmarkPlus, Heart, Ban,
+  CircleStop,
 } from './icons.js';
 import { libraryPlayRequest } from './library-play-options.js';
+import { setDisabled } from './disabled-videos.js';
+import { isFavourite, toggleFavourite } from './favourites.js';
+import { showDisabledVideosDialog } from '../components/disabled-videos-dialog.js';
+import { planFollowAdds, planCategoryUnassign } from './playlist-follow.js';
+import { stopBtSyncTest, isBtSyncTestRunning } from '../components/bt-sync-test-dialog.js';
 import { compareVideoNames } from './library-search.js';
 import { startInit, span, mark, logSummary } from './startup-timer.js';
 import { installConsoleForwarding } from './logger.js';
@@ -108,12 +123,17 @@ import {
 import { videoSyncOffsetOf, withVideoSyncOffset } from './video-sync-offset.js';
 import { openOrgasmConfigModal } from '../components/orgasm-config-modal.js';
 import { pickVariantIndexOnLoad } from './variant-select.js';
-import { planVariantAdds, pickedFiles, showBulkVariantNaming } from './variant-bulk-add.js';
+import { planVariantAdds, pickedFiles, showBulkVariantNaming, uniqueVariantLabel } from './variant-bulk-add.js';
 import { remoteVariantList } from './variant-names.js';
 import { InlineViz } from '../components/inline-viz.js';
 import { shuffle as shuffleArray, reshuffleAvoidingRepeat, balancedShuffle, reshuffleBalancedAvoidingRepeat } from './shuffle.js';
 import { partitionByWatched } from './playlist-progress.js';
-import { initI18n, setLocale, translatePage, t, LOCALE_LABELS } from './i18n.js';
+import { initI18n, setLocale, translatePage, t, LOCALE_LABELS, getCurrentLocale } from './i18n.js';
+import { levelHeights, progressiveMaxHeight, pickProgressiveIndex } from './stream-quality.js';
+import { StreamStatus } from '../components/stream-status.js';
+import { streamOffsetKey, streamCutWarning, clockText } from './stream-session.js';
+import { SETTING_STREAMS, SETTING_SAVE_STREAMS, streamEntryFrom, upsertStream } from './saved-streams.js';
+import { subtitleTrackLabel, pickEmbeddedTrack, mayHaveEmbeddedSubtitles } from './subtitle-tracks.js';
 import {
   shouldRecordPosition,
   shouldOfferResume,
@@ -134,8 +154,17 @@ import {
   initStashStore, onStashChanged, onStashSettingsChanged, stashData, stashSyncOnStart, isStashSettingPath,
 } from './stash-store.js';
 import { stashMarkersForVideo, chapterStarts } from './stash-markers.js';
+import { wireMenuKeys, moveMenuFocus, focusMenuFromKeyboard } from './menu-keys.js';
+import { canConvert, convertedCopy, offerConversion, runConversion } from './convert-to-play.js';
+import { setPlayerAudioTile } from './player-audio-tile.js';
+import { gateEngineStart, setEdgeCarryNotice, edgeCarriesAcrossVideos, edgeCarryNoticeKey, carriesAcrossVideos, orgasmCarryNoticeKey } from './edge-hold-carry.js';
+import { StartupConnections, deviceList } from './startup-connections.js';
 
 /** Default opacity (percent) for the inline TL/HM overlays. */
+/** How often a shown Web Remote session is checked against the backend (DESIGN.md §2.16). */
+const REMOTE_LIVENESS_MS = 10000;
+/** The device gate's owner while Stop all holds a source that kept playing (DESIGN.md §2.15). */
+const STOP_ALL_HOLD_OWNER = 'stop-all-hold';
 const INLINE_VIZ_OPACITY_DEFAULT = 80;
 const DEVICE_SIM_OPACITY_DEFAULT = 80;
 /** Quiet time after the last editor save before audience viewers are sent
@@ -282,6 +311,8 @@ class App {
         Play, Pause, Volume2, Volume1, VolumeX, FolderOpen, Bluetooth, Cable,
         Maximize, Minimize, ArrowLeft, Plus, PictureInPicture2, SkipBack, SkipForward,
         Pencil, RotateCcw, EllipsisVertical,
+        // The player top bar's Stop all (DESIGN.md §2.15).
+        CircleStop,
         // 'keyboard' icon for the overflow menu's help item; lucide
         // ships it as `keyboard.js`. Resolved by createIcons via
         // data-lucide attribute lookup at the placeholder site.
@@ -310,6 +341,12 @@ class App {
         // the script timeline (pulse-line reads as a motion trace),
         // 'thermometer' for the heatmap strip.
         Activity, Thermometer,
+        // 'link' for the player bar's Load from URL (back 2026-11-22; blank without it).
+        Link,
+        // 'bookmark-plus' for the player bar's Save of an unsaved stream (2026-11-23).
+        BookmarkPlus,
+        // 'heart' (Favourite) and 'ban' (Disable) for the player (zaikechi #381, 2026-11-23).
+        Heart, Ban,
         // 'move-vertical' (an up/down stroke) for the Device simulator item.
         MoveVertical,
       },
@@ -358,6 +395,42 @@ class App {
     // cached, so toggling it in Settings applies to the very next video with
     // nothing to propagate. Wired here, not in the Handy block below, so a
     // failed Handy init can't leave it unset.
+    // The video's subtitles reach the player pop-out too (2026-11-22: it
+    // showed none): every load and clear, and with each video it is handed.
+    this.videoPlayer.onSubtitlesChanged = (sub) => {
+      this._currentSubtitle = sub || null;
+      this._sendPlayerWindowSubtitle();
+    };
+
+    // A stream's quality (2026-11-22): the remembered choice, and the button.
+    this.videoPlayer.setStreamQuality(this.settings?.get?.('player.streamQuality') ?? 'auto');
+    this.videoPlayer.onStreamLevels = (info) => this._paintStreamQuality(info || this._progressiveQualityInfo());
+    // The last adaptive stream's measure of the line (Auto for a single-file stream).
+    this.videoPlayer.onBandwidth = (bps) => this.settings?.set?.('player.streamBandwidth', Math.round(bps));
+    this._wireStreamQuality();
+    // What a stream is doing, over the picture (2026-11-23).
+    this.streamStatus = new StreamStatus({
+      video: this.videoPlayer.video,
+      el: document.getElementById('stream-status'),
+      onRepeatedStalls: () => this._onStreamStalling(),
+    });
+    // Playing or paused by the user: what a reconnect goes back to.
+    this.videoPlayer.video.addEventListener('play', () => { if (this._remoteSession) this._remoteSession.wantsPlay = true; });
+    this.videoPlayer.video.addEventListener('pause', () => { if (this._remoteSession && !this._remoteSession.recovering) this._remoteSession.wantsPlay = false; });
+    // The stream's length is known: is it the cut the script was made for?
+    this.videoPlayer.video.addEventListener('loadedmetadata', () => { if (this._remoteSession) this._checkStreamCut(); });
+    // A saved stream whose lookup gave no length learns it here, for its card.
+    this.videoPlayer.video.addEventListener('loadedmetadata', () => {
+      const key = this._remoteSession?.savedKey;
+      const d = this.videoPlayer.video.duration;
+      if (!key || !(d > 0) || !Number.isFinite(d)) return;
+      const list = this.settings.get(SETTING_STREAMS) || [];
+      const e = list.find((x) => x?.key === key);
+      if (!e || e.duration) return;
+      this.settings.set(SETTING_STREAMS, list.map((x) => (x?.key === key ? { ...x, duration: Math.round(d) } : x)));
+      this.library?.onStreamsChanged?.();
+    });
+
     this.videoPlayer.setRememberRateProvider(
       () => this.settings?.get?.('player.rememberPlaybackSpeed') === true,
     );
@@ -367,6 +440,11 @@ class App {
       containerElement: document.getElementById('progress-container'),
       videoPlayer: this.videoPlayer,
       backendPort: this.backendPort,
+    });
+    // The frame strip on the seek bar (powerkool #433): opt-in, live.
+    this.progressBar.setFrameStrip?.(this.settings?.get?.('player.seekFrameStrip') === true);
+    eventBus.on('settings:changed', ({ path } = {}) => {
+      if (path === 'player.seekFrameStrip') this.progressBar?.setFrameStrip?.(this.settings.get('player.seekFrameStrip') === true);
     });
 
     // Initialize funscript engine
@@ -395,6 +473,8 @@ class App {
       video: this.videoPlayer.video,
     });
     this._wireInlineVizToggles();
+    this._wireInlineVizPlacement();
+    this._wirePlayerWindowTheme();
 
     // Initialize drag-and-drop EARLY — this must always work. Omit
     // `dropZoneElement` so the default `#drop-zone-overlay` element
@@ -453,6 +533,13 @@ class App {
           if (promoted > 0) {
             showToast(t('toast.autoPromotedMulti', { count: promoted }), 'info', 4000);
           }
+        } else if (mode !== 'multi' && this.library?._revertAutoPromotion) {
+          // Back to Single: the videos FunSync paired by itself go back to
+          // their own script; anything set by hand stays (Dave, 2026-11-20).
+          const reverted = this.library._revertAutoPromotion();
+          if (reverted > 0) {
+            showToast(t('toast.autoPromotedMultiReverted', { count: reverted }), 'info', 4000);
+          }
         }
       },
       getMultiAxisEligibleCount: () => {
@@ -469,7 +556,7 @@ class App {
       onFindDuplicates: async () => {
         const { DuplicatesModal } = await import('../components/duplicates-modal.js');
         const modal = new DuplicatesModal({
-          getVideos: () => this.library?._videos || [],
+          getVideos: () => (this.library?._videos || []).filter((v) => !v._stream),
           onRemoved: () => {
             this.library?.ensureScanned?.({ forceRescan: true })
               .catch((err) => console.warn('[Duplicates] Rescan after removal failed:', err?.message || err));
@@ -551,12 +638,15 @@ class App {
       // Settings > Sources > Stash (S1): Sync now sends the library's videos;
       // a Need-a-check row's Choose… opens that video's dialog at File, on
       // its Stash choice (Settings has closed itself first).
-      getStashVideos: () => this.library?._videos || [],
+      getStashVideos: () => (this.library?._videos || []).filter((v) => !v._stream),
       onOpenStashCheck: (videoPath) => {
         const video = this.library?.getVideoByPath?.(videoPath);
         if (video) this.library._openVideoOptions(video, { section: 'file', focusKey: 'stash:choice' });
         else showToast(t('settingsPanel.stash.checkVideoMissing'), 'warn');
       },
+      // Settings search's "Open" for a setting that lives elsewhere
+      // (settings-panel.js SETTINGS_ELSEWHERE; Settings has closed itself).
+      onOpenElsewhere: (id) => this._openSettingElsewhere(id),
     });
 
     this.navBar = new NavBar({
@@ -582,9 +672,10 @@ class App {
           });
         });
       },
-      // TEMP DISABLED (2026-07-30): Load-from-URL — see notes/SCRATCHPAD.md.
-      // onLoadUrlClick: () => this._openLoadUrlModal(),
+      onLoadUrlClick: () => this._openLoadUrlModal(),
       onEroScriptsClick: () => this._onEroScriptsNavClick(),
+      onDisabledVideos: () => this._showDisabledVideos(),
+      onStopAll: () => this.stopEverything({ source: 'button' }),
       onLibraryCollectionChange: (collectionId) => this._switchCollection(collectionId),
       onNewCollection: () => this._showNewCollectionModal(),
       onRenameCollection: (id) => this._renameCollection(id),
@@ -599,6 +690,8 @@ class App {
     // Library
     this.library = new Library({
       onPlayVideo: (video, funscript, subtitle, variants) => this._playFromLibrary(video, funscript, subtitle, variants),
+      // A script card's "Pair with a video…" (the Scripts filter, 2026-11-26).
+      onPairScript: (item) => this._showLooseScripts({ only: item }),
       onBack: () => this._navigateBack(),
       onAddSource: () => this._addSource(),
       onTestDevice: (deviceId, buttplugIndex) => this._testDevice(deviceId, buttplugIndex),
@@ -668,6 +761,7 @@ class App {
     this._initResumeTracking();
 
     // Player back button
+    document.getElementById('btn-player-stop-all')?.addEventListener('click', () => this.stopEverything({ source: 'button' }));
     const btnPlayerBack = document.getElementById('btn-player-back');
     if (btnPlayerBack) {
       btnPlayerBack.addEventListener('click', () => this._navigateBack());
@@ -707,18 +801,21 @@ class App {
       this._updateMiniPlayPauseIcon();
     }
 
+    // Favourite and Disable for the playing video (zaikechi #381).
+    document.getElementById('btn-player-favourite')?.addEventListener('click', () => this._togglePlayerFavourite());
+    document.getElementById('btn-disable-video')?.addEventListener('click', () => this._togglePlayerDisabled());
+
     // Quick-add to playlist button in player top bar
     const btnAddToPlaylist = document.getElementById('btn-add-to-playlist');
     if (btnAddToPlaylist) {
       btnAddToPlaylist.addEventListener('click', () => this._quickAddToPlaylist());
     }
 
-    // TEMP DISABLED (2026-07-30): Load-from-URL hidden until it works reliably.
-    // Restore alongside the nav-bar button + #btn-load-url in index.html + the
-    // onLoadUrlClick nav wiring. See notes/SCRATCHPAD.md.
     // Load from URL — also reachable from the player top bar (for switching
     // to another remote video mid-session). Primary entry is the nav bar.
-    // document.getElementById('btn-load-url')?.addEventListener('click', () => this._openLoadUrlModal());
+    document.getElementById('btn-load-url')?.addEventListener('click', () => this._openLoadUrlModal());
+    // Save the playing stream to the library (2026-11-23): shown only for an unsaved one.
+    document.getElementById('btn-save-stream')?.addEventListener('click', () => this._saveCurrentStream());
 
     // Queue navigation (prev/next)
     document.getElementById('btn-prev')?.addEventListener('click', () => this._playPrev());
@@ -768,13 +865,17 @@ class App {
           closeOverflow();
         }
       });
+      // Down / Up / Home / End move through it; Enter on ⋮ focuses its first
+      // item (break-it 2026-11-25: Down changed the volume under the open
+      // menu). Also registered before the KeyboardHandler.
+      wireMenuKeys(overflowBtn, overflowMenu);
     }
     // Keyboard-shortcuts item inside the overflow menu — open the
     // shared help overlay. Same content the `?` shortcut shows.
     document.getElementById('btn-help')?.addEventListener('click', () => {
       // Lazy-import to keep startup tree small.
       import('./keyboard-help.js').then(({ openKeyboardHelp, getPlayerShortcutGroups }) => {
-        openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
+        openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups({ vrZoomKeys: readVRZoomKeys(this.settings?.get?.(VR_ZOOM_KEYS_SETTING)) }));
       });
     });
 
@@ -808,6 +909,8 @@ class App {
     // (or null) and shows the marker's name above the thumbnail.
     this.videoPlayer.onProgressHover = (time, xPx, widthPx) => {
       this.progressBar.updateThumbnailPreview(time);
+      // The script at the cursor (powerkool #433, 2026-11-23).
+      this.progressBar.updateScriptPreview?.(time);
       const durMs = (this.videoPlayer.duration || 0) * 1000;
       if (Number.isFinite(xPx) && Number.isFinite(widthPx)) {
         this.progressBar.updateMarkerTooltip(xPx, widthPx, durMs);
@@ -816,6 +919,8 @@ class App {
 
     // Windows caption buttons follow the player chrome: transparent over the
     // video, and fading out with the seek bar when the controls auto-hide.
+    // A new frame rate or frame grid: the editor's pop-out snaps on it too.
+    this.videoPlayer.onFrameGridChanged = () => this.scriptEditor?._broadcastSettings?.();
     this.videoPlayer.onControlsVisibilityChanged = (visible) => {
       this._syncCaptionOverlay(visible);
     };
@@ -999,6 +1104,10 @@ class App {
         console.warn('Autoblow integration unavailable:', err.message);
       }
 
+      // While Z is on, no sync engine starts: a start is held for Z's
+      // release (lr_x3 #447; edge-hold-carry.js).
+      this._installEdgeStartGate();
+
       // Initialize VR bridge (non-critical)
       try {
         this.vrBridge = new VRBridge();
@@ -1026,6 +1135,8 @@ class App {
         this.remoteBridge.onBridgeClose = () => console.log('[Remote] observer bridge closed — will retry');
         this.remoteBridge.connect();
         console.log('[Remote] observer bridge: attempting connect to ws://127.0.0.1:' + backendPort + '/api/remote/sync/observe');
+        // A session shown as live is checked (DESIGN.md §2.16).
+        this._remoteLivenessTimer = setInterval(() => { this._checkRemoteLiveness?.(backendPort); }, REMOTE_LIVENESS_MS);
       } catch (err) {
         console.warn('Remote bridge unavailable:', err.message);
       }
@@ -1107,50 +1218,10 @@ class App {
         eventBus.on(evt, refreshAudienceLed);
       }
 
-      // Load saved smoothing settings into buttplug sync
-      if (this.buttplugSync) {
-        const savedSmoothing = this.settings.get('player.smoothing') || 'linear';
-        const savedSpeedLimit = this.settings.get('player.speedLimit') || 0;
-        this.buttplugSync.setInterpolationMode(savedSmoothing);
-        this.buttplugSync.setSpeedLimit(savedSpeedLimit);
-        // B2 boot path — keep tcodeSync in sync with the saved
-        // smoothing mode (parallel to the runtime callback above).
-        if (this.tcodeSync) this.tcodeSync.setInterpolationMode(savedSmoothing);
-
-        // Range Extender boot — push the saved state into both per-tick
-        // sync engines. Without this, a user with the extender saved as
-        // ON would get no stretch until they toggled the setting in the
-        // current session (sync engines default to false in constructor).
-        const savedExt = !!this.settings.get('player.rangeExtender.enabled');
-        this.buttplugSync.setRangeExtenderEnabled(savedExt);
-        if (this.tcodeSync) this.tcodeSync.setRangeExtenderEnabled(savedExt);
-
-        // Linear strategy: action-boundary (default) sends one LinearCmd per
-        // stroke with the full duration, letting the device's firmware handle
-        // in-stroke interpolation — much smoother on BLE (Handy / Kiiroo).
-        // interpolated (legacy) re-sends every tick with remaining duration.
-        const savedLinearStrategy = this.settings.get('player.linearStrategy') || 'action-boundary';
-        const savedLookahead = this.settings.get('player.linearLookaheadMs');
-        const savedMinStroke = this.settings.get('player.minStrokeMs');
-        this.buttplugSync.setLinearStrategy(savedLinearStrategy);
-        if (savedLookahead != null) this.buttplugSync.setLinearLookaheadMs(savedLookahead);
-        if (savedMinStroke != null) this.buttplugSync.setMinStrokeMs(savedMinStroke);
-
-        // Per-device sync offset, restored from settings. The offset
-        // shifts effective time so device commands fire earlier
-        // (negative) or later (positive) than the video time. See
-        // buttplug-sync setOffsetMs comment for the formula.
-        const savedBpOffset = this.settings.get('buttplug.defaultOffset');
-        if (savedBpOffset != null) this.buttplugSync.setOffsetMs(savedBpOffset);
-      }
-      if (this.tcodeSync) {
-        const savedTcOffset = this.settings.get('tcode.defaultOffset');
-        if (savedTcOffset != null) this.tcodeSync.setOffsetMs(savedTcOffset);
-        // Output rate (advanced) — apply the saved Hz on boot so it's active
-        // even if the connection panel is never opened this session.
-        const savedTcRate = Number(this.settings.get('tcode.updateRateHz')) || 60;
-        this.tcodeSync.setUpdateRate(savedTcRate);
-      }
+      // Saved smoothing, speed limit, Range Extender, linear strategy, offsets
+      // and output rate (the script player's engines take the same, v0.10.1).
+      this._configureButtplugSync(this.buttplugSync);
+      this._configureTCodeSync(this.tcodeSync);
 
       // Wire command activity indicator (throttled to avoid DOM thrashing)
       if (this.buttplugSync) {
@@ -1182,6 +1253,7 @@ class App {
             : '?';
           console.log(`[Handy] Connected (native WiFi) — key ...${keySuffix}, firmware ${fw}`);
           this._registerKnownDevice('handy', 'The Handy', 'handy');
+          this._startupConnections?.connected('The Handy');
           this._onHandyConnected();
           this._refreshOrgasmPlan();
         };
@@ -1275,6 +1347,7 @@ class App {
           this._registerKnownDevice(`buttplug:${dev.name}`, dev.name, 'buttplug', {
             buttplugIndex: dev.index,
           });
+          this._startupConnections?.connected(dev.name);
 
           // Re-run route matching — a device that connected after the video
           // loaded would otherwise stay silent until reload.
@@ -1384,6 +1457,17 @@ class App {
 
       // Initialize keyboard shortcuts (with connection panel for H key)
       this._keyboard = new KeyboardHandler(this._keyboardOptions());
+      // The View menu's F11 is the player's fullscreen (Dave 2026-11-22).
+      window.funsync?.onMenuToggleFullscreen?.(() => this._keyboard?.toggleFullscreenFromMenu());
+
+      // One toast naming the devices that connect by themselves now (the
+      // Handy with a saved key, Intiface's toys), once they settle; nothing
+      // when none does (Dave, 2026-11-25: not only Handy users any more; the
+      // Handy's "auto-connect failed" toast is gone).
+      this._startupConnections = new StartupConnections({
+        onShow: (names) => showToast(t('toast.devicesConnected', { devices: deviceList(names, getCurrentLocale()) }), 'success', 4000),
+      });
+      this._startupConnections.begin();
 
       // Auto-connect if a key is saved
       const savedKey = this.settings.get('handy.connectionKey');
@@ -1400,13 +1484,68 @@ class App {
     this.eroscriptsPanel = new EroScriptsPanel({ settings: this.settings });
     this.eroscriptsPanel.onLoginStatusChanged = (loggedIn) => {
       if (this.navBar) this.navBar.setEroScriptsStatus(loggedIn);
+      this.eroscriptsView?.onLoginChanged?.(loggedIn);
     };
     this.eroscriptsPanel.confirmBeforeDownload = () => this._confirmBeforeEroScriptsDownload();
     this.eroscriptsPanel.onScriptDownloaded = (fsPath, fsName) => this._onEroScriptDownloaded(fsPath, fsName);
     // Where a download goes: beside the OPEN video only, not one closed (C-05).
     this.eroscriptsPanel.getOpenVideoPath = () => this._openVideoPath();
+    // The EroScripts tab (2026-11-22): the panel docked in a view, a post's
+    // videos and scripts, downloads into a library folder.
+    this.eroscriptsView = new EroScriptsView({
+      container: document.getElementById('eroscripts-container'),
+      panel: this.eroscriptsPanel,
+      settings: this.settings,
+      getBackendPort: () => this.backendPort,
+      isLibraryFolder: (dir) => this._isUnderEnabledSource(dir),
+      onSavedIntoLibrary: () => this.library?.refresh?.(),
+      // A downloaded card's Play: the library's own play (its script, its
+      // variants). Not in the library (a folder that is not a source): false,
+      // and the card opens its download window instead.
+      playPath: (path) => {
+        const video = this.library?._videos?.find?.((v) => v.path === path);
+        if (!video || typeof this.library._playVideo !== 'function') return false;
+        this.library._playVideo(video);
+        return true;
+      },
+      // A feed's notification opens the tab.
+      showTab: () => { if (this._currentView() !== 'eroscripts') this._navigateTo('eroscripts'); },
+      // Watch: a post's video streamed with its script (2026-11-22).
+      playStream: (result, scriptPath, axes, opts) => this._loadRemoteVideo(result, scriptPath, axes, opts),
+      queueStream: (info) => this._queueStream(info),
+      getSaveStreams: () => this.settings?.get?.(SETTING_SAVE_STREAMS) !== false,
+      setSaveStreams: (on) => this.settings?.set?.(SETTING_SAVE_STREAMS, on),
+      resolveStream: (url) => this._resolveStream(url),
+    });
+    // The feeds' new threads on the nav bar's EroScripts button (2026-11-22).
+    this.eroscriptsView.onFeedsChanged = (total) => {
+      this.navBar?.setEroScriptsBadge?.(total, total ? t('eroscripts.tab.feeds.badgeLabel', { count: total }) : '');
+    };
+    this.eroscriptsView.onFeedsChanged(this.eroscriptsView.totalNew());
+    // A download running when FunSync closed comes back paused: said once at
+    // start, with Show (Dave, 2026-11-25). Not awaited: the backend may still be starting.
+    this.eroscriptsView.checkInterruptedDownloads?.().catch?.(() => {});
+    this.eroscriptsPanel.onOpenPost = (topic) => {
+      if (this._currentView() !== 'eroscripts') this._navigateTo('eroscripts');
+      this.eroscriptsView.openPost(topic);
+    };
+    eventBus.on('language:changed', () => this.eroscriptsView?.retranslate());
     // The same two hooks for Associate Funscript's EroScripts search (R4-07).
     this.library.confirmBeforeEroDownload = (videoPath, savePaths) => this._confirmBeforeAssociateDownload(videoPath, savePaths);
+    // Deleting a video's files (DESIGN.md §2.18): the player lets go first.
+    this.library.onBeforeDelete = (paths) => this._releaseVideoForDelete(paths);
+    // A heart or Disabled changed on a card or in Video options: the player follows (zaikechi #381).
+    this.library.onMarksChanged = () => this._paintPlayerMarks();
+    // Following playlists (zaikechi #381) keep in step: after each scan, on a
+    // category change, and when a rule is set.
+    this.library.onScanned = () => this._syncFollowingPlaylists();
+    eventBus.on('category:changed', (e) => this._onCategoryChangedForFollow(e));
+    eventBus.on('playlist:changed', (e) => { if (e?.action === 'follow' && e.follow) this._syncFollowingPlaylists(); });
+    // The Favourites playlist exists from the start, so it is there to find in Playlists.
+    this.settings.ensureFavouritesPlaylist?.(t('library.favourites.playlistName'));
+    // ...and its built-in name follows the language (B008: a first launch
+    // made it in English before German was chosen). A user's name stays.
+    eventBus.on('language:changed', () => this.settings.ensureFavouritesPlaylist?.(t('library.favourites.playlistName')));
     this.library.onEroDownloadWritten = (videoPath, done) => this._onAssociateDownloadWritten(videoPath, done);
 
     // Initialize script editor (after all dependencies are set up)
@@ -1428,6 +1567,13 @@ class App {
     this.scriptEditor.onReuploadHandy = () => this._uploadAndStartSync();
     // Axes embedded in the main script, in the editor's script list (#376, V42).
     this.scriptEditor.onEditEmbeddedAxis = (suffix) => this._editEmbeddedAxis(suffix);
+    // Multi-axis editing (2026-11-24): an axis saved to its own file plays on
+    // its channel (a new one becomes a companion); a saved combined file is
+    // read again for its axes.
+    this.scriptEditor.onAxisSaved = (info) => this._onEditorAxisSaved(info);
+    this.scriptEditor.onCombinedSaved = (info) => this._onEditorCombinedSaved(info);
+    // Save As (belgriffinite #439): the main script now lives in a new file.
+    this.scriptEditor.onMainSavedAs = (info) => this._onEditorMainSavedAs(info);
     this.scriptEditor.getEmbeddedAxisActions = (suffix) =>
       this.getEmbeddedAxes(this._currentFunscriptPath)?.axes?.get?.(suffix) || null;
     // The editor pop-out follows the video that plays, and seeks and steps
@@ -1435,6 +1581,20 @@ class App {
     this.scriptEditor.getPlaybackClock = () =>
       (this._playerWindowActive && this._playerWinProxy ? this._playerWinProxy : null);
     this.scriptEditor.routePlayback = (command, arg) => this._playerWindowPlayback(command, arg);
+    // The editor pop-out's Shift+Space (DESIGN.md §2.15).
+    this.scriptEditor.onStopAll = () => this.stopEverything({ source: 'editor' });
+    // Open or closed by any way (E included, not only the player's button):
+    // Up Next pauses for an open editor and comes back when it closes.
+    this.scriptEditor.onOpenChange = () => {
+      this._syncUpNextSuppression();
+      this.upNextEngine?.check();
+      // The player's script strip is under the docked editor: it stops
+      // drawing (it drew every frame there; Dave, 2026-11-25, "speed up the
+      // player when in editor"). In the mini player the editor is hidden.
+      this._syncInlineVizCovered();
+      // The simulator reads where the editor starts a few times a second; now at once.
+      this.deviceSimulator?.editorMoved?.();
+    };
     // Dock with the player in its own window brings the player back too (E-07).
     this.scriptEditor.onPopoutDocked = () => this._onEditorDocked();
     // E and the player's editor button both call toggle(): with the player in
@@ -1464,8 +1624,23 @@ class App {
     this.deviceSimulator = new DeviceSimulator({
       videoPlayer: this.videoPlayer,
       funscriptEngine: this.funscriptEngine,
+      options: this._deviceSimOptions(),
+      // Handled on the widget (v0.10.1): a drag saves where it sits, the
+      // corner grip its size, the right-click menu its direction and colour.
+      onMoved: (position) => this.settings?.set?.('player.deviceSimPosition', position),
+      onResized: (size) => this.settings?.set?.('player.deviceSimSize', size),
+      onRotated: (deg) => this.settings?.set?.('player.deviceSimRotation', deg),
+      onOption: (key, value) => this._onDeviceSimOption(key, value),
+      // Editor work list 2.5 / 5.4 (2026-11-24): the other axes beside the
+      // bar, in the look from its right-click menu (the 3D receiver by
+      // default), and Align to the video's saved line.
+      axisSource: (suffix) => this._deviceSimAxisActions(suffix),
+      look: this._deviceSimLook(),
+      alignment: this.settings?.get?.('player.deviceSimAlign'),
     });
     this._wireDeviceSimMenuItem();
+    this._wireDeviceSimOptions();
+    this._initScriptPlayer();
 
     // Initialize gap skip engine
     this.gapSkipEngine = new GapSkipEngine({
@@ -1514,6 +1689,12 @@ class App {
       // Orgasm Switch (hold X) — wired below once the controller exists.
       this._keyboard.onOrgasmHold = (active) => this._onOrgasmHold(active);
       this._keyboard.onEdgeHold = (active) => this._onEdgeHold(active);
+      // Stop all (DESIGN.md §2.15): Shift+Space.
+      this._keyboard.onStopAll = () => this.stopEverything({ source: 'key' });
+      // A play of this window's video lifts a Stop all hold. 'play' comes
+      // before 'playing', the event every sync engine starts on, so the gate
+      // is open before they send.
+      this.videoPlayer?.video?.addEventListener?.('play', () => this._releaseStopAllHold?.('this window played'));
 
     // Global hotkeys (Eroto, EroScripts #316) — the same three actions the
     // in-app keys drive, routed through the SAME methods so behaviour cannot
@@ -1578,6 +1759,12 @@ class App {
         if (this.handyManager?.connected && handyPath && handyContent) {
           this._orgasmHandyEngaged = true;
           const activation = (this._orgasmActivationId = (this._orgasmActivationId || 0) + 1);
+          // The phone shows "Starting…" until the Handy really plays the
+          // finisher: a cloud setScript took 2.35 s on Dave's phone hold
+          // (2026-11-24), and the button said "Release to return" while the
+          // device was still on the video's script.
+          this._orgasmHandyStarting = true;
+          this._pushRemoteOrgasmState?.();
           // Stop UNCONDITIONALLY — do not gate on `_active`. That flag can
           // drift out of step with the engine's bound video handlers: the
           // web-remote path swaps `syncEngine.player` to the proxy and calls
@@ -1628,7 +1815,11 @@ class App {
           // Handy sequences never interleave. Its restore may have started
           // the main engine meanwhile: stopped again before the finisher.
           // So does a Settings Test's Handy restore (pf-fixup).
-          const priorReleases = [this._edgeReleasePromise, this._patternTestReleasePromise].filter(Boolean);
+          // So does this switch's OWN previous release (Dave's phone,
+          // 2026-11-24): pressed again while it was still restoring the
+          // video's script, the restore started the video sync in the middle
+          // of the new hold and the two fought over the Handy for 5 s.
+          const priorReleases = [this._edgeReleasePromise, this._patternTestReleasePromise, this._orgasmReleasePromise].filter(Boolean);
           const edgeRelease = priorReleases.length ? Promise.all(priorReleases).catch(() => {}) : null;
           this._orgasmEngagePromise = edgeRelease
             ? Promise.resolve(edgeRelease).then(() => {
@@ -1638,11 +1829,22 @@ class App {
               return engage();
             })
             : engage();
+          // The Handy plays the finisher (or the engage gave up): the phone
+          // stops saying "Starting…". A stale engage leaves it to the newer.
+          const started = () => {
+            if (activation !== this._orgasmActivationId) return;
+            this._orgasmHandyStarting = false;
+            this._pushRemoteOrgasmState?.();
+          };
+          Promise.resolve(this._orgasmEngagePromise).then(started, started);
         }
       },
       onDeactivate: () => {
+        this._setOrgasmCarryNotice?.(false);
+        this._orgasmHandyStarting = false;
         this._pushRemoteOrgasmState?.(); // phone button parity (F2)
         this._orgasmActivationId = (this._orgasmActivationId || 0) + 1; // cancel any in-flight engage
+        const releaseActivation = this._orgasmActivationId;
         // Finish mode (toggle): the user is "done" — leave the main engines
         // stopped and halt the devices where they are, rather than snapping
         // back to the main funscript.
@@ -1694,9 +1896,19 @@ class App {
           // the engage's setScript is mid-flight — the engage aborts stale,
           // and only then do we stop + restore so the calls never interleave).
           // Kept: an Edge "Play a pattern" press meanwhile waits for it.
+          // Pressed again before this release got to its restore: the new
+          // hold owns the Handy, so the video's script is NOT put back (it
+          // started the video sync mid-hold, Dave's phone 2026-11-24).
+          const stillReleased = () => this._orgasmActivationId === releaseActivation && !this.orgasmSwitch?.active;
           const release = Promise.resolve(this._orgasmEngagePromise)
             .then(() => releaseHandyFinisher({ handyManager: this.handyManager }))
-            .then(() => this._restoreHandyAfterOrgasm());
+            .then(() => {
+              if (!stillReleased()) {
+                console.log('[OrgasmSwitch] pressed again before the release finished: the video script stays off');
+                return undefined;
+              }
+              return this._restoreHandyAfterOrgasm({ isCurrent: stillReleased });
+            });
           this._orgasmReleasePromise = release;
           const settled = () => {
             if (this._orgasmReleasePromise === release) this._orgasmReleasePromise = null;
@@ -1758,17 +1970,44 @@ class App {
           active.mode = 'disabled';
           subBadgeInit.classList.remove('subtitle-badge--active');
         } else {
-          tracks[0].mode = 'showing';
+          // The NEWEST track: clearSubtitles empties a previous video's
+          // track but Chromium can keep it in the list, at [0] (#268).
+          tracks[tracks.length - 1].mode = 'showing';
           subBadgeInit.classList.add('subtitle-badge--active');
         }
       };
-      subBadgeInit.addEventListener('click', toggleSubs);
+      // Subtitles inside the file (#268): with more than one track, or a
+      // picture one to explain, the button opens a menu of them; otherwise
+      // it switches the one track on and off as before.
+      const holder = document.createElement('span');
+      holder.className = 'subtitle-picker';
+      subBadgeInit.replaceWith(holder);
+      const subMenu = document.createElement('div');
+      subMenu.id = 'subtitle-menu';
+      subMenu.className = 'player__quality-menu subtitle-picker__menu';
+      subMenu.setAttribute('role', 'menu');
+      subMenu.hidden = true;
+      holder.append(subBadgeInit, subMenu);
+      const closeSubMenu = () => { subMenu.hidden = true; subBadgeInit.setAttribute('aria-expanded', 'false'); };
+      this._closeSubtitleMenu = closeSubMenu;
+      const pressSubs = () => {
+        const subs = this._embeddedSubs;
+        const menuWorth = subs && (subs.tracks.length > 1 || subs.tracks.some((tr) => !tr.text));
+        if (!menuWorth) { toggleSubs(); return; }
+        const open = subMenu.hidden;
+        if (open) this._paintSubtitleMenu();
+        subMenu.hidden = !open;
+        subBadgeInit.setAttribute('aria-expanded', String(open));
+      };
+      subBadgeInit.addEventListener('click', (e) => { e.stopPropagation(); pressSubs(); });
       subBadgeInit.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();
-          toggleSubs();
+          pressSubs();
         }
       });
+      document.addEventListener('click', (e) => { if (!subMenu.hidden && !e.target.closest('.subtitle-picker')) closeSubMenu(); }, true);
+      subMenu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); closeSubMenu(); subBadgeInit.focus(); } });
     }
 
     // Funscript badge — clicking opens the script editor (same as E
@@ -1815,9 +2054,11 @@ class App {
     // the page goes after all (_onBeforeUnload).
     this._stopEverythingOnUnload = () => {
       try {
+        this.scriptPlayer?.stopForExit?.();
         if (this._sourcePollingInterval) clearInterval(this._sourcePollingInterval);
         if (this._vrActivityInterval) clearInterval(this._vrActivityInterval);
         if (this._rescanPollInterval) clearInterval(this._rescanPollInterval);
+        if (this._remoteLivenessTimer) clearInterval(this._remoteLivenessTimer);
         if (this.syncEngine) this.syncEngine.stop();
         if (this.buttplugSync) this.buttplugSync.stop();
         if (this.tcodeSync) this.tcodeSync.stop();
@@ -1967,7 +2208,11 @@ class App {
     const missed = (this._expectedScriptMisses ||= new Set());
     if (!missed.has(scriptPath)) {
       missed.add(scriptPath);
-      console.warn('[Script] expected script not found:', scriptPath);
+      // There but unreadable (locked, no permission) is not missing: say
+      // which (C-09, TODO triage 2026-11-23), as the library's reads do.
+      const there = await this.library?._pathStatus?.(scriptPath);
+      if (there === true) console.warn('[Script] expected script is there but could not be read:', scriptPath);
+      else console.warn('[Script] expected script not found:', scriptPath);
     }
 
     // Nothing stored changes: a variation whose script is missing, even
@@ -2221,7 +2466,9 @@ class App {
         const deviceLabel = device ? device.label : (route.deviceId || '');
         const prefix = route.role === 'main' ? '★ ' : '';
         const scriptName = route.scriptName || route.scriptPath.split(/[\\/]/).pop();
-        scripts.push({ label: `${prefix}${deviceLabel}: ${scriptName}`, path: route.scriptPath });
+        // `route`: device routes, not the axes of one script: the editor's
+        // New axis / Export stay off (multi-axis editing, 2026-11-24).
+        scripts.push({ label: `${prefix}${deviceLabel}: ${scriptName}`, path: route.scriptPath, route: true, ...(route.role === 'main' ? { kind: 'main' } : {}) });
       }
       if (scripts.length > 1) this.scriptEditor.setAvailableScripts(scripts);
     }
@@ -2470,6 +2717,11 @@ class App {
       videoPath: rawPath,
     });
     this.sessionTracker?.setState('preparing');
+    // Z on a video change, as for a local one (lr_x3 #447). X ends, as by
+    // default: this path puts the new script on the Handy itself, so a
+    // finisher kept on (a local-video setting) cannot ride over it.
+    this._edgeOnVideoChange?.();
+    this._orgasmOnVideoChange?.({ remote: true });
 
     // Guard against concurrent calls (rapid video browsing in VR player)
     this._vrMatchGeneration = (this._vrMatchGeneration || 0) + 1;
@@ -2775,6 +3027,8 @@ class App {
     // Edge Hold from the phone (next major): the keyboard-Z path, so hold
     // or toggle, the Edge pattern and X over Z apply as for the key. Its
     // state goes back as `edge-state` (_pushRemoteEdgeState).
+    // The phone's Stop (DESIGN.md §2.15): the same Stop all as Shift+Space.
+    this.remoteBridge.onPhoneStopAll = () => this.stopEverything({ source: 'phone' });
     this.remoteBridge.onPhoneEdgeHold = (active) => {
       this._onEdgeHold(active === true);
     };
@@ -2835,6 +3089,8 @@ class App {
       type: 'orgasm-state',
       configured: !!this.orgasmSwitch?.configured,
       active: !!this.orgasmSwitch?.active,
+      // The Handy is still switching to the finisher (cloud setScript).
+      starting: !!(this.orgasmSwitch?.active && this._orgasmHandyStarting),
       mode: this.settings?.get?.('player.orgasmSwitchMode') === 'toggle' ? 'toggle' : 'hold',
     });
   }
@@ -2942,6 +3198,11 @@ class App {
     // loads ran to the end, the first one's uploads able to land last.
     const phoneEpoch = this._remotePhoneEpoch;
     const phoneLoad = this._remotePhoneLoadGen = (this._remotePhoneLoadGen || 0) + 1;
+    // Z on a video change, as for a local one (lr_x3 #447). X ends, as by
+    // default: this path puts the new script on the Handy itself, so a
+    // finisher kept on (a local-video setting) cannot ride over it.
+    this._edgeOnVideoChange?.();
+    this._orgasmOnVideoChange?.({ remote: true });
     const phoneGone = () => this._remotePhoneEpoch !== phoneEpoch || this._remotePhoneLoadGen !== phoneLoad;
 
     if (!videoPath) {
@@ -3158,7 +3419,39 @@ class App {
     }
   }
 
+  /**
+   * Liveness (DESIGN.md §2.16, §1.6 S7): a Web Remote session shown as live
+   * is checked every 10 s. The backend knows whether a phone is connected
+   * (GET /api/remote/sync/status); two answers in a row with no phone end the
+   * session through the normal disconnect path (devices stopped, card gone,
+   * toast). Found by the full manual test (2026-11-23): one throw in the
+   * disconnect handler left the card on "Paused" for good. A failed request
+   * is not an answer: a busy backend is not a dead one, and only an explicit
+   * "no phone" counts.
+   * @param {number} port
+   */
+  async _checkRemoteLiveness(port) {
+    const session = this.sessionTracker?.getSession?.();
+    if (!session || session.source !== 'web-remote') { this._remoteLivenessMisses = 0; return; }
+    let body = null;
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/remote/sync/status`);
+      if (res.ok) body = await res.json();
+    } catch { /* not an answer */ }
+    if (!body || typeof body.phoneConnected !== 'boolean') return;
+    if (body.phoneConnected) { this._remoteLivenessMisses = 0; return; }
+    this._remoteLivenessMisses = (this._remoteLivenessMisses || 0) + 1;
+    if (this._remoteLivenessMisses < 2) return;
+    this._remoteLivenessMisses = 0;
+    const still = this.sessionTracker?.getSession?.();
+    if (!still || still.source !== 'web-remote') return;
+    console.warn(`[Remote] liveness: no phone connected for two checks; ending the session from ${still.identifier || 'the phone'}`);
+    this._onRemotePhoneDisconnected(still.identifier);
+  }
+
   _onRemotePhoneDisconnected(_ip) {
+    // A Stop all hold on the phone ends with it (DESIGN.md §2.15).
+    if (this._stopAllHold?.driving?.kind === 'phone') this._releaseStopAllHold?.('the phone left');
     // A phone load still in flight stops at its next await (see
     // _onRemotePhoneConnected), and a variant list it filled now belongs to
     // a session that has ended (see _switchVariant).
@@ -3167,7 +3460,14 @@ class App {
     // after the script restore's first await: a V press or a pick from the
     // variant menu in between, or under a headset that took over, loaded
     // the phone video's variant onto the streamer's own devices.
-    this._givePhoneVariantListBack?.();
+    // A failure here is the menu's, never a reason to leave the devices
+    // running and the session open (full manual test, 2026-11-23: it threw,
+    // and everything below was skipped).
+    try {
+      this._givePhoneVariantListBack?.();
+    } catch (err) {
+      console.warn('[Remote] giving the variation list back failed:', err?.message || err);
+    }
     // The phone video's per-video sync offset (#380) ends with the session.
     if (this._phoneSyncOffsetActive) {
       this._phoneSyncOffsetActive = false;
@@ -3526,24 +3826,8 @@ class App {
       const v = Number(this.settings?.get?.(key));
       return Number.isFinite(v) ? v : 0;
     };
-    if (this.handyManager?.connected) {
-      devices.push({ kind: 'handy', label: 'The Handy', offsetMs: offsetFor('handy') });
-    }
-    if (this.buttplugManager?.connected) {
-      for (const d of this.buttplugManager.devices || []) {
-        devices.push({ kind: 'buttplug', label: d.name, offsetMs: offsetFor('buttplug') });
-      }
-    }
-    if (this.tcodeManager?.connected) {
-      // The link's own endpoint, as the desktop names the device (E-05; also
-      // in v0.9.2): COM port, host:port or the WebSocket URL. `portPath` is
-      // serial-only, so a UDP or WebSocket device read "TCode (serial)".
-      const port = this.tcodeManager.endpoint || this.tcodeManager.portPath || 'serial';
-      devices.push({ kind: 'tcode', label: `TCode (${port})`, offsetMs: offsetFor('tcode') });
-    }
-    if (this.autoblowManager?.connected) {
-      const ab = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
-      devices.push({ kind: 'autoblow', label: ab, offsetMs: offsetFor('autoblow') });
+    for (const d of this._connectedDevices()) {
+      devices.push({ kind: d.kind, label: d.label, offsetMs: offsetFor(d.kind) });
     }
 
     // Tracker still expects the four-boolean summary. Derive it from the
@@ -3581,6 +3865,8 @@ class App {
    *   unordered ones).
    */
   _stopVRSync({ keepVideoSyncOffset = false } = {}) {
+    // A Stop all hold on the headset ends with its session (DESIGN.md §2.15).
+    if (this._stopAllHold?.driving?.kind === 'headset') this._releaseStopAllHold?.('the headset session ended');
     // Audience: a VR video's source ends with the VR session (disconnect,
     // mutex eviction, or the next VR video, which begins its own after
     // this), so a local play afterwards can never start viewers on the
@@ -4147,9 +4433,13 @@ class App {
           ownScript,
         ]);
       }),
-      onFunscriptFile: (file) => afterEditorOk((asked) => (asked
+      onFunscriptFile: (file) => ((this.scriptPlayer && !this._hasOpenVideo())
+        // No video open: play it on the devices (the script player, v0.10.1).
+        // It used to wait, unseen, for a video to pair with.
+        ? this._playScriptOnly({ name: file.name, path: file.path || null, file })
+        : afterEditorOk((asked) => (asked
         ? this._readFunscriptFileAgain(file).then((again) => this.loadFunscript(again))
-        : this.loadFunscript(file))),
+        : this.loadFunscript(file)))),
       onSubtitleFile: (file) => (batchAnswer
         ? batchAnswer.then((ok) => (ok ? this.videoPlayer.loadSubtitles(file) : undefined))
         : this.videoPlayer.loadSubtitles(file)),
@@ -4262,6 +4552,8 @@ class App {
       // the user is looking at the Library, not the video.
       isVRZoomActive: () => this._currentView() === 'player'
         && !!this._currentStereoFormat && !!this._currentVideoPath,
+      // Zoom with no Ctrl (Settings > Keyboard > VR zoom keys).
+      getVRZoomKeys: () => readVRZoomKeys(this.settings?.get?.(VR_ZOOM_KEYS_SETTING)),
       // Home/End seek only on the player view; in the Library they scroll (V44).
       getView: () => this._currentView(),
       // The playback keys act only while a player is on screen: the player
@@ -4284,6 +4576,8 @@ class App {
       this._onOrgasmHold(true, { forceToggle: true });
     } else if (action === 'edge') {
       this._onEdgeHold(!this._edgeActive, { force: true });
+    } else if (action === 'stopAll') {
+      this.stopEverything({ source: 'hotkey' });
     }
   }
 
@@ -4554,6 +4848,8 @@ class App {
    * @returns {'started'|'busy'|'no-devices'}
    */
   _startFillerTest(actions, { onProgress, onEnd } = {}) {
+    // A deliberate start lifts a Stop all hold (DESIGN.md §2.15).
+    this._releaseStopAllHold?.('a pattern Test');
     if (!this._fillerTest) {
       this._fillerTest = new FillerTestPlayer({
         buttplugSync: this.buttplugSync,
@@ -4618,6 +4914,7 @@ class App {
       this._handyTestHeldEngine = true;
     }
     const engage = () => engageHandyFinisher({
+      logTag: 'PatternTest',
       handyManager: this.handyManager,
       content,
       cachedUrl: null,
@@ -5232,8 +5529,9 @@ class App {
       // (FT-045, also in v0.9.2: a removed script stayed on both).
       // A hand-added variation (added, renamed, removed, healed) is in the
       // video's variation list the phone shows (FN-04).
+      // A VR Format change reaches the phone's Flat view too (#426).
       else if (path === 'library.manualVRType' || path === 'library.associations'
-        || path === 'library.manualVariants') scheduleVideos();
+        || path === 'library.manualVariants' || path === 'library.vrFormat') scheduleVideos();
     });
     // The phone's Tags filter and the funscript metadata harvest (Round 3).
     this._wireRemoteTags?.();
@@ -5327,8 +5625,8 @@ class App {
     });
     // The first scan's list (the library replaces `_videos` per scan).
     eventBus.on('library:filtered', () => {
-      const videos = this.library?._videos;
-      if (!Array.isArray(videos) || videos.length === 0) return;
+      const videos = (this.library?._videos || []).filter((v) => !v._stream);
+      if (videos.length === 0) return;
       stashSyncOnStart(videos);
     });
   }
@@ -5601,10 +5899,11 @@ class App {
         ? ((status === 'connecting' || status === 'slow') ? 'connecting' : 'connected')
         : 'disconnected';
 
-    // Nav bar LED + text
-    if (this.navBar) {
-      this.navBar.setHandyStatus(effectiveStatus, deviceCount);
-    }
+    // Nav bar pill. It reads each device's own state, so a later
+    // _updateDeviceIndicators no longer paints over "not responding" or
+    // "connecting" with "connected"; only "connecting" has to be remembered.
+    this._handyConnecting = status === 'connecting';
+    this._paintNavDevices();
 
     // Player control button LED
     const led = document.getElementById('handy-led');
@@ -5645,9 +5944,7 @@ class App {
       if (anyConnected) led.classList.add('handy-led--connected');
     }
 
-    if (this.navBar) {
-      this.navBar.setHandyStatus(anyConnected ? 'connected' : 'disconnected', deviceCount);
-    }
+    this._paintNavDevices();
 
     // Player control button tooltip
     const btn = document.getElementById('btn-handy');
@@ -5716,11 +6013,52 @@ class App {
     chip.hidden = false;
     chip.dataset.state = compact.state;
     if (text.textContent !== compact.label) text.textContent = compact.label;
+    // Stop all beside it while a device (or an Audience room) is there (DESIGN.md §2.15).
+    const stopBtn = document.getElementById('btn-player-stop-all');
+    if (stopBtn) stopBtn.hidden = !((this._getConnectedDeviceCount?.() || 0) > 0 || this.audienceBridge?.roomActive);
   }
 
   /**
    * Count total connected devices across Handy and Buttplug.
    */
+  /**
+   * Every connected device, named as the desktop names it, with its state:
+   * the nav bar's Devices pill and the phone's device status both read this.
+   * Buttplug's `connected` means "connected to Intiface", so only its paired
+   * devices count.
+   * @returns {{kind: string, label: string, state: 'connected'|'slow'|'unresponsive'}[]}
+   */
+  _connectedDevices() {
+    const out = [];
+    const h = this.handyManager;
+    if (h?.connected) {
+      const state = h.responsive === false ? 'unresponsive' : (h.slow ? 'slow' : 'connected');
+      out.push({ kind: 'handy', label: 'The Handy', state });
+    }
+    if (this.buttplugManager?.connected) {
+      for (const d of this.buttplugManager.devices || []) {
+        out.push({ kind: 'buttplug', label: d.name, state: 'connected' });
+      }
+    }
+    if (this.tcodeManager?.connected) {
+      // The link's own endpoint, as the desktop names the device (E-05; also
+      // in v0.9.2): COM port, host:port or the WebSocket URL. `portPath` is
+      // serial-only, so a UDP or WebSocket device read "TCode (serial)".
+      const port = this.tcodeManager.endpoint || this.tcodeManager.portPath || 'serial';
+      out.push({ kind: 'tcode', label: `TCode (${port})`, state: 'connected' });
+    }
+    if (this.autoblowManager?.connected) {
+      const ab = this.autoblowManager.isUltra ? 'Autoblow Ultra' : 'VacuGlide 2';
+      out.push({ kind: 'autoblow', label: ab, state: 'connected' });
+    }
+    return out;
+  }
+
+  /** The nav bar's Devices pill, from the devices themselves (setDeviceStatus). */
+  _paintNavDevices() {
+    this.navBar?.setDeviceStatus({ devices: this._connectedDevices(), connecting: !!this._handyConnecting });
+  }
+
   _getConnectedDeviceCount() {
     let count = 0;
     if (this.handyManager?.connected) count += 1;
@@ -5905,8 +6243,9 @@ class App {
         console.log('[Handy] Auto-connect successful');
         // The onConnect callback will handle the rest (indicators + sync)
       } else {
+        // No toast (Dave, 2026-11-25): the indicator says it; not everyone
+        // with a saved key has the Handy on at every start.
         console.warn('[Handy] Auto-connect failed');
-        showToast(t('toast.handyAutoFailed'), 'warn');
         this._updateHandyIndicators('disconnected');
       }
     } catch (err) {
@@ -6081,6 +6420,11 @@ class App {
    */
   _onOrgasmHold(active, { forceToggle = false } = {}) {
     if (!this.orgasmSwitch) return;
+    if (active) this._releaseStopAllHold?.('X');
+    if (active && this.scriptPlayer?.active) {
+      showToast(t('scriptPlayer.xzUnavailable'), 'info', 4000);
+      return;
+    }
     // An Edge hold (Z) must yield before the finisher arms: X's activation
     // records which engines IT stopped so its release can restart exactly
     // those — arming it while Edge already stopped them would record none
@@ -6159,6 +6503,11 @@ class App {
    */
   _finishOrgasm() {
     this._orgasmFinishStop = true;
+    // Every way a finisher ends comes here (a second press, a video change),
+    // so the toggle mark goes with it: it stayed true after a video change
+    // ended a toggled switch (bf-verify 2026-11-19). Only the log line reads
+    // it today, but a stale mark would mislead anything that reads it later.
+    this._orgasmToggled = false;
     this.orgasmSwitch.deactivate();
   }
 
@@ -6277,6 +6626,7 @@ class App {
    */
   async _stopForRelaunch() {
     const STOP_WAIT_MS = 3000;
+    try { this.scriptPlayer?.stopForExit?.(); } catch { /* best-effort */ }
     // Freeze the clock first so nothing re-anchors a device while the stops
     // are in flight. The pop-out owns the playing <video> while it is active.
     try { this.videoPlayer?.video?.pause?.(); } catch { /* best-effort */ }
@@ -6316,6 +6666,161 @@ class App {
     ]);
     clearTimeout(timer);
     console.log(`[Relaunch] playback paused, ${stops.length} device stop(s) ${answered ? 'answered' : 'still pending after 3 s'}`);
+  }
+
+  /**
+   * The delete dialog is about to delete these files (DESIGN.md §2.18). If
+   * this window's video is one of them, let go of it first: Windows will not
+   * delete a file a player has open, and the editor's autosave must run now,
+   * not after the delete (it would write the script back). Back to the
+   * Library, playback and the devices stopped, the player emptied, and no
+   * current video (a deleted one must not be resumed, nor its records
+   * written back after FunSync forgot them).
+   * @param {string[]} paths
+   * @returns {Promise<boolean>} whether it let go of something
+   */
+  async _releaseVideoForDelete(paths) {
+    const fold = (p) => String(p || '').replace(/\//g, '\\').toLowerCase();
+    const going = new Set((paths || []).map(fold));
+    const cur = this._currentVideoPath;
+    if (!cur || !going.has(fold(cur))) return false;
+    try { this.scriptEditor?.hide?.(); } catch { /* best-effort */ }
+    if (this._currentView?.() === 'player') this._navigateTo?.('library');
+    this._clearMiniplayer?.();
+    const el = this._getViewEl?.('player');
+    if (el) el.hidden = true;
+    this._teardownPlayback?.();
+    try {
+      const v = this.videoPlayer?.video;
+      if (v) { v.removeAttribute('src'); v.load(); }
+    } catch { /* nothing to unload */ }
+    this._currentVideoPath = null;
+    this._currentVideoName = null;
+    console.log('[Delete] the player let go of the video before it is deleted');
+    await new Promise((r) => setTimeout(r, 300));
+    return true;
+  }
+
+  /**
+   * Stop all (DESIGN.md §1.6 S1 / S2, §2.15): the ONE stop, whatever drives
+   * the devices. Shift+Space, the Stop buttons beside the device status, the
+   * optional global hotkey, the pop-out's Shift+Space and the phone's Stop all
+   * call it.
+   *
+   * In order: pause every source it can reach (this window's video, the
+   * pop-out, the phone, the headset); end every driver on its own clock (the
+   * script player, the Orgasm Switch in either mode, Edge Hold, a pattern
+   * Test); then send every connected device its stop. Connections stay up.
+   * Nothing restarts by itself: play, X, Z or a Test starts things again.
+   * A phone or headset still playing is held at once: the device gate closes
+   * until it pauses (`_holdDevicesAfterStopAll`), and one still playing 1.5 s
+   * later (it ignored the pause) is said so.
+   * @param {{ source?: string }} [opts] who asked: key, button, hotkey, popout, phone
+   * @returns {string[]} what it stopped (the log line and the tests)
+   */
+  stopEverything({ source = 'key' } = {}) {
+    const done = [];
+    const step = (name, fn) => {
+      try { if (fn() !== false) done.push(name); } catch (err) { console.warn(`[StopAll] ${name} failed:`, err?.message || err); }
+    };
+    // 1. Pause every source it can reach (a paused source sends nothing).
+    step('video', () => { const v = this.videoPlayer?.video; if (!v || v.paused) return false; v.pause(); return true; });
+    if (this._playerWindowActive) {
+      step('pop-out', () => window.funsync?.playerPopoutRelay?.('to-popout',
+        PLAYERWIN.makeMessage(PLAYERWIN.SET_PLAY_STATE, { paused: true })));
+    }
+    const driving = this._stopAllDrivingSource?.() || null;
+    if (driving?.kind === 'phone' || this._remoteActive) {
+      step('phone', () => (this.remoteBridge?.connected ? this.remoteBridge.sendToPhone({ type: 'stop-all' }) : false));
+    }
+    if (driving?.kind === 'headset') step('headset', () => this.vrBridge?.pause?.());
+    // 2. End every driver on its own clock. Edge Hold first, while the
+    //    sources are paused: its release re-arms the engines it stopped (so
+    //    the next play drives the devices) without sending, and the Handy's
+    //    resume is skipped (its hsspPlay could land after the stop below).
+    if (this.scriptPlayer?.active) step('script player', () => { this.scriptPlayer.stop(); });
+    if (this.orgasmSwitch?.active) step('orgasm switch', () => this._finishOrgasm?.());
+    if (this._edgeActive) {
+      step('edge hold', () => {
+        this._onEdgeHold?.(false, { force: true, skipHandyResume: true });
+        if (this.syncEngine && !this.syncEngine._active && this.funscriptEngine?.isLoaded) this.syncEngine.start();
+      });
+    }
+    if (this._fillerTest?.running || this._handyTest) step('pattern test', () => this._fillerTest?.stop?.());
+    // The Bluetooth sync test's beat (#431): it would start the toys again.
+    if (this._btSyncTestRunning?.()) step('sync test', () => this._stopBtSyncTest?.());
+    // 3. Every connected device's stop, last, so nothing above lands after it.
+    if (this.handyManager?.connected) step('handy', () => { this.handyManager.hsspStop()?.catch?.(() => {}); });
+    if (this.buttplugManager?.connected) step('buttplug', () => { this.buttplugManager.stopAll()?.catch?.(() => {}); });
+    if (this.tcodeManager?.connected) step('tcode', () => { this.tcodeManager.stop(); });
+    if (this.autoblowManager?.connected) step('autoblow', () => { this.autoblowManager.syncStop()?.catch?.(() => {}); });
+    if (this.audienceBridge?.roomActive) step('audience', () => { this.audienceBridge.hsspStopAll()?.catch?.(() => {}); });
+    console.log(`[StopAll] from ${source}: ${done.join(', ') || 'nothing was running'}`);
+
+    const devices = this._getConnectedDeviceCount?.() || 0;
+    showToast(t(devices > 0 || this.audienceBridge?.roomActive ? 'toast.stopAllDone' : 'toast.stopAllNoDevices'), 'info', 4000);
+    // S2: a phone or headset still playing must not drive the devices again,
+    // not even until its pause arrives (live, 2026-11-23: a phone that played
+    // on moved the device 56 ms after the stop). Held at once, AFTER the stops
+    // above (the gate would block them too); the hold lifts on that source's
+    // pause, the normal case a moment later. One still playing 1.5 s on is
+    // said so.
+    clearTimeout(this._stopAllCheckTimer);
+    this._stopAllCheckTimer = null;
+    if (driving && (driving.kind === 'phone' || driving.kind === 'headset') && driving.proxy?.paused === false) {
+      this._holdDevicesAfterStopAll?.(driving);
+      this._stopAllCheckTimer = setTimeout(() => {
+        this._stopAllCheckTimer = null;
+        if (this._stopAllHold?.driving !== driving || driving.proxy?.paused !== false) return;
+        console.log(`[StopAll] the ${driving.kind} kept playing: devices held until it pauses`);
+        showToast(t(driving.kind === 'phone' ? 'toast.stopAllPhoneKeptPlaying' : 'toast.stopAllHeadsetKeptPlaying'), 'warn', 8000);
+      }, 1500);
+    }
+    return done;
+  }
+
+  /**
+   * Which source the sync engines follow: this window's video, the pop-out,
+   * the phone or the headset (their `player.video` is that source's proxy).
+   * @returns {{ kind: 'local'|'popout'|'phone'|'headset', proxy: object }|null}
+   */
+  _stopAllDrivingSource() {
+    const p = (this.tcodeSync?.player || this.buttplugSync?.player || this.syncEngine?.player || this.autoblowSync?.player)?.video || null;
+    if (!p) return null;
+    if (this._remoteProxy && p === this._remoteProxy) return { kind: 'phone', proxy: p };
+    if (this.vrBridge?.proxy && p === this.vrBridge.proxy) return { kind: 'headset', proxy: p };
+    if (this._playerWinProxy && p === this._playerWinProxy) return { kind: 'popout', proxy: p };
+    return { kind: 'local', proxy: p };
+  }
+
+  /**
+   * S2's hold (DESIGN.md §2.15): the phone or headset still plays on its own
+   * clock, so its engines would drive the devices again before (or instead
+   * of) its pause. The device gate closes (every command reaches nothing)
+   * until that source pauses, the session ends, this window's video is
+   * played, or X, Z or a Test is pressed. It never lifts by itself.
+   * @param {{ kind: string, proxy: EventTarget }} driving
+   */
+  _holdDevicesAfterStopAll(driving) {
+    const gate = this.deviceGate;
+    if (!gate || gate.closed) return; // the script player holds it, or a hold already does
+    gate.close(STOP_ALL_HOLD_OWNER);
+    const onPause = () => this._releaseStopAllHold?.(`the ${driving.kind} paused`);
+    driving.proxy?.addEventListener?.('pause', onPause);
+    this._stopAllHold = { driving, onPause };
+    console.log(`[StopAll] the ${driving.kind} is still playing: devices held until it pauses`);
+  }
+
+  /** Lift S2's hold (no-op without one). @param {string} why for the log */
+  _releaseStopAllHold(why = '') {
+    const hold = this._stopAllHold;
+    clearTimeout(this._stopAllCheckTimer);
+    this._stopAllCheckTimer = null;
+    if (!hold) return;
+    this._stopAllHold = null;
+    hold.driving?.proxy?.removeEventListener?.('pause', hold.onPause);
+    if (this.deviceGate?.owner === STOP_ALL_HOLD_OWNER) this.deviceGate.open();
+    console.log(`[StopAll] hold lifted: ${why || 'released'}`);
   }
 
   /**
@@ -6739,11 +7244,442 @@ class App {
     this._pushRemoteOrgasmState?.();
   }
 
+  /**
+   * Look the stream's page up again and carry on where it was, playing or
+   * paused (2026-11-23). Falls back to the ordinary error when the page
+   * gives nothing.
+   */
+  async _recoverStream(session) {
+    const video = this.videoPlayer.video;
+    session.recovering = true;
+    const at = video.currentTime || 0;
+    console.warn(`[Stream] failed at ${at.toFixed(1)}s: looking the page up again`);
+    this.streamStatus?.reconnecting();
+    let res = null;
+    try { res = await this._resolveStream(session.pageUrl); } catch { res = null; }
+    if (this._remoteSession !== session) return;   // another video meanwhile
+    session.recovering = false;
+    session.recoveredAt = Date.now();
+    if (!res?.ok) {
+      console.warn(`[Stream] could not reconnect: ${res?.kind || 'error'}`);
+      this._onVideoError({ noRecover: true });
+      return;
+    }
+    session.isHls = !!res.isHls;
+    session.levels = Array.isArray(res.levels) && res.levels.length > 1 ? res.levels : null;
+    session.height = res.height || null;
+    await this.videoPlayer.swapSource(res.proxyUrl, { isHls: !!res.isHls, at, play: session.wantsPlay !== false });
+    this._paintStreamQuality(this.videoPlayer.streamLevels?.() || this._progressiveQualityInfo());
+    console.log(`[Stream] reconnected at ${at.toFixed(1)}s`);
+  }
+
+  /**
+   * Keep a stream in the library (2026-11-23, SCOPE-saved-streams.md): its
+   * page, title and script; its picture fetched once in the background. A
+   * stream saved before is updated in place. Returns the record, or null.
+   */
+  async _saveStream({ pageUrl, title, site, duration, scriptPath = null, axes = null, topicId = null, imageUrl = null }) {
+    const entry = streamEntryFrom({ pageUrl, title, site, duration, scriptPath, axes, topicId });
+    if (!entry) return null;
+    const list = upsertStream(this.settings.get(SETTING_STREAMS) || [], entry);
+    this.settings.set(SETTING_STREAMS, list);
+    this.library?.onStreamsChanged?.();
+    if (imageUrl && window.funsync?.saveStreamThumbnail) {
+      window.funsync.saveStreamThumbnail(entry.key, imageUrl).then((r) => {
+        if (!r?.path) return;
+        const map = { ...(this.settings.get('library.customThumbnails') || {}) };
+        map[entry.key] = { type: 'image', imagePath: r.path };
+        this.settings.set('library.customThumbnails', map);
+        this.library?.onStreamsChanged?.({ thumb: entry.key });
+      }).catch(() => { /* the card shows the logo tile */ });
+    }
+    return list.find((e) => e.key === entry.key) || entry;
+  }
+
+  /**
+   * A saved stream about to play: its page looked up (the card says "Starting
+   * the stream…" meanwhile) and a stream session begun under its key. The
+   * load data for loadVideo, or null when the page gave nothing (a toast
+   * says why; the stream stays in the library: absence is never destructive).
+   */
+  async _prepareSavedStream(videoData) {
+    // A path-only route knows the key only: the page and title from the library.
+    const lib = this.library?.getVideoByPath?.(videoData.path);
+    videoData = { ...videoData, pageUrl: videoData.pageUrl || lib?.pageUrl, name: lib?.name || videoData.name };
+    if (!videoData.pageUrl) {
+      showToast(t('library.streams.unavailable', { name: videoData.name || videoData.path, reason: t('remoteVideo.err.unavailable') }), 'error', 8000);
+      return null;
+    }
+    const video = this.videoPlayer?.video;
+    if (video && !video.paused) video.pause();
+    this.streamStatus?.begin();
+    let res = null;
+    try { res = await this._resolveStream(videoData.pageUrl); } catch { res = null; }
+    if (!res?.ok) {
+      this.streamStatus?.end();
+      const key = `remoteVideo.err.${res?.kind || 'error'}`;
+      const why = t(key);
+      showToast(t('library.streams.unavailable', { name: videoData.name, reason: why === key ? t('remoteVideo.err.error') : why }), 'error', 8000);
+      return null;
+    }
+    this._remoteSession = {
+      pageUrl: videoData.pageUrl,
+      isHls: !!res.isHls,
+      wantsPlay: true,
+      recovering: false,
+      recoveredAt: 0,
+      offsetKey: videoData.path,
+      cutChecked: false,
+      levels: Array.isArray(res.levels) && res.levels.length > 1 ? res.levels : null,
+      height: res.height || null,
+      savedKey: videoData.path,
+    };
+    this._paintStreamQuality(this._progressiveQualityInfo());
+    return {
+      ...videoData,
+      path: res.proxyUrl,
+      _remote: true,
+      _isPathBased: false,
+      isHls: !!res.isHls,
+      _streamKey: videoData.path,
+    };
+  }
+
+  /** The player bar's Save: shown while a stream that is not in the library plays. */
+  _paintSaveStreamButton() {
+    const btn = document.getElementById('btn-save-stream');
+    if (btn) btn.hidden = !(this._remoteSession?.pageUrl && !this._remoteSession.savedKey);
+    this._paintPlayerMarks?.();
+  }
+
+  /**
+   * Is this video disabled (zaikechi #381; renderer/js/disabled-videos.js)?
+   * Read here, inline, rather than through the module: the methods that ask
+   * are also run on a stand-in in tests, where imports do not exist, and
+   * they call it as `this._isDisabledPath?.(path)`.
+   */
+  _isDisabledPath(path) {
+    const off = this.settings?.get?.('library.disabledVideos');
+    return !!off && typeof off === 'object' && typeof path === 'string'
+      && Object.prototype.hasOwnProperty.call(off, path);
+  }
+
+  /** The playing video's key for favourites and Disable: its path, or a saved stream's key. */
+  _markablePath() {
+    return this._currentVideoPath || this._remoteSession?.savedKey || null;
+  }
+
+  /**
+   * The player's heart and its ⋯ "Disabled" item (zaikechi #381) say the
+   * playing video's state; hidden while nothing markable plays (an unsaved
+   * stream, a dropped file with no path).
+   */
+  _paintPlayerMarks() {
+    const path = this._markablePath();
+    const fav = document.getElementById('btn-player-favourite');
+    if (fav) {
+      fav.hidden = !path;
+      const on = !!path && isFavourite(this.settings, path);
+      fav.classList.toggle('is-on', on);
+      fav.setAttribute('aria-pressed', on ? 'true' : 'false');
+      const label = t(on ? 'library.favourites.removeThis' : 'library.favourites.addThis');
+      fav.title = label;
+      fav.setAttribute('aria-label', label);
+    }
+    const dis = document.getElementById('btn-disable-video');
+    if (dis) {
+      dis.hidden = !path;
+      dis.setAttribute('aria-checked', path && this._isDisabledPath?.(path) ? 'true' : 'false');
+    }
+  }
+
+  /** The player's heart: favourite the playing video, or not. */
+  async _togglePlayerFavourite() {
+    const path = this._markablePath();
+    if (!path) return;
+    const on = await toggleFavourite(this.settings, path, t('library.favourites.playlistName'));
+    this._paintPlayerMarks();
+    this.library?.refreshFavourite?.(path);
+    showToast(t(on ? 'library.favourites.added' : 'library.favourites.removed'), 'success', 2000);
+  }
+
+  /**
+   * The player's ⋯ "Disabled" (zaikechi #381: "If currently playing and user
+   * selects to disable them, it skips to the next video"). Disabling goes on
+   * to the next video as N would; with nothing next, it pauses and says so.
+   * Enabling just clears the mark. Either way the toast has an Undo.
+   */
+  _togglePlayerDisabled() {
+    const path = this._markablePath();
+    if (!path) return;
+    const on = setDisabled(this.settings, path, !this._isDisabledPath?.(path));
+    this._paintPlayerMarks();
+    this.library?.refreshDisabled?.(path);
+    const undo = () => { setDisabled(this.settings, path, !on); this._paintPlayerMarks(); this.library?.refreshDisabled?.(path); };
+    if (!on) {
+      showUndoToast(t('library.disabled.enabledToast'), undo, 'success', 5000);
+      return;
+    }
+    const moved = this._playNext?.() === true;
+    if (!moved) {
+      try { this.videoPlayer?.video?.pause?.(); } catch { /* nothing to pause */ }
+    }
+    showUndoToast(t(moved ? 'library.disabled.skippedToast' : 'library.disabled.disabledNothingNext'), undo, 'info', 6000);
+  }
+
+  /**
+   * Save the playing stream with the script playing with it (and its axis
+   * files). It is in the library from now on; this play goes on as it was.
+   */
+  async _saveCurrentStream() {
+    const s = this._remoteSession;
+    if (!s?.pageUrl || s.savedKey) return;
+    const video = this.videoPlayer?.video;
+    const entry = await this._saveStream({
+      pageUrl: s.pageUrl,
+      title: document.getElementById('video-title')?.textContent || '',
+      duration: video?.duration > 0 ? video.duration : null,
+      scriptPath: this.funscriptEngine?.isLoaded ? (this._currentFunscriptPath || null) : null,
+      axes: this._currentMultiAxis?.axes || null,
+    });
+    if (!entry) return;
+    s.savedKey = entry.key;
+    this._paintSaveStreamButton();
+    showToast(t('library.streams.saved'), 'success', 2500);
+  }
+
+  /** A saved stream as a Play All item: looked up, then what a file item does. */
+  async _playQueueStreamItem(item, resumeAt) {
+    const lib = this.library?.getVideoByPath?.(item.path);
+    const data = lib ? await this._prepareSavedStream({ ...lib, path: item.path }) : null;
+    if (!data) return;
+    this._resetCustomRoutingState();
+    this.loadVideo(data, { skipViewSwitch: true, autoPlay: !this._playerWindowActive });
+    if (lib.funscriptPath) this._markCloudUploadsPending();
+    if (resumeAt) this._applyPendingResumeSeek(resumeAt);
+    this._loadQueueItemContent({ ...item, name: lib.name, funscriptPath: lib.funscriptPath || null }, data).catch((err) => {
+      console.warn('[Queue] loading the stream\'s script failed:', err?.message || err);
+    });
+  }
+
+  /** "Add to queue" for a link: saved, then at the end of the queue, not played. */
+  async _queueStream(info) {
+    const entry = await this._saveStream(info || {});
+    if (!entry) { showToast(t('remoteVideo.err.error'), 'error'); return null; }
+    this.addToUserQueue(entry.key);
+    return entry;
+  }
+
+  /**
+   * Once per stream, when both its length and its script are known: say so
+   * when the script belongs to another cut (2026-11-23). No clock fixes
+   * that; the user is pointed at this video's offset, which a stream keeps.
+   */
+  _checkStreamCut() {
+    const s = this._remoteSession;
+    const video = this.videoPlayer?.video;
+    if (!s || s.cutChecked || !this.funscriptEngine?.isLoaded || !(video?.duration > 0)) return;
+    s.cutChecked = true;
+    const actions = this.funscriptEngine._parsed?.actions || this.funscriptEngine.getActions?.() || [];
+    const meta = this.funscriptEngine.getMetadata?.() || {};
+    const warn = streamCutWarning({
+      scriptEndMs: actions.length ? actions[actions.length - 1].at : null,
+      metaDurationS: meta.metadata?.duration ?? meta.duration,
+      videoDurationS: video.duration,
+    });
+    if (!warn) return;
+    console.warn('[Stream] the script may be for another cut:', warn);
+    const text = warn.kind === 'pastEnd'
+      ? t('player.stream.cutPastEnd', { script: clockText(warn.scriptS), end: clockText(warn.videoS) })
+      : t(warn.diffS < 0 ? 'player.stream.cutShorter' : 'player.stream.cutLonger', { diff: clockText(warn.diffS) });
+    showToast(text, 'warn', 12_000);
+  }
+
+  /**
+   * A stream keeps stopping to load (three times in a minute): a fixed
+   * quality offers Auto. Auto on an adaptive stream already steps down.
+   */
+  _onStreamStalling() {
+    const pref = this.settings?.get?.('player.streamQuality') ?? 'auto';
+    // A single-file stream cannot step down by itself: offer the next file down.
+    const s = this._remoteSession;
+    if (s?.levels && !this.videoPlayer?.streamLevels?.()) {
+      const lower = s.levels.filter((l) => (l.height || 0) < (s.height || 0)).sort((a, b) => b.height - a.height)[0];
+      if (!lower) return;
+      const box = document.createElement('div');
+      box.className = 'toast__row'; // the text and its button apart (2026-11-26)
+      const text = document.createElement('span');
+      text.textContent = t('player.stream.slow', { height: s.height });
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'toast__action';
+      btn.textContent = t('player.stream.tryLower', { height: lower.height });
+      box.append(text, btn);
+      const toast = showToast(box, 'warn', 12_000);
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        this.settings?.set?.('player.streamQuality', lower.height);
+        this._switchProgressive(lower.height);
+        toast?.dismiss?.();
+      });
+      return;
+    }
+    if (pref === 'auto' || !this.videoPlayer?.streamLevels?.()) return;
+    const box = document.createElement('div');
+    box.className = 'toast__row';
+    const text = document.createElement('span');
+    text.textContent = t('player.stream.slow', { height: pref });
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast__action';
+    btn.textContent = t('player.stream.useAuto');
+    box.append(text, btn);
+    const toast = showToast(box, 'warn', 12_000);
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.settings?.set?.('player.streamQuality', 'auto');
+      this.videoPlayer.setStreamQuality('auto');
+      toast?.dismiss?.();
+    });
+  }
+
+  /** The player's Quality button (2026-11-22): its menu opens and closes, a pick is held and remembered. */
+  _wireStreamQuality() {
+    const btn = document.getElementById('btn-stream-quality');
+    const menu = document.getElementById('stream-quality-menu');
+    if (!btn || !menu) return;
+    const close = () => { menu.hidden = true; btn.setAttribute('aria-expanded', 'false'); };
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const open = menu.hidden;
+      if (open) this._paintStreamQualityMenu();
+      menu.hidden = !open;
+      btn.setAttribute('aria-expanded', String(open));
+    });
+    document.addEventListener('click', (e) => { if (!menu.hidden && !e.target.closest('#stream-quality')) close(); }, true);
+    menu.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); close(); btn.focus(); } });
+    this._closeStreamQualityMenu = close;
+  }
+
+  /**
+   * Find a page's stream for the player, the height limit from the Quality
+   * choice (a single-file stream picks its file by it; an adaptive one
+   * ignores it). One place for Load from URL, Watch and a reconnect.
+   */
+  _resolveStream(url) {
+    const pref = this.settings?.get?.('player.streamQuality') ?? 'auto';
+    const maxHeight = progressiveMaxHeight(pref, this.settings?.get?.('player.streamBandwidth'));
+    return window.funsync.resolveRemoteVideo(url, maxHeight ? { maxHeight } : {});
+  }
+
+  /** The Quality chip's state for a single-file stream with several files, or null. */
+  _progressiveQualityInfo() {
+    const s = this._remoteSession;
+    if (!s?.levels || this.videoPlayer?._hls) return null;
+    const current = s.levels.findIndex((l) => l.height === s.height);
+    const pref = this.settings?.get?.('player.streamQuality') ?? 'auto';
+    return { levels: s.levels.map((l, i) => ({ index: i, height: l.height || 0 })), current, auto: pref === 'auto', progressive: true };
+  }
+
+  /** Another file of a single-file stream, at the same second, playing if it was. */
+  async _switchProgressive(pref) {
+    const s = this._remoteSession;
+    if (!s?.levels) return;
+    const max = progressiveMaxHeight(pref, this.settings?.get?.('player.streamBandwidth'));
+    const level = s.levels[pickProgressiveIndex(s.levels, max)];
+    if (!level || level.height === s.height) { this._paintStreamQuality(this._progressiveQualityInfo()); return; }
+    const video = this.videoPlayer.video;
+    const at = video.currentTime || 0;
+    const play = !video.paused;
+    s.height = level.height;
+    this._paintStreamQuality(this._progressiveQualityInfo());
+    await this.videoPlayer.swapSource(level.proxyUrl, { isHls: false, at, play });
+  }
+
+  /** Show the Quality button while a stream with levels plays: "Auto · 480p" or "720p". */
+  _paintStreamQuality(info) {
+    const box = document.getElementById('stream-quality');
+    const btn = document.getElementById('btn-stream-quality');
+    if (!box || !btn) return;
+    const heights = levelHeights(info?.levels);
+    box.hidden = !info || heights.length < 2;
+    if (box.hidden) { this._closeStreamQualityMenu?.(); return; }
+    const now = info.levels[info.current]?.height || 0;
+    btn.textContent = info.auto
+      ? (now ? t('player.quality.autoNow', { height: now }) : t('player.quality.auto'))
+      : t('player.quality.level', { height: now });
+    btn.title = t('player.quality.label');
+    btn.setAttribute('aria-label', `${t('player.quality.label')}: ${btn.textContent}`);
+    if (!document.getElementById('stream-quality-menu')?.hidden) this._paintStreamQualityMenu();
+  }
+
+  _paintStreamQualityMenu() {
+    const menu = document.getElementById('stream-quality-menu');
+    const info = this.videoPlayer?.streamLevels?.() || this._progressiveQualityInfo();
+    if (!menu || !info) return;
+    const pref = this.settings?.get?.('player.streamQuality') ?? 'auto';
+    menu.replaceChildren();
+    const item = (label, value) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'player__quality-item';
+      b.setAttribute('role', 'menuitemradio');
+      const on = String(value) === String(pref);
+      b.setAttribute('aria-checked', String(on));
+      b.classList.toggle('player__quality-item--on', on);
+      b.textContent = label;
+      b.addEventListener('click', () => {
+        this.settings?.set?.('player.streamQuality', value);
+        if (info.progressive) this._switchProgressive(value);
+        else this.videoPlayer.setStreamQuality(value);
+        this._closeStreamQualityMenu?.();
+      });
+      menu.appendChild(b);
+    };
+    item(t('player.quality.auto'), 'auto');
+    for (const h of levelHeights(info.levels)) item(t('player.quality.level', { height: h }), h);
+  }
+
+  /**
+   * Where a setting outside Settings lives (Settings search's "Open",
+   * 2026-11-23; ids from settings-panel.js SETTINGS_ELSEWHERE). Each opens
+   * what the nav bar's own button opens, and the Devices tab it names.
+   * @param {string} id
+   */
+  _openSettingElsewhere(id) {
+    const deviceTabs = { handy: 'handy', buttplug: 'buttplug', tcode: 'tcode', autoblow: 'autoblow', audience: 'audience', deviceSync: 'sync' };
+    if (deviceTabs[id]) {
+      if (!this.connectionPanel) return;
+      this.connectionPanel.show();
+      this.connectionPanel._switchTab?.(deviceTabs[id]);
+      return;
+    }
+    if (id === 'feeds' || id === 'eroscriptsDownloads' || id === 'eroscriptsLogin') {
+      if (this._currentView() !== 'eroscripts') this._onEroScriptsNavClick();
+      return;
+    }
+    if (id === 'streams') { this._openLoadUrlModal(); return; }
+    if (id === 'webRemote') { this.navBar?._onRemoteClick?.(); return; }
+    if (id === 'vr') { this.navBar?._onVRClick?.(); return; }
+    if (id === 'librarySort') this._navigateTo('library');
+  }
+
   /** Open the Load-from-URL (remote video) modal. Shared by the nav-bar
    *  action and the player top-bar button. */
   _openLoadUrlModal() {
     import('../components/remote-video-modal.js').then((mod) => {
-      mod.openRemoteVideoModal({ onPlay: (result, scriptPath) => this._loadRemoteVideo(result, scriptPath) });
+      mod.openRemoteVideoModal({
+      onPlay: (result, scriptPath, opts) => this._loadRemoteVideo(result, scriptPath, null, opts),
+      resolve: (url) => this._resolveStream(url),
+      save: {
+        initial: this.settings?.get?.(SETTING_SAVE_STREAMS) !== false,
+        onChange: (on) => this.settings?.set?.(SETTING_SAVE_STREAMS, on),
+      },
+      onQueue: (result, scriptPath) => this._queueStream({
+        pageUrl: result.pageUrl, title: result.title, site: result.site, duration: result.duration,
+        scriptPath, imageUrl: result.thumbnail,
+      }),
+    });
     });
   }
 
@@ -6756,27 +7692,64 @@ class App {
    * @param {{proxyUrl:string, title?:string, isHls?:boolean}} result
    * @param {string|null} [scriptPath] — local funscript to pair (v1: manual)
    */
-  async _loadRemoteVideo(result, scriptPath = null) {
-    if (!result?.proxyUrl) return;
+  async _loadRemoteVideo(result, scriptPath = null, axes = null, { save = false, topicId = null, imageUrl = null } = {}) {
+    if (!result?.proxyUrl) return null;
     const editorOk = this._editorAllowsReplace(); // CB-01
-    if (editorOk !== true && !(await editorOk)) return;
+    if (editorOk !== true && !(await editorOk)) return null;
+    // Saved to the library first (the tick, on by default): then it plays as
+    // that library video, its key as its path (SCOPE-saved-streams.md).
+    const saved = save
+      ? await this._saveStream({
+        pageUrl: result.pageUrl || result.webpageUrl, title: result.title, site: result.site,
+        duration: result.duration, scriptPath, axes, topicId, imageUrl: imageUrl || result.thumbnail,
+      })
+      : null;
+    // The page it came from: an expired stream is looked up again from it.
+    const pageUrl = result.pageUrl || result.webpageUrl || null;
+    this._remoteSession = {
+      pageUrl,
+      isHls: !!result.isHls,
+      wantsPlay: true,
+      recovering: false,
+      recoveredAt: 0,
+      // Its own sync offset, kept under the page (a stream has no path).
+      offsetKey: streamOffsetKey(pageUrl),
+      cutChecked: false,
+      // A single-file stream's files, one per height (2026-11-23), and the one playing.
+      levels: Array.isArray(result.levels) && result.levels.length > 1 ? result.levels : null,
+      height: result.height || null,
+      // Its library key when it is saved (null: played and forgotten).
+      savedKey: saved?.key || null,
+    };
+    this._paintStreamQuality(this._progressiveQualityInfo());
     this.loadVideo({
       name: result.title || t('remoteVideo.untitled'),
       path: result.proxyUrl,
       _remote: true,
       isHls: !!result.isHls,
+      _streamKey: saved?.key || null,
     });
+    this.streamStatus?.begin();
+    this._paintSaveStreamButton();
     if (scriptPath) {
       try {
         const content = await window.funsync.readFunscript(scriptPath);
         if (content) {
           const name = scriptPath.split(/[\\/]/).pop() || 'script.funscript';
-          this.loadFunscript({ name, textContent: content, path: scriptPath });
+          await this.loadFunscript({ name, textContent: content, path: scriptPath });
+          this._checkStreamCut();
         }
       } catch (err) {
         showToast(t('toast.downloadAutoLoadFailed', { error: err?.message || err }), 'error', 5000);
       }
     }
+    // A multi-axis set's axis files (EroScripts Watch, 2026-11-23): what a
+    // library video's companions are, {suffix: path}.
+    if (axes && Object.keys(axes).length) {
+      this._currentMultiAxis = { axes: { ...axes } };
+      await this._loadMultiAxisScripts(this._currentMultiAxis);
+    }
+    return saved;
   }
 
   /**
@@ -6807,6 +7780,11 @@ class App {
    * bookkeeping would corrupt whose job it is to restart what.
    */
   _onEdgeHold(active, { skipHandyResume = false, force = false } = {}) {
+    if (active) this._releaseStopAllHold?.('Z');
+    if (active && this.scriptPlayer?.active) {
+      showToast(t('scriptPlayer.xzUnavailable'), 'info', 4000);
+      return;
+    }
     // Press-to-toggle (lr_x3, EroScripts #307). Keyboard still reports Z as
     // a hold — press then release — so in toggle mode the release arrives as
     // active=false and must be ignored, or the edge would end the instant
@@ -6825,7 +7803,11 @@ class App {
     // A Settings Test running (pf-fixup): Z takes the devices, the test ends.
     if (active && (this._fillerTest?.running || this._handyTest)) this._fillerTest?.stop();
     this._edgeActive = !!active;
+    // Started as a toggle (the setting, or a global hotkey: `force` on a
+    // press comes only from there): its carried note says press, not release.
+    if (active) this._edgeToggled = mode === 'toggle' || force;
     this._pushRemoteEdgeState?.(); // the phone's Edge button follows (next major)
+    if (!active) this._setEdgeCarryNotice?.(false);
 
     if (active) {
       // "Play a pattern" (Settings > Edge Hold, next major) takes the devices
@@ -6886,6 +7868,8 @@ class App {
       buttplugManager: this.buttplugManager,
       tcodeManager: this.tcodeManager,
       handyManager: null,
+      // Its log lines say EdgeHold, not OrgasmSwitch (2026-11-20).
+      logTag: 'EdgeHold',
       getCutoff: (key) => this._cutoffFromSettings(key),
       // Flywheel machines follow the Edge pattern too, as for X.
       oscillate: (dev, pos, prevPos, ms, startMs) => this.buttplugSync?.oscillateNow?.(dev.index, pos, prevPos, ms, startMs),
@@ -6968,6 +7952,7 @@ class App {
       const cacheKey = `${once ? 'once-v1' : 'tiled-v2'}|${src.key}|${JSON.stringify(cutoff ?? null)}|inv=${inverted ? 1 : 0}`;
       if (this._edgeCloudUrl && this._edgeCloudUrlKey !== cacheKey) this._edgeCloudUrl = null;
       const engage = () => engageHandyFinisher({
+        logTag: 'EdgeHold',
         handyManager: this.handyManager,
         content,
         cachedUrl: this._edgeCloudUrl,
@@ -7053,24 +8038,189 @@ class App {
   }
 
   /**
+   * While Z is on, no sync engine starts (lr_x3 #447): a start from anywhere
+   * (a new video's script load, a playback-rate change, a phone session
+   * handing the devices back) is held and noted with the engines Z stopped,
+   * so Z's release starts it. Z's releases turn Z off first, so they pass.
+   */
+  _installEdgeStartGate() {
+    // Z on holds every engine; the Orgasm Switch holds the ones its
+    // finisher took over (`_orgasmHolds`), so its release restarts them.
+    const held = (name) => !!this._edgeActive || !!this._orgasmHolds?.(name);
+    const onHeld = (name) => {
+      if (!this._edgeActive) {
+        // The Handy needs nothing noted: X's release restores it
+        // (`_restoreHandyAfterOrgasm`), with this video's script.
+        if (name === 'handy') return;
+        if (!Array.isArray(this._orgasmStoppedEngines)) this._orgasmStoppedEngines = [];
+        if (!this._orgasmStoppedEngines.includes(name)) {
+          this._orgasmStoppedEngines.push(name);
+          console.log(`[OrgasmSwitch] the ${name} sync waits for X's release`);
+        }
+        return;
+      }
+      if (!Array.isArray(this._edgeStoppedEngines)) this._edgeStoppedEngines = [];
+      if (!this._edgeStoppedEngines.includes(name)) {
+        this._edgeStoppedEngines.push(name);
+        console.log(`[EdgeHold] the ${name} sync waits for Z's release`);
+      }
+    };
+    gateEngineStart(this.syncEngine, 'handy', { held, onHeld });
+    gateEngineStart(this.handyHdspSync, 'handy', { held, onHeld });
+    gateEngineStart(this.buttplugSync, 'buttplug', { held, onHeld });
+    gateEngineStart(this.tcodeSync, 'tcode', { held, onHeld });
+    gateEngineStart(this.autoblowSync, 'autoblow', { held, onHeld });
+  }
+
+  /**
+   * Z when a new video starts (locally, in the headset or on the phone;
+   * lr_x3 #447, Dave 2026-11-26). By default Z resets: off, and the new
+   * video's own load starts its script (the engines Z stopped are its to
+   * start), so the next press stops the device at once. With
+   * `player.edgeHoldAcrossVideos` on, Z stays on: a pattern hold ends (every
+   * device stops on a video change, FN-01) and the devices stand still; the
+   * new video's engines wait (`_installEdgeStartGate`), and the note on the
+   * video says how to start the script.
+   */
+  _edgeOnVideoChange() {
+    if (!this._edgeActive && !this._edgePatternOn) {
+      this._setEdgeCarryNotice?.(false);
+      return;
+    }
+    if (!edgeCarriesAcrossVideos(this.settings?.get?.('player.edgeHoldAcrossVideos'))) {
+      if (this._edgePatternOn) {
+        this._dropEdgePattern?.('the video changed');
+        return;
+      }
+      this._edgeActive = false;
+      this._edgeStoppedEngines = [];
+      this._pushRemoteEdgeState?.(); // the phone's Edge button follows
+      this._setEdgeCarryNotice?.(false);
+      console.log('[EdgeHold] off: a new video started (Settings > Edge Hold can keep it on)');
+      return;
+    }
+    if (this._edgePatternOn) this._dropEdgePattern?.('the video changed', { keepOn: true });
+    this._setEdgeCarryNotice?.(true);
+    console.log("[EdgeHold] still on into the new video: its script waits for Z's release");
+  }
+
+  /**
+   * The note on the video while Z is kept on into a new video: "Release Z
+   * to start the script" (hold) / "Press Z to resume the script" (toggle),
+   * in this window's player and the player pop-out.
+   * @param {boolean} on
+   */
+  _setEdgeCarryNotice(on) {
+    const mode = this._edgeToggled ? 'toggle' : this.settings?.get?.('player.edgeHoldMode');
+    this._showCarryNotice('edge', on ? t(edgeCarryNoticeKey(mode)) : null);
+  }
+
+  /**
+   * X's note while it is kept on into a new video: "Release X to start the
+   * script" (held) / "Press X to stop the device" (started as a toggle: a
+   * press finishes).
+   * @param {boolean} on
+   */
+  _setOrgasmCarryNotice(on) {
+    this._showCarryNotice('orgasm', on ? t(orgasmCarryNoticeKey(!!this._orgasmToggled)) : null);
+  }
+
+  /**
+   * The one note on the video, owned by Z ('edge') or X ('orgasm'): a
+   * removal by the other one leaves it. In this window's player and the
+   * player pop-out.
+   * @param {'edge'|'orgasm'} owner
+   * @param {string|null} text
+   */
+  _showCarryNotice(owner, text) {
+    if (!text && this._carryNoticeOwner !== owner) return;
+    this._carryNoticeOwner = text ? owner : null;
+    setEdgeCarryNotice(document.getElementById('video-wrapper'), text);
+    if (this._playerWindowActive) {
+      window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.EDGE_NOTICE, { text }));
+    }
+  }
+
+  /**
+   * True while the Orgasm Switch's finisher has `name`'s device: the kinds
+   * its plan takes over (a custom plan can leave Buttplug or T-Code on the
+   * main script), and the Handy once the finisher was put on it. Never the
+   * Autoblow (X does not drive it).
+   * @param {string} name 'handy' | 'buttplug' | 'tcode' | 'autoblow'
+   */
+  _orgasmHolds(name) {
+    if (!this.orgasmSwitch?.active) return false;
+    const plan = this._orgasmPlan || null;
+    if (name === 'buttplug') return !plan || plan.stopsButtplug !== false;
+    if (name === 'tcode') return !plan || plan.stopsTcode !== false;
+    if (name === 'handy') return !!this._orgasmHandyEngaged;
+    return false;
+  }
+
+  /**
+   * A pattern has the Handy: X's finisher (`_orgasmHolds('handy')`) or Z's
+   * pattern. Its release puts the video's script back
+   * (`_restoreHandyAfterOrgasm`), so meanwhile nothing else stops the
+   * Handy or puts a script on it: V during a held X or a Z pattern stopped
+   * the pattern on Dave's Handy (hardware run 2026-11-27, B108).
+   */
+  _patternHoldsHandy() {
+    return !!this._orgasmHolds?.('handy') || (!!this._edgePatternOn && !!this._edgeHandyEngaged);
+  }
+
+  /**
+   * X when a new video loads (Dave 2026-11-26, the same rule as Z). By
+   * default the finisher ends as a second press ends it (finish: every
+   * device stops, nothing snaps back to the old script; a held X's
+   * release then does nothing), as since 2026-11-19. With
+   * `player.orgasmAcrossVideos` on it plays on: the new video's engines
+   * and its Handy upload wait for X's release, and the note says how.
+   * @param {{remote?: boolean}} [opts] a phone's or headset's video change
+   * @returns {boolean} true when the finisher keeps the Handy (loadVideo
+   *   then sends it no stop)
+   */
+  _orgasmOnVideoChange({ remote = false } = {}) {
+    if (!this.orgasmSwitch?.active) {
+      this._setOrgasmCarryNotice?.(false);
+      return false;
+    }
+    // A phone's or a headset's video change (`remote`) uploads its script to
+    // the Handy directly: the finisher ends there whatever the setting says.
+    if (remote || !carriesAcrossVideos(this.settings?.get?.('player.orgasmAcrossVideos'))) {
+      console.log(`[OrgasmSwitch] Video changed — ending the ${this._orgasmToggled ? 'toggled' : 'held'} finisher`);
+      try { this._finishOrgasm(); } catch (err) { console.warn('[OrgasmSwitch] ending it on a video change failed:', err?.message || err); }
+      return false;
+    }
+    console.log("[OrgasmSwitch] Video changed — the finisher plays on (kept on); this video's script waits for X");
+    this._setOrgasmCarryNotice?.(true);
+    return !!this._orgasmHandyEngaged;
+  }
+
+  /**
    * End a pattern hold without restoring anything: the video changed
    * (FN-01: every device stops at once; the new video's load starts its own
    * engines, and loadVideo stops the Handy) or the app relaunches. Z is off
    * afterwards: a held Z's release then does nothing, a toggle's next press
    * starts a new hold.
    */
-  _dropEdgePattern(reason = 'the video changed') {
+  _dropEdgePattern(reason = 'the video changed', { keepOn = false } = {}) {
     if (!this._edgePatternOn) return;
     this._edgePatternOn = false;
-    this._edgeActive = false;
-    this._pushRemoteEdgeState?.(); // the phone's Edge button follows (next major)
+    // Kept on (Settings > Edge Hold, Z into the next video): the devices
+    // stand still under Z until its release, which starts the new video's
+    // script. Otherwise Z is off.
+    if (!keepOn) {
+      this._edgeActive = false;
+      this._pushRemoteEdgeState?.(); // the phone's Edge button follows (next major)
+      this._setEdgeCarryNotice?.(false);
+    }
     this._edgeActivationId = (this._edgeActivationId || 0) + 1; // an engage in flight goes stale
     this._edgeHandyEngaged = false;
     this._edgeStoppedEngines = [];
     try { this._edgeLoop?.deactivate(); } catch { /* best-effort */ }
     this._stopAllDevicesIdle();
     try { this.buttplugManager?.stopSustainedOutputs?.(); } catch { /* best-effort */ }
-    console.log(`[EdgeHold] pattern stopped: ${reason}`);
+    console.log(`[EdgeHold] pattern stopped: ${reason}${keepOn ? ' (Z stays on)' : ''}`);
   }
 
   /**
@@ -7144,7 +8294,12 @@ class App {
     }
   }
 
-  async _restoreHandyAfterOrgasm() {
+  /**
+   * @param {object} [opts]
+   * @param {() => boolean} [opts.isCurrent] false once the switch was pressed
+   *   again: the restore stops before it starts the video sync (2026-11-24).
+   */
+  async _restoreHandyAfterOrgasm({ isCurrent = () => true } = {}) {
     if (!this.handyManager?.connected) return;
     const rate = this.videoPlayer?.playbackRate || 1;
     if (rate !== 1) {
@@ -7160,6 +8315,9 @@ class App {
       if (this._scriptCloudUrl && this._scriptCloudUrlInverted === this._handyInverted()) {
         ok = await this.handyManager.setupScript(this._scriptCloudUrl);
       }
+      // Pressed again while the script was being set: the new hold has the
+      // Handy; starting the video sync now would fight it.
+      if (!isCurrent()) return;
       if (ok) {
         this.syncEngine._scriptReady = true;
         this.syncEngine.start();
@@ -7180,6 +8338,8 @@ class App {
       } else {
         // No cached URL (script never uploaded this session) → full path.
         await this._uploadAndStartSync();
+        // Pressed again during the upload: hand the Handy to the new hold.
+        if (!isCurrent()) this.syncEngine?.stop();
       }
     } catch (err) {
       console.warn('[OrgasmSwitch] Handy HSSP restore failed:', err?.message || err);
@@ -7334,6 +8494,19 @@ class App {
       this._resolveCloudUpload('handy');
       return;
     }
+    // X's finisher or Z's pattern has the Handy (X kept on into a new video,
+    // or a script change during a hold): an upload now would replace the
+    // pattern on the device. The release uploads this script instead
+    // (_restoreHandyAfterOrgasm: no cached URL, so the full path), never an
+    // older cached one. The video does not wait for it.
+    if (this._patternHoldsHandy?.()) {
+      this._scriptCloudUrl = null;
+      console.log(this._orgasmHolds?.('handy')
+        ? "[Handy] The finisher has the Handy: this script goes on when X lets go"
+        : "[Handy] Z's pattern has the Handy: this script goes on when Z lets go");
+      this._resolveCloudUpload('handy');
+      return;
+    }
 
     const rawContent = this.funscriptEngine.getRawContent();
     if (!rawContent) {
@@ -7409,7 +8582,21 @@ class App {
   }
 
   loadVideo(file, { skipViewSwitch = false, autoPlay = true } = {}) {
+    // A saved stream's key by a route that only knows paths: the library's
+    // play path (its page looked up), never a file:// load of the key.
+    if (file?._isPathBased && !file._remote && String(file.path ?? '').startsWith('stream:')) {
+      console.warn('[Streams] a stream key reached loadVideo directly; playing it as a stream');
+      this._playFromLibrary?.({ ...file, _stream: true });
+      return;
+    }
     console.log('Loading video:', file.name);
+    // A local file ends any stream session (its status card, its reconnect).
+    if (!file?._remote) {
+      this._remoteSession = null;
+      this.streamStatus?.end();
+      this._paintStreamQuality?.(null);
+      this._paintSaveStreamButton?.();
+    }
 
     // Push previous video to queue history if it was watched ≥5s
     // (SCOPE-queue-panel.md §3.5). Must check BEFORE we clear out
@@ -7430,6 +8617,9 @@ class App {
     // turns out to be unplayable (see _tryRemuxFallback).
     this._remuxAttemptedForPath = null;
     this._remuxedCopy = null; // FT-076: the playable copy of the PREVIOUS video
+    // An offer to convert the previous video is not about this one.
+    this._convertOffer?.dismiss?.();
+    this._convertOffer = null;
     // The load/error listeners are installed ONCE per <video> and read the
     // current file from instance state (V07). They used to be added here on
     // every load, each closing over its own `file`, so one failure ran every
@@ -7444,16 +8634,21 @@ class App {
     // (setNoScript); a later source makes it stale.
     this._audienceVideoToken = this.audienceBridge?.beginSource({ title: file?.name || '' }) ?? null;
     this._videoTrackChecked = false;
+    // An audio file: the audio tile over the player's black, not a black
+    // screen (S033, Dave 2026-11-26). Any other load takes it away.
+    this._showAudioTileFor?.(file);
     // A previous load's autoplay listener is still armed when that load
     // failed (it never reached loadeddata). Left in place it would play the
     // NEXT video the user opens, even one meant to open paused (V10).
     this._disarmLoadAutoplay();
+    this._loadWantedPlay = null; // that load's wish to play is not this one's (B106)
     // Same for a resume seek armed for that load: it must not move the next
     // video to the previous one's position. Callers arm theirs after this.
     if (this._pendingResumeSeek) {
       this.videoPlayer?.video?.removeEventListener('loadedmetadata', this._pendingResumeSeek);
       this._pendingResumeSeek = null;
     }
+    this._resumeTarget = null;
 
     // Clean up previous video
     if (this._currentVideoUrl) {
@@ -7469,9 +8664,10 @@ class App {
     // flight and queues ahead of the new video's setScript, which keeps that
     // order. Skipped only when the last HSSP request was already a stop. The
     // player pop-out's video changes load through here too.
-    // An Edge Hold playing a pattern drives the devices on its own clock:
-    // it ends here too, before the Handy's stop below (its engage goes stale).
-    this._dropEdgePattern?.();
+    // Z on a video change (lr_x3 #447): reset, or kept on as set. A pattern
+    // hold drives the devices on its own clock: it ends here either way,
+    // before the Handy's stop below (its engage goes stale).
+    this._edgeOnVideoChange?.();
     // So does a Settings Test (pf-fixup 2026-11-19): every device it drives
     // stops, and its Handy part gives way to the new video's script.
     if (this._fillerTest?.running || this._handyTest) {
@@ -7486,11 +8682,11 @@ class App {
     // way (Dave 2026-11-19 ~14:52, pf-fixup): its loop no longer rides into
     // the next video, and letting go of the key afterwards does nothing (the
     // switch is off; its release finds nothing to deactivate).
-    if (this.orgasmSwitch?.active) {
-      console.log(`[OrgasmSwitch] Video changed — ending the ${this._orgasmToggled ? 'toggled' : 'held'} finisher`);
-      try { this._finishOrgasm(); } catch (err) { console.warn('[OrgasmSwitch] ending it on a video change failed:', err?.message || err); }
-    }
-    const handyStop = !!this.handyManager?.connected && this.handyManager.hsspMayBeRunning !== false;
+    // Kept on into the next video (Settings > Orgasm Switch, Dave 2026-11-26):
+    // the finisher plays on, the Handy's included (no stop below).
+    const finisherKeepsHandy = this._orgasmOnVideoChange?.() === true;
+    const handyStop = !!this.handyManager?.connected && this.handyManager.hsspMayBeRunning !== false
+      && !finisherKeepsHandy;
     if (handyStop) {
       console.log('[Handy] Video changed — stopping the old script');
       Promise.resolve(this.handyManager.hsspStop()).then((stopped) => {
@@ -7557,6 +8753,9 @@ class App {
     // a <track> attached by loadSubtitles() keeps rendering after switching
     // to a video that has no subtitle of its own (persisted until restart).
     if (this.videoPlayer) this.videoPlayer.clearSubtitles();
+    // Its subtitle streams are read again for the next video (#268).
+    this._embeddedSubs = null;
+    this._closeSubtitleMenu?.();
     // Reset variant selector
     const variantSelector = document.getElementById('variant-selector');
     if (variantSelector) variantSelector.hidden = true;
@@ -7606,6 +8805,7 @@ class App {
     // Remote streams have no local path — keep _currentVideoPath null so
     // local-only paths (remux-on-error, recent files, library lookup) stay off.
     this._currentVideoPath = file._remote ? null : (file.path || null);
+    this._paintPlayerMarks?.();
     // A new video with no script yet — drop the previous video's script
     // path so the funscript badge can't attribute its embedded axes here.
     this._currentFunscriptPath = null;
@@ -7616,6 +8816,7 @@ class App {
     }
     this._currentIsRemote = !!file._remote;
     this.videoPlayer.loadSource(videoUrl, file.name, loadOpts);
+    if (this._currentVideoPath) this._applyVideoFrameRate?.(this._currentVideoPath);
     this.progressBar.setVideoSource(videoUrl);
     this._updateCategoryDots();
     // Refresh the queue panel state so the "Now playing" row updates
@@ -7651,7 +8852,7 @@ class App {
 
     // Store video path on player container for editor access
     const pc = document.getElementById('player-container');
-    if (pc) pc.dataset.videoPath = file.path || '';
+    if (pc) pc.dataset.videoPath = file._remote ? '' : (file.path || '');
 
     // Auto-play once video is ready (gated by script upload if applicable).
     // Kept in `_loadAutoplayListener` so a failed load can disarm it: it is
@@ -7676,7 +8877,9 @@ class App {
 
     // Set title
     const titleEl = document.getElementById('video-title');
-    titleEl.textContent = file.name.replace(/\.[^/.]+$/, '');
+    // A stream's name is a page title, not a file name: "PMV MIX // VOL. 12"
+    // lost ". 12" as if it were an extension (2026-11-22).
+    titleEl.textContent = file._remote ? file.name : file.name.replace(/\.[^/.]+$/, '');
 
     // Track recent file (local only — a localhost proxy URL isn't re-openable).
     if (file.path && !file._remote) {
@@ -7722,11 +8925,16 @@ class App {
   }
 
   /** Remove the current load's armed autoplay listener, if it has not fired. */
-  _disarmLoadAutoplay() {
+  _disarmLoadAutoplay({ remember = false } = {}) {
     const listener = this._loadAutoplayListener;
     if (!listener) return;
     this._loadAutoplayListener = null;
     this.videoPlayer?.video?.removeEventListener('loadeddata', listener);
+    // A load that meant to play (Play, Resume from a playlist…) and failed
+    // because the player cannot decode it: the converted copy that takes its
+    // place plays (_playConvertedCopy). It took over paused, so "Continue
+    // watching" on a converted AVI only seeked (test day 2026-11-26, B106).
+    if (remember) this._loadWantedPlay = this._currentVideoPath || null;
   }
 
   /** Stop every sync engine and device after the video failed to load. */
@@ -7746,9 +8954,17 @@ class App {
    * state (`_currentVideoPath` / `_currentVideoName`), never from a closure:
    * see _ensureVideoLoadWatch.
    */
-  async _onVideoError() {
+  async _onVideoError({ noRecover = false } = {}) {
     const video = this.videoPlayer?.video;
     if (!video) return;
+    // A stream that failed (its link expired, or the backend restarted and
+    // forgot it): looked up again once and carried on at the same second
+    // (2026-11-23). A second failure within 30 s is reported as before.
+    const session = this._remoteSession;
+    if (!noRecover && session?.pageUrl && !session.recovering && Date.now() - session.recoveredAt > 30_000) {
+      this._recoverStream(session);
+      return;
+    }
     const gen = this._videoLoadGen;
     const code = video.error?.code;
     const message = video.error?.message || '';
@@ -7803,7 +9019,8 @@ class App {
     }
 
     // This load is over: its autoplay listener must not play the next one.
-    this._disarmLoadAutoplay();
+    // Remembered (B106): a converted copy may still take its place.
+    this._disarmLoadAutoplay({ remember: true });
 
     // Show appropriate error message
     if (isFileUrl && code === 2) {
@@ -7938,12 +9155,46 @@ class App {
     this._reportUndecodedVideoTrack(path, stage);
   }
 
+  /**
+   * Give the player the video's own frame rate (ffprobe, the metadata cache),
+   * so the editor steps and snaps on this video's frames: it assumed 30 fps
+   * for every video (2026-11-24). A later load wins; no rate = 30 kept.
+   * @param {string} path
+   */
+  async _applyVideoFrameRate(path) {
+    const gen = this._videoLoadGen;
+    let meta = null;
+    try { meta = await window.funsync?.fetchMetadata?.(path); } catch { meta = null; }
+    if (gen !== this._videoLoadGen) return;
+    const fps = exactFrameRate(meta?.fps);
+    if (fps) this.videoPlayer?.setFps?.(fps);
+  }
+
+  /**
+   * The player's audio tile (S033): shown for an audio file (by its
+   * extension; a remote stream never), or for a file known to hold no video
+   * stream (`audioOnly`); removed for anything else.
+   * @param {{name?: string, path?: string, _remote?: boolean}|null} file
+   * @param {{audioOnly?: boolean}} [opts]
+   */
+  _showAudioTileFor(file, { audioOnly = false } = {}) {
+    const where = String(file?.path || file?.name || '');
+    const audio = audioOnly || (!file?._remote && isAudioPath(where));
+    const name = file?.name || where.split(/[\\/]/).pop();
+    setPlayerAudioTile(document.getElementById('video-wrapper'), audio && name ? String(name) : null);
+  }
+
   async _reportUndecodedVideoTrack(path, stage) {
     const gen = this._videoLoadGen;
     let meta = null;
     try { meta = await window.funsync?.fetchMetadata?.(path); } catch { meta = null; }
     if (gen !== this._videoLoadGen) return;
-    if (meta && !hasRealVideoStream(meta)) return; // audio only, or cover art
+    if (meta && !hasRealVideoStream(meta)) {
+      // Audio only (or cover art) in a file its extension did not tell: the
+      // audio tile too (S033).
+      this._showAudioTileFor?.({ name: this._currentVideoName, path }, { audioOnly: true });
+      return;
+    }
     if (!meta && stage === 'metadata') {
       // Without ffprobe an audio-only file looks exactly like this. Log it
       // for a bug report, but don't tell the user their video is broken.
@@ -7985,11 +9236,82 @@ class App {
     // The user has opened something else while ffprobe ran: a toast naming
     // this file's codec would now describe the wrong video.
     if (gen !== this._videoLoadGen) return;
+    // Convert to play (Dave, 2026-11-26: an MPEG-4 Part 2 file played sound
+    // over black): a copy made before plays at once, without asking;
+    // otherwise the player offers to make one (convert-to-play.js). Only a
+    // local file: a saved stream keeps the message below.
+    if (canConvert(path, window.funsync)) {
+      const copy = await convertedCopy(path, window.funsync);
+      if (gen !== this._videoLoadGen) return;
+      if (copy) {
+        this._playConvertedCopy(path, copy);
+        return;
+      }
+      this._convertOffer?.dismiss?.();
+      this._convertOffer = offerConversion({
+        codec: detail, t, showToast,
+        onConvert: () => { this._convertOffer = null; this._convertToPlay(path); },
+      });
+      return;
+    }
     if (detail) {
       showToast(t('toast.videoErrorDecodeCodec', { codec: detail }), 'error', 8000);
     } else {
       showToast(t('toast.videoErrorDecode'), 'error');
     }
+  }
+
+  /**
+   * Convert to play: make the H.264 copy of `path` (progress and Cancel in
+   * a toast), then play it if `path` is still the video open; otherwise say
+   * it is ready for next time (the copy is kept either way).
+   * @param {string} path
+   */
+  async _convertToPlay(path) {
+    const name = String(path).split(/[\\/]/).pop();
+    await runConversion({
+      path, bridge: window.funsync, t, showToast,
+      onDone: (copy) => {
+        if (this._currentVideoPath === path) this._playConvertedCopy(path, copy);
+        else showToast(t('player.convert.readyLater', { name }), 'info', 6000);
+      },
+    });
+  }
+
+  /**
+   * Play the converted copy of the open video in its place, from where it
+   * was and playing if it was (it may have been playing its sound only).
+   * The copy stands in for the file the way a remuxed copy does
+   * (`_remuxedCopy`: the pop-out, screenshots); the script, resume
+   * position and everything else stay keyed to the original.
+   * @returns {boolean} false when another video is open now
+   */
+  _playConvertedCopy(originalPath, copyPath) {
+    if (this._currentVideoPath !== originalPath) return false;
+    const video = this.videoPlayer?.video;
+    const at = Number.isFinite(video?.currentTime) ? video.currentTime : 0;
+    // Playing, or meant to: the original's load wanted to play and failed
+    // because the player cannot decode it (B106).
+    const wanted = this._loadWantedPlay === originalPath;
+    this._loadWantedPlay = null;
+    const wasPlaying = (!!video && !video.paused && !video.ended) || wanted;
+    const url = pathToFileURL(copyPath);
+    this._remuxedCopy = { original: originalPath, path: copyPath };
+    this.videoPlayer.loadSource(url, this._currentVideoName || String(originalPath).split(/[\\/]/).pop());
+    this.progressBar?.setVideoSource?.(url);
+    video?.addEventListener('loadedmetadata', () => {
+      if (at > 0.5) video.currentTime = at;
+      // A device still taking its script starts playback itself when ready.
+      if (wasPlaying && !this._waitingForScript) video.play()?.catch?.(() => {});
+    }, { once: true });
+    // The pop-out was sent the original, which it cannot decode either
+    // (FT-076, as the remux fallback does).
+    const sent = this._popoutLoadSent;
+    if (this._playerWindowActive && sent?.path === originalPath) {
+      this._sendLoadVideoToPopout(sent.autoplay || (sent.wanted === true && !this._waitingForScript), { timeMs: at * 1000 });
+    }
+    console.log(`[Convert] playing the converted copy of ${originalPath}`);
+    return true;
   }
 
   /**
@@ -8021,7 +9343,13 @@ class App {
         toast?.dismiss?.();
         return;
       }
-      if (!result?.path) throw new Error('remux returned no file');
+      if (!result?.path) {
+        // kind 'codec': the backend refused because the codec itself needs a
+        // transcode (an MPEG-2 .mkv; test day 2026-11-24, B027).
+        throw Object.assign(new Error(result?.kind === 'codec'
+          ? 'the video codec cannot be remuxed (needs a transcode)'
+          : 'remux returned no file'), { kind: result?.kind });
+      }
 
       const url = pathToFileURL(result.path);
       // The pop-out builds its src from this (FT-076): popping out a video
@@ -8048,7 +9376,14 @@ class App {
       console.warn('[Remux] fallback failed:', err?.message || err,
         `(original error: ${mediaError || 'none reported'}) for`, originalPath);
       // The load is over; its armed autoplay must not play the next video.
-      this._disarmLoadAutoplay();
+      // Remembered (B106): the converted copy that takes its place plays.
+      this._disarmLoadAutoplay({ remember: true });
+      if (err?.kind === 'codec') {
+        // Name the codec and say to transcode, as a decode failure does,
+        // instead of "Video format not supported" (B027).
+        await this._showDecodeErrorWithCodec(originalPath, { reason: 'cannot be remuxed (the codec needs a transcode)' });
+        return;
+      }
       // Fall back to the normal "format not supported" message.
       showToast(t('toast.videoErrorFormat'), 'error');
     }
@@ -8069,7 +9404,12 @@ class App {
       // If a funscript was loaded in the meantime, skip
       if (this.funscriptEngine.isLoaded) return;
 
-      const query = videoName.replace(/\.[^/.]+$/, ''); // strip extension
+      // The file name as the inline search cleans it: no extension, no
+      // underscores / dots / hyphens between words, no 1080p, host or date
+      // (v0.10.1). The raw "anna-claire-clouds-takes-on-a-mouthful-of-cum_1080p"
+      // found nothing; the cleaned words find the post first.
+      const query = cleanSearchName(videoName);
+      if (!query) return;
       const { results, authExpired } = await window.funsync.eroscriptsSearch(query);
 
       // The API reports a dead session; act on it instead of dropping it.
@@ -8083,8 +9423,10 @@ class App {
         return;
       }
 
-      if (results && results.length > 0 && !this.funscriptEngine.isLoaded) {
-        const top = results[0];
+      // Only a post whose title shares the video's words (titleMatchesQuery):
+      // the first result was offered whatever it was (2026-11-22).
+      const top = Array.isArray(results) ? results.find((r) => titleMatchesQuery(r?.title, query)) : null;
+      if (top && !this.funscriptEngine.isLoaded) {
         const container = document.createElement('div');
         container.className = 'update-toast';
 
@@ -8351,6 +9693,7 @@ class App {
       'player': document.getElementById('player-container'),
       'playlists': document.getElementById('playlists-container'),
       'categories': document.getElementById('categories-container'),
+      'eroscripts': document.getElementById('eroscripts-container'),
     };
     return map[viewId] || null;
   }
@@ -8372,7 +9715,7 @@ class App {
     // keep the player container visible (it floats as a fixed corner
     // overlay over the target view) unless we're navigating INTO the
     // player, which expands it back to full and clears mini mode.
-    for (const vid of ['library', 'player', 'playlists', 'categories']) {
+    for (const vid of ['library', 'player', 'playlists', 'categories', 'eroscripts']) {
       if (vid === 'player' && this._miniActive && viewId !== 'player') continue;
       const el = this._getViewEl(vid);
       if (el) el.hidden = true;
@@ -8462,6 +9805,8 @@ class App {
       this.playlists.show(this._getViewEl('playlists'));
     } else if (viewId === 'categories') {
       this.categories.show(this._getViewEl('categories'));
+    } else if (viewId === 'eroscripts') {
+      this.eroscriptsView?.show();
     }
     // Same re-anchor for the other browse views: their headers render
     // synchronously in show() (V27).
@@ -8470,6 +9815,8 @@ class App {
 
   /** Hook called when leaving a view. */
   _onLeaveView(viewId) {
+    // The tab gives the search panel back (it floats in the player view).
+    if (viewId === 'eroscripts') this.eroscriptsView?.hide();
     if (viewId === 'player') {
       // Drop OS fullscreen FIRST, before any of the branches below. Leaving
       // the player while fullscreen otherwise left the container as
@@ -8618,6 +9965,7 @@ class App {
     el.hidden = false;
     el.classList.add('player-container--mini');
     this.upNextCard?.setMini(true); // compact "Next video starts in Ns" strip
+    this._syncInlineVizCovered?.();
     this._updateMiniPlayPauseIcon();
   }
 
@@ -8798,6 +10146,7 @@ class App {
       return;
     }
     if (type === PLAYERWIN.LOAD_PREV) { this._playPrev(); return; }
+    if (type === PLAYERWIN.STOP_ALL) { this.stopEverything({ source: 'popout' }); return; }
     if (type === PLAYERWIN.LOAD_NEXT) { this._playNext(); return; }
     if (type === PLAYERWIN.UP_NEXT_ACTION) { this._handlePopoutUpNextAction(payload.action); return; }
     // X / Z pressed and let go in the player window (next major): the
@@ -8977,7 +10326,8 @@ class App {
         const fps = inline?._estimateFps?.() || 30;
         // Just past the target frame's start: on it, or a hair before (the
         // ms rounding below), showed the previous frame (D-02, verify-1).
-        seekTo(frameStepTime(from, frames, fps));
+        // On this video's frame grid (its start, framePhaseSec).
+        seekTo(frameStepTime(from, frames, fps, Infinity, inline?.framePhaseSec?.() || 0));
         break;
       }
       // A hair before the end, as the inline End key does: seeking exactly
@@ -9024,6 +10374,17 @@ class App {
   /** Start playback where it lives: the pop-out while detached, else the inline <video>. */
   _startPlayback() {
     if (this._playerWindowPlayback('play')) return;
+    // A playlist resume's seek still waits for the video's length
+    // (`_applyPendingResumeSeek`): played now, the video and the Handy's
+    // first play started from 0, and the resume position's play followed
+    // 0.25 s later (device session 2026-11-20, step 43). The upload gate
+    // lifts on `durationchange` with the gap filler on (Chromium fires it
+    // before `loadedmetadata`), and at once for a script the Handy already
+    // holds. The seek starts playback when it has moved the video.
+    if (this._pendingResumeSeek) {
+      this._pendingResumeSeek.playAfterSeek = true;
+      return;
+    }
     this.videoPlayer.video.play().catch(() => {});
   }
 
@@ -9089,6 +10450,36 @@ class App {
    * opacity: tell an open pop-out now (FT-028), not at its next open.
    * `changed` is the value just set; the other comes from settings.
    */
+  /**
+   * Timeline and heatmap over the video or under it (Settings > Playback;
+   * zaikechi #381, Dave 2026-11-22): applied at start and on every change,
+   * here and in an open pop-out.
+   */
+  _wireInlineVizPlacement() {
+    const placement = () => (this.settings?.get?.('player.inlineVizPlacement') === 'below' ? 'below' : 'overlay');
+    this.inlineViz?.setPlacement?.(placement());
+    this.inlineViz?.setTimelineView?.(this._inlineTimelineView());
+    eventBus.on('settings:changed', ({ path } = {}) => {
+      if (path === 'player.inlineTimelineWindowMs' || path === 'player.inlineTimelineAnchor') {
+        // The Timeline's zoom and playhead (#381), here and in the pop-out.
+        this.inlineViz?.setTimelineView?.(this._inlineTimelineView());
+        this._sendPlayerWindowInlineVizState?.({ timelineView: this._inlineTimelineView() });
+        return;
+      }
+      if (path !== 'player.inlineVizPlacement') return;
+      this.inlineViz?.setPlacement?.(placement());
+      this._sendPlayerWindowInlineVizState?.({ placement: placement() });
+    });
+  }
+
+  /** The Timeline overlay's window and playhead from Settings > Playback (#381). */
+  _inlineTimelineView() {
+    return {
+      windowMs: Number(this.settings?.get?.('player.inlineTimelineWindowMs')) || 5000,
+      anchor: this.settings?.get?.('player.inlineTimelineAnchor') === 'left' ? 'left' : 'centre',
+    };
+  }
+
   _sendPlayerWindowInlineVizState(changed = {}) {
     if (!this._playerWindowOpen && !this._playerWindowActive) return;
     const playhead = typeof changed.playhead === 'boolean'
@@ -9097,13 +10488,60 @@ class App {
     const opacity = Number.isFinite(Number(changed.opacity))
       ? Number(changed.opacity)
       : (Number(this.settings?.get?.('player.inlineVizOpacity')) || INLINE_VIZ_OPACITY_DEFAULT);
-    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.INLINE_VIZ_STATE, { playhead, opacity }));
+    const placement = changed.placement === 'below' || changed.placement === 'overlay'
+      ? changed.placement
+      : (this.settings?.get?.('player.inlineVizPlacement') === 'below' ? 'below' : 'overlay');
+    const timelineView = changed.timelineView || this._inlineTimelineView();
+    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.INLINE_VIZ_STATE, { playhead, opacity, placement, timelineView }));
+  }
+
+  /**
+   * The player pop-out (and the Audience room window) follow a theme, style
+   * or Holiday change while open. It only ever got the look in INITIAL_STATE: Dark / Light, Modern or
+   * Holiday chosen with it open left it as it was until it was reopened
+   * (found 2026-11-22 checking Holiday with the pop-outs open; also in
+   * v0.10.0). theme-manager writes data-theme / data-style / data-season on
+   * <html> for every cause (Settings, the OS theme under "System"), so a
+   * change of those attributes is what is sent.
+   */
+  _wirePlayerWindowTheme() {
+    if (typeof MutationObserver === 'undefined') return;
+    this._themeObserver = new MutationObserver(() => {
+      this._sendPlayerWindowTheme();
+      // The Audience room window had the same gap: it handles THEME, and
+      // nothing sent it one. Main drops it while that window is closed.
+      this._sendAudienceTheme();
+    });
+    this._themeObserver.observe(document.documentElement, {
+      attributes: true, attributeFilter: ['data-theme', 'data-style', 'data-season'],
+    });
+  }
+
+  _sendPlayerWindowTheme() {
+    if (!this._playerWindowOpen && !this._playerWindowActive) return;
+    const d = document.documentElement.dataset;
+    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.THEME, {
+      theme: d.theme || 'dark',
+      uiStyle: d.style || 'classic',
+      season: d.season || null,
+    }));
+  }
+
+  _sendAudienceTheme() {
+    if (!this.audienceBridge) return;
+    const d = document.documentElement.dataset;
+    this._pushAudienceMessage(AUDIENCE.THEME, {
+      theme: d.theme || 'dark',
+      uiStyle: d.style || 'classic',
+      season: d.season || null,
+    });
   }
 
   _sendPlayerWindowInitialState() {
     window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.INITIAL_STATE, {
       theme: document.documentElement.dataset.theme || 'dark',
       uiStyle: document.documentElement.dataset.style || 'classic',
+      season: document.documentElement.dataset.season || null,
       locale: this.settings?.get?.('player.language') || 'en',
       backendPort: this.backendPort || null,
       // Inline TL/HM state so the pop-out opens with the same overlays (and
@@ -9113,6 +10551,8 @@ class App {
         heatmap: this.settings?.get?.('player.inlineHeatmap') === true,
         playhead: this.settings?.get?.('player.inlineHeatmapPlayhead') === true,
         opacity: Number(this.settings?.get?.('player.inlineVizOpacity')) || INLINE_VIZ_OPACITY_DEFAULT,
+        placement: this.settings?.get?.('player.inlineVizPlacement') === 'below' ? 'below' : 'overlay',
+        timelineView: this._inlineTimelineView(),
       },
       video: null, // sent separately via LOAD_VIDEO (unified first-open + re-route)
     }));
@@ -9163,7 +10603,9 @@ class App {
       // (or the 8 s fallback) start it, so the video cannot run ahead of a
       // device that has no script yet (V15).
       const gated = autoplay !== false && this._waitingForScript;
-      this._sendLoadVideoToPopout(autoplay !== false && !gated, true); // fresh clip → start at 0
+      // A fresh clip starts at 0, or where this video resumes.
+      const resume = this._resumeTarget?.path === this._currentVideoPath ? this._resumeTarget.seconds : 0;
+      this._sendLoadVideoToPopout(autoplay !== false && !gated, resume > 0 ? { timeMs: Math.round(resume * 1000) } : true);
       // A gated load still means "play": a remux re-send must not lose it (FT-076).
       if (this._popoutLoadSent) this._popoutLoadSent.wanted = autoplay !== false;
       if (gated) this._showScriptLoadingOverlay();
@@ -9189,9 +10631,20 @@ class App {
    * selector render exactly like the inline player. The data lives here in
    * main with the devices; the pop-out is a display of it.
    */
+  /** The current subtitles to an open player pop-out ({ name: null } = none). */
+  _sendPlayerWindowSubtitle() {
+    if (!this._playerWindowOpen && !this._playerWindowActive) return;
+    const sub = this._currentSubtitle;
+    window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.SUBTITLE,
+      sub && sub.name && typeof sub.text === 'string' ? { name: sub.name, text: sub.text, show: sub.show !== false } : { name: null }));
+  }
+
   _streamPlayerWindowData() {
     if (!this._playerWindowOpen) return;
     const relay = (payload) => window.funsync?.playerPopoutRelay?.('to-popout', payload);
+    // The video's subtitles, with every video handed over (the pop-out's
+    // own player keeps what it was last given until told otherwise).
+    this._sendPlayerWindowSubtitle?.();
     const durationMs = Math.round((this.videoPlayer?.duration || 0) * 1000);
     if (this.funscriptEngine?.isLoaded) {
       relay(PLAYERWIN.makeMessage(PLAYERWIN.HEATMAP, {
@@ -9260,9 +10713,9 @@ class App {
     // Cache-first thumbnail (usually instant); stream it when ready as long
     // as the same card is still up.
     this._captureUpNextThumb(path).then((r) => {
-      if (r?.dataUrl && this._playerWindowActive && this._upNextCurrentPath === path) {
-        this._relayUpNext({ action: 'thumb', path, thumbDataUrl: r.dataUrl });
-      }
+      if (!this._playerWindowActive || this._upNextCurrentPath !== path) return;
+      if (r?.dataUrl) this._relayUpNext({ action: 'thumb', path, thumbDataUrl: r.dataUrl });
+      else if (r?.noVideo) this._relayUpNext({ action: 'thumb', path, thumbNoVideo: true, thumbStream: !!r.stream });
     }).catch(() => { /* skeleton stays */ });
   }
 
@@ -9531,6 +10984,7 @@ class App {
     this._miniActive = false;
     this._getViewEl('player')?.classList.remove('player-container--mini');
     this.upNextCard?.setMini(false); // back to the full card in the player view
+    this._syncInlineVizCovered?.();
   }
 
   // --- VR-as-flat playback (community ask: Monoinc 2026-05-17) ---
@@ -10114,6 +11568,7 @@ class App {
       hideKeys: this.settings?.get?.('audience.hideKeys') !== false,
       theme: document.documentElement.dataset.theme || 'dark',
       uiStyle: document.documentElement.dataset.style || 'classic',
+      season: document.documentElement.dataset.season || null,
       // Pop-out renderer has its own module-level i18n state. Pass the
       // streamer's chosen locale so the pop-out shows translated UI
       // instead of raw key constants like "audience.room.empty".
@@ -10485,9 +11940,19 @@ class App {
    */
   _onEroScriptsNavClick() {
     if (!this.eroscriptsPanel) return;
-    if (this._hasOpenVideo() && !this.funscriptEngine.isLoaded && !this.eroscriptsPanel._visible) {
-      const query = this._currentVideoName.replace(/\.[^/.]+$/, '');
-      this.eroscriptsPanel.setSearchQuery(query, true);
+    // The EroScripts tab (2026-11-22). The nav bar shows outside the player
+    // only; a video still open in the mini player without a script searches
+    // for itself, as the panel did.
+    const fresh = this._currentView() !== 'eroscripts';
+    if (fresh && this._hasOpenVideo() && !this.funscriptEngine.isLoaded) {
+      // The same cleaned query as the auto-match (v0.10.1), so the button
+      // and the "Script found" toast search for the same words.
+      const query = cleanSearchName(this._currentVideoName);
+      if (query) this.eroscriptsPanel.setSearchQuery(query, true);
+    }
+    if (this.eroscriptsView) {
+      this._navigateTo('eroscripts');
+      return;
     }
     this.eroscriptsPanel.toggle();
   }
@@ -10531,6 +11996,7 @@ class App {
       const content = await window.funsync.readFunscript(fsPath);
       if (content) {
         await this.loadFunscript({ name: fsName, textContent: content, path: fsPath });
+        this._refreshVariantsAfterDownload?.(fsPath);
       } else {
         showToast(t('toast.downloadedButUnreadable', { name: fsName }), 'warn', 6000);
       }
@@ -10579,10 +12045,69 @@ class App {
     const name = String(path).split(/[\\/]/).pop();
     try {
       const content = await window.funsync.readFunscript(path);
-      if (content) await this.loadFunscript({ name, textContent: content, path });
-      else showToast(t('toast.downloadedButUnreadable', { name }), 'warn', 6000);
+      if (content) {
+        await this.loadFunscript({ name, textContent: content, path });
+        if (forOpen) {
+          this._refreshVariantsAfterDownload?.(path);
+          await this._loadDownloadedAxes?.(path, written);
+        }
+      } else showToast(t('toast.downloadedButUnreadable', { name }), 'warn', 6000);
     } catch (err) {
       showToast(t('toast.downloadAutoLoadFailed', { error: err.message }), 'error', 5000);
+    }
+  }
+
+  /**
+   * Download all for the open video wrote axis files beside its new main
+   * script (<name>.<axis>.funscript): they play now, not from the next open
+   * (editor work list 6.4, 2026-11-24; Dave: "do what you think is best").
+   * The session's multi-axis set takes them with the new main; nothing is
+   * written to the associations (the next scan finds companion files beside
+   * the video, as before). Not under Custom Routing (the user's own routes).
+   */
+  async _loadDownloadedAxes(mainPath, written = []) {
+    if (!mainPath || this._customRoutingActive) return;
+    const key = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
+    const axes = {};
+    for (const p of written || []) {
+      if (!p || key(p) === key(mainPath)) continue;
+      const def = parseAxisSuffix(String(p).split(/[\\/]/).pop());
+      if (def?.suffix) axes[def.suffix] = p;
+    }
+    if (!Object.keys(axes).length) return;
+    this._currentMultiAxis = {
+      ...(this._currentMultiAxis || {}), main: mainPath,
+      axes: { ...(this._currentMultiAxis?.axes || {}), ...axes },
+    };
+    await this._loadMultiAxisScripts(this._currentMultiAxis);
+    this._refreshEditorScriptList?.();
+  }
+
+  /**
+   * After a download for the open video (the EroScripts panel, or
+   * Associate's search) loaded its new main script: the video's variation
+   * list as the library now has it, with the download picked (N-02 note,
+   * TODO triage 2026-11-23, also in v0.9.2: the chip still named the previous
+   * script and the download was in no entry until the video was opened
+   * again). A phone's list is the phone video's and is left alone.
+   * @param {string} scriptPath
+   */
+  _refreshVariantsAfterDownload(scriptPath) {
+    if (!scriptPath || this._variantsPhoneEpoch != null) return;
+    const key = (p) => String(p || '').replace(/\\/g, '/').toLowerCase();
+    const libVideo = (this.library?._videos || []).find((v) => key(v.path) === key(this._currentVideoPath));
+    if (Array.isArray(libVideo?.variants)) this._currentVariants = libVideo.variants;
+    // What the video plays now, for the menu's own "Default" when the list is empty.
+    this._mainScript = { gen: this._videoLoadGen, path: scriptPath };
+    this._activeVariantIndex = 0;
+    this._activeVariantPath = null;
+    this._updateVariantSelector?.();
+    const all = this._allVariantsWithManual || [];
+    const at = all.findIndex((v) => key(v.path) === key(scriptPath));
+    if (at > 0) {
+      this._activeVariantIndex = at;
+      this._activeVariantPath = all[at].path;
+      this._updateVariantSelector?.();
     }
   }
 
@@ -10603,6 +12128,13 @@ class App {
       [this._autoAdvancing, this._navigationalArrivals] = now;
       return load;
     }
+    // A script with no video (the Library's Scripts filter, a playlist's
+    // script entry; Dave, 2026-11-26): the script player plays it.
+    if (/\.funscript$/i.test(String(videoData?.path ?? ''))) return this._playScriptEntry(videoData);
+    // A video replacing a playlist's script entry: the script player gives
+    // the devices back first, as one video gives way to the next.
+    if (this._scriptEntry) await this._endScriptEntry();
+
     // When the detached player window is open, the new video loads into IT,
     // not the main window — main stays on the library so it keeps being
     // browseable (deaf #189). Otherwise, switch to the inline player view —
@@ -10683,17 +12215,17 @@ class App {
     // `_autoPlayOnNextLoad` -> `_autoPlayOnLoad`, from autoplayOnAdvance.
     const autoPlayOnLoad = !!videoData?._autoPlayOnLoad
       || (!this._autoAdvancing && this.settings?.get?.('player.autoplayOnOpen') === true);
-    // If we're auto-playing AND there's a funscript to upload, gate
-    // playback on every connected cloud-sync device (Handy / Autoblow).
-    // Without this, `loadeddata` would fire `.play()` immediately and
-    // the video would race ahead while the cloud upload(s) are still
-    // in flight (1–3s of device silence). `_resolveCloudUpload` from
-    // each device's upload completion path lifts the gate when the
-    // last one finishes. Marked right AFTER loadVideo below: loadVideo
-    // clears any earlier gate, so marking it here first left nothing
-    // waiting by `loadeddata` and autoplay never waited (FT-112, also in
-    // v0.9.2).
-    const gateCloudUploads = autoPlayOnLoad && !!funscriptData?.textContent;
+    // If we're auto-playing AND there's a funscript to upload, playback is
+    // gated on every connected cloud-sync device (Handy / Autoblow):
+    // `gateCloudUploads`, after the resume question below, because a Resume
+    // click plays too (v0.10.1). Without the gate, `loadeddata` would fire
+    // `.play()` immediately and the video would race ahead while the cloud
+    // upload(s) are still in flight (1–3s of device silence).
+    // `_resolveCloudUpload` from each device's upload completion path lifts
+    // the gate when the last one finishes. Marked right AFTER loadVideo
+    // below: loadVideo clears any earlier gate, so marking it here first
+    // left nothing waiting by `loadeddata` and autoplay never waited
+    // (FT-112, also in v0.9.2).
 
     // Resume. Two arrival kinds, deliberately different:
     //
@@ -10715,6 +12247,11 @@ class App {
     // (assigned above), so this gates on where the new video is being
     // played FROM — playlists only.
     let resumeAt = null;
+    // Set by the resume question when the user CLICKS "Resume from …": that
+    // click is the "play this" (v0.10.1, Dave: "Only Resume plays"), so the
+    // video plays from there even with Autoplay on open off. Start over, and
+    // Escape / the backdrop (which keep the position), still load paused.
+    const resumeAnswer = { play: false };
     const arrivalPath = videoData?.path || null;
     const flowThrough = !!this._autoAdvancing || (this._navigationalArrivals || 0) > 0;
     // Consumed once, and unconditionally, so a Start over chosen on the Up
@@ -10731,15 +12268,28 @@ class App {
         showToast(t('resume.resumedToast', { time: formatResumeTime(entry.position) }), 'info', 4000);
       }
     } else {
-      resumeAt = await this._maybeOfferResume(arrivalPath, videoData?.duration);
+      resumeAt = await this._maybeOfferResume(arrivalPath, videoData?.duration, resumeAnswer);
     }
+
+    // The ONE play decision for everything below, Resume included: the
+    // cloud-upload gate (computed from it, not from autoPlayOnLoad alone) is
+    // what stops a resumed video racing ahead of a Handy / Autoblow upload.
+    const playOnLoad = autoPlayOnLoad || resumeAnswer.play === true;
+    const gateCloudUploads = playOnLoad && !!funscriptData?.textContent;
 
     // While the pop-out owns playback the inline <video> only holds the
     // file: the pop-out plays it, from _routeLoadedVideoToPlayerWindow below
     // (V13). Autoplaying here too would start a second, hidden copy.
-    this.loadVideo(videoData, {
+    // A saved stream (2026-11-23): its page looked up now and the fresh
+    // stream played as this library video (its key stays its path).
+    let loadData = videoData;
+    if (videoData?._stream || String(videoData?.path ?? '').startsWith('stream:')) {
+      loadData = await this._prepareSavedStream(videoData);
+      if (!loadData) return undefined;          // said why; nothing removed
+    }
+    this.loadVideo(loadData, {
       skipViewSwitch: true,
-      autoPlay: autoPlayOnLoad && !this._playerWindowActive,
+      autoPlay: playOnLoad && !this._playerWindowActive,
     });
     if (gateCloudUploads) this._markCloudUploadsPending();
     // An unattended advance loaded this: a file it finds missing is walked
@@ -10779,7 +12329,7 @@ class App {
     // Detached player is open → route this freshly-loaded video into it,
     // with the same autoplay decision the inline player would have used
     // (a plain click loads paused unless player.autoplayOnOpen is on, V15).
-    await this._routeLoadedVideoToPlayerWindow(autoPlayOnLoad);
+    await this._routeLoadedVideoToPlayerWindow(playOnLoad);
 
     // Final queue panel refresh — `loadVideo` already fired one, but
     // by now `_currentPlayContext` is set so `_getUpcoming` can derive
@@ -10898,6 +12448,9 @@ class App {
     }
     if (subtitleData) {
       this._loadSubtitleFromLibrary(subtitleData);
+    } else if (!videoData?._remote && !videoData?._stream) {
+      // No subtitle file beside it: the subtitles inside it (#268), not awaited.
+      this._loadEmbeddedSubtitles?.(videoData?.path);
     }
     // Honor a per-video pinned default variant (lr_x3 request): once the
     // auto-default has loaded, swap to the user's preferred variant for
@@ -11171,6 +12724,102 @@ class App {
   }
 
   /**
+   * The Multi Axis set the script at `scriptPath` plays with (TODO "Found
+   * while editing Dave's scripts", 2026-11-20; also in v0.9.2: the video's
+   * "Title.vib.funscript" played with every variant). A script variant's own
+   * axis files ("Title (muted).vib.funscript" beside "Title (muted).funscript",
+   * `sameFolderCompanions`) play with it, axis by axis, in place of the
+   * video's; an axis it has no file for keeps the video's. The rule:
+   *   - the video's own script, or a variant with no files of its own: the
+   *     video's set, exactly as it loaded;
+   *   - an axis the user assigned by hand (a Multi Axis set they saved, not
+   *     FunSync's `autoAssigned` pairing by name) keeps their file: a
+   *     variant's file never replaces it;
+   *   - only where companion files play at all: a video with a Multi Axis
+   *     set, or one with no association of the user's while Settings
+   *     "Multi-axis when available" is on (what pairs them for the video's
+   *     own script). A single-script association, or "Single", plays none.
+   * Returns the video's set itself when nothing changes, else a new set that
+   * keeps it as `variantOf`, so a switch back finds it.
+   */
+  _multiAxisForScript(scriptPath) {
+    const cur = this._currentMultiAxis || null;
+    const base = cur && Object.prototype.hasOwnProperty.call(cur, 'variantOf') ? cur.variantOf : cur;
+    if (!scriptPath) return base;
+    const same = (p) => !!p && canonicalPath(p).toLowerCase() === canonicalPath(scriptPath).toLowerCase();
+    // `_mainScript` itself first: before any video has loaded here both it
+    // and `_videoLoadGen` are undefined, and undefined === undefined.
+    const mainPath = this._mainScript && this._mainScript.gen === this._videoLoadGen ? this._mainScript.path : null;
+    if (same(base?.main) || same(mainPath)) return base;
+    if (!base) {
+      if (this.settings?.get?.('player.preferMultiAxis') !== 'multi') return base;
+      const record = this._currentVideoPath ? this.library?.getVideoByPath?.(this._currentVideoPath) : null;
+      if (record?._manualAssociation && !record._autoAssigned) return base;
+    }
+    const files = (this.library?.getAllFunscripts?.() || []).map((f) => f?.path).filter(Boolean);
+    const own = Object.entries(sameFolderCompanions(scriptPath, files));
+    if (own.length === 0) return base;
+    const tcodeOf = (suffix) => getAxisBySuffix(suffix)?.tcode || null;
+    const byHand = new Set();
+    if (base && !base.autoAssigned) {
+      for (const [suffix, axisPath] of Object.entries(base.axes || {})) {
+        if (axisPath && tcodeOf(suffix)) byHand.add(tcodeOf(suffix));
+      }
+    }
+    const axes = { ...(base?.axes || {}) };
+    let changed = false;
+    for (const [suffix, axisPath] of own) {
+      const tcode = tcodeOf(suffix);
+      if (!tcode || byHand.has(tcode)) continue;
+      // The video's file for this channel, under whatever spelling it was saved.
+      for (const key of Object.keys(axes)) if (tcodeOf(key) === tcode) delete axes[key];
+      axes[suffix] = axisPath;
+      changed = true;
+    }
+    if (!changed) return base;
+    return { ...(base || { buttplugVib: false, autoAssigned: true }), main: scriptPath, axes, variantOf: base };
+  }
+
+  /**
+   * After a variant switch loaded `content` from `scriptPath`: its axes on
+   * both engines (`_multiAxisForScript`). A channel the last set drove and
+   * this one does not comes off ButtplugSync and TCodeSync; the axes
+   * embedded in the last script come off and this script's go on
+   * (`_applyEmbeddedAxes` leaves the companion channels alone, V11); then
+   * the set's files load (`_loadMultiAxisScripts`, which drops its reads
+   * once the set is not the current one). The switch used to leave all of
+   * it as the video's main script had set it.
+   */
+  async _applyVariantAxes(scriptPath, content) {
+    const prev = this._currentMultiAxis || null;
+    const next = this._multiAxisForScript(scriptPath);
+    if (next !== prev) {
+      const tcodesOf = (config) => new Set(Object.entries(config?.axes || {})
+        .filter(([, axisPath]) => axisPath)
+        .map(([suffix]) => getAxisBySuffix(suffix)?.tcode)
+        .filter(Boolean));
+      const keep = tcodesOf(next);
+      for (const tcode of tcodesOf(prev)) {
+        if (keep.has(tcode)) continue;
+        this.buttplugSync?.setAxisActions?.(tcode, null);
+        this.tcodeSync?.setAxisActions?.(tcode, null);
+      }
+      // The vibe script the last set sent to Buttplug vibrators (buttplugVib).
+      if (prev?.buttplugVib && !(next?.buttplugVib && keep.has('V0'))) {
+        this.buttplugSync?.setVibrationActions?.(null);
+        this.connectionPanel?.updateVibControlState?.();
+      }
+      this._currentMultiAxis = next;
+      this._companionAxesFailed = new Set();
+    }
+    // The last script's embedded axes off (a script with none feeds nothing,
+    // and clears nothing), then this one's.
+    this._applyEmbeddedAxes(new Map());
+    this._feedEmbeddedMultiAxis(content, scriptPath);
+    if (next && next !== prev) await this._loadMultiAxisScripts(next);
+  }
+
+  /**
    * An assigned companion could not be read (moved, deleted, unreadable).
    * Absence must not silence an axis the main script still carries: hand
    * the channel back to the embedded copy. If the embedded feed has not
@@ -11235,13 +12884,13 @@ class App {
    */
   async _extractEmbeddedAxesToCompanions(video) {
     if (!video?.funscriptPath || !video?.path) {
-      showToast('Cannot extract — video or funscript path missing', 'error');
+      showToast(t('toast.extractMissingPaths'), 'error');
       return null;
     }
     const entry = this.getEmbeddedAxes(video.funscriptPath)
       || await this.detectEmbeddedAxesForPath(video.funscriptPath);
     if (!entry || entry.suffixes.length === 0) {
-      showToast('No embedded axes detected in this funscript', 'info');
+      showToast(t('toast.extractNoAxes'), 'info');
       return null;
     }
     const files = buildCompanionFiles(entry.axes);
@@ -11298,7 +12947,7 @@ class App {
     }
 
     if (todo.length > 0 && Object.keys(extracted).length === 0) {
-      showToast(`Extraction failed (${failed.join(', ')})`, 'error');
+      showToast(t('toast.extractFailed', { axes: failed.join(', ') }), 'error');
       return null;
     }
 
@@ -11418,12 +13067,19 @@ class App {
    */
   _refreshEditorScriptList() {
     if (!this.scriptEditor || this._customRoutingActive) return;
-    const SUFFIX_LABELS = { surge: 'Surge', sway: 'Sway', twist: 'Twist', roll: 'Roll', pitch: 'Pitch', vib: 'Vibe', lube: 'Lube', pump: 'Pump', suction: 'Suction', valve: 'Valve' };
+    // The same short names as multi-axis.js axisShortLabel (the editor's New
+    // axis); `suck` added: a .suck companion was listed as "suck".
+    const SUFFIX_LABELS = { surge: 'Surge', sway: 'Sway', twist: 'Twist', roll: 'Roll', pitch: 'Pitch', vib: 'Vibe', lube: 'Lube', pump: 'Pump', suction: 'Suction', suck: 'Suction', valve: 'Valve' };
     const label = (suffix) => SUFFIX_LABELS[suffix] || suffix;
-    const scripts = [{ label: t('editor.mainAxisLabel'), path: this.scriptEditor._funscriptPath || '' }];
+    // The MAIN script's path: the app's, not whatever the editor has on
+    // screen (the list is rebuilt after an axis is saved, with that axis on
+    // screen; it was then listed as Main). `kind` / `axis` let the editor
+    // route Save and New axis (multi-axis editing, 2026-11-24).
+    const mainPath = this._currentFunscriptPath || this.scriptEditor._funscriptPath || '';
+    const scripts = [{ label: t('editor.mainAxisLabel'), path: mainPath, kind: 'main' }];
     const companions = Object.entries(this._currentMultiAxis?.axes || {}).filter(([, p]) => p);
     for (const [suffix, axisPath] of companions) {
-      scripts.push({ label: label(suffix), path: axisPath });
+      scripts.push({ label: label(suffix), path: axisPath, kind: 'companion', axis: suffix });
     }
     const covered = new Set(companions.map(([suffix]) => suffix));
     const embedded = this._currentFunscriptPath ? this.getEmbeddedAxes(this._currentFunscriptPath) : null;
@@ -11433,9 +13089,110 @@ class App {
         label: t('editor.embeddedAxisLabel', { axis: label(suffix) }),
         path: `${this._currentFunscriptPath}#embedded=${suffix}`,
         embeddedAxis: suffix,
+        axisLabel: label(suffix),
+        kind: 'embedded',
       });
     }
     this.scriptEditor.setAvailableScripts(scripts.length > 1 ? scripts : []);
+  }
+
+  /**
+   * The editor wrote an axis to its own file (multi-axis editing,
+   * 2026-11-24). The devices play the saved points on that axis's channel:
+   * an edited companion used to wait for the next open of the video (and
+   * the editor put it into the MAIN engine, so the Handy played a saved
+   * twist as the stroke). An axis the editor created becomes a companion of
+   * this video at once: the association (as Extract does), the card, the list.
+   */
+  async _onEditorAxisSaved({ path, suffix, created = false } = {}) {
+    const videoPath = this._currentVideoPath;
+    if (!path || !suffix || !videoPath || this._customRoutingActive) return;
+    if (this._currentMultiAxis?.axes?.[suffix] !== path) {
+      try {
+        const assocs = this.settings?.get?.('library.associations') || {};
+        const existing = assocs[videoPath] || {};
+        const main = existing.multi?.main || this._currentFunscriptPath || existing.single || null;
+        const multi = { ...(existing.multi || {}), main, axes: { ...(existing.multi?.axes || {}), [suffix]: path } };
+        assocs[videoPath] = { ...existing, active: 'multi', single: existing.single || main, multi };
+        this.settings?.set?.('library.associations', assocs);
+        this._currentMultiAxis = {
+          ...(this._currentMultiAxis || {}), main,
+          axes: { ...(this._currentMultiAxis?.axes || {}), [suffix]: path },
+        };
+        const libVideo = this.library?.getVideoByPath?.(videoPath);
+        if (libVideo) {
+          libVideo.hasFunscript = true;
+          libVideo._multiAxis = multi;
+          libVideo._manualAssociation = true;
+        }
+        if (created) console.log(`[MultiAxisEdit] new ${suffix} axis saved as ${path}`);
+      } catch (err) {
+        console.warn('[MultiAxisEdit] association update failed:', err?.message);
+      }
+    }
+    // The player's own config: the loader drops a config that is not the
+    // current one (its guard against another video loading mid-read).
+    if (this._currentMultiAxis) await this._loadMultiAxisScripts(this._currentMultiAxis);
+    this._refreshEditorScriptList();
+  }
+
+  /**
+   * Save As in the editor (belgriffinite #439, 2026-11-24): the main script
+   * now lives in a new file, and this video plays from it (the editor has put
+   * its points in the engine). The badge, the embedded-axis cache and the
+   * editor's list follow. The original file and the video's saved pairing are
+   * left as they are; the library picks the new file up (a variant when it is
+   * named <video> (...).funscript), so the variant menu switches between them.
+   */
+  _onEditorMainSavedAs({ from, to } = {}) {
+    if (!to || this._currentFunscriptPath !== from) return;
+    this._currentFunscriptPath = to;
+    const cached = this._embeddedAxesByPath?.get(from);
+    if (cached) this._embeddedAxesByPath.set(to, cached);
+    if (this._lastFunscriptInfo) {
+      this._lastFunscriptInfo = { ...this._lastFunscriptInfo, filename: to.split(/[\\/]/).pop() };
+      this._showFunscriptBadge?.(this._lastFunscriptInfo);
+    }
+    this._rescanLibraryInBackground?.();
+  }
+
+  /**
+   * The editor wrote the combined main file (its axes are saved back into
+   * it, in the new format): read it again, so the devices play every axis
+   * as saved, and the script list and badge follow.
+   */
+  async _onEditorCombinedSaved({ path } = {}) {
+    if (!path || path !== this._currentFunscriptPath) return;
+    try {
+      const content = await window.funsync.readFunscript(path);
+      if (content) {
+        this._embeddedAxesByPath?.delete(path);
+        this._feedEmbeddedMultiAxis(content, path);
+      }
+    } catch (err) {
+      console.warn('[MultiAxisEdit] re-reading the combined file failed:', err?.message);
+    }
+    this._refreshEditorScriptList();
+  }
+
+  /**
+   * The editor's script list in the new language (FT-103, TODO triage
+   * 2026-11-23): "Main (L0)" and "<axis> (embedded): extract to edit…" were
+   * built with t() once per video load and kept the old language, docked and
+   * in the pop-out. Only the labels change: every path stays, and the script
+   * being edited stays selected (setAvailableScripts re-selects it). Custom
+   * routing's list has no translated words.
+   */
+  _retranslateEditorScriptList() {
+    const list = this.scriptEditor?._availableScripts;
+    if (this._customRoutingActive || !Array.isArray(list) || list.length < 2) return;
+    this.scriptEditor.setAvailableScripts(list.map((entry, i) => {
+      if (i === 0) return { ...entry, label: t('editor.mainAxisLabel') };
+      if (entry.embeddedAxis) {
+        return { ...entry, label: t('editor.embeddedAxisLabel', { axis: entry.axisLabel || entry.embeddedAxis }) };
+      }
+      return entry;
+    }));
   }
 
   _formatActionsDuration(actions) {
@@ -11517,18 +13274,28 @@ class App {
         if (rate === currentRate) item.classList.add('speed-popover__item--current');
         item.addEventListener('click', (e) => {
           e.stopPropagation();
+          // Chosen with Enter: the focus back to ⋮ / the chip, not the page.
+          // Read BEFORE the rate: its label sync re-renders this list (the
+          // focused item is gone after it; live, 2026-11-25).
+          const hadFocus = popover.contains(document.activeElement);
           this.videoPlayer.setPlaybackRate(rate);
+          if (hadFocus) popoverAnchor?.focus();
           closePopover();
         });
         popover.appendChild(item);
       }
     };
 
-    const openPopover = (anchorEl) => {
+    // fromKeyboard (a click with detail 0: Enter / Space on ⋮ ▸ Playback
+    // speed or on the chip): the focus goes to the current speed. It was on
+    // the ⋮ item that just hid, so it fell to the page and the arrows
+    // changed the volume (break-it 2026-11-25, B089's second half).
+    const openPopover = (anchorEl, fromKeyboard = false) => {
       popoverAnchor = anchorEl;
       renderPopover(this.videoPlayer.video.playbackRate || 1);
       popover.hidden = false;
       anchorEl?.setAttribute('aria-expanded', 'true');
+      if (fromKeyboard) focusMenuFromKeyboard(popover, '.speed-popover__item--current');
     };
     const closePopover = () => {
       popover.hidden = true;
@@ -11549,7 +13316,7 @@ class App {
     chip.addEventListener('click', (e) => {
       e.stopPropagation();
       closeOverflowMenu();
-      popover.hidden ? openPopover(chip) : closePopover();
+      popover.hidden ? openPopover(chip, e.detail === 0) : closePopover();
     });
 
     // Overflow menu entry — close the overflow menu, then open the
@@ -11558,7 +13325,7 @@ class App {
     overflowItem.addEventListener('click', (e) => {
       e.stopPropagation();
       closeOverflowMenu();
-      openPopover(overflowBtn || overflowItem);
+      openPopover(overflowBtn || overflowItem, e.detail === 0);
     });
 
     // Outside-click dismissal — registered in the CAPTURE phase so we
@@ -11591,9 +13358,16 @@ class App {
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && !popover.hidden) {
         e.preventDefault(); // taken: keyboard.js leaves the queue panel open
+        // The focus back where the menu came from (⋮ or the chip), not the page.
+        if (popover.contains(document.activeElement)) popoverAnchor?.focus();
         closePopover();
       }
     }, true);
+    // Down / Up / Home / End through the speeds while it is open (menu-keys.js).
+    document.addEventListener('keydown', (e) => {
+      if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (moveMenuFocus(popover, e.key)) e.preventDefault();
+    });
 
     // Keep chip + overflow-menu label in sync with rate changes from
     // any surface (keyboard, editor, web-remote later).
@@ -11627,6 +13401,8 @@ class App {
   _wirePlayerChromeLanguage() {
     eventBus.on('language:changed', ({ locale } = {}) => {
       this._retranslatePlayerChrome();
+      this._retranslateEditorScriptList?.(); // FT-103
+
       if (this._playerWindowOpen && locale) {
         window.funsync?.playerPopoutRelay?.('to-popout', PLAYERWIN.makeMessage(PLAYERWIN.LOCALE, { locale }));
         // Its variation menu carries main's word for "main" (`mainTag`,
@@ -11837,6 +13613,8 @@ class App {
       container.appendChild(undoBtn);
       showToast(container, 'info', 4000);
     };
+    // G with nothing ahead (the last movement): said, not a silent key (#442).
+    this.gapSkipEngine.onNothingAhead = () => showToast(t('toast.gapNothingAhead'), 'info', 2500);
 
     // Wire buttons
     btnSkip.addEventListener('click', () => this.gapSkipEngine.skipToNextAction());
@@ -11995,6 +13773,20 @@ class App {
    * Sync editor / loop suppression state into the engine. Call after any
    * change to A-B loop, video.loop, or scriptEditor.isOpen.
    */
+  /**
+   * The player's script strip sits under the docked script editor while it is
+   * open: it does not draw there (Dave, 2026-11-25, "speed up the player when
+   * in editor": it drew every frame, 538 ms of 5 s with six axes). The mini
+   * player hides the strip itself, so it does not draw there either.
+   */
+  _syncInlineVizCovered() {
+    const mini = !!this._getViewEl?.('player')?.classList.contains('player-container--mini');
+    // Docked only: a popped-out editor leaves the strip on screen. The mini
+    // player hides the strip itself (player.css: .player-container--mini
+    // .inline-viz), so it does not draw there either (break-it, 2026-11-25).
+    this.inlineViz?.setCovered?.(mini || !!this.scriptEditor?.dockedOnScreen);
+  }
+
   _syncUpNextSuppression() {
     if (!this.upNextEngine) return;
     const editorOpen = !!this.scriptEditor?.isOpen;
@@ -12124,10 +13916,14 @@ class App {
    * the old list's videos were not before it was emptied (FT-018).
    */
   _isUpNextPlayable(path) {
+    // A disabled video is never offered (zaikechi #381). Read from settings,
+    // so it holds before the library is scanned too.
+    if (this._isDisabledPath?.(path)) return false;
     const lib = this.library;
     if (!lib || typeof lib.getVideoByPath !== 'function') return true;
     if (lib._emptiedNoSource) return false;
     if (!lib._videos || lib._videos.length === 0) return true;
+    if (String(path ?? '').startsWith('stream:')) return !!lib.getVideoByPath(path);   // a saved stream: no source folder
     return !!lib.getVideoByPath(path) && this._isUnderEnabledSource(path);
   }
 
@@ -12393,6 +14189,9 @@ class App {
       onClearQueue: () => this._clearUserQueue(),
       onShuffleUpcoming: () => this._shuffleUpcoming(),
       onClose: () => this._toggleQueuePanel(),
+      // Beside the video or over it (#381): the header's dock button.
+      isDocked: () => this.settings?.get?.('player.queueDocked') === true,
+      onToggleDock: () => this._toggleQueueDock(),
       onOpenLibrary: () => this._navigateTo('library'),
       onCancelAutoAdvance: () => this.upNextEngine?.dismiss(),
     });
@@ -12563,7 +14362,7 @@ class App {
         && this.library?._filteredVideos?.length > 1
         && this._currentVideoPath) {
       const filtered = this.library._filteredVideos;
-      const curIdx = filtered.findIndex((v) => v?.path === this._currentVideoPath);
+      let curIdx = filtered.findIndex((v) => v?.path === this._currentVideoPath);
       if (curIdx < 0) return false;
       const toEntry = (v) => ({
         name: v.name || (v.path ? v.path.split(/[\\/]/).pop() : ''),
@@ -12575,8 +14374,10 @@ class App {
       // drift. All off (the default), `_playAllOrder` is a plain shuffle of
       // the rest: the queue this always built.
       const opts = { shuffle: true, ...libraryPlayRequest(this.settings) };
-      const all = filtered.map(toEntry);
-      const start = all[curIdx];
+      // Disabled videos stay out (zaikechi #381); the playing one leads either way.
+      const all = filtered.map(toEntry).filter((v, i) => i === curIdx || !this._isDisabledPath?.(v.path));
+      const start = all.find((v) => v.path === this._currentVideoPath);
+      curIdx = all.indexOf(start);
       // With Equal turn on, the playing video takes its script group's slot,
       // as a shuffled playlist start does (`_withShuffledStart`), and the
       // WHOLE list is kept for the loop-wrap redraw, as `_playAll` keeps it,
@@ -12628,7 +14429,31 @@ class App {
    * every view) the panel sat at top:0 over the nav bar and stopped 100px
    * short of the window bottom, the player's layout.
    */
+  /**
+   * The queue panel docked beside the video (zaikechi #381, 2026-11-22): in
+   * the player view, with the panel open and "docked" on, the video (and the
+   * TL / HM strip) gets the width the panel does not take, so nothing of the
+   * picture is under the panel. Off, or in any other view, as it always was.
+   */
+  _applyQueueDock() {
+    const app = document.getElementById('app');
+    if (!app) return;
+    const on = this.settings?.get?.('player.queueDocked') === true
+      && !!this.queuePanel?.visible
+      && this._currentView?.() === 'player';
+    app.classList.toggle('app--queue-docked', on);
+  }
+
+  /** The dock button: save the choice, apply it, redraw the button. */
+  _toggleQueueDock() {
+    const next = this.settings?.get?.('player.queueDocked') !== true;
+    this.settings?.set?.('player.queueDocked', next);
+    this._applyQueueDock();
+    this._updateQueuePanelState?.();
+  }
+
   _positionQueuePanelForView() {
+    this._applyQueueDock();
     const panel = document.getElementById('queue-panel');
     if (!panel) return;
     const headerSelector = {
@@ -12659,6 +14484,7 @@ class App {
       this._queueHistory = [];
       this.queuePanel.close();
     }
+    this._applyQueueDock();
     this._syncQueueToggles();
   }
 
@@ -12693,12 +14519,13 @@ class App {
    */
   _maybePushCurrentToHistory() {
     if (this._queueHistoryPushedForCurrent) return;
-    if (!this._currentVideoPath) return;
+    const nowPath = (this._currentVideoPath || this._remoteSession?.savedKey || null);
+    if (!nowPath) return;
     const watchedMs = (this.videoPlayer?.video?.currentTime || 0) * 1000;
     if (watchedMs < this._queueHistoryThresholdMs) return;
     // Dedup
-    this._queueHistory = this._queueHistory.filter((p) => p !== this._currentVideoPath);
-    this._queueHistory.push(this._currentVideoPath);
+    this._queueHistory = this._queueHistory.filter((p) => p !== nowPath);
+    this._queueHistory.push(nowPath);
     // Cap from the front
     if (this._queueHistory.length > this._queueHistoryCap) {
       this._queueHistory = this._queueHistory.slice(-this._queueHistoryCap);
@@ -12804,6 +14631,7 @@ class App {
    * the load's own missing-file handling covers a file that really is gone.
    */
   async _queuedFileOnDisk(path) {
+    if (String(path ?? '').startsWith('stream:')) return !!this.library?.getVideoByPath?.(path);
     try {
       const answer = await window.funsync?.filesExist?.([path]);
       return !(Array.isArray(answer) && answer[0] === false);
@@ -12841,6 +14669,7 @@ class App {
     let added = 0;
     for (const path of Array.isArray(paths) ? paths : []) {
       if (!path || typeof path !== 'string' || this._userQueue.includes(path)) continue;
+      if (this._isDisabledPath?.(path)) continue; // never by the armful (zaikechi #381)
       this._userQueue.push(path);
       added += 1;
     }
@@ -12904,6 +14733,10 @@ class App {
     if (this.library?._captureVideoFrame) {
       try {
         const result = await this.library._captureVideoFrame(path);
+        // No picture to show (an audio file, a saved stream with none of
+        // its own): the card shows the grey logo tile (N-05).
+        if (!result?.dataUrl && result?.noVideo) return { noVideo: true, stream: String(path ?? '').startsWith('stream:') };
+        if (String(path ?? '').startsWith('stream:') && !result?.dataUrl) return null;
         if (result?.dataUrl) {
           try {
             const mod = await import('./thumbnail-cache.js');
@@ -13187,23 +15020,27 @@ class App {
     const dirPath = await window.funsync.selectDirectory();
     if (!dirPath) return;
 
+    // Settings > Sources' rules, checked BEFORE the name is asked (test day
+    // 2026-11-24, B024). This path (Library ▾ "Add Source Folder…" and the
+    // first-launch button) asked for a name and then refused an exact
+    // duplicate, compared without folding slashes or the drive letter, and
+    // took a folder inside a source, or one holding sources, without a word:
+    // every video in it scanned twice.
+    const sources = this.settings.get('library.sources') || [];
+    const { proceed, removeIds: removeChildrenIds } = await askSourceOverlap(dirPath, sources, { Modal, t, showToast });
+    if (!proceed) return;
+
     const name = await Modal.prompt(t('toast.nameSourcePrompt'), t('toast.nameSourcePlaceholder'), dirPath.split(/[\\/]/).pop());
     if (!name) return;
 
-    const sources = this.settings.get('library.sources') || [];
-    // Don't add duplicates
-    if (sources.some(s => s.path === dirPath)) {
-      showToast(t('toast.folderAlreadySource'), 'warn');
-      return;
-    }
-
-    sources.push({
+    const next = (removeChildrenIds ? sources.filter((s) => !removeChildrenIds.has(s.id)) : [...sources]);
+    next.push({
       id: crypto.randomUUID(),
       name,
       path: dirPath,
       enabled: true,
     });
-    this.settings.set('library.sources', sources);
+    this.settings.set('library.sources', next);
 
     // Also set as legacy directory if it's the first source
     if (!this.settings.get('library.directory')) {
@@ -13727,6 +15564,100 @@ class App {
     this.videoPlayer.loadSubtitles(file);
   }
 
+  /**
+   * The subtitles INSIDE a video file (#268 thirstyduck500, 2026-11-23),
+   * when no subtitle file sits beside it. The backend lists its subtitle
+   * streams; a text one (SRT, ASS, mov_text) is read as WebVTT and loaded,
+   * shown at once only when the file marks it default or forced. Picture
+   * subtitles (PGS, VobSub) cannot be text: when a file has only those it
+   * says so, once per file per session. Every track is in the CC menu.
+   * @param {string} path
+   */
+  async _loadEmbeddedSubtitles(path) {
+    if (!path || !mayHaveEmbeddedSubtitles(path) || !window.funsync?.subtitleTracks) return;
+    const gen = this._videoLoadGen;
+    const tracks = await window.funsync.subtitleTracks(path);
+    if (gen !== this._videoLoadGen || !Array.isArray(tracks) || !tracks.length) return;
+    this._embeddedSubs = { path, tracks, current: null };
+    const choice = pickEmbeddedTrack(tracks);
+    if (!choice) {
+      this._showSubtitleBadgeForMenu();
+      this._pictureSubsWarned ||= new Set();
+      if (!this._pictureSubsWarned.has(path)) {
+        this._pictureSubsWarned.add(path);
+        showToast(t('player.subtitles.pictureOnly'), 'info', 6000);
+      }
+      return;
+    }
+    await this._useEmbeddedSubtitle(choice.track, { show: choice.show, quiet: true });
+  }
+
+  /** Load one embedded text track (from the CC menu, or the first pick). */
+  async _useEmbeddedSubtitle(track, { show = true, quiet = false } = {}) {
+    const subs = this._embeddedSubs;
+    if (!subs || !track?.text) return;
+    const gen = this._videoLoadGen;
+    const got = await window.funsync?.subtitleTrack?.(subs.path, track.index);
+    if (gen !== this._videoLoadGen || this._embeddedSubs !== subs) return;
+    if (!got?.vtt) {
+      if (!quiet) showToast(t('player.subtitles.loadFailed'), 'warn', 4000);
+      return;
+    }
+    const n = subs.tracks.indexOf(track) + 1;
+    const name = `${subtitleTrackLabel(track, n, t, getCurrentLocale())}.vtt`;
+    await this.videoPlayer.loadSubtitles({ name, textContent: got.vtt }, { show });
+    subs.current = track.index;
+    this._paintSubtitleMenu();
+  }
+
+  /** A file with only picture subtitles still gets the CC button, for the menu that says why. */
+  _showSubtitleBadgeForMenu() {
+    const badge = document.getElementById('subtitle-badge');
+    if (badge) {
+      badge.hidden = false;
+      badge.classList.remove('subtitle-badge--active');
+    }
+  }
+
+  /** The CC menu: Off, each embedded track (a picture one greyed, saying why). */
+  _paintSubtitleMenu() {
+    const menu = document.getElementById('subtitle-menu');
+    const subs = this._embeddedSubs;
+    if (!menu || !subs) return;
+    menu.replaceChildren();
+    const tracks = this.videoPlayer?.video?.textTracks;
+    const showing = tracks ? [...tracks].some((tr) => tr.mode === 'showing') : false;
+    const item = (label, on, { disabled = false, onPick } = {}) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'player__quality-item';
+      b.setAttribute('role', 'menuitemradio');
+      b.setAttribute('aria-checked', String(on));
+      b.classList.toggle('player__quality-item--on', on);
+      b.textContent = label;
+      if (disabled) {
+        b.disabled = true;
+        b.classList.add('player__quality-item--disabled');
+      } else {
+        b.addEventListener('click', () => { this._closeSubtitleMenu?.(); onPick?.(); });
+      }
+      menu.appendChild(b);
+    };
+    item(t('player.subtitles.off'), !showing, {
+      onPick: () => {
+        for (const tr of this.videoPlayer?.video?.textTracks || []) tr.mode = 'disabled';
+        document.getElementById('subtitle-badge')?.classList.remove('subtitle-badge--active');
+      },
+    });
+    subs.tracks.forEach((track, i) => {
+      const label = subtitleTrackLabel(track, i + 1, t, getCurrentLocale());
+      if (!track.text) { item(label, false, { disabled: true }); return; }
+      item(label, showing && subs.current === track.index, {
+        onPick: () => this._useEmbeddedSubtitle(track, { show: true }),
+      });
+    });
+  }
+
   // --- Script Variants ---
 
   _updateVariantSelector() {
@@ -13756,7 +15687,11 @@ class App {
     const scriptLoaded = !!this.funscriptEngine.isLoaded && !!this.funscriptEngine.getRawContent();
     let mainPath = null;
     if (localList && baseVariants.length === 0) {
-      mainPath = this._mainScript?.gen === this._videoLoadGen ? this._mainScript.path : null;
+      // `_mainScript` itself first (full manual test, 2026-11-23; in v0.10.0):
+      // with no video opened in this window yet, both it and `_videoLoadGen`
+      // were undefined, undefined === undefined, and `.path` threw. A phone
+      // that left then never ended its session (the disconnect stopped here).
+      mainPath = this._mainScript && this._mainScript.gen === this._videoLoadGen ? this._mainScript.path : null;
       if (!mainPath && scriptLoaded && !this._activeVariantPath && this._engineHeldByRemote !== true
           && this.scriptEditor?._funscriptPath) {
         mainPath = this.scriptEditor._funscriptPath;
@@ -14017,6 +15952,8 @@ class App {
   _videoSyncOffsetPath() {
     if (this._phoneSyncOffsetActive) return this._phoneSyncOffsetPath || null;
     if (this._vrSyncOffsetActive) return this._vrSyncOffsetPath || null;
+    // A stream: its page's key (2026-11-23), so a mis-timed copy is fixed once.
+    if (!this._currentVideoPath && this._remoteSession?.offsetKey) return this._remoteSession.offsetKey;
     return this._currentVideoPath || null;
   }
 
@@ -14031,6 +15968,8 @@ class App {
     if (!videoPath) return 0;
     const map = this.settings?.get?.('library.syncOffsets') || {};
     if (Object.prototype.hasOwnProperty.call(map, videoPath)) return videoSyncOffsetOf(map, videoPath);
+    // A stream's key is no file: nothing moved, nothing to re-home.
+    if (String(videoPath).startsWith('stream:')) return 0;
     const plan = this._planLazyRehome(
       Object.keys(map).filter((p) => videoSyncOffsetOf(map, p) !== 0),
       videoPath,
@@ -14165,6 +16104,29 @@ class App {
     }
   }
 
+  /**
+   * A variation whose file is gone is marked in the player's menu, as the
+   * video options dialog marks it: dimmed, "Script not found", and not
+   * offered (fixup-ui followUp3, 2026-11-18; also in v0.9.2). The menu used
+   * to list it and only find out on the pick (`_switchVariant` put back
+   * what played and toasted). Only a definite "absent" marks it: a check
+   * that cannot answer (a spun-down drive) leaves the row as it is.
+   */
+  _markVariantItemIfMissing(item, variant) {
+    const path = variant?.path;
+    if (!path || typeof this.library?._pathStatus !== 'function') return;
+    Promise.resolve(this.library._pathStatus(path)).then((status) => {
+      if (status !== false || !item.isConnected) return;
+      item.disabled = true;
+      item.classList.add('variant-selector__item--missing');
+      const tag = document.createElement('span');
+      tag.className = 'variant-selector__missing-tag';
+      tag.textContent = t('videoOptions.script.status.missing');
+      const label = item.querySelector('.variant-selector__item-label');
+      if (label) label.after(tag); else item.appendChild(tag);
+    }, () => { /* unknown: leave the row as it is */ });
+  }
+
   _showVariantDropdown() {
     const dropdown = document.getElementById('variant-dropdown');
     if (!dropdown) return;
@@ -14259,6 +16221,7 @@ class App {
         closeDropdown();
       });
       dropdown.appendChild(item);
+      this._markVariantItemIfMissing(item, v);
     }
 
     // While a phone's list is shown (its video's variations, FN-04), Add and
@@ -14409,7 +16372,13 @@ class App {
 
     if (!label) return;
 
-    const variant = { label, path: fsPath, name: fsName };
+    // Never the name of an entry already listed: the second would be
+    // unreachable (pins, the phone and the pop-out pick by label).
+    const variant = {
+      label: this._uniqueVariantLabel?.(label, (this._allVariantsWithManual || []).map((v) => v.label)) ?? label,
+      path: fsPath,
+      name: fsName,
+    };
 
     // Save to settings
     const manualVariants = this.settings.get('library.manualVariants') || {};
@@ -14435,6 +16404,11 @@ class App {
    * Only `library.manualVariants` is written, appended to; the first new
    * variation then plays.
    */
+  /** variant-bulk-add.js uniqueVariantLabel, as a method (stand-in tests lift the callers). */
+  _uniqueVariantLabel(label, takenLabels) {
+    return uniqueVariantLabel(label, takenLabels);
+  }
+
   async _addManualVariants(files) {
     const videoPath = this._currentVideoPath;
     if (!videoPath) return;
@@ -14463,6 +16437,12 @@ class App {
     const named = await showBulkVariantNaming(plan);
     // Another video opened while the dialog was up: these are not its scripts.
     if (!named?.length || this._currentVideoPath !== videoPath) return;
+    // Edits in the naming step can make two alike, or match one listed.
+    const takenLabels = (this._allVariantsWithManual || []).map((v) => v.label);
+    for (const entry of named) {
+      entry.label = this._uniqueVariantLabel?.(entry.label, takenLabels) ?? entry.label;
+      takenLabels.push(entry.label);
+    }
     const manualVariants = this.settings.get('library.manualVariants') || {};
     manualVariants[videoPath] = [...(manualVariants[videoPath] || []), ...named];
     this.settings.set('library.manualVariants', manualVariants);
@@ -14635,7 +16615,10 @@ class App {
             renameBtn.title = t('toast.renameTooltip');
             renameBtn.addEventListener('click', async (e) => {
               e.stopPropagation();
-              const newName = await Modal.prompt(t('toast.renameVariationTitle'), t('toast.renameVariationLabel'), v.label);
+              const asked = await Modal.prompt(t('toast.renameVariationTitle'), t('toast.renameVariationLabel'), v.label);
+              const others = (this._allVariantsWithManual || []).filter((x) => x.path !== v.path).map((x) => x.label)
+                .concat(manualForVideo.filter((_, j) => j !== i).map((x) => x.label));
+              const newName = asked ? (this._uniqueVariantLabel?.(asked, others) ?? asked) : asked;
               if (newName && newName !== v.label) {
                 manualForVideo[i].label = newName;
                 changed = true;
@@ -14854,6 +16837,18 @@ class App {
       // (R3-20).
       this._engineHeldByRemote = phoneList;
       if (movedOn()) return;
+      // This variant's own axis files on both engines, or the video's again
+      // for its main script, and the axes embedded in THIS script instead of
+      // the last one's (TODO 2026-11-20; also in v0.9.2). Not for a phone's
+      // list (the phone video's script: this window's axes are off the
+      // devices for the session) nor with custom routing (its routes own the
+      // devices). The set is in place before the badge below lists it; its
+      // files load as at a video load, not awaited (`_loadPlayContent`).
+      if (!phoneList && !this._customRoutingActive) {
+        Promise.resolve(this._applyVariantAxes?.(variant.path, content)).catch((err) => {
+          console.warn('[Variants] the variation\'s axis files did not load:', err?.message || err);
+        });
+      }
       // Viewers get the new variant (decision 8), streamer Handy or not.
       // Built only when a viewer needs it.
       this.audienceBridge?.setScript(audienceToken, {
@@ -14906,9 +16901,14 @@ class App {
        // playing) — so the device keeps streaming the old script even
        // though we uploaded the new one. Same shape as `_handleSeeked`,
        // which has always done stop-then-setScript-then-play for seeks.
+      // X's finisher or Z's pattern on the Handy: no stop (it ended the
+      // pattern under the held key, B108); the upload waits for the release,
+      // which puts this variant on.
       if (this.handyManager?.connected) {
         if (this.syncEngine) this.syncEngine.stop();
-        try { await this.handyManager.hsspStop(); } catch { /* ignore */ }
+        if (!this._patternHoldsHandy?.()) {
+          try { await this.handyManager.hsspStop(); } catch { /* ignore */ }
+        }
         if (movedOn() || phoneLeft()) return;
         await this._uploadAndStartSync();
         if (movedOn() || phoneLeft()) return;
@@ -14947,6 +16947,8 @@ class App {
       if (this.scriptEditor && this._engineHeldByRemote !== true) {
         this.scriptEditor.setFunscriptPath(variant.path);
         this.scriptEditor.loadScript();
+        // Its script list: this variant as the main entry, with its axes.
+        this._refreshEditorScriptList?.();
       }
 
       // Restart gap skip
@@ -15173,6 +17175,452 @@ class App {
   }
 
   /**
+   * Smoothing, speed limit, Range Extender, linear strategy and offset for a
+   * Buttplug engine, from the saved settings. For the app's engine at boot,
+   * and for the script player's each time it starts (v0.10.1).
+   */
+  _configureButtplugSync(engine) {
+    if (!engine) return;
+    const savedSmoothing = this.settings.get('player.smoothing') || 'linear';
+    engine.setInterpolationMode(savedSmoothing);
+    engine.setSpeedLimit(this.settings.get('player.speedLimit') || 0);
+    // Range Extender: the engines default to off in their constructor.
+    engine.setRangeExtenderEnabled(!!this.settings.get('player.rangeExtender.enabled'));
+    // Linear strategy: action-boundary (default) sends one LinearCmd per
+    // stroke with the full duration, letting the device's firmware handle
+    // in-stroke interpolation — much smoother on BLE (Handy / Kiiroo).
+    // interpolated (legacy) re-sends every tick with remaining duration.
+    engine.setLinearStrategy(this.settings.get('player.linearStrategy') || 'action-boundary');
+    const savedLookahead = this.settings.get('player.linearLookaheadMs');
+    const savedMinStroke = this.settings.get('player.minStrokeMs');
+    if (savedLookahead != null) engine.setLinearLookaheadMs(savedLookahead);
+    if (savedMinStroke != null) engine.setMinStrokeMs(savedMinStroke);
+    // Hybrid during a hold (EroScripts #434): fade its position part to off.
+    engine.setHybridHoldFade?.(this.settings.get('player.hybridHoldFade') === true);
+    // Per-device sync offset: shifts effective time so commands fire earlier
+    // (negative) or later (positive). See buttplug-sync setOffsetMs.
+    const savedBpOffset = this.settings.get('buttplug.defaultOffset');
+    if (savedBpOffset != null) engine.setOffsetMs(savedBpOffset);
+  }
+
+  /** Smoothing, Range Extender, offset and output rate for a T-Code engine (as above). */
+  _configureTCodeSync(engine) {
+    if (!engine) return;
+    engine.setInterpolationMode(this.settings.get('player.smoothing') || 'linear');
+    engine.setRangeExtenderEnabled(!!this.settings.get('player.rangeExtender.enabled'));
+    const savedTcOffset = this.settings.get('tcode.defaultOffset');
+    if (savedTcOffset != null) engine.setOffsetMs(savedTcOffset);
+    // Output rate (advanced): the saved Hz, active even if the connection
+    // panel is never opened this session.
+    engine.setUpdateRate(Number(this.settings.get('tcode.updateRateHz')) || 60);
+  }
+
+  /**
+   * The script player (v0.10.1; powerkool on EroScripts): a script on the
+   * devices with no video, kept playing while other videos are watched. Its
+   * own engine, clock and sync engines (renderer/js/script-player.js); while
+   * it plays, the DeviceGate keeps the video's engines off the devices
+   * (renderer/js/device-gate.js). The bar along the bottom is its UI, the
+   * player's pill says the devices follow it and offers the video's script.
+   */
+  _initScriptPlayer() {
+    this.deviceGate = new DeviceGate();
+    installDeviceGate(this.deviceGate, 'handy', this.handyManager);
+    installDeviceGate(this.deviceGate, 'buttplug', this.buttplugManager);
+    installDeviceGate(this.deviceGate, 'tcode', this.tcodeManager);
+    installDeviceGate(this.deviceGate, 'autoblow', this.autoblowManager);
+    this.scriptPlayer = new ScriptPlayer({
+      gate: this.deviceGate,
+      managers: {
+        handy: this.handyManager, buttplug: this.buttplugManager,
+        tcode: this.tcodeManager, autoblow: this.autoblowManager,
+      },
+      createFunscriptEngine: () => new FunscriptEngine({ backendPort: this.backendPort }),
+      createEngines: ({ player, funscriptEngine, managers }) => ({
+        handy: managers.handy ? new SyncEngine({ videoPlayer: player, handyManager: managers.handy, funscriptEngine }) : null,
+        buttplug: managers.buttplug ? new ButtplugSync({ videoPlayer: player, buttplugManager: managers.buttplug, funscriptEngine }) : null,
+        tcode: managers.tcode ? new TCodeSync({ videoPlayer: player, tcodeManager: managers.tcode, funscriptEngine }) : null,
+        autoblow: managers.autoblow ? new AutoblowSync({ videoPlayer: player, autoblowManager: managers.autoblow }) : null,
+      }),
+      hooks: {
+        beforeTakeover: () => this._stopVideoDeviceOutput(),
+        afterHandback: () => this._reapplyVideoToDevices(),
+        configureEngines: (e) => { this._configureButtplugSync(e.buttplug); this._configureTCodeSync(e.tcode); },
+        handyContent: (content, { durationMs }) => this._handyUploadContent(content, this._handyInverted(), { durationMs }),
+        autoblowContent: (content, { durationMs }) => this._autoblowUploadContent(content, { durationMs }),
+        onChange: (state) => this._onScriptPlayerChange(state),
+      },
+    });
+    this.scriptPlayerBar = new ScriptPlayerBar({
+      scriptPlayer: this.scriptPlayer,
+      onClose: () => { this._stopScriptPlayer(); },
+    });
+    if (this.deviceSimulator) this.deviceSimulator.scriptPlayer = this.scriptPlayer;
+    document.getElementById('btn-script-pill-use-video')?.addEventListener('click', () => { this._stopScriptPlayer(); });
+    eventBus.on('language:changed', () => {
+      this.scriptPlayerBar?.retranslate();
+      this._onScriptPlayerChange(this.scriptPlayer.state);
+    });
+  }
+
+  /**
+   * Play a script on its own (the Library menu's list, a drop with no video).
+   * @param {{ name: string, path?: string|null, file?: File|null }} src
+   * @returns {Promise<boolean>}
+   */
+  async _playScriptOnly({ name, path = null, file = null }) {
+    if (!this.scriptPlayer) return false;
+    let content = null;
+    try {
+      content = file ? await file.text() : await window.funsync?.readFunscript?.(path);
+    } catch { /* said below */ }
+    if (!isPlayableFunscript(content)) {
+      showToast(t('scriptPlayer.readFailed', { name: name || '' }), 'error', 5000);
+      return false;
+    }
+    let ok = false;
+    try {
+      ok = await this.scriptPlayer.start({ name, path, content });
+    } catch (err) {
+      console.warn('[ScriptPlayer] start failed:', err?.message || err);
+      showToast(t('scriptPlayer.readFailed', { name: name || '' }), 'error', 5000);
+      return false;
+    }
+    if (ok && !this.scriptPlayer.state.devices.length) showToast(t('scriptPlayer.noDevicesToast'), 'info', 5000);
+    return ok;
+  }
+
+  /**
+   * Play a script that has no video (the Library's Scripts filter, a
+   * playlist's script entry; Dave, 2026-11-26: "so somone can still make
+   * playlists etc with them") in the script player. From a playlist or Play
+   * all it is that list's entry: the open video pauses and the player closes
+   * (its devices would fight the script), and when the script ends the list
+   * goes on (_onScriptPlayerChange). From the Library it just plays, as the
+   * Library menu's "Scripts without a video" does: a video can stay open.
+   */
+  async _playScriptEntry(videoData) {
+    const path = videoData?.path;
+    if (!path) return false;
+    const name = String(videoData?.name || String(path).split(/[\\/]/).pop()).replace(/\.funscript$/i, '');
+    const ctx = videoData?._playContext || null;
+    const inList = !!ctx && (ctx.source === 'queue' || this._isPlaylistContext?.(ctx) === true);
+    if (inList) {
+      const v = this.videoPlayer?.video;
+      if (v && !v.paused) v.pause();
+      if (this._currentView?.() === 'player') this._navigateBack();
+      // Played in the mini player: the video after the script goes back
+      // there, not to the full player over what you were browsing (T302).
+      this._miniBeforeScript = !!this._miniActive || this._miniBeforeScript === true;
+      if (this._miniActive) this._closeMiniplayer();
+      this._currentPlayContext = ctx;
+      // Up Next works out what follows from here (_advanceAfterScriptEntry).
+      this._setUpNextContext?.(ctx);
+    }
+    this._scriptEntry = null;
+    this._openPlayerForNext = false;
+    const ok = await this._playScriptOnly({ name, path });
+    if (ok && inList) this._scriptEntry = { path, ctx };
+    return ok;
+  }
+
+  /** A playlist's script entry gives way (a video or another entry plays): the devices go back. */
+  async _endScriptEntry() {
+    this._scriptEntry = null;
+    this._miniBeforeScript = false;
+    await this._stopScriptPlayer();
+  }
+
+  /** A playlist's script entry ended: the devices go back, then the list's next entry plays. */
+  async _advanceAfterScriptEntry(entry) {
+    await this._stopScriptPlayer();
+    if (entry?.ctx) {
+      this._currentPlayContext = entry.ctx;
+      this._setUpNextContext?.(entry.ctx);
+    }
+    // What a video's end plays next, worked out the same way (Up Next's
+    // peekNext): your queue first, then the list, wrapping round when the
+    // playlist loops. Next's _playNext never wraps: a playlist on Loop
+    // stopped after a script that ended it (live, 2026-11-26, T300).
+    const next = this.upNextEngine?.peekNext?.() || null;
+    if (!next) { this._miniBeforeScript = false; return; }
+    if (!/\.funscript$/i.test(String(next))) {
+      if (this._miniBeforeScript) {
+        // Back in the corner, as the list was playing (an auto-advance keeps
+        // the mini player: _playFromLibrary's keepMini, Play all's no switch).
+        this._miniBeforeScript = false;
+        this._enterMiniplayer?.();
+      } else {
+        this._openPlayerForNext = true;   // a Play all video after it reopens the player
+      }
+    }
+    try { await this._playUpNext(next); } catch (err) {
+      console.warn('[ScriptPlayer] the playlist could not go on:', err?.message || err);
+    }
+  }
+
+  /** ✕ on the bar, or the pill's "Use this video's script": the devices go back to the video. */
+  async _stopScriptPlayer() {
+    try { await this.scriptPlayer?.stop(); } catch (err) {
+      console.warn('[ScriptPlayer] stop failed:', err?.message || err);
+    }
+  }
+
+  /** Before the script player takes the devices: the video's engines send their stops. */
+  _stopVideoDeviceOutput() {
+    try { if (this.syncEngine?._active) this.syncEngine.stop(); } catch { /* best-effort */ }
+    try { if (this.buttplugSync?._active) this.buttplugSync.stop(); } catch { /* best-effort */ }
+    try { if (this.tcodeSync?._active) this.tcodeSync.stop(); } catch { /* best-effort */ }
+    try { if (this.autoblowSync?._active) this.autoblowSync.stop(); } catch { /* best-effort */ }
+    try { this.handyHdspSync?.stop?.(); } catch { /* best-effort */ }
+  }
+
+  /**
+   * After the script player gives the devices back: the open video's script
+   * on them again (the Handy and the Autoblow hold the script player's until
+   * then), started where the video is. No open video: everything stopped.
+   */
+  async _reapplyVideoToDevices() {
+    const video = this.videoPlayer?.video;
+    if (!this._hasOpenVideo?.() || !this.funscriptEngine?.isLoaded) {
+      this._stopAllDevicesIdle();
+      try { if (this.handyManager?.connected) await this.handyManager.hsspStop(); } catch { /* best-effort */ }
+      return;
+    }
+    if (this.handyManager?.connected && this.syncEngine) {
+      if (this.syncEngine._active) this.syncEngine.stop();
+      await this._uploadAndStartSync();
+      if (video && !video.paused && this.syncEngine._active) {
+        await this.syncEngine.resync?.().catch((err) => {
+          console.warn('[ScriptPlayer] Handy re-anchor after hand-back failed:', err?.message || err);
+        });
+      }
+    }
+    if (this.autoblowManager?.connected) await this._tryStartAutoblowSync();
+    this._resyncButtplug();
+    if (this.tcodeSync && this.tcodeManager?.connected) {
+      if (this.tcodeSync._active) this.tcodeSync.stop();
+      this._tryStartTCodeSync();
+    }
+  }
+
+  /** The bar and the player's pill follow the script player. */
+  _onScriptPlayerChange(state) {
+    this.scriptPlayerBar?.update(state);
+    // A playlist's (or Play all's) script entry (2026-11-26): at its end the
+    // list goes on, as Up Next does after a video. Stopped (✕) or replaced
+    // by another script, the list stops here.
+    const entry = this._scriptEntry;
+    if (entry) {
+      if (!state?.active || state.path !== entry.path) {
+        this._scriptEntry = null;
+        this._miniBeforeScript = false;
+      } else if (state.ended && !state.loop) {
+        this._scriptEntry = null;
+        this._advanceAfterScriptEntry(entry);
+      }
+    }
+    const pill = document.getElementById('player-script-pill');
+    if (!pill) return;
+    pill.hidden = !state?.active;
+    const text = document.getElementById('player-script-pill-text');
+    if (text) text.textContent = state?.active ? t('scriptPlayer.pill', { name: state.name || '' }) : '';
+    const use = document.getElementById('btn-script-pill-use-video');
+    if (use) use.textContent = t('scriptPlayer.useVideoScript');
+  }
+
+  /**
+   * Following playlists (zaikechi #381; renderer/js/playlist-follow.js): each
+   * takes in the videos its rule matches that it lacks (never one taken out
+   * by hand). Adds only: absence never removes anything. Returns how many.
+   */
+  _syncFollowingPlaylists() {
+    const lib = this.library;
+    const playlists = this.settings?.getPlaylists?.() || [];
+    if (!lib || !playlists.some((p) => p?.follow)) return 0;
+    const ctx = {
+      videos: lib._videos || [],
+      sources: this.settings.get('library.sources') || [],
+      getVideoCategories: (p) => this.settings.getVideoCategories?.(p) || [],
+    };
+    let added = 0;
+    for (const pl of playlists) {
+      const plan = planFollowAdds(pl, ctx);
+      if (!plan) continue;
+      this.settings.addVideosToPlaylist(pl.id, plan.add, { byRule: true });
+      added += plan.add.length;
+    }
+    if (added) console.log(`[Playlists] Following playlists took in ${added} video(s)`);
+    return added;
+  }
+
+  /** A category change: an unassign takes the video out of playlists following that category; an assign brings it in. */
+  _onCategoryChangedForFollow(e) {
+    if (!e) return;
+    if (e.action === 'unassign') {
+      for (const step of planCategoryUnassign(this.settings?.getPlaylists?.(), e.catId, e.videoPath)) {
+        this.settings.removeVideosFromPlaylist(step.playlistId, step.remove, { byRule: true });
+      }
+      return;
+    }
+    if (e.action === 'assign' || e.action === 'assignMany') this._syncFollowingPlaylists();
+  }
+
+  /** Stop all ends a running Bluetooth sync test (#431) too: its beat would start the toys again. */
+  _stopBtSyncTest() {
+    return stopBtSyncTest();
+  }
+
+  _btSyncTestRunning() {
+    return isBtSyncTestRunning();
+  }
+
+  /** Library ▾ Disabled videos (zaikechi #381): review, play, enable or delete them. */
+  _showDisabledVideos() {
+    const lib = this.library;
+    if (!lib) return;
+    showDisabledVideosDialog({
+      settings: this.settings,
+      videos: lib._videos || [],
+      onPlay: (video) => { if (video) lib._playVideo?.(video); },
+      onDelete: (video) => lib.deleteVideo?.(video) ?? false,
+      onChanged: (paths) => {
+        for (const p of paths) lib.refreshDisabled?.(p);
+        this._paintPlayerMarks();
+      },
+    });
+  }
+
+  /**
+   * The "scripts no video uses" window, with Play and Pair… per script.
+   * Opened by a script card's "Pair with a video…" for just that script (the
+   * Library's Scripts filter); the Library menu entry that opened it for all
+   * of them went on 2026-11-26.
+   */
+  _showLooseScripts({ only = null } = {}) {
+    const lib = this.library;
+    if (!lib) return;
+    const all = looseScripts(lib._unmatchedFunscripts, lib._videos);
+    // One script's Pair with a video… (the Scripts filter, 2026-11-26): just it.
+    const scripts = only ? all.filter((sc) => sc.path === only.path) : all;
+    showLooseScriptsDialog({
+      scripts,
+      videos: lib._videos || [],
+      onPlay: (sc) => { this._playScriptOnly({ name: sc.name, path: sc.path }); },
+      // A pair or delete from here redraws the Scripts filter behind it (T310).
+      onDelete: (sc) => Promise.resolve(lib.deleteLooseScript?.(sc) ?? false).then((gone) => {
+        if (gone && lib._activeTab === 'scripts') lib._applyFilters?.();
+        return gone;
+      }),
+      closeWhenEmpty: !!only,
+      onPair: (videoPath, sc) => {
+        const ok = lib.associateDownloadedScript(videoPath, sc.path);
+        if (!ok) return false;
+        lib._unmatchedFunscripts = (lib._unmatchedFunscripts || []).filter((x) => x.path !== sc.path);
+        if (lib._activeTab === 'scripts') lib._applyFilters?.();
+        const v = (lib._videos || []).find((x) => x.path === videoPath);
+        showToast(t('scriptPlayer.paired', { script: sc.name, title: v?.name || '' }), 'info', 3500);
+        return true;
+      },
+    });
+  }
+
+  /**
+   * The device simulator's options from Settings > Playback (v0.10.1,
+   * powerkool): direction ('device' follows the Handy's Invert), colour,
+   * size and the dragged position. Resolved, so a hand-edited value falls
+   * back to the default.
+   */
+  _deviceSimOptions() {
+    const get = (k) => this.settings?.get?.(k);
+    return resolveSimOptions({
+      direction: get('player.deviceSimDirection'),
+      color: get('player.deviceSimColor'),
+      size: get('player.deviceSimSize'),
+      position: get('player.deviceSimPosition'),
+      rotation: get('player.deviceSimRotation'),
+      customColor: get('player.deviceSimCustomColor'),
+    }, { deviceInverted: get('handy.inverted') === true });
+  }
+
+  /** A choice in the simulator's right-click menu. */
+  _onDeviceSimOption(key, value) {
+    if (key === 'direction') this.settings?.set?.('player.deviceSimDirection', value);
+    else if (key === 'color') this.settings?.set?.('player.deviceSimColor', value);
+    else if (key === 'customColor') {
+      if (typeof value === 'string' && /^#[0-9a-f]{6}$/i.test(value)) {
+        this.settings?.set?.('player.deviceSimCustomColor', value.toLowerCase());
+        this.settings?.set?.('player.deviceSimColor', 'custom');
+      }
+    }
+    // The other axes' look, its 3D size and view (editor work list 2.5,
+    // 2026-11-24): the view is a preset's name or { yaw, tilt } after a
+    // drag on the 3D picture. The simulator resolves each on its way back.
+    else if (key === 'look') this.settings?.set?.('player.deviceSimLook', value);
+    else if (key === 'size3d') this.settings?.set?.('player.deviceSim3dSize', value);
+    else if (key === 'view3d') this.settings?.set?.('player.deviceSim3dView', value);
+    // Align to the video (work list 5.4): { tip, base }, fractions of the picture.
+    else if (key === 'align') this.settings?.set?.('player.deviceSimAlign', value || null);
+    else if (key === 'reset') {
+      // Reset size, angle and position: an alignment to the video goes too.
+      this.settings?.set?.('player.deviceSimAlign', null);
+      this.settings?.set?.('player.deviceSimSize', null);
+      this.settings?.set?.('player.deviceSimPosition', null);
+      this.settings?.set?.('player.deviceSimRotation', 0);
+      // ... and the 3D picture's size and view (break-it pass: Reset kept a
+      // dragged 250 px picture).
+      this.settings?.set?.('player.deviceSim3dSize', 150);
+      this.settings?.set?.('player.deviceSim3dView', 'quarter');
+    }
+  }
+
+  /** Re-apply the simulator options when one of them, or the Handy's Invert, changes. */
+  _wireDeviceSimOptions() {
+    eventBus.on('settings:changed', ({ path } = {}) => {
+      if (!this.deviceSimulator) return;
+      if (/^player\.deviceSim(Direction|Color|CustomColor|Size|Position|Rotation)$/.test(path) || path === 'handy.inverted') {
+        this.deviceSimulator.applyOptions(this._deviceSimOptions());
+      } else if (/^player\.deviceSim(Look|3dSize|3dView)$/.test(path)) {
+        this.deviceSimulator.setLook?.(this._deviceSimLook?.());
+      } else if (path === 'player.deviceSimAlign') {
+        this.deviceSimulator.setAlignment?.(this.settings?.get?.('player.deviceSimAlign'));
+      }
+    });
+  }
+
+  /**
+   * The simulator's look settings, raw (it resolves them): the look ('3d'
+   * by default, or a 2D one), the 3D receiver's size and view (editor work
+   * list 2.5, 2026-11-24; defaults in electron/store.js).
+   */
+  _deviceSimLook() {
+    const get = (k) => this.settings?.get?.(k);
+    return { look: get('player.deviceSimLook'), size: get('player.deviceSim3dSize'), view: get('player.deviceSim3dView') };
+  }
+
+  /**
+   * The points the device simulator shows for one more axis (editor work
+   * list 2.5, 2026-11-24): the script editor's, unsaved edits included,
+   * while it holds that axis (getLiveAxisActions: the array itself, read
+   * only); else what the devices play. The sync engines hold the video's
+   * resolved set (a companion file over the same axis embedded in the
+   * script, a variant's own files, cleared on every new video and while a
+   * phone or headset drives the devices), so the simulator shows what plays.
+   * Asked about ten times a second per axis; it copies nothing.
+   */
+  _deviceSimAxisActions(suffix) {
+    const live = this.scriptEditor?.getLiveAxisActions?.(suffix);
+    if (Array.isArray(live)) return live;
+    const tcode = getAxisBySuffix(suffix)?.tcode;
+    if (!tcode) return null;
+    for (const sync of [this.tcodeSync, this.buttplugSync]) {
+      const actions = sync?._axisActions?.get?.(tcode)?.actions;
+      if (Array.isArray(actions) && actions.length > 0) return actions;
+    }
+    return null;
+  }
+
+  /**
    * Push the configured device-simulator opacity onto the widget. Stored
    * 20-100 (percent) under `player.deviceSimOpacity`, defaulting to 80 to
    * match the inline-viz overlay. Clamped rather than trusted: a hand-edited
@@ -15220,6 +17668,14 @@ class App {
   /** Play a list of videos sequentially (Play All). */
   _playAll(videoList, opts = {}) {
     if (!videoList || videoList.length === 0) return;
+    // Disabled videos are never chosen by Play all / Shuffle all (zaikechi
+    // #381). Every one disabled: say so rather than do nothing.
+    const playable = videoList.filter((v) => !this._isDisabledPath?.(typeof v === 'string' ? v : v?.path));
+    if (playable.length === 0) {
+      showToast(t('library.disabled.allDisabled'), 'info', 3500);
+      return;
+    }
+    videoList = playable;
     // Unsaved editor edits are asked about before the queue is replaced (CB-01).
     const editorOk = this._editorAllowsReplace();
     if (editorOk !== true) {
@@ -15306,7 +17762,7 @@ class App {
       || { name: videoData.name, path: videoData.path, funscriptPath: null };
     const balance = !!req.balanceByScript;
     const startKey = balance ? this._scriptKeyOf(start) : null;
-    const rest = req.videoList.filter((v) => v.path !== start.path
+    const rest = req.videoList.filter((v) => !this._isDisabledPath?.(v?.path) && v.path !== start.path
       && !(startKey && this._scriptKeyOf(v) === startKey));
     const order = [start, ...this._playAllOrder(rest, { ...req, shuffle: true })];
     return {
@@ -15327,6 +17783,12 @@ class App {
     if (editorOk !== true) {
       const options = arguments[1]; // all of them, as called
       return editorOk.then((go) => (go ? this._playQueueItem(index, options) : undefined));
+    }
+    // A video or script after a playlist's script entry (a click in the
+    // queue): the script player gives the devices back first (2026-11-26).
+    if (this._scriptEntry) {
+      const options = arguments[1];
+      return this._endScriptEntry().then(() => this._playQueueItem(index, options));
     }
     const item = this._playQueue[index];
     this._playQueueIndex = index;
@@ -15381,6 +17843,31 @@ class App {
       }
     }
 
+    if (/\.funscript$/i.test(String(item.path ?? ''))) {
+      // A script with no video in Play all (2026-11-26): the script player,
+      // and the queue goes on when it ends (_onScriptPlayerChange).
+      // The ended video's own queue advance is spent: superseded here as a
+      // video's next load supersedes it, or the same "ended" that Up Next
+      // just turned into this entry advanced the queue once more, past it
+      // (live, 2026-11-26: the script never played, the video after it did).
+      if (this._queueEndedListener) {
+        this.videoPlayer?.video?.removeEventListener?.('ended', this._queueEndedListener);
+        this._queueEndedListener = null;
+      }
+      this._updateQueueUI();
+      this._playScriptEntry({ name: item.name, path: item.path, _playContext: this._currentPlayContext });
+      return;
+    }
+    if (String(item.path ?? '').startsWith('stream:')) {
+      // A saved stream (2026-11-23): its page looked up, then the same steps.
+      this._playQueueStreamItem(item, resumeAt);
+    } else {
+    // The first video after a script entry: the script closed the player, so
+    // it opens again (a queue item otherwise loads into the player as it is).
+    if (this._openPlayerForNext) {
+      this._openPlayerForNext = false;
+      if (!this._playerWindowActive && this._currentView?.() !== 'player') this._navigateTo('player');
+    }
     const fileData = { name: item.name, path: item.path, _isPathBased: true };
     // The previous video's routing goes before loadVideo, as for a library
     // click (`_playFromLibrary`): loadVideo leaves the device assignment map
@@ -15403,6 +17890,7 @@ class App {
     this._loadQueueItemContent(item, fileData).catch((err) => {
       console.warn('[Queue] loading the item\'s scripts failed:', err?.message || err);
     });
+    }
 
     this._updateQueueUI();
     // Queue nav while the pop-out is open → route the new item into it.
@@ -15678,7 +18166,8 @@ class App {
       memo = { list: ctx.list, index: at, order: fresh.map((v) => v.path) };
       this._pendingContextWrap = memo;
     }
-    const playable = (p) => !!this.library?.getVideoByPath?.(p) && this._isUnderEnabledSource(p);
+    const playable = (p) => !this._isDisabledPath?.(p) && !!this.library?.getVideoByPath?.(p)
+      && (String(p ?? '').startsWith('stream:') || this._isUnderEnabledSource(p));
     const justPlayed = ctx.list[at];
     let first = memo.order.findIndex((p) => p !== justPlayed && playable(p));
     if (first < 0) first = memo.order.findIndex(playable);
@@ -15699,6 +18188,14 @@ class App {
         return Promise.resolve(editorOk).then((go) => (go ? this._playPrev() : false), () => false);
       }
       this._userQueueBack.pop();
+      // The video you leave goes back to the head of your queue, so it is
+      // not "previously watched"; the one you go back to plays again, so it
+      // leaves that list too. History listed the video just left (bf-verify
+      // 2026-11-19). The load below must not push it either.
+      this._queueHistoryPushedForCurrent = true;
+      if (Array.isArray(this._queueHistory)) {
+        this._queueHistory = this._queueHistory.filter((p) => p !== back.to && p !== back.from);
+      }
       if (!this._userQueue.includes(back.to)) {
         this._userQueue.unshift(back.to);
         this._persistUserQueue();
@@ -15809,11 +18306,15 @@ class App {
   _stepPlayContext(delta) {
     const ctx = this._currentPlayContext;
     if (!ctx || ctx.source === 'queue') return false;
-    // PLAYLISTS ONLY (Dave, 2026-08-06). Stepping through a 1471-video
-    // library in scan order isn't a real workflow, and an "N / 1471"
-    // counter on a plain library play is noise. A playlist is a curated,
-    // ordered list where prev/next means something.
-    if (!this._isPlaylistContext(ctx)) return false;
+    // Playlists, the library and a category (Dave, 2026-11-23, powerkool
+    // #433: "play videos in the current sort order"). It was playlists only
+    // (Dave, 2026-08-06: a library "in scan order isn't a real workflow");
+    // the library's context is now its VISIBLE list, filtered and in the
+    // chosen sort (library.js `_filteredVideos`), so N / P mean something
+    // there too. The "N / total" counter stays playlist-only
+    // (_updateQueueUI): on a 1471-video library it is noise.
+    const steppable = this._isPlaylistContext(ctx) || ctx.source === 'library' || ctx.source === 'category';
+    if (!steppable) return false;
     const list = ctx.list;
     if (!Array.isArray(list) || list.length < 2) return false;
 
@@ -15837,7 +18338,7 @@ class App {
     while (targetIdx >= 0 && targetIdx < list.length) {
       const path = list[targetIdx];
       const candidate = path ? this.library.getVideoByPath?.(path) : null;
-      if (path && candidate && !skipped.has(path)) {
+      if (path && candidate && !skipped.has(path) && !this._isDisabledPath?.(path)) {
         video = candidate;
         break;
       }
@@ -16040,7 +18541,7 @@ class App {
    *   currently-loaded one, for flushing the OUTGOING video mid-swap
    */
   _recordResumePosition({ force = false, path } = {}) {
-    const target = path || this._currentVideoPath;
+    const target = path || (this._currentVideoPath || this._remoteSession?.savedKey || null);
     if (!target) return;
 
     // Suppressed by a playlist Reset until this video is swapped out.
@@ -16159,7 +18660,7 @@ class App {
    * way the sync engine's normal play-anchor does the work instead of the
    * seek-correction path, which is the fragile one for cloud HSSP devices.
    */
-  async _maybeOfferResume(videoPath, knownDuration) {
+  async _maybeOfferResume(videoPath, knownDuration, answer = null) {
     if (!videoPath) return null;
     const entry = this.getResumeEntry(videoPath);
     if (!shouldOfferResume(entry, knownDuration)) return null;
@@ -16199,6 +18700,9 @@ class App {
     // resume rather than start-over: dismissing a dialog should not
     // silently discard the position they had.
     if (choice === 'start-over') return null;
+    // Only the Resume button itself says "play" (v0.10.1); a dismissed
+    // dialog keeps the position but does not start anything.
+    if (choice === 'resume' && answer) answer.play = true;
     return entry.position;
   }
 
@@ -16210,6 +18714,10 @@ class App {
   _applyPendingResumeSeek(seconds) {
     const video = this.videoPlayer?.video;
     if (!video || !Number.isFinite(seconds) || seconds <= 0) return;
+    // The pop-out is handed this video from its own start position, so it
+    // needs the resume point too (triage 2026-11-23: with the player popped
+    // out, a playlist resume started at 0).
+    this._resumeTarget = { path: this._currentVideoPath, seconds };
     const seek = () => {
       video.removeEventListener('loadedmetadata', seek);
       if (this._pendingResumeSeek === seek) this._pendingResumeSeek = null;
@@ -16217,6 +18725,9 @@ class App {
       if (Number.isFinite(video.duration) && video.duration > 0 && seconds < video.duration) {
         video.currentTime = seconds;
       }
+      // A start held back for this seek (`_startPlayback`) goes now, from
+      // the resume position. A new load drops this seek, and the start with it.
+      if (seek.playAfterSeek) this._startPlayback();
     };
     if (Number.isFinite(video.duration) && video.duration > 0) {
       seek();
@@ -16235,19 +18746,21 @@ class App {
     // library playback, not just inside a Play All queue. Queue-sourced
     // contexts are excluded — the queue branch above already describes them.
     const ctx = this._currentPlayContext;
-    // Same playlist-only gate as _stepPlayContext: no buttons and no
-    // "N / total" indicator for library or category playback.
-    const ctxList = (ctx && ctx.source !== 'queue' && this._isPlaylistContext(ctx) && Array.isArray(ctx.list))
-      ? ctx.list
-      : null;
+    // The same contexts _stepPlayContext steps through: a playlist, the
+    // library, a category (2026-11-23). Buttons for all three; the
+    // "N / total" indicator only for a playlist (a library count is noise).
+    const isPlaylistCtx = !!ctx && this._isPlaylistContext(ctx);
+    const steppableCtx = !!ctx && ctx.source !== 'queue'
+      && (isPlaylistCtx || ctx.source === 'library' || ctx.source === 'category');
+    const ctxList = (steppableCtx && Array.isArray(ctx.list)) ? ctx.list : null;
     const hasContext = !hasQueue && !!ctxList && ctxList.length > 1;
     const ctxIndex = ctx?.index || 0;
     // Your own queue (FN-07): Next plays its head and Prev goes back from a
     // video it played (`_playNext` / `_playPrev`), so both buttons say so.
     const userNext = Array.isArray(this._userQueue) && this._userQueue.length > 0;
     const userBack = !!this._userQueueBackHere?.();
-    const counted = hasQueue || hasContext;
-    const show = counted || userNext || userBack;
+    const counted = hasQueue || (hasContext && isPlaylistCtx);
+    const show = hasQueue || hasContext || userNext || userBack;
     // A video from your queue in the middle of Play All (R3-15) is no slot of
     // the Play All: the counter showed the item it followed ("1 / 3"), so it
     // is hidden while that video plays (R4-02). Back goes to the item it
@@ -16276,7 +18789,7 @@ class App {
         indicator.textContent = '';
       } else if (hasQueue) {
         indicator.textContent = `${this._playQueueIndex + 1} / ${this._playQueue.length}`;
-      } else if (hasContext) {
+      } else if (hasContext && isPlaylistCtx) {
         indicator.textContent = `${ctxIndex + 1} / ${ctxList.length}`;
       }
     }
@@ -16291,13 +18804,14 @@ class App {
           : (hasContext && ctxIndex < ctxList.length - 1)),
         label: interlude ? '' : (hasQueue
           ? `${this._playQueueIndex + 1} / ${this._playQueue.length}`
-          : (hasContext ? `${ctxIndex + 1} / ${ctxList.length}` : '')),
+          : (hasContext && isPlaylistCtx ? `${ctxIndex + 1} / ${ctxList.length}` : '')),
       }));
     }
   }
 
   async _quickAddToPlaylist() {
-    if (!this._currentVideoPath) {
+    const nowPath = (this._currentVideoPath || this._remoteSession?.savedKey || null);
+    if (!nowPath) {
       showToast(t('toast.addNoPath'), 'warn');
       return;
     }
@@ -16313,7 +18827,7 @@ class App {
     }));
     const selectedId = await Modal.selectFromList(t('library.addToPlaylistTitle'), items);
     if (selectedId) {
-      this.settings.addVideoToPlaylist(selectedId, this._currentVideoPath);
+      this.settings.addVideoToPlaylist(selectedId, nowPath);
       const pl = this.settings.getPlaylist(selectedId);
       showToast(t('toast.addedTo', { name: pl.name }), 'info');
     }
@@ -16404,9 +18918,10 @@ class App {
     const container = document.getElementById('video-category-dots');
     if (!container) return;
     container.innerHTML = '';
-    if (!this._currentVideoPath) return;
+    const nowPath = (this._currentVideoPath || this._remoteSession?.savedKey || null);
+    if (!nowPath) return;
 
-    const catIds = this.settings.getVideoCategories(this._currentVideoPath);
+    const catIds = this.settings.getVideoCategories(nowPath);
     const allCats = this.settings.getCategories();
     for (const catId of catIds) {
       const cat = allCats.find((c) => c.id === catId);

@@ -34,8 +34,17 @@
  */
 export async function probeAvailability(paths, api) {
   const list = Array.isArray(paths) ? paths.filter((p) => typeof p === 'string' && p) : [];
-  const unique = [...new Set(list)];
-  if (unique.length === 0) return new Set();
+  const all = [...new Set(list)];
+  if (all.length === 0) return new Set();
+  // A saved stream ('stream:' key, 2026-11-23) is no file to look for: it is
+  // available, and found out when it plays (nothing is removed for it).
+  const streams = all.filter((p) => p.startsWith('stream:'));
+  if (streams.length) {
+    const files = await probeAvailability(all.filter((p) => !p.startsWith('stream:')), api);
+    for (const s of streams) files.add(s);
+    return files;
+  }
+  const unique = all;
 
   const bridge = api || (typeof window !== 'undefined' ? window.funsync : null);
 
@@ -132,4 +141,46 @@ export function groupByVolume(paths) {
     out.get(root).push(path);
   }
   return out;
+}
+
+/**
+ * The folder a path sits in ('C:\\Videos\\a.mp4' -> 'C:\\Videos', a drive's
+ * root keeps its slash: 'C:\\a.mp4' -> 'C:\\'). '' when there is none.
+ * @param {string} path
+ * @returns {string}
+ */
+export function parentFolder(path) {
+  if (typeof path !== 'string') return '';
+  const m = /^(.*)[\\/][^\\/]+$/.exec(path);
+  if (!m) return '';
+  if (/^[A-Za-z]:$/.test(m[1])) return m[1] + '\\';
+  return m[1] || '/';
+}
+
+/**
+ * Are the folders of these unavailable files all still there? Then the files
+ * were renamed, moved or deleted: their drive is connected, so "reconnect the
+ * drive" would be wrong (test day 2026-11-26, S030). Only a definite yes for
+ * every folder counts: a no (the drive is gone), an unknown (a share past its
+ * time budget) or a failed probe answers false, and the notice keeps its
+ * drive wording. Never changes anything: it only chooses words.
+ *
+ * @param {string[]} paths the unavailable files
+ * @param {object} [api] injection point for tests; defaults to window.funsync
+ * @returns {Promise<boolean>}
+ */
+export async function foldersPresent(paths, api) {
+  const dirs = [...new Set((Array.isArray(paths) ? paths : [])
+    .filter((p) => typeof p === 'string' && p && !p.startsWith('stream:'))
+    .map(parentFolder)
+    .filter(Boolean))];
+  if (dirs.length === 0) return false;
+  const bridge = api || (typeof window !== 'undefined' ? window.funsync : null);
+  try {
+    if (!bridge?.filesExist) return false;
+    const res = await bridge.filesExist(dirs);
+    return Array.isArray(res) && res.length === dirs.length && res.every((r) => r === true);
+  } catch {
+    return false;
+  }
 }

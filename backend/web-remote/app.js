@@ -10,13 +10,15 @@ import { fuzzySearch, sortVideos, compareNames } from './library-search.js';
 import { buildContextMapFromGroupings } from './search-context.js';
 import { isVRVideo, setOverrideStore as setVRTypeOverrideStore } from './vr-detect.js';
 import { svgIcon } from './icons.js';
-import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles } from './folder-index.js';
-import { t, initWebRemoteI18n, translatePage } from './i18n.js';
+import { buildFolderIndex, descendantsOf, breadcrumbOf, canonicalPath, commonAncestorOfFiles, folderJumpLabelParts } from './folder-index.js';
+import { t, initWebRemoteI18n, translatePage, getCurrentLocale } from './i18n.js';
+import { subtitleTrackLabel, pickEmbeddedTrack, mayHaveEmbeddedSubtitles } from './subtitle-tracks.js';
 import { shuffle as shuffleList, balancedShuffle } from './shuffle.js';
 import { chipModel, FILTER_DEFAULTS } from './filter-chips.js';
 // The desktop's tag filter, copied (P1 tags): the same algorithm on both,
 // pinned by tests/fixtures/tag-filter-parity.json.
 import { filterByTags, FACET_IDS, foldForMatch } from './tag-filter.js';
+import { PhoneFlatView, flatViewFormat } from './vr-flat.js';
 
 /* ============================================================
    Phone-local play queue (F1, SCOPE-web-remote-2.md): Play All /
@@ -30,7 +32,8 @@ import { filterByTags, FACET_IDS, foldForMatch } from './tag-filter.js';
 let phoneQueue = null; // { ids: string[], index: number, label: string }
 
 function startPhoneQueue(videos, { shuffled = false, balance = false, label = '' } = {}) {
-  const list = (videos || []).filter(v => v && v.id);
+  // A video disabled on the desktop (zaikechi #381) is never queued by Play all / Shuffle.
+  const list = (videos || []).filter(v => v && v.id && !v.disabled);
   if (list.length === 0) return;
   let ordered = list;
   if (shuffled) {
@@ -211,8 +214,8 @@ let uiState = {
   vr: storedState.vr || 'all',             // all | vr | flat
   view: storedState.view || 'grid',        // grid | list
   // The Tags filter (P1 tags, 2026-11-18): the keys picked in the filter
-  // sheet. OR within a facet, AND across facets (the desktop's
-  // filterByTags). NOT remembered across launches (Dave, 2026-11-17), so
+  // sheet. Every ticked tag, the length buckets OR (the desktop's
+  // filterByTags; Dave 2026-11-22). NOT remembered across launches (Dave, 2026-11-17), so
   // never read from or written to storage (saveFilterState leaves it out).
   tags: [],
 };
@@ -1274,7 +1277,12 @@ function _buildFolderJumpLink(videos) {
 
   const label = document.createElement('span');
   label.className = 'folder-jump__label';
-  label.innerHTML = t('webRemote.folderJump.label', { path: escapeHtml(trail) });
+  // The path in bold, put in by the code: the message held <strong>, which
+  // the phone's ICU formatter reads as a rich-text tag, so it failed and the
+  // page showed "In folder: {path}" unfilled (FT-104, fixed 2026-11-22).
+  // A marker stands in for the path; the text around it stays as each
+  // language orders it. No innerHTML: the folder names are the user's.
+  label.replaceChildren(...folderJumpLabelParts(t, trail));
   link.appendChild(label);
 
   const chev = document.createElement('span');
@@ -1301,7 +1309,7 @@ function renderRows(videos) {
 
 function createCard(v) {
   const card = document.createElement('div');
-  card.className = 'card';
+  card.className = v.disabled ? 'card card--disabled' : 'card';
   card.addEventListener('click', () => { location.hash = `play/${v.id}`; });
 
   const thumb = document.createElement('img');
@@ -1398,7 +1406,7 @@ function createSpeedBadge(v, { withText = false } = {}) {
 
 function createRow(v) {
   const row = document.createElement('div');
-  row.className = 'list__row';
+  row.className = v.disabled ? 'list__row list__row--disabled' : 'list__row';
   row.addEventListener('click', () => { location.hash = `play/${v.id}`; });
 
   const thumb = document.createElement('img');
@@ -2332,6 +2340,10 @@ async function renderPlayer(id) {
     track.default = true;
     track.srclang = 'en';
     videoEl.appendChild(track);
+  } else if (mayHaveEmbeddedSubtitles(video.path)) {
+    // No subtitle file beside it: the subtitles inside it (#268), asked
+    // for now and added when they come (the CC button appears with them).
+    addEmbeddedSubtitleTracks(videoEl, video);
   }
   videoWrap.appendChild(videoEl);
 
@@ -2503,6 +2515,22 @@ async function renderPlayer(id) {
   pill.dataset.state = 'connecting';
   wrap.appendChild(pill);
 
+  // A video this browser cannot play (WMV, MPEG-2, an Xvid AVI...): say so
+  // and how, instead of a play button that does nothing. The backend serves
+  // the desktop's converted copy when there is one, which plays (2026-11-26).
+  // Its own line: the pill above is rewritten by the device status.
+  const cantPlay = document.createElement('div');
+  cantPlay.className = 'player__note player__note--error';
+  cantPlay.setAttribute('role', 'alert');
+  cantPlay.hidden = true;
+  wrap.appendChild(cantPlay);
+  videoEl.addEventListener('error', () => {
+    const code = videoEl.error?.code;
+    if (code !== 3 && code !== 4) return; // a network drop has its own handling
+    cantPlay.textContent = t('webRemote.player.cantPlay');
+    cantPlay.hidden = false;
+  });
+
   // ---- Orgasm Switch remote button (F2) ----
   // A hold-pill in the thumb zone that drives the DESKTOP's orgasm switch
   // over the sync WS (precedent: switch-variant). Hidden until the desktop
@@ -2523,12 +2551,17 @@ async function renderPlayer(id) {
   let orgasmMode = 'hold';
   let orgasmActive = false;
   let orgasmHeld = false;
+  // The desktop's Handy is still switching to the finisher (orgasm-state
+  // `starting`): "Starting…", not "Release to return" (2026-11-24).
+  let orgasmStarting = false;
   const orgasmSend = (active) => {
     if (activeSyncClient?.sendOrgasmHold) activeSyncClient.sendOrgasmHold(active);
   };
   const orgasmVisual = () => {
     orgasmBtn.classList.toggle('player__orgasm-btn--active', orgasmActive);
-    orgasmBtn.textContent = orgasmActive
+    orgasmBtn.textContent = orgasmActive && orgasmStarting
+      ? t('webRemote.player.orgasmStarting')
+      : orgasmActive
       ? (orgasmMode === 'toggle' ? t('webRemote.player.orgasmStop') : t('webRemote.player.orgasmRiding'))
       : (orgasmMode === 'toggle' ? t('webRemote.player.orgasmTap') : t('webRemote.player.orgasmHold'));
   };
@@ -2540,6 +2573,10 @@ async function renderPlayer(id) {
   orgasmBtn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     if (orgasmMode === 'toggle') return; // toggle acts on click
+    // Keep the touch: a thumb sliding off the button no longer lets go
+    // (pointerleave fired on the slide, and three presses landed in 1.3 s
+    // on Dave's phone, 2026-11-24). Lifting the finger still does.
+    try { orgasmBtn.setPointerCapture?.(e.pointerId); } catch { /* not capturable */ }
     orgasmHeld = true;
     orgasmSend(true);
     try { navigator.vibrate?.(30); } catch { /* unsupported */ }
@@ -2547,6 +2584,7 @@ async function renderPlayer(id) {
   orgasmBtn.addEventListener('pointerup', orgasmRelease);
   orgasmBtn.addEventListener('pointercancel', orgasmRelease);
   orgasmBtn.addEventListener('pointerleave', orgasmRelease);
+  orgasmBtn.addEventListener('lostpointercapture', orgasmRelease);
   orgasmBtn.addEventListener('click', () => {
     if (orgasmMode !== 'toggle') return;
     orgasmSend(true); // desktop's toggle handler flips start/stop itself
@@ -2569,6 +2607,22 @@ async function renderPlayer(id) {
   edgeBtn.hidden = true;
   edgeBtn.textContent = t('webRemote.player.edgeHold');
   holdRow.appendChild(edgeBtn);
+  // ---- Stop (DESIGN.md §1.6 S1, §2.15) ----
+  // The desktop's Stop all: every source paused, every device stopped,
+  // whatever drives them. In the thumb zone with X and Z (Hoober), shown
+  // while the desktop reports a device. This page's video pauses at once.
+  const stopBtn = document.createElement('button');
+  stopBtn.type = 'button';
+  stopBtn.className = 'player__stop-btn';
+  stopBtn.hidden = true;
+  stopBtn.textContent = t('webRemote.player.stopAll');
+  stopBtn.setAttribute('aria-label', t('webRemote.player.stopAllAria'));
+  stopBtn.addEventListener('click', () => {
+    try { videoEl.pause(); } catch { /* best-effort */ }
+    activeSyncClient?.sendStopAll?.();
+    try { navigator.vibrate?.(60); } catch { /* unsupported */ }
+  });
+  holdRow.appendChild(stopBtn);
   let edgeMode = 'hold';
   let edgeActive = false;
   let edgeHeld = false;
@@ -2589,6 +2643,8 @@ async function renderPlayer(id) {
   edgeBtn.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     if (edgeMode === 'toggle') return; // toggle acts on click
+    // Keep the touch, as the Orgasm button does (2026-11-24).
+    try { edgeBtn.setPointerCapture?.(e.pointerId); } catch { /* not capturable */ }
     edgeHeld = true;
     edgeSend(true);
     try { navigator.vibrate?.(30); } catch { /* unsupported */ }
@@ -2596,6 +2652,7 @@ async function renderPlayer(id) {
   edgeBtn.addEventListener('pointerup', edgeRelease);
   edgeBtn.addEventListener('pointercancel', edgeRelease);
   edgeBtn.addEventListener('pointerleave', edgeRelease);
+  edgeBtn.addEventListener('lostpointercapture', edgeRelease);
   edgeBtn.addEventListener('click', () => {
     if (edgeMode !== 'toggle') return;
     edgeSend(true); // the desktop's toggle handler flips start / stop itself
@@ -2688,6 +2745,7 @@ async function renderPlayer(id) {
         // the desktop's keyboard X is used instead of the phone.
         if (msg && msg.type === 'orgasm-state') {
           orgasmActive = !!msg.active;
+          orgasmStarting = msg.starting === true;
           if (msg.mode === 'hold' || msg.mode === 'toggle') orgasmMode = msg.mode;
           if (typeof msg.configured === 'boolean') orgasmBtn.hidden = !msg.configured;
           // The Edge button shows with the Orgasm button (next major).
@@ -2697,6 +2755,18 @@ async function renderPlayer(id) {
         }
         // Edge Hold state from the desktop (next major): active + mode keep
         // the Edge button truthful when the desktop's Z is used instead.
+        // Stop all from the desktop (DESIGN.md §2.15): this page's video
+        // pauses, so nothing here drives the devices again.
+        if (msg && msg.type === 'stop-all') {
+          try { videoEl.pause(); } catch { /* best-effort */ }
+          return;
+        }
+        // The Stop button shows while the desktop reports a device.
+        if (msg && msg.type === 'device-status') {
+          const list = Array.isArray(msg.devices) ? msg.devices : null;
+          stopBtn.hidden = !(list ? list.length > 0
+            : ['handy', 'buttplug', 'tcode', 'autoblow'].some((k) => msg[k] === 'connected'));
+        }
         if (msg && msg.type === 'edge-state') {
           edgeActive = !!msg.active;
           if (msg.mode === 'hold' || msg.mode === 'toggle') edgeMode = msg.mode;
@@ -3062,6 +3132,129 @@ async function renderPlayer(id) {
 
 const GAP_SKIP_THRESHOLD_MS = 10000; // phone-local default (F6)
 
+// The Flat view's on / off is remembered on this phone (a per-viewer
+// convenience): on, the next VR video opens flat too.
+const FLAT_VIEW_KEY = 'funsync.remote.flatView';
+function flatViewRemembered() {
+  try { return localStorage.getItem(FLAT_VIEW_KEY) === '1'; } catch { return false; }
+}
+function rememberFlatView(on) {
+  try { localStorage.setItem(FLAT_VIEW_KEY, on ? '1' : '0'); } catch { /* private mode */ }
+}
+
+/**
+ * The Flat view button for a VR video (#426), or null for any other video.
+ * Off by default; a press shows the video as one flat picture (drag to look
+ * around, pinch to zoom) and a second press shows it as it is. If this phone
+ * cannot draw it (no WebGL2) the button is disabled and says so.
+ */
+function buildFlatViewButton(videoWrap, videoEl, video) {
+  const format = flatViewFormat(video);
+  if (!format) return null;
+  const btn = document.createElement('button');
+  btn.className = 'pcx__btn pcx__btn--flat';
+  btn.setAttribute('aria-label', t('webRemote.player.flatView'));
+  btn.title = t('webRemote.player.flatViewHint');
+  btn.setAttribute('aria-pressed', 'false');
+  btn.appendChild(svgIcon('view', 20));
+  const flat = new PhoneFlatView({ videoWrap, videoEl, format });
+  const setOn = async (on) => {
+    if (on) {
+      const ok = await flat.enable();
+      if (!ok) {
+        // This phone cannot draw it (no WebGL2): the button says so and does nothing.
+        btn.disabled = true;
+        btn.title = t('webRemote.player.flatViewUnavailable');
+        btn.setAttribute('aria-label', btn.title);
+        btn.setAttribute('aria-pressed', 'false');
+        return;
+      }
+    } else {
+      flat.disable();
+    }
+    btn.setAttribute('aria-pressed', String(flat.on));
+  };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const next = !flat.on;
+    rememberFlatView(next);
+    setOn(next);
+  });
+  if (flatViewRemembered()) setOn(true);
+  return btn;
+}
+
+/**
+ * The subtitles inside a video file (#268 thirstyduck500, 2026-11-23), for a
+ * video with no subtitle file beside it: every text track is added (the
+ * browser fetches one only when it is switched on); the one the file marks
+ * default or forced starts on. Picture tracks (PGS / VobSub) cannot be
+ * shown and are left out. Nothing is added once the video has gone.
+ */
+export async function addEmbeddedSubtitleTracks(videoEl, video) {
+  const base = `/api/media/subtitle/${encodeURIComponent(video.id)}`;
+  let tracks;
+  try {
+    const res = await fetch(`${base}/tracks`, { cache: 'no-cache' });
+    if (!res.ok) return;
+    tracks = (await res.json())?.tracks;
+  } catch {
+    return;
+  }
+  if (!videoEl.isConnected || !Array.isArray(tracks)) return;
+  const choice = pickEmbeddedTrack(tracks);
+  const locale = getCurrentLocale() || 'en';
+  tracks.forEach((tr, i) => {
+    if (!tr?.text) return;
+    const el = document.createElement('track');
+    el.kind = 'subtitles';
+    el.label = subtitleTrackLabel(tr, i + 1, t, locale);
+    el.src = `${base}/track/${tr.index}`;
+    // The `default` attribute, not a mode set now: Chromium's own track
+    // selection, which runs just after the tracks are added, switched EVERY
+    // track on once one showed (seen live on the phone page, 2026-11-23).
+    el.default = !!(choice?.show && choice.track === tr);
+    videoEl.appendChild(el);
+  });
+}
+
+/**
+ * The CC button (#268, 2026-11-23). There once the video has a subtitle
+ * track: a file beside it, or the ones inside it (they arrive a moment after
+ * the video opens). Each press steps Off, then each track in turn, then Off.
+ * Before it, a subtitle file beside the video was always on, with no way
+ * to turn it off on the phone's own controls.
+ */
+export function buildSubtitleButton(videoEl) {
+  const btn = document.createElement('button');
+  btn.className = 'pcx__btn pcx__btn--cc';
+  btn.appendChild(svgIcon('captions', 20));
+  const list = () => [...(videoEl.textTracks || [])];
+  const paint = () => {
+    const tracks = list();
+    btn.hidden = tracks.length === 0;
+    const on = tracks.find((tr) => tr.mode === 'showing');
+    btn.setAttribute('aria-pressed', String(!!on));
+    const label = t('webRemote.player.subtitlesNow', {
+      label: on ? (on.label || t('webRemote.player.subtitles')) : t('player.subtitles.off'),
+    });
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+  };
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const tracks = list();
+    const at = tracks.findIndex((tr) => tr.mode === 'showing');
+    for (const tr of tracks) tr.mode = 'disabled';
+    if (at + 1 < tracks.length) tracks[at + 1].mode = 'showing';
+    paint();
+  });
+  videoEl.textTracks?.addEventListener?.('addtrack', paint);
+  videoEl.textTracks?.addEventListener?.('change', paint);
+  paint();
+  return btn;
+}
+
 function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'pcx';
@@ -3135,7 +3328,12 @@ function buildPlayerControls(videoWrap, videoEl, video, opts = {}) {
   btnRow.className = 'pcx__btnrow';
   const spacer = document.createElement('div');
   spacer.className = 'pcx__spacer';
-  btnRow.append(playBtn, muteBtn, spacer, fsBtn);
+  // Flat view (#426): a VR video shown as one flat picture, as the desktop's
+  // VR Format does, for watching VR without a headset. Only on a VR video.
+  const flatBtn = buildFlatViewButton(videoWrap, videoEl, video);
+  // Subtitles (#268): hidden until the video has a track.
+  const ccBtn = buildSubtitleButton(videoEl);
+  btnRow.append(playBtn, muteBtn, spacer, ...(flatBtn ? [flatBtn] : []), ccBtn, fsBtn);
 
   bar.append(seekRow, btnRow);
   overlay.appendChild(bar);

@@ -199,16 +199,16 @@ describe('the Tags section of the Filters picker', () => {
     expect(box('tag:device:the-handy').getAttribute('aria-label')).toBe('the handy, 2 videos');
   });
 
-  it('OR within a facet, AND across facets; one chip per tag; the badge counts each chip', async () => {
+  it('every ticked tag must be on the video (Dave 2026-11-22); one chip per tag; the badge counts each chip', async () => {
     await boot();
     openFilters();
-    tick('tag:device:osr2');
-    expect(shown()).toEqual([BRAVO]);
     tick('tag:device:the-handy');
-    expect(shown().sort()).toEqual([ALPHA, BRAVO, CHARLIE].sort());
+    expect(shown().sort()).toEqual([ALPHA, CHARLIE].sort());
     tick('tag:content:pov');
-    expect(shown().sort()).toEqual([ALPHA, BRAVO].sort());
-    expect(chipKeys()).toEqual(['tag:device:osr2', 'tag:device:the-handy', 'tag:content:pov']);
+    expect(shown()).toEqual([ALPHA]);                       // the handy AND pov
+    tick('tag:device:osr2');
+    expect(shown()).toEqual([]);                            // no video has all three
+    expect(chipKeys()).toEqual(['tag:device:the-handy', 'tag:content:pov', 'tag:device:osr2']);
     expect(chip('tag:device:the-handy').textContent).toBe('Device: the handy');
     expect(badge().hidden).toBe(false);
     expect(badge().textContent).toBe('3');

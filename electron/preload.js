@@ -24,6 +24,11 @@ contextBridge.exposeInMainWorld('funsync', {
   // Read-only sampled sha256 per path, for the "Identical" tier (FT-B01).
   hashVideoFiles: (paths) => ipcRenderer.invoke('hash-video-files', paths),
   trashVideoFiles: (paths) => ipcRenderer.invoke('trash-video-files', paths),
+  // Delete a video's files (2026-11-23, DESIGN.md §2.18): which files belong
+  // to it, and the delete itself (Recycle Bin, or permanent when the dialog
+  // had the user confirm it). Main holds every guard (electron/delete-files.js).
+  listVideoFiles: (videoPath) => ipcRenderer.invoke('list-video-files', videoPath),
+  deleteVideoFiles: (paths, opts) => ipcRenderer.invoke('delete-video-files', paths, opts),
 
   getAppVersion: () => ipcRenderer.invoke('get-app-version'),
   getPortableInfo: () => ipcRenderer.invoke('get-portable-info'),
@@ -37,6 +42,13 @@ contextBridge.exposeInMainWorld('funsync', {
     const handler = (_e, scale) => cb(scale);
     ipcRenderer.on('ui-scale-changed', handler);
     return () => ipcRenderer.removeListener('ui-scale-changed', handler);
+  },
+  // The View menu's F11 (an F11 the page did not take itself): the player's
+  // fullscreen, never the window's (Dave 2026-11-22).
+  onMenuToggleFullscreen: (cb) => {
+    const handler = () => cb();
+    ipcRenderer.on('menu-toggle-fullscreen', handler);
+    return () => ipcRenderer.removeListener('menu-toggle-fullscreen', handler);
   },
 
   // Backend health monitoring — used by the disconnected-banner.
@@ -91,6 +103,9 @@ contextBridge.exposeInMainWorld('funsync', {
   getPlaylists: () => ipcRenderer.invoke('get-playlists'),
   getPlaylist: (id) => ipcRenderer.invoke('get-playlist', id),
   addPlaylist: (name) => ipcRenderer.invoke('add-playlist', name),
+  ensureFavouritesPlaylist: (name) => ipcRenderer.invoke('ensure-favourites-playlist', name),
+  setPlaylistFollow: (id, follow) => ipcRenderer.invoke('set-playlist-follow', id, follow),
+  setPlaylistExcluded: (id, paths) => ipcRenderer.invoke('set-playlist-excluded', id, paths),
   renamePlaylist: (id, name) => ipcRenderer.invoke('rename-playlist', id, name),
   setPlaylistLoop: (id, loop) => ipcRenderer.invoke('set-playlist-loop', id, loop),
   setPlaylistShuffle: (id, shuffle) => ipcRenderer.invoke('set-playlist-shuffle', id, shuffle),
@@ -114,6 +129,7 @@ contextBridge.exposeInMainWorld('funsync', {
 
   // Category mappings
   assignCategory: (videoPath, catId) => ipcRenderer.invoke('assign-category', videoPath, catId),
+  assignCategoryToVideos: (videoPaths, catId) => ipcRenderer.invoke('assign-category-to-videos', videoPaths, catId),
   unassignCategory: (videoPath, catId) => ipcRenderer.invoke('unassign-category', videoPath, catId),
   getVideoCategories: (videoPath) => ipcRenderer.invoke('get-video-categories', videoPath),
   getVideosByCategory: (catId) => ipcRenderer.invoke('get-videos-by-category', catId),
@@ -140,6 +156,12 @@ contextBridge.exposeInMainWorld('funsync', {
   // Script editor
   saveFunscript: (content, name) => ipcRenderer.invoke('save-funscript', content, name),
   writeFunscript: (content, filePath) => ipcRenderer.invoke('write-funscript', content, filePath),
+  // "Restore an earlier version…" (editor work list 3.1, 2026-11-24): the
+  // versions main kept before overwriting this script, newest first
+  // [{id, at, size, points}], and one version's text (null when it cannot be
+  // read). Read-only: restoring is the editor's own undoable edit.
+  listScriptBackups: (filePath) => ipcRenderer.invoke('list-script-backups', filePath),
+  readScriptBackup: (filePath, id) => ipcRenderer.invoke('read-script-backup', filePath, id),
 
   // File utilities
   fileExists: (filePath, timeoutMs) => ipcRenderer.invoke('file-exists', filePath, timeoutMs),
@@ -149,7 +171,7 @@ contextBridge.exposeInMainWorld('funsync', {
   dirsListable: (dirPaths, timeoutMs) => ipcRenderer.invoke('dirs-listable', dirPaths, timeoutMs),
 
   // Data export/import
-  exportData: () => ipcRenderer.invoke('export-data'),
+  exportData: (opts) => ipcRenderer.invoke('export-data', { includeSecrets: opts?.includeSecrets === true }),
   importData: () => ipcRenderer.invoke('import-data'),
 
   // Backup & Recovery (rolling snapshots, auto-recovery)
@@ -196,7 +218,20 @@ contextBridge.exposeInMainWorld('funsync', {
   generateThumbnails: (videoPath, interval) => ipcRenderer.invoke('generate-thumbnails', videoPath, interval),
   generateSingleThumbnail: (videoPath, opts) => ipcRenderer.invoke('generate-single-thumbnail', videoPath, opts),
   remuxVideo: (videoPath) => ipcRenderer.invoke('remux-video', videoPath),
-  resolveRemoteVideo: (pageUrl) => ipcRenderer.invoke('resolve-remote-video', pageUrl),
+  // Convert to play (2026-11-26): an H.264 copy of a video the player cannot decode.
+  transcodeVideo: (videoPath, opts) => ipcRenderer.invoke('transcode-video', videoPath, { cachedOnly: opts?.cachedOnly === true }),
+  transcodeStatus: (job) => ipcRenderer.invoke('transcode-status', job),
+  transcodeCancel: (job) => ipcRenderer.invoke('transcode-cancel', job),
+  convertedCopiesInfo: () => ipcRenderer.invoke('converted-copies-info'),
+  clearConvertedCopies: () => ipcRenderer.invoke('converted-copies-clear'),
+  // Embedded subtitles (#268, 2026-11-23): the file's subtitle streams, and one text stream as WebVTT.
+  subtitleTracks: (videoPath) => ipcRenderer.invoke('subtitle-tracks', videoPath),
+  subtitleTrack: (videoPath, index) => ipcRenderer.invoke('subtitle-track', videoPath, index),
+  resolveRemoteVideo: (pageUrl, opts) => ipcRenderer.invoke('resolve-remote-video', pageUrl, opts),
+  // Where a watched post's script waits (EroScripts tab Watch, 2026-11-22).
+  getStreamScriptsDir: () => ipcRenderer.invoke('get-stream-scripts-dir'),
+  // A saved stream's picture, kept as its custom thumbnail (2026-11-23).
+  saveStreamThumbnail: (streamKey, imageUrl) => ipcRenderer.invoke('save-stream-thumbnail', streamKey, imageUrl),
   getSpeedStats: () => ipcRenderer.invoke('get-speed-stats'),
   getDurations: () => ipcRenderer.invoke('get-durations'),
   // The funscript metadata harvest (P1 tags): {paths?, since?, cache?} -> answer | null.
@@ -262,9 +297,15 @@ contextBridge.exposeInMainWorld('funsync', {
   eroscriptsValidate: () => ipcRenderer.invoke('eroscripts-validate'),
   eroscriptsCheckSession: (opts) => ipcRenderer.invoke('eroscripts-check-session', { force: opts?.force === true }),
   eroscriptsSearch: (query, page) => ipcRenderer.invoke('eroscripts-search', query, page),
-  eroscriptsTopic: (topicId) => ipcRenderer.invoke('eroscripts-topic', topicId),
+  eroscriptsTopic: (topicId, opts) => ipcRenderer.invoke('eroscripts-topic', topicId, opts),
+  eroscriptsLatest: (price, page, opts) => ipcRenderer.invoke('eroscripts-latest', price, page, opts),
+  eroscriptsTags: () => ipcRenderer.invoke('eroscripts-tags'),
+  eroscriptsTagSearch: (query) => ipcRenderer.invoke('eroscripts-tag-search', query),
   eroscriptsTopicMeta: (topicId) => ipcRenderer.invoke('eroscripts-topic-meta', topicId),
   eroscriptsTopicImage: (topicId) => ipcRenderer.invoke('eroscripts-topic-image', topicId),
+  eroscriptsScriptPreview: (url) => ipcRenderer.invoke('eroscripts-script-preview', url),
+  eroscriptsImage: (url, opts) => ipcRenderer.invoke('eroscripts-image', url, opts),
+  gofileResolve: (url, hint) => ipcRenderer.invoke('gofile-resolve', url, hint),
   eroscriptsDownload: (url, savePath, opts) => ipcRenderer.invoke('eroscripts-download', url, savePath, opts),
   // After a Cancel: main drops the bytes a look fetched for this URL (R4-09).
   eroscriptsForgetDownload: (url) => ipcRenderer.invoke('eroscripts-forget-download', url),

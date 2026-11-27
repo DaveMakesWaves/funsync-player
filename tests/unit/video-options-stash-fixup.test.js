@@ -278,6 +278,16 @@ describe('File > Stash: the scene with this id no longer has this file', () => {
     expect([...b.querySelectorAll('.video-options__actions button')].map((x) => x.textContent)).toEqual(['Sync this video', 'Unlink']);
   });
 
+  it('Tags > Where they came from says it the same way, not "this file changed" (s1-fixup-renderer, fixed 2026-11-22)', async () => {
+    const data = stashData({ videoPath: VIDEO });
+    data.links[VIDEO] = { ...data.links[VIDEO], state: 'changed', sceneChanged: true };
+    setup({ data });
+    await open({ section: 'tags' });
+    const line = panel('tags').querySelector('.video-options-tags__stash-line').textContent;
+    expect(line).toContain('its Stash scene no longer has this file; its Stash tags are hidden');
+    expect(line).not.toContain('this file changed');
+  });
+
   it('a file that changed (no sceneChanged) keeps its own words', async () => {
     setup({ size: 2000 });
     await open();

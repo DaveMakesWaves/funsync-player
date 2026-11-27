@@ -1,0 +1,67 @@
+name: Tests
+
+# The same JS and Python tests the release build runs (build.yml), on every
+# push to a branch and every pull request, so a test that only fails on CI's
+# runners shows up BEFORE a release tag is pushed. The first v0.10.0 tag
+# (2026-11-20) failed both runners (Windows checks out CRLF, Linux timers are
+# finer, posix path rules) and had to be moved.
+#
+# Release flow: push the commit, wait for this to go green, THEN run
+# `npm version` and push the tag. A tag push does not run this workflow
+# (branches only); build.yml runs the same tests again before it builds.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to the same branch replaces a run still going.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    strategy:
+      # Report both runners even when one fails: the two fail differently.
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            python: python
+          - os: ubuntu-latest
+            python: python3
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Run JS tests
+        run: npx vitest run
+
+      - name: Run Python tests
+        run: |
+          cd backend
+          ${{ matrix.python }} -m venv .venv
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\pip' || '.venv/bin/pip' }} install -r requirements.txt
+          ${{ matrix.os == 'windows-latest' && '.venv\\Scripts\\python' || '.venv/bin/python' }} -m pytest -v

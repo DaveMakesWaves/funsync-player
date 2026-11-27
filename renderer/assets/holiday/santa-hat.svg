@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 40">
+  <!-- The Holiday style's Santa hat, worn on the nav bar's logo (renderer/styles/holiday.css).
+       Redrawn 2026-11-21 (Dave: "shape is weird"): fur band, a cone that flops over, the pom-pom at the tip. -->
+  <path d="M7 30 C9 20 12 11 18 6 C25 0.5 35 3 40 12 C41.5 15 42 18 41.5 21 C38.5 15.5 34.5 13.5 31 14.5 C28 15.5 28.5 22 31 30 Z" fill="#d62839"/>
+  <path d="M18 6 C25 0.5 35 3 40 12 C34 6.5 26 5.5 20 9 Z" fill="#ef4256" opacity="0.6"/>
+  <rect x="3" y="26.5" width="32" height="10.5" rx="5.25" fill="#f6f3ec"/>
+  <rect x="5" y="28" width="28" height="2.4" rx="1.2" fill="#ffffff" opacity="0.7"/>
+  <circle cx="41.5" cy="24" r="5.2" fill="#f6f3ec"/>
+</svg>

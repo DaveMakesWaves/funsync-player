@@ -47,6 +47,7 @@ import { liftCtorOptions } from './helpers/app-methods.js';
 import { patternChoicePlayer, orgasmChoiceInUse, readPatternChoice, choiceSource, scriptRangeAround } from '../../renderer/js/pattern-choice.js';
 import { teardownPlayback, isVideoInPip } from '../../renderer/js/pip-guard.js';
 import { shouldEnterMiniplayer } from '../../renderer/js/miniplayer.js';
+import { gateEngineStart, setEdgeCarryNotice, edgeCarriesAcrossVideos, edgeCarryNoticeKey, carriesAcrossVideos, orgasmCarryNoticeKey } from '../../renderer/js/edge-hold-carry.js';
 
 const SCRIPT_A = JSON.stringify({ actions: [{ at: 0, pos: 10 }, { at: 600, pos: 90 }, { at: 1200, pos: 10 }] });
 const SCRIPT_B = JSON.stringify({ actions: [{ at: 0, pos: 90 }, { at: 400, pos: 10 }] });
@@ -68,6 +69,11 @@ const METHODS = [
   '_ownVideoPaused', '_noteAutoblowForEdge', '_rearmAutoblowAfterEdge',
   '_onLeaveView', '_teardownPlayback', '_isOurVideoInPip', '_shouldEnterMiniplayer',
   '_patternScriptRange', '_orgasmFollowScriptNow', '_orgasmLibrarySettings', '_orgasmLibrarySource',
+  // X on a video change (Dave 2026-11-26: Z's rule and option for X too)
+  '_orgasmOnVideoChange', '_setOrgasmCarryNotice', '_showCarryNotice', '_orgasmHolds', '_installEdgeStartGate',
+  '_edgeOnVideoChange', '_setEdgeCarryNotice',
+  // V during X or a Z pattern (hardware run 2026-11-27, B108): the REAL variant switch
+  '_patternHoldsHandy', '_switchVariant', '_editorAllowsReplace',
 ];
 
 let Lifted;
@@ -103,6 +109,7 @@ function fakeSync(name, log) {
     _active: true,
     setVibrationActions: vi.fn(),
     clearAxisActions: vi.fn(),
+    reloadActions: vi.fn(),                      // a variant switch reloads the toys' script
     start: vi.fn(function start() { this._active = true; log.push(`${name}.start`); }),
     stop: vi.fn(function stop() { this._active = false; log.push(`${name}.stop`); }),
   };
@@ -118,6 +125,7 @@ beforeAll(() => {
       OrgasmSwitch, engageHandyFinisher, releaseHandyFinisher,
       teardownPlayback, isVideoInPip, shouldEnterMiniplayer,
       exitFullscreenForNav: () => {},
+      gateEngineStart, setEdgeCarryNotice, edgeCarriesAcrossVideos, edgeCarryNoticeKey, carriesAcrossVideos, orgasmCarryNoticeKey,
     },
   });
 });
@@ -212,6 +220,7 @@ describe('a video change ends an Orgasm Switch started as a toggle (Dave 2026-11
     app._onOrgasmHold(false);                    // the release is ignored in toggle mode
     await settle();
     expect(app.orgasmSwitch.active).toBe(true);
+    expect(app._orgasmToggled, 'started as a toggle').toBe(true);
     expect(tickFinisher(1000).bp.length, 'the finisher drives the Buttplug toy').toBeGreaterThan(0);
 
     const mark = h.sdk.calls.length;
@@ -219,6 +228,7 @@ describe('a video change ends an Orgasm Switch started as a toggle (Dave 2026-11
     tc.sent.length = 0;
     const load = openBravo();                    // N, a library open, a queue advance: all load here
     expect(app.orgasmSwitch.active, 'the finisher ended with the video').toBe(false);
+    expect(app._orgasmToggled, 'the toggle mark ends with it (bf-verify 2026-11-19)').toBe(false);
     expect(bp.sent.map((s) => s.kind)).toContain('stopAll');
     expect(tc.stop).toHaveBeenCalled();
     await load;
@@ -343,5 +353,189 @@ describe('a video change ends a HELD Orgasm Switch too (Dave 2026-11-19 ~14:52, 
     await settle();
     expect(app.orgasmSwitch.active).toBe(false);
     expect(tickFinisher(5000).bp).toEqual([]);
+  });
+});
+
+// Dave 2026-11-26 ("apply the same rule and options" as Z): the default stays
+// as above (a video change ends X); Settings > Orgasm Switch > "Keep X on
+// into the next video" (`player.orgasmAcrossVideos`) keeps the finisher
+// playing into the next video, the Handy's included: no stop, the new
+// video's upload waits for X's release (which then puts THAT script on), the
+// toys' engines wait too, and a note says how to end it.
+describe('kept on into the next video (player.orgasmAcrossVideos)', () => {
+  async function heldIntoBravo(mode) {
+    await playAlpha();
+    app._installEdgeStartGate();
+    configureX(mode);
+    app._settingsMap.set('player.orgasmAcrossVideos', true);
+    app._onOrgasmHold(true);
+    await settle();
+    expect(lastScript(), 'the Handy plays the finisher').toBe('FIN.csv');
+    const mark = h.sdk.calls.length;
+    await openBravo();
+    await settle();
+    app.buttplugSync.start();                    // what the new video's toy start does
+    app.tcodeSync.start();
+    return mark;
+  }
+
+  it('hold: the finisher plays on (Handy and toys), the new script waits; the release puts Bravo on and starts the toys', async () => {
+    const mark = await heldIntoBravo('hold');
+    expect(app.orgasmSwitch.active, 'X is still on').toBe(true);
+    expect(tickFinisher(5000).bp.length, 'the finisher still drives the Buttplug toy').toBeGreaterThan(0);
+    expect(legsSince(mark), 'the Handy: no stop, no new script while X is on').toEqual([]);
+    expect(syncs.buttplug._active, 'the toy engines wait').toBe(false);
+    expect(syncs.tcode._active).toBe(false);
+    expect(app._carryNoticeOwner, 'the note is X\'s').toBe('orgasm');
+
+    app._onOrgasmHold(false);                    // let go
+    await settle(40);
+    expect(app.orgasmSwitch.active).toBe(false);
+    const legs = legsSince(mark);
+    expect(legs, 'Bravo goes on the Handy and plays').toContain('setScript:B.csv');
+    expect(legs).not.toContain('setScript:A.csv');
+    expect(lastScript()).toBe('B.csv');
+    expect(syncs.buttplug._active, 'the toys start on Bravo').toBe(true);
+    expect(syncs.tcode._active).toBe(true);
+    expect(app._carryNoticeOwner ?? null, 'the note is gone').toBe(null);
+  });
+
+  it('toggle: the finisher plays on; the next press finishes (every device stops, nothing plays)', async () => {
+    const mark = await heldIntoBravo('toggle');
+    expect(app.orgasmSwitch.active).toBe(true);
+    expect(app._orgasmToggled).toBe(true);
+    expect(legsSince(mark)).toEqual([]);
+    expect(app._carryNoticeOwner).toBe('orgasm');
+
+    bp.sent.length = 0;
+    app._onOrgasmHold(true);                     // the press that finishes
+    await settle(40);
+    expect(app.orgasmSwitch.active).toBe(false);
+    expect(bp.sent.map((s) => s.kind)).toContain('stopAll');
+    expect(tc.stop).toHaveBeenCalled();
+    const legs = legsSince(mark);
+    expect(legs.at(-1), 'the Handy stops').toBe('hsspStop');
+    expect(legs).not.toContain('setScript:B.csv');
+    expect(syncs.buttplug._active).toBe(false);
+    expect(app._carryNoticeOwner ?? null).toBe(null);
+  });
+
+  it('off (the default): the video change ends it, as before', async () => {
+    await playAlpha();
+    app._installEdgeStartGate();
+    configureX('hold');
+    app._onOrgasmHold(true);
+    await settle();
+    await openBravo();
+    await settle();
+    expect(app.orgasmSwitch.active).toBe(false);
+    expect(lastScript()).toBe('B.csv');
+    app.buttplugSync.start();
+    expect(syncs.buttplug._active, 'the new video\'s toys start').toBe(true);
+  });
+
+  it('a script upload during a hold (same video) waits: the release puts the CURRENT script on, never a cached older one', async () => {
+    await playAlpha();
+    configureX('hold');
+    app._onOrgasmHold(true);
+    await settle();
+    const mark = h.sdk.calls.length;
+    script = SCRIPT_B;                           // e.g. a variant switch during the hold
+    await app._uploadAndStartSync();
+    await settle();
+    expect(legsSince(mark), 'nothing replaces the finisher').toEqual([]);
+    app._onOrgasmHold(false);
+    await settle(40);
+    expect(lastScript()).toBe('B.csv');
+  });
+});
+
+describe('a phone or headset video change ends X whatever the setting (its path uploads to the Handy itself)', () => {
+  it('kept on is set, but a remote video change ends the finisher', async () => {
+    await playAlpha();
+    configureX('toggle');
+    app._settingsMap.set('player.orgasmAcrossVideos', true);
+    app._onOrgasmHold(true);
+    await settle();
+    expect(app.orgasmSwitch.active).toBe(true);
+    expect(app._orgasmOnVideoChange({ remote: true })).toBe(false);
+    expect(app.orgasmSwitch.active).toBe(false);
+  });
+});
+
+// Hardware run 2026-11-27 (B108), Dave's Handy + a Lovense Edge: V while X
+// was held stopped the finisher on the Handy (range 0 on the readback) while
+// the Edge played on; the same under a Z pattern, where the new variant was
+// also put on over the pattern. The variant switch sent its own hsspStop
+// before the upload (which already waited for X), so the earlier test of the
+// upload alone (above) passed while the device stopped. These run the REAL
+// _switchVariant.
+describe('V during a held X or a Z pattern (B108)', () => {
+  const MIRROR = { label: 'Mirror', name: 'Alpha (Mirror).funscript' };
+  function variantsReady() {
+    app._allVariantsWithManual = [{ path: A.replace('.mp4', '.funscript'), label: 'Default' }, { ...MIRROR, path: A.replace('.mp4', ' (Mirror).funscript') }];
+    app._activeVariantIndex = 0;
+    app._readScriptResilient = async () => ({ content: SCRIPT_B });
+    app.funscriptEngine.loadContent = async (c) => { script = c; };
+    app.funscriptEngine.getActions = () => JSON.parse(script).actions;
+    app.funscriptEngine.getChapters = () => [];
+    app.funscriptEngine.getBookmarks = () => [];
+    app.progressBar = { renderHeatmap() {}, renderChapterStrip() {}, setMarkers() {} };
+    app._showFunscriptBadge = () => {};
+    app._formatActionsDuration = () => '0:01';
+  }
+
+  it('held X: V sends the Handy no stop and no script (the finisher plays on); letting go puts the variant on', async () => {
+    await playAlpha();
+    configureX('hold');
+    app._onOrgasmHold(true);
+    await settle();
+    expect(lastScript(), 'the finisher is on the Handy').toBe('FIN.csv');
+    variantsReady();
+    const mark = h.sdk.calls.length;
+    await app._switchVariant(1);
+    await settle();
+    expect(app._activeVariantIndex, 'the variant is picked').toBe(1);
+    expect(legsSince(mark), 'no stop, no new script while X is held').toEqual([]);
+    expect(deviceRunning(), 'the finisher plays on').toBe(true);
+    app._onOrgasmHold(false);                    // let go
+    await settle(40);
+    expect(lastScript(), 'the release puts the variant on').toBe('B.csv');
+    expect(deviceRunning()).toBe(true);
+  });
+
+  it('a Z pattern: V leaves the pattern on the Handy; Z off puts the variant on', async () => {
+    await playAlpha();
+    app._installEdgeStartGate();
+    app._settingsMap.set('player.edgeHoldMode', 'toggle');
+    app._settingsMap.set('player.edgeHoldAction', 'pattern');
+    app._settingsMap.set('player.edgePattern', { ...EDGE_PATTERN_DEFAULTS, id: 'slow-tip-strokes' });
+    app._onEdgeHold(true);                       // Z on: the pattern
+    await settle(40);
+    const pattern = lastScript();
+    expect(pattern, 'the pattern is on the Handy').not.toBe('A.csv');
+    expect(deviceRunning()).toBe(true);
+    variantsReady();
+    const mark = h.sdk.calls.length;
+    await app._switchVariant(1);
+    await settle();
+    expect(legsSince(mark), 'the pattern plays on: no stop, no new script').toEqual([]);
+    expect(lastScript()).toBe(pattern);
+    app._onEdgeHold(true);                       // the press that turns Z off
+    await settle(40);
+    expect(lastScript(), 'Z off puts the variant on').toBe('B.csv');
+    expect(deviceRunning()).toBe(true);
+  });
+
+  it('no pattern on the Handy: V stops the old script and puts the variant on, as before', async () => {
+    await playAlpha();
+    variantsReady();
+    const mark = h.sdk.calls.length;
+    await app._switchVariant(1);
+    await settle(40);
+    const legs = legsSince(mark);
+    expect(legs[0], 'the old script stops first').toBe('hsspStop');
+    expect(legs).toContain('setScript:B.csv');
+    expect(deviceRunning()).toBe(true);
   });
 });

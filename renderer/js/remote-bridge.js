@@ -175,11 +175,19 @@ export class RemoteBridge {
       case 'orgasm-hold':
         // Orgasm Switch remote trigger (SCOPE-web-remote-2.md F2). The
         // phone's hold button — routed into the same keyboard-X handler.
+        // Logged: three presses in 1.3 s could not be told apart from a
+        // thumb sliding off the button (Dave's phone, 2026-11-24).
+        console.log(`[Remote] orgasm-hold ${msg.active ? 'press' : 'release'} from the phone`);
         if (this.onPhoneOrgasmHold) this.onPhoneOrgasmHold(!!msg.active, ip);
+        break;
+      case 'stop-all':
+        // The phone's Stop (DESIGN.md §2.15): the desktop's Stop all.
+        if (this.onPhoneStopAll) this.onPhoneStopAll(ip);
         break;
       case 'edge-hold':
         // Edge Hold remote trigger (next major): the phone's Edge button,
         // routed into the same keyboard-Z handler.
+        console.log(`[Remote] edge-hold ${msg.active === true ? 'press' : 'release'} from the phone`);
         if (this.onPhoneEdgeHold) this.onPhoneEdgeHold(msg.active === true, ip);
         break;
       case 'set-offset':

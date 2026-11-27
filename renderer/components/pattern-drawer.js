@@ -29,7 +29,9 @@
 
 import { t } from '../js/i18n.js';
 import { patternSpeedBounds } from '../js/pattern-source.js';
-import { normalizePatternChoice, renderPatternSample, sameChoice } from '../js/pattern-choice.js';
+import {
+  normalizePatternChoice, renderPatternSample, sameChoice, representativeMs, widenedBand,
+} from '../js/pattern-choice.js';
 import { PREVIEW_SCRIPT_RANGE, drawSamplePreview } from '../js/filler-preview.js';
 import { createPatternBlock } from './pattern-source-rows.js';
 
@@ -44,8 +46,18 @@ function el(tag, attrs = {}, text) {
   return node;
 }
 
-/** ms of the applied choice the summary's small graph shows. */
-export const SUMMARY_GRAPH_MS = 4000;
+/**
+ * ms of the applied choice the summary's small graph shows: the whole pattern
+ * once (one loop; an ending once through), 4-20 s, plus the Gap Filler's
+ * joins (pattern-choice.js representativeMs). It was the first 4 s, which
+ * drew a pattern that builds up (Crescendo) as a flat line (fix 2026-11-20).
+ * @param {object} choice
+ * @param {{ feature?: string, sampleOptions?: object }} [o]
+ * @returns {number}
+ */
+export function summaryGraphMs(choice, { feature, sampleOptions } = {}) {
+  return representativeMs(choice, { ...(sampleOptions || {}), scriptRange: PREVIEW_SCRIPT_RANGE, feature });
+}
 
 const FOCUSABLE = 'button:not([disabled]), select:not([disabled]), input:not([disabled]):not([type="hidden"]), [tabindex]:not([tabindex="-1"])';
 
@@ -77,9 +89,11 @@ export function summarizePatternChoice(choice) {
  * the pattern they created in the setting menu under the description"). The
  * graph is decorative (the line says it in words), drawn again only by
  * setValue (after Apply, never from the drawer's draft), and hidden while no
- * pattern is chosen.
+ * pattern is chosen. A range too narrow to play (Lowest = Highest) plays
+ * wider: a note under the line names the band that plays, as the drawer's
+ * note does (fix 2026-11-20; the line keeps the range as set).
  * @param {object} o
- * @param {string} o.idPrefix — '<idPrefix>-summary', '<idPrefix>-set', '<idPrefix>-summary-graph'
+ * @param {string} o.idPrefix — '<idPrefix>-summary', '<idPrefix>-set', '<idPrefix>-summary-graph', '<idPrefix>-summary-widened'
  * @param {string} o.featureName — "Gap Filler" etc., for the button's accessible name
  * @param {'gapFiller'|'orgasm'|'edge'} [o.feature] — whose output the graph draws (Gap Filler: its own)
  * @param {object} [o.sampleOptions] — more for renderPatternSample (Gap Filler: maxJoinSpeed)
@@ -97,14 +111,16 @@ export function createPatternSummaryRow({ idPrefix, featureName, feature, sample
     id: `${idPrefix}-set`,
     className: 'settings-panel__add-btn pattern-summary__set',
     'aria-label': t('settingsPanel.patternBlock.setPatternAria', { feature: featureName }),
-    'aria-describedby': `${idPrefix}-summary`,
+    // The note too, so the button says what plays (empty while there is none).
+    'aria-describedby': `${idPrefix}-summary ${idPrefix}-summary-widened`,
     'aria-haspopup': 'dialog',
   }, t('settingsPanel.patternBlock.setPattern'));
   row.append(text, button);
+  const note = el('div', { className: 'settings-panel__hint pattern-summary__note', id: `${idPrefix}-summary-widened` });
   const graph = el('canvas', {
     id: `${idPrefix}-summary-graph`, className: 'pattern-summary__graph', width: 240, height: 32, 'aria-hidden': 'true',
   });
-  wrap.append(row, graph);
+  wrap.append(row, note, graph);
   let actions = [];
   const draw = () => { if (!graph.hidden) drawSamplePreview(graph, actions); };
   const setValue = (v) => {
@@ -118,10 +134,13 @@ export function createPatternSummaryRow({ idPrefix, featureName, feature, sample
     let out = null;
     try {
       out = c.id === null ? null : renderPatternSample(c, {
-        ...(sampleOptions || {}), durationMs: SUMMARY_GRAPH_MS, scriptRange: PREVIEW_SCRIPT_RANGE, feature,
+        ...(sampleOptions || {}), durationMs: summaryGraphMs(c, { feature, sampleOptions }), scriptRange: PREVIEW_SCRIPT_RANGE, feature,
       });
     } catch { out = null; }
     actions = Array.isArray(out?.actions) ? out.actions : [];
+    const band = c.id === null ? null : widenedBand(c, out?.warnings, actions);
+    note.textContent = band ? t('settingsPanel.playback.patternRangeWidened', { lo: band[0], hi: band[1] }) : '';
+    note.hidden = !band;
     graph.hidden = actions.length < 2;
     draw();
   };

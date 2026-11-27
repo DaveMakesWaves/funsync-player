@@ -65,25 +65,29 @@ describe('nav bar follows a live language switch (V50)', () => {
     _setBundlesForTests('de', DE, EN);
     const { el } = mountNavBar();
     // Sanity: it really booted German.
-    expect(el.querySelector('.nav-bar__handy-text').textContent).toBe(DE.nav.notConnected);
+    expect(el.querySelector('.nav-bar__handy-text').textContent).toBe(DE.nav.noDevices);
 
     switchTo('en', EN);
 
     expect(rendered(el)).toEqual(reference);
-    expect(el.querySelector('.nav-bar__handy-label').textContent).toBe(EN.nav.devices);
-    expect(el.querySelector('.nav-bar__handy-text').textContent).toBe(EN.nav.notConnected);
+    expect(el.querySelector('.nav-bar__handy-text').textContent).toBe(EN.nav.noDevices);
+    // The connections group's name is translated too (2026-11-25).
+    expect(el.querySelector('.nav-bar__group').getAttribute('aria-label')).toBe(EN.nav.connectionsGroup);
   });
 
   it('keeps live device state while translating it', () => {
     _setBundlesForTests('de', DE, EN);
     const { bar, el } = mountNavBar();
-    bar.setHandyStatus('connected', 2);
+    bar.setDeviceStatus({ devices: [{ label: 'The Handy', state: 'connected' }, { label: 'Lovense Edge', state: 'slow' }] });
+    expect(el.querySelector('.nav-bar__handy-text').textContent).toBe('2 Geräte');
 
     switchTo('en', EN);
 
-    expect(el.querySelector('.nav-bar__handy-led').classList.contains('nav-bar__handy-led--connected')).toBe(true);
-    expect(el.querySelector('.nav-bar__handy-text').textContent).not.toBe(DE.nav.notConnected);
-    expect(el.querySelector('.nav-bar__handy').getAttribute('aria-label')).toMatch(/^Devices: /);
+    // Slow to respond is amber, as before.
+    expect(el.querySelector('.nav-bar__handy-led').classList.contains('nav-bar__handy-led--connecting')).toBe(true);
+    expect(el.querySelector('.nav-bar__handy-text').textContent).toBe('2 devices');
+    expect(el.querySelector('.nav-bar__handy').title).toBe('The Handy · Connected\nLovense Edge · Slow to respond');
+    expect(el.querySelector('.nav-bar__handy').getAttribute('aria-label')).toBe('Devices: The Handy · Connected, Lovense Edge · Slow to respond');
   });
 
   it('keeps the active collection name on the library button', () => {

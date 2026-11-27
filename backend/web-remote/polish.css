@@ -1,0 +1,113 @@
+/* ============================================================
+   Web remote polish (2026-11-23)
+
+   The desktop's Modern polish (renderer/styles/modern-polish.css), the
+   same ideas for the phone: Dave, "do it all".
+
+   REVERT: delete the one line
+     <link rel="stylesheet" href="./polish.css">
+   in backend/web-remote/index.html (or delete this file). style.css is
+   untouched; every rule here is under :root[data-style="modern"], which
+   the remote always sets (tests/unit/web-remote-polish.test.js).
+
+   No gradients, no glow, no glass beyond the existing header blur.
+     1. One navy, in steps (and a cool light theme)
+     2. Red rationed: focus neutral, active filter chips neutral
+     3. Fixed-width digits everywhere
+     4. Hairlines instead of resting shadows on cards
+     5. Calmer motion: no lift, no slide, no press-shrink, no tab glow
+   ============================================================ */
+
+:root[data-style="modern"] {
+  --polish-ring: rgba(228, 231, 239, 0.72);
+  --polish-hairline: rgba(255, 255, 255, 0.06);
+}
+:root[data-style="modern"][data-theme="light"] {
+  --polish-ring: rgba(21, 27, 48, 0.55);
+  --polish-hairline: rgba(0, 0, 0, 0.07);
+}
+
+/* --- 1. One navy, in steps ------------------------------------------------- */
+:root[data-style="modern"]:not([data-theme="light"]) {
+  --bg-primary: #151b30;
+  --glass-bg: rgba(21, 27, 48, 0.78);
+  --text-primary: #e4e7ef;
+  --text-secondary: #a3abbe;
+}
+:root[data-style="modern"][data-theme="light"] {
+  --bg-primary: #f3f4f8;
+  --glass-bg: rgba(243, 244, 248, 0.78);
+  --bg-card-hover: #eceef4;
+  --text-primary: #161b2c;
+  --text-secondary: #535b6e;
+}
+
+/* --- 2. Red rationed --------------------------------------------------------
+   Red stays for the main action, "on" and the selected tab. A focus ring is
+   neutral (a red ring reads as an error); an active filter is a state. */
+:root[data-style="modern"] .icon-btn:focus-visible,
+:root[data-style="modern"] .content-actions__btn:focus-visible,
+:root[data-style="modern"] .search-bar__input:focus-visible,
+:root[data-style="modern"] .nav-tabs__tab:focus-visible,
+:root[data-style="modern"] .sheet__option:focus-within,
+:root[data-style="modern"] .sheet__close:focus-visible,
+:root[data-style="modern"] .header__action:focus-visible,
+:root[data-style="modern"] .header__back:focus-visible,
+:root[data-style="modern"] .search-bar__input:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--polish-ring);
+}
+:root[data-style="modern"] .filter-chip {
+  background: var(--control-hover);
+  border-color: var(--border);
+  color: var(--text-primary);
+}
+:root[data-style="modern"] .filter-chip:hover {
+  background: var(--bg-card-hover);
+}
+
+/* --- 3. Fixed-width digits ------------------------------------------------- */
+:root[data-style="modern"] body {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- 4. Hairlines instead of resting shadows ------------------------------- */
+:root[data-style="modern"] .card {
+  box-shadow: inset 0 0 0 1px var(--polish-hairline);
+}
+:root[data-style="modern"] .player__sync-pill,
+:root[data-style="modern"] .player__variant-chip,
+:root[data-style="modern"] .playall-bar__btn {
+  box-shadow: none;
+}
+/* The sticky header and toolbar keep their bottom border; no drop shadow. */
+:root[data-style="modern"] .header,
+:root[data-style="modern"] .toolbar {
+  box-shadow: none;
+}
+
+/* --- 5. Calmer motion ------------------------------------------------------ */
+@media (hover: hover) {
+  :root[data-style="modern"] .card:hover {
+    transform: none;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  :root[data-style="modern"] .grouping-row:hover,
+  :root[data-style="modern"] .list__row:hover {
+    transform: none;
+  }
+}
+:root[data-style="modern"] .card:active,
+:root[data-style="modern"] .content-actions__btn:active,
+:root[data-style="modern"] .icon-btn:active,
+:root[data-style="modern"] .filter-chip:active,
+:root[data-style="modern"] .player__variant-chip:active,
+:root[data-style="modern"] .pcx__center:active,
+:root[data-style="modern"] .player__orgasm-btn:active,
+:root[data-style="modern"] .player__edge-btn:active,
+:root[data-style="modern"] .playall-bar__btn:active {
+  transform: none;
+}
+:root[data-style="modern"] .nav-tabs__tab[aria-selected="true"] .nav-tabs__icon {
+  filter: none;
+}

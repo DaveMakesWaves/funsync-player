@@ -1,0 +1,379 @@
+/* Device simulator: the other axes and their looks (editor work list 2.5),
+   and Align to the video (5.4), 2026-11-24. device-simulator.js,
+   sim-axes-view.js, sim-align-overlay.js. Linked from index.html after
+   player.css (its .device-sim rules are the bar's).
+
+   Over the video, so the video-overlay look on both themes (notes/DESIGN.md
+   2.2): dark plates, white-on-dark text, flat colours, no glow, no
+   decorative gradients. The plates match the bar's read-out (.device-sim__info). */
+
+/* The block hangs beside the panel, out of its layout: the bar stays on its
+   spot whatever the look. device-simulator.js moves it to the right when the
+   panel is near the window's left edge. */
+.device-sim__axes {
+  position: absolute;
+  /* Bottom-aligned with the bar and its read-out, growing UP over the video:
+     top-aligned, the Large 3D receiver (and a tall gauge stack) hung down over
+     the player's control bar (hands-on pass, 2026-11-24). */
+  bottom: 0;
+  right: calc(100% + 8px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+  background: rgba(16, 16, 16, 0.75);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 2px;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--video-overlay-text-dim);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;   /* clicks go through to the video, as the read-out's */
+}
+.device-sim[data-axes-side="right"] .device-sim__axes {
+  right: auto;
+  left: calc(100% + 8px);
+}
+/* The bar turned sideways: the block above it, or below it near the top. */
+.device-sim[data-axes-side="above"] .device-sim__axes {
+  right: auto;
+  left: 0;
+  bottom: calc(100% + 8px);
+}
+.device-sim[data-axes-side="below"] .device-sim__axes {
+  right: auto;
+  left: 0;
+  bottom: auto;
+  top: calc(100% + 8px);
+}
+.device-sim__axes[data-look="drawing"] { width: 124px; }
+.device-sim__axes[data-look="gauges"] { width: 136px; }
+
+/* The 3D receiver: the one part that takes the pointer (drag to look from
+   another side; right-click for the menu). */
+.device-sim__3d {
+  display: block;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+.device-sim__3d.is-orbiting { cursor: grabbing; }
+.device-sim__readout {
+  display: grid;
+  grid-template-columns: repeat(3, auto);
+  justify-content: space-between;
+  gap: 0 8px;
+  line-height: 13px;
+}
+.device-sim__readout b { color: var(--video-overlay-text); font-weight: 600; }
+
+/* A row per axis: name, a small bar, the value. The receiver axes fill from
+   the middle (50 is their rest; a tick marks it), the others from 0. */
+.device-sim__axis-row {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 4px;
+}
+.device-sim__axis-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.device-sim__axis-bar {
+  position: relative;
+  height: 6px;
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 1px;
+  overflow: hidden;
+}
+.device-sim__axis-bar.is-centred::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  margin-left: -0.5px;
+  background: rgba(255, 255, 255, 0.5);
+}
+.device-sim__axis-fill { position: absolute; top: 0; bottom: 0; left: 0; width: 0; background: var(--accent); }
+.device-sim__axis-val { text-align: right; color: var(--video-overlay-text); }
+.device-sim__receiver { display: block; margin: 0 auto 2px; }
+
+/* A slim copy of the stroke bar per axis, its T-Code channel and value under it. */
+.device-sim__axes[data-look="bars"] {
+  flex-direction: row;
+  gap: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+}
+.device-sim__bar-col { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+.device-sim__bar {
+  position: relative;
+  width: 20px;
+  height: 200px;
+  background: rgba(16, 16, 16, 0.75);
+  border: 2px solid rgba(var(--accent-rgb), 0.5);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.device-sim__bar-fill { position: absolute; left: 0; right: 0; bottom: 0; height: 0; background: var(--accent); }
+.device-sim__bar-line { position: absolute; left: 0; right: 0; height: 1px; background: rgba(var(--accent-rgb), 0.5); }
+.device-sim__bar-mid { position: absolute; left: 0; right: 0; bottom: 50%; height: 1px; background: rgba(255, 255, 255, 0.5); }
+.device-sim__bar-marker {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent-hover);
+  transform: translateY(50%);
+}
+.device-sim__bar-label {
+  min-width: 24px;
+  padding: 2px;
+  text-align: center;
+  font-size: 9px;
+  line-height: 11px;
+  background: rgba(16, 16, 16, 0.75);
+  border: 1px solid rgba(var(--accent-rgb), 0.35);
+  border-radius: 2px;
+}
+.device-sim__bar-label span { display: block; color: var(--video-overlay-text); }
+
+/* Gauges: twist, roll, pitch and the surge / sway pad. */
+.device-sim__gauges { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 4px; }
+.device-sim__gauge { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+.device-sim__gauge-canvas { display: block; }
+.device-sim__gauge-cap { line-height: 12px; text-align: center; white-space: nowrap; }
+.device-sim__gauge-cap b { color: var(--video-overlay-text); font-weight: 400; }
+
+/* The bar's colour choices, on the other axes too. (Speed colours: each fill
+   is painted inline by its own speed; the frames go neutral, as the bar's.) */
+.device-sim[data-color="white"] .device-sim__axis-fill,
+.device-sim[data-color="white"] .device-sim__bar-fill { background: #ffffff; }
+.device-sim[data-color="white"] .device-sim__bar-marker { background: #ffffff; }
+.device-sim[data-color="solid"] .device-sim__axis-fill,
+.device-sim[data-color="solid"] .device-sim__bar-fill { background: var(--sim-color); }
+.device-sim[data-color="solid"] .device-sim__bar-marker { background: #ffffff; }
+.device-sim[data-color="speed"] .device-sim__bar { border-color: rgba(255, 255, 255, 0.4); }
+.device-sim[data-color="speed"] .device-sim__bar-line { background: rgba(255, 255, 255, 0.28); }
+.device-sim[data-color="speed"] .device-sim__bar-marker { background: #ffffff; }
+
+/* Modern: solid plates, as modern-polish.css section 12 gives the bar. */
+:root[data-style="modern"] .device-sim__axes:not([data-look="bars"]),
+:root[data-style="modern"] .device-sim__bar,
+:root[data-style="modern"] .device-sim__bar-label {
+  background: rgba(12, 15, 26, 0.92);
+}
+
+/* Aligned to the video, the line sets the length and angle: no grip, no knob. */
+.device-sim[data-aligned="true"] .device-sim__knob,
+.device-sim[data-aligned="true"] .device-sim__grip { display: none; }
+
+/* The right-click menu grew (Look, Size, View): it scrolls rather than
+   running off a small window. Size and View are rows of small choices. */
+.device-sim__menu {
+  max-height: calc(100vh - 8px);
+  overflow-y: auto;
+}
+.device-sim__seg-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 2px 10px 6px 26px;
+}
+.device-sim__seg {
+  padding: 3px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.device-sim__seg:hover,
+.device-sim__seg:focus-visible { background: var(--surface-overlay-strong); outline: none; }
+.device-sim__seg[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #ffffff;
+}
+
+/* === Align to the video: the two clicks (sim-align-overlay.js) ===
+   A see-through layer over the whole window that takes every click, so the
+   player never sees them. The borders are white 18% on both themes: the
+   overlay token (--video-overlay-border = --border-strong) is black 18% in
+   the light theme, invisible on the dark hint (found in the mockup). */
+.sim-align {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  cursor: crosshair;
+  background: transparent;
+  font-family: var(--font-family);
+}
+.sim-align--done > * { display: none; }
+.sim-align__frame {
+  position: fixed;
+  border: 1px dashed var(--video-overlay-text-dim);
+  pointer-events: none;
+}
+.sim-align__svg {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.sim-align__line { stroke: var(--accent); stroke-width: 2; stroke-dasharray: 6 4; fill: none; }
+.sim-align__dot { fill: var(--accent); stroke: #ffffff; stroke-width: 1.5; }
+.sim-align__hint {
+  position: fixed;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 32px);
+  padding: 5px 6px 5px 12px;
+  background: var(--video-overlay-bg);
+  color: var(--video-overlay-text);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  white-space: nowrap;
+  /* Clicks go through it to the picture (only its Cancel takes them): it
+     sits over the top of the picture, where a stroke's tip often is, and on
+     a picture made short by a tall editor a click there did nothing
+     (fit-on-screen pass, 2026-11-24). */
+  pointer-events: none;
+}
+.sim-align__keys { color: var(--video-overlay-text-dim); font-size: 12px; }
+.sim-align__cancel {
+  pointer-events: auto;
+  min-height: 28px;
+  padding: 3px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--video-overlay-text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.sim-align__cancel:hover { background: var(--video-overlay-control-hover); }
+.sim-align__cancel:focus-visible { outline: 2px solid var(--video-overlay-text); outline-offset: 1px; }
+
+/* One simulator (Dave, 2026-11-24): the whole axes block takes the pointer.
+   A drag anywhere on it moves the simulator (as on the bar), the wheel over
+   the 3D picture turns its view, and the top-left grip resizes the picture
+   (the block grows up and left of the bar, so that corner moves outward). */
+.device-sim__axes {
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+}
+.device-sim--dragging .device-sim__axes { cursor: grabbing; }
+.device-sim__axes .device-sim__3d { cursor: inherit; }
+.device-sim__3d-grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  border-left: 2px solid rgba(var(--accent-rgb), 0.8);
+  border-top: 2px solid rgba(var(--accent-rgb), 0.8);
+  border-top-left-radius: 2px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.device-sim__axes:hover .device-sim__3d-grip,
+.device-sim__axes.is-resizing .device-sim__3d-grip { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .device-sim__3d-grip { transition: none; } }
+
+/* The colour row: Accent, Speed colours and White are swatches like the
+   solid colours (Dave: "why are accent and white a worded option when
+   theres a colour picker"), and the last one opens the colour picker,
+   showing the custom colour in its middle. */
+.device-sim__swatch--speed { background: linear-gradient(135deg, #0000ff, #00c8c8, #00ff00, #ffff00, #ff0000); }
+.device-sim__swatch--custom {
+  position: relative;
+  background: conic-gradient(#ff3b30, #ffcc00, #34c759, #00c7be, #007aff, #af52de, #ff3b30);
+}
+.device-sim__swatch--custom::after {
+  content: '';
+  position: absolute;
+  inset: 4px;
+  border-radius: 50%;
+  background: var(--custom, #e94560);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.3);
+}
+
+/* The 3D look IS the simulator (Dave, 2026-11-25: "why when i have the 3d
+   device simulator selected does the original 2d one show beside it? surely
+   both arent required"): the bar and its knob give way, the picture takes
+   their place in the panel's flow, the read-out (stroke %, speed) under it.
+   Last in the file: it wins over the side rules above (data-axes-side). */
+.device-sim[data-look="3d"] .device-sim__body {
+  display: none;
+}
+.device-sim[data-look="3d"] .device-sim__axes {
+  position: relative;
+  left: auto;
+  right: auto;
+  top: auto;
+  bottom: auto;
+  order: -1;
+}
+.device-sim[data-look="3d"] .device-sim__3d {
+  /* Turned (Turn 90°, the knob, an alignment): about its centre, room made
+     around it by margins (sim-axes-view.js _applyRotation). */
+  transform-origin: 50% 50%;
+}
+/* Its turn knob: inside the top of the picture, on hover. Above it (as the
+   bar's is) it went off the window when the simulator sat at the top, as a
+   tall editor pushes it (2026-11-25). */
+.device-sim__3d-knob {
+  position: absolute;
+  left: 50%;
+  top: 4px;
+  width: 14px;
+  height: 14px;
+  margin-left: -7px;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.8);
+  background: rgba(16, 16, 16, 0.85);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 120ms;
+  z-index: 2;
+}
+.device-sim__3d-knob::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  width: 2px;
+  height: 10px;
+  margin-left: -1px;
+  background: rgba(255, 255, 255, 0.8);
+}
+.device-sim__axes:hover .device-sim__3d-knob,
+.device-sim--rotating .device-sim__3d-knob { opacity: 1; }
+.device-sim--rotating .device-sim__3d-knob { cursor: grabbing; }
+
+/* The player's own buttons stay clickable over the device simulator (z 50).
+   Found with the editor and seven tracks in an 800x500 window (2026-11-25):
+   the video strip is all control bar there, and the shrunken simulator sat on
+   Fullscreen, More options and the queue toggle. Only the buttons rise, not
+   the bar: elsewhere the simulator still takes a drag. Hidden, the bar's
+   opacity 0 makes it its own stacking context, so they stay beneath. */
+.player__controls button,
+.player__top-bar button {
+  position: relative;
+  z-index: 51;
+}
+.player__queue-toggle {
+  z-index: 51;
+}

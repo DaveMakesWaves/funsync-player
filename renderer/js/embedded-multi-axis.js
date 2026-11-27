@@ -106,7 +106,7 @@ const NAME_ALIASES = Object.freeze({
   twist: 'twist', rotate: 'twist',
   roll: 'roll',
   pitch: 'pitch',
-  vib: 'vib', vibrate: 'vib', vibration: 'vib',
+  vib: 'vib', vibrate: 'vib', vibration: 'vib', vibe: 'vib', // vibe: RFC #64's own example name
   lube: 'lube',
   pump: 'pump',
   suction: 'suction', suck: 'suction',

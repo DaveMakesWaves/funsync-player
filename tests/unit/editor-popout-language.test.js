@@ -121,12 +121,15 @@ function leftovers(locale, others, allowed = []) {
 }
 const rawKeys = () => chromeStrings().filter(({ s }) => /^[a-z][A-Za-z0-9]*(\.[A-Za-z0-9]+)+$/.test(s));
 const TOOLBAR_BUTTONS = [
-  'editor.btn.undo', 'editor.btn.redo', 'editor.btn.delete', 'editor.btn.cut', 'editor.btn.invert',
-  'editor.btn.simplify', 'editor.btn.metadata', 'editor.btn.bookmark', 'editor.btn.fillGaps',
-  'editor.popout.waveformTitle', 'editor.btn.beats', 'editor.btn.zoomIn', 'editor.btn.zoomOut',
+  // Multi-axis editing (2026-11-24): Stacked, New axis, Export beside the script list.
+  'editor.btn.stacked', 'editor.btn.newAxis', 'editor.btn.exportAxes',
+  'editor.btn.undo', 'editor.btn.redo', 'editor.history.button', 'editor.btn.delete', 'editor.btn.cut', 'editor.btn.invert',
+  'editor.btn.simplify', 'editor.vibrate.button', 'editor.btn.metadata', 'editor.btn.bookmark', 'editor.btn.fillGaps', 'editor.check.button',
+  'editor.popout.waveformTitle', 'editor.btn.beats', 'editor.btn.record', 'editor.gamepad.button', 'editor.btn.zoomIn', 'editor.btn.zoomOut',
   'editor.btn.fitAll', 'editor.btn.save', 'editor.btn.dock',
 ];
-const MODIFY = ['placeholder', 'halfSpeed', 'doubleSpeed', 'reverse', 'remapRange', 'offsetTime',
+// + the editor work list (2026-11-24): Fade in / out, Ripple delete, Make from the stroke.
+const MODIFY = ['placeholder', 'halfSpeed', 'doubleSpeed', 'reverse', 'fadeIn', 'fadeOut', 'rippleDelete', 'fromStroke', 'remapRange', 'offsetTime',
   'removePauses', 'rangeExtend', 'generatePattern', 'fillPattern', 'exportHeatmap'];
 const SELECT = ['placeholder', 'all', 'beforePlayhead', 'afterPlayhead', 'topThird', 'middleThird',
   'bottomThird', 'everyNth', 'created', 'none'];
@@ -209,7 +212,9 @@ describe('opened in German (INITIAL_STATE locale)', () => {
     expectToolbarIn('de');
     expect($('.editor__status', host()).textContent).toBe(fmt('de', 'editor.status', { count: 12 }));
     fromParent({ type: P.ACTIONS_CHANGED, actions: ACTIONS(), selectedIndices: [1, 2], bookmarks: [] });
-    expect($('.editor__status', host()).textContent).toBe(fmt('de', 'editor.statusSelected', { count: 12, selected: 2 }));
+    // Two selected: the selection statistics too, in German (editor work list 4.1).
+    expect($('.editor__status', host()).textContent).toBe(
+      `${fmt('de', 'editor.statusSelected', { count: 12, selected: 2 })} · ${fmt('de', 'editor.statusStats', { seconds: '0.50', avg: 200, top: 200 })}`);
     fromParent({ type: P.ACTIONS_CHANGED, actions: ACTIONS(), selectedIndices: [], bookmarks: [] });
     expect(leftovers('de', ['en'], [fmt('de', 'editor.status', { count: 12 })])).toEqual([]);
     expect(rawKeys()).toEqual([]);

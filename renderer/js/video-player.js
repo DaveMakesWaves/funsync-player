@@ -1,6 +1,7 @@
 // VideoPlayer — HTML5 video wrapper with custom controls
 
 import { showToast } from './toast.js';
+import { HLS_QUALITY_CONFIG, normalizeStreamQuality, pickLevelIndex } from './stream-quality.js';
 import { t } from './i18n.js';
 import { eventBus } from './event-bus.js';
 import { VRProjectionRenderer } from './vr-projection-renderer.js';
@@ -57,15 +58,38 @@ export const FRAME_STEP_MARGIN_SEC = 0.001;
  * @param {number} frames       positive = forward, negative = back
  * @param {number} fps
  * @param {number} [duration]   seconds; not finite = no upper clamp
+ * @param {number} [phase]      seconds: where the video's frame grid starts
+ *   (framePhaseSec). Frames sit at phase + n / fps; 0 assumed a grid from 0,
+ *   and a video whose frames are offset (Natsuki: 12.7 ms) landed every step
+ *   and point that far from the frame's real start (2026-11-24).
  * @returns {number}
  */
-export function frameStepTime(currentTime, frames, fps, duration = Infinity) {
+export function frameStepTime(currentTime, frames, fps, duration = Infinity, phase = 0) {
   const rate = fps > 0 && Number.isFinite(fps) ? fps : 30;
+  const ph = Number.isFinite(phase) && phase > 0 && phase < 1 / rate ? phase : 0;
   const now = Number.isFinite(currentTime) ? Math.max(0, currentTime) : 0;
-  const shown = Math.floor(now * rate + 1e-6);
+  const shown = Math.floor((now - ph) * rate + 1e-6);
   const target = Math.max(0, shown + (Number(frames) || 0));
-  const t = target / rate + FRAME_STEP_MARGIN_SEC;
+  const t = ph + target / rate + FRAME_STEP_MARGIN_SEC;
   return Number.isFinite(duration) && duration > 0 ? Math.min(t, duration) : t;
+}
+
+/**
+ * A probed frame rate as the exact rate. ffprobe's rate reaches the renderer
+ * rounded to 2 decimals (29.97), and the NTSC rates are n * 1000 / 1001
+ * (29.97002997...): 0.5 ms adrift after 9 minutes on the rounded value. Any
+ * other rate is kept as it is; nothing usable (0, NaN, absurd) gives null.
+ * @param {number} fps
+ * @returns {number|null}
+ */
+export function exactFrameRate(fps) {
+  const n = Number(fps);
+  if (!Number.isFinite(n) || n < 1 || n > 1000) return null;
+  for (const base of [24, 30, 48, 60, 120, 240]) {
+    const ntsc = base * 1000 / 1001;
+    if (Math.abs(n - ntsc) < 0.006) return ntsc;
+  }
+  return n;
 }
 
 export class VideoPlayer {
@@ -98,9 +122,89 @@ export class VideoPlayer {
     // Fired only on an actual show/hide transition of the control chrome.
     this.onControlsVisibilityChanged = null; // callback: (visible: boolean) => {}
     this.onSeekDrag = null; // callback: (timeSeconds) => {} — called during scrub
+    // Fired when the frame rate or the frame grid's start changes (the
+    // editor re-sends them to its pop-out).
+    this.onFrameGridChanged = null; // callback: () => {}
+    // The video's own frame rate (setFps, from ffprobe); undefined = unknown
+    // (30 assumed). Reset by every loadSource.
+    this._fps = undefined;
+    // The frame on screen, as the browser presented it: { mediaTime } in
+    // seconds (requestVideoFrameCallback). null until a frame is presented.
+    this._shownFrame = null;
+    // Where the frame grid starts, in seconds (frames sit at phase + n / fps).
+    this._phase = 0;
 
     this._cacheElements();
     this._bindEvents();
+    this._watchPresentedFrames();
+  }
+
+  /**
+   * Follow the frames the browser actually presents. Their timestamps are the
+   * truth for "the frame on screen", where currentTime is only the time asked
+   * for: a point placed while paused belongs at the shown frame's start, and a
+   * video whose frames don't start at 0 (Natsuki, D:, 2026-11-24: every frame
+   * 12.7 ms after the 29.97 grid) needs that offset to step and snap right.
+   * Without requestVideoFrameCallback nothing changes (grid from 0).
+   */
+  _watchPresentedFrames() {
+    const v = this.video;
+    if (typeof v?.requestVideoFrameCallback !== 'function') return;
+    const onFrame = (_now, meta) => {
+      this._onPresentedFrame(meta?.mediaTime);
+      v.requestVideoFrameCallback(onFrame);
+    };
+    v.requestVideoFrameCallback(onFrame);
+  }
+
+  /** @param {number} mediaTime  seconds, the presented frame's timestamp */
+  _onPresentedFrame(mediaTime) {
+    if (!Number.isFinite(mediaTime) || mediaTime < 0) return;
+    this._shownFrame = { mediaTime };
+    this._learnPhase();
+  }
+
+  /** The grid's start from the last presented frame, once the real rate is known. */
+  _learnPhase() {
+    if (!this._fps || !this._shownFrame) return;
+    const dur = 1 / this._fps;
+    const t = this._shownFrame.mediaTime;
+    let phase = t - Math.floor(t / dur + 1e-6) * dur;
+    if (!(phase > 0.00005 && phase < dur - 0.00005)) phase = 0;
+    if (Math.abs(phase - this._phase) > 0.0002) {
+      this._phase = phase;
+      this.onFrameGridChanged?.();
+    }
+  }
+
+  /** Length of one frame in ms: the video's own rate, or 1/30 s unknown. */
+  frameDurationMs() {
+    return 1000 / this._estimateFps();
+  }
+
+  /** Where the frame grid starts, in seconds (0 until learned). */
+  framePhaseSec() {
+    return this._phase || 0;
+  }
+
+  /**
+   * The start of the frame on screen, in ms, while paused: the presented
+   * frame's own timestamp. null when not known for sure (playing, seeking, no
+   * frame presented since the last seek, or none ever): the caller then uses
+   * the frame grid. A frame presented before a step is never taken for the
+   * new one: it must start at or before currentTime and less than one frame
+   * before it.
+   * @returns {number|null}
+   */
+  shownFrameTimeMs() {
+    const v = this.video;
+    const shown = this._shownFrame;
+    if (!shown || !v || !v.paused || v.seeking) return null;
+    const now = v.currentTime;
+    if (!Number.isFinite(now)) return null;
+    const dur = 1 / this._estimateFps();
+    if (shown.mediaTime > now + 0.0005 || now - shown.mediaTime >= dur) return null;
+    return shown.mediaTime * 1000;
   }
 
   _cacheElements() {
@@ -267,9 +371,44 @@ export class VideoPlayer {
    */
   _destroyHls() {
     if (this._hls) {
+      // What the line carried: Auto's first pick for a single-file stream.
+      const bw = Number(this._hls.bandwidthEstimate);
+      if (bw > 0) this.onBandwidth?.(bw);
       try { this._hls.destroy(); } catch { /* already gone */ }
       this._hls = null;
+      this.onStreamLevels?.(null);
     }
+  }
+
+  /**
+   * A stream's quality levels for the player's Quality button: {levels:
+   * [{index, height, bitrate}], current (the level playing), auto}. Null
+   * when no stream with levels is playing.
+   */
+  streamLevels() {
+    const hls = this._hls;
+    if (!hls || !Array.isArray(hls.levels) || !hls.levels.length) return null;
+    const current = hls.currentLevel >= 0 ? hls.currentLevel : hls.loadLevel;
+    return {
+      levels: hls.levels.map((l, i) => ({ index: i, height: l.height || 0, bitrate: l.bitrate || 0 })),
+      current,
+      auto: hls.autoLevelEnabled !== false && this._streamPref === 'auto',
+    };
+  }
+
+  /** 'auto' or a height: held for this stream and the next (2026-11-22). */
+  setStreamQuality(pref) {
+    this._streamPref = normalizeStreamQuality(pref);
+    this._applyStreamQuality();
+  }
+
+  _applyStreamQuality() {
+    const hls = this._hls;
+    if (!hls || !Array.isArray(hls.levels) || !hls.levels.length) return;
+    // currentLevel switches at once (the buffer is flushed): a chosen height
+    // is seen straight away; -1 hands the choice back to hls.js.
+    hls.currentLevel = pickLevelIndex(hls.levels, this._streamPref || 'auto');
+    this.onStreamLevels?.(this.streamLevels());
   }
 
   /**
@@ -291,8 +430,12 @@ export class VideoPlayer {
       return;
     }
     if (Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: false });
+      // Quality first (Dave, 2026-11-22: "the quality went really poor"):
+      // start high, buffer further ahead, step back up sooner.
+      const hls = new Hls({ ...HLS_QUALITY_CONFIG });
       this._hls = hls;
+      hls.on(Hls.Events.MANIFEST_PARSED, () => this._applyStreamQuality());
+      hls.on(Hls.Events.LEVEL_SWITCHED, () => this.onStreamLevels?.(this.streamLevels()));
       hls.loadSource(url);
       hls.attachMedia(this.video);
       hls.on(Hls.Events.ERROR, (_evt, data) => {
@@ -310,6 +453,32 @@ export class VideoPlayer {
       console.error('[hls] MSE not supported and no native HLS');
       this.video.dispatchEvent(new Event('error'));
     }
+  }
+
+  /**
+   * The same video from a new address, where it was and as it was (playing
+   * or paused): an expired stream looked up again, or another quality of a
+   * single-file stream (2026-11-23). No hiding, no reset: the engines see a
+   * wait and a seek, and follow.
+   */
+  async swapSource(url, { isHls = false, at = 0, play = false } = {}) {
+    const v = this.video;
+    const ready = new Promise((resolve) => {
+      let timer = null;
+      const fin = () => { clearTimeout(timer); v.removeEventListener('loadedmetadata', fin); resolve(); };
+      v.addEventListener('loadedmetadata', fin);
+      timer = setTimeout(fin, 30_000);
+    });
+    if (isHls) {
+      await this._attachHls(url);
+    } else {
+      this._destroyHls();
+      v.src = url;
+      v.load();
+    }
+    await ready;
+    try { if (at > 0) v.currentTime = at; } catch { /* not seekable yet */ }
+    if (play) v.play().catch(() => { /* autoplay refused: the user presses Play */ });
   }
 
   loadSource(url, filename, opts = {}) {
@@ -331,6 +500,13 @@ export class VideoPlayer {
     // their geometry. Cleared on `loadeddata` (one-shot listener so
     // the hide doesn't persist across subsequent unrelated loads).
     this.video.style.visibility = 'hidden';
+    // A new video: its frame rate and frame grid are not known yet (app.js
+    // sets the rate from ffprobe; the grid comes from its first frames).
+    const hadGrid = !!this._fps || this._phase !== 0;
+    this._fps = undefined;
+    this._shownFrame = null;
+    this._phase = 0;
+    if (hadGrid) this.onFrameGridChanged?.();
     const vrCanvas = this._vrRenderer?.canvas || null;
     if (vrCanvas) vrCanvas.style.visibility = 'hidden';
     const revealOnFirstFrame = () => {
@@ -352,6 +528,12 @@ export class VideoPlayer {
     if (opts.isHls) {
       // HLS via hls.js (MSE) — does NOT set video.src; hls.js drives the
       // element. _attachHls is async (lazy import) and fire-and-forget.
+      // The element is emptied NOW (2026-11-23): until hls.js attaches, it
+      // held the previous video, whose duration let a resume seek land on
+      // that old media and be lost (a saved stream resumed at 0:00).
+      this._destroyHls();
+      this.video.removeAttribute('src');
+      try { this.video.load(); } catch { /* nothing to unload */ }
       this._attachHls(url);
     } else {
       this._destroyHls(); // switching away from a prior HLS stream
@@ -448,7 +630,7 @@ export class VideoPlayer {
     if (!count) return;
     this.video.pause();
     // Just past the target frame's start, never on it (frameStepTime).
-    const newTime = frameStepTime(this.video.currentTime, count, this._estimateFps(), this.video.duration);
+    const newTime = frameStepTime(this.video.currentTime, count, this._estimateFps(), this.video.duration, this.framePhaseSec());
     if (isFinite(newTime)) this.video.currentTime = newTime;
   }
 
@@ -458,7 +640,12 @@ export class VideoPlayer {
    */
   setFps(fps) {
     if (fps > 0 && isFinite(fps)) {
+      const changed = this._fps !== fps;
       this._fps = fps;
+      if (changed) {
+        this._learnPhase();
+        this.onFrameGridChanged?.();
+      }
     }
   }
 
@@ -750,7 +937,6 @@ export class VideoPlayer {
 
     if (isFinite(time)) {
       this.tooltipTime.textContent = this._formatTime(time);
-      this.progressTooltip.style.left = `${pct * 100}%`;
 
       // Notify for thumbnail preview + chapter/bookmark marker tooltip.
       // Second arg is the cursor X within the progress container so the
@@ -758,6 +944,19 @@ export class VideoPlayer {
       if (this.onProgressHover) {
         this.onProgressHover(time, e.clientX - rect.left, rect.width);
       }
+
+      // Centred on the cursor, but kept inside the bar: near either end the
+      // 160 px frame and script preview went past the window's edge (test
+      // day 2026-11-26, B097). Measured after the callback above has filled
+      // it; the time label still names the cursor's time.
+      let leftPct = pct * 100;
+      const half = (this.progressTooltip.offsetWidth || 0) / 2;
+      if (half > 0 && rect.width > 2 * half) {
+        const x = pct * rect.width;
+        if (x < half) leftPct = (half / rect.width) * 100;
+        else if (x > rect.width - half) leftPct = ((rect.width - half) / rect.width) * 100;
+      }
+      this.progressTooltip.style.left = `${leftPct}%`;
     }
   }
 
@@ -1331,15 +1530,23 @@ export class VideoPlayer {
     const badge = document.getElementById('subtitle-badge');
     if (badge) badge.hidden = true;
     this._liftedCues?.clear(); // their track is gone (R4-05)
+    this.onSubtitlesChanged?.(null);
   }
 
-  async loadSubtitles(file) {
+  /**
+   * @param {File|{name: string, textContent: string}} file
+   * @param {{ show?: boolean }} [opts] show: false loads the track switched
+   *   off (an embedded stream the file does not mark as default, #268);
+   *   the CC button turns it on.
+   */
+  async loadSubtitles(file, { show = true } = {}) {
     // Remove existing tracks and revoke old blob URLs
     this.clearSubtitles();
 
     // Read file content
     let text = typeof file.textContent === 'string' ? file.textContent : await file.text();
     const name = file.name || 'subtitles';
+    const original = text;
     const ext = name.slice(name.lastIndexOf('.')).toLowerCase();
 
     // Convert SRT to VTT (HTML5 <track> only supports WebVTT)
@@ -1354,7 +1561,7 @@ export class VideoPlayer {
     track.kind = 'subtitles';
     track.label = name.replace(/\.[^/.]+$/, '');
     track.src = url;
-    track.default = true;
+    track.default = !!show;
     this.video.appendChild(track);
 
     // Enable ONLY the newly-added track via its own TextTrack handle. Don't
@@ -1362,7 +1569,7 @@ export class VideoPlayer {
     // can still sit at index 0 in Chromium, so [0].mode = 'showing' would
     // re-show the WRONG subtitles. `.track` is live once the element is in
     // the DOM; the load listener is a belt-and-suspenders fallback.
-    const enableNew = () => { if (track.track) track.track.mode = 'showing'; };
+    const enableNew = () => { if (track.track) track.track.mode = show ? 'showing' : 'disabled'; };
     enableNew();
     track.addEventListener('load', enableNew, { once: true });
     // Its cues keep off the control bar while it shows (R4-05): the ones
@@ -1372,7 +1579,13 @@ export class VideoPlayer {
 
     // Show subtitle indicator
     const badge = document.getElementById('subtitle-badge');
-    if (badge) badge.hidden = false;
+    if (badge) {
+      badge.hidden = false;
+      badge.classList.toggle('subtitle-badge--active', !!show);
+    }
+    // The player pop-out shows them too (app.js, 2026-11-22): the file as
+    // read, and whether it shows (an embedded track can load switched off).
+    this.onSubtitlesChanged?.({ name, text: original, show: !!show });
   }
 
   // --- Utils ---

@@ -1,0 +1,136 @@
+/* Gamepad recording (editor work list 2.6, 2026-11-24): the menu's extras on
+   top of the editor's context menu (.editor-context-menu in editor.css), and
+   the toolbar's two live bars (createGamepadRecordHud). Flat, theme tokens
+   only (notes/DESIGN.md 2.1), no glow; red only while a take is recording
+   (2.14: red is rationed to "on" and danger). */
+
+/* The pad line: what the menu is about, not a choice. */
+.gamepad-record-menu .gamepad-record-menu__status {
+  color: var(--text-secondary);
+  font-size: 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 4px 4px 0 0;
+  margin-bottom: 2px;
+}
+
+/* Rows that are on / off (the flips) or one-of (an axis): a fixed column for
+   the mark, so the labels stay lined up whether a row is ticked or not. */
+.gamepad-record-menu .gamepad-record-menu__check {
+  position: relative;
+  padding-left: 28px;
+}
+
+.gamepad-record-menu .gamepad-record-menu__check::before {
+  content: "";
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  width: 10px;
+  height: 10px;
+  margin-top: -6px;
+  border: 1.5px solid var(--border-strong);
+  border-radius: 2px;
+}
+
+.gamepad-record-menu .gamepad-record-menu__check[role="menuitemradio"]::before {
+  border-radius: 50%;
+}
+
+.gamepad-record-menu .gamepad-record-menu__check[aria-checked="true"]::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+/* The tick inside a ticked box (the radio shows the filled dot alone). */
+.gamepad-record-menu .gamepad-record-menu__check[role="menuitemcheckbox"][aria-checked="true"]::after {
+  content: "";
+  position: absolute;
+  left: 13.5px;
+  top: 50%;
+  width: 3px;
+  height: 6px;
+  margin-top: -5px;
+  border: solid var(--surface-card);
+  border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
+
+.gamepad-record-menu .gamepad-record-menu__check[aria-disabled="true"]::before {
+  opacity: 0.5;
+}
+
+/* Start / Stop: set apart from the settings above it. */
+.gamepad-record-menu .gamepad-record-menu__action {
+  margin-top: 2px;
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 4px 4px;
+  font-weight: 600;
+}
+
+/* The live bars, in the editor toolbar beside the REC indicator. */
+.gamepad-hud {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.gamepad-hud[hidden] {
+  display: none;
+}
+
+.gamepad-hud__axis {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.gamepad-hud__label {
+  max-width: 64px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gamepad-hud__track {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--surface-overlay-strong);
+  overflow: hidden;
+}
+
+/* The centre (the stick at rest). */
+.gamepad-hud__track::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border-strong);
+}
+
+.gamepad-hud__fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 0;
+  background: var(--text-secondary);
+}
+
+.gamepad-hud--live .gamepad-hud__fill {
+  background: var(--accent);
+}
+
+.gamepad-hud__value {
+  min-width: 2.2em;
+  text-align: right;
+  color: var(--text-primary);
+}

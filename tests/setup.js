@@ -15,6 +15,9 @@ globalThis.funsync = {
   openFileDialog: vi.fn().mockResolvedValue([]),
   readFunscript: vi.fn().mockResolvedValue(null),
   writeFunscript: vi.fn().mockResolvedValue(null),
+  // Earlier versions of a script (editor work list 3.1, 2026-11-24).
+  listScriptBackups: vi.fn().mockResolvedValue([]),
+  readScriptBackup: vi.fn().mockResolvedValue(null),
   saveFunscript: vi.fn().mockResolvedValue(null),
   convertFunscript: vi.fn().mockResolvedValue({
     csv: '',
@@ -168,6 +171,7 @@ globalThis.funsync = {
   renameCategory: vi.fn().mockResolvedValue(undefined),
   deleteCategory: vi.fn().mockResolvedValue(undefined),
   assignCategory: vi.fn().mockResolvedValue(undefined),
+  assignCategoryToVideos: vi.fn().mockResolvedValue(undefined),
   unassignCategory: vi.fn().mockResolvedValue(undefined),
   getVideoCategories: vi.fn().mockResolvedValue([]),
   getVideosByCategory: vi.fn().mockResolvedValue([]),

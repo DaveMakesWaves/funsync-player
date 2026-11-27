@@ -317,3 +317,149 @@ describe('the inline search (Associate flow and Find the post)', () => {
     expect(overlay().querySelector('.eroscripts-inline__results').textContent).toContain('Log in to EroScripts to search.');
   });
 });
+
+// Live, 2026-11-25 (testing the EroScripts tab's tags): the auth button had a
+// permanent login listener BESIDE the onclick _setLoggedIn / _setLoggedOut
+// swap. Log Out logged out AND opened the login window; Log In after that
+// opened two. The leftover window held FunSync's quit for 30 s. Also in v0.10.0.
+describe('the Log In / Log Out button does one thing', () => {
+  const authBtn = (panel) => panel._panel.querySelector('#es-auth-btn');
+
+  it('Log Out logs out and opens no login window', async () => {
+    const { panel } = await makeApp({ loggedIn: true });
+    await vi.waitFor(() => expect(authBtn(panel).textContent).toBe(EN.eroscripts.logOut));
+    authBtn(panel).click();
+    await settle(6);
+    expect(window.funsync.eroscriptsLogout).toHaveBeenCalledTimes(1);
+    expect(window.funsync.eroscriptsLoginWindow).not.toHaveBeenCalled();
+    expect(panel._loggedIn).toBe(false);
+    expect(authBtn(panel).textContent).toBe(EN.eroscripts.logIn);
+  });
+
+  it('Log In after a Log Out opens ONE login window', async () => {
+    const { panel } = await makeApp({ loggedIn: true });
+    await vi.waitFor(() => expect(authBtn(panel).textContent).toBe(EN.eroscripts.logOut));
+    authBtn(panel).click();
+    await settle(6);
+    authBtn(panel).click();
+    await settle(6);
+    expect(window.funsync.eroscriptsLoginWindow).toHaveBeenCalledTimes(1);
+    expect(panel._loggedIn).toBe(true);
+    expect(window.funsync.eroscriptsLogout).toHaveBeenCalledTimes(1);   // the login click did not log out again
+  });
+
+  it('a second ask while the window is open waits for it (Get tags, the results area), no second window', async () => {
+    const { panel } = await makeApp({ loggedIn: false });
+    let finish;
+    window.funsync.eroscriptsLoginWindow = vi.fn(() => new Promise((r) => { finish = r; }));
+    authBtn(panel).click();
+    const viaGetTags = panel.login();
+    await settle(2);
+    expect(window.funsync.eroscriptsLoginWindow).toHaveBeenCalledTimes(1);
+    finish({ success: true, cookie: 'NEWCOOKIE', username: 'tester' });
+    expect(await viaGetTags).toBe(true);
+    expect(window.funsync.eroscriptsLoginWindow).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('login() from another surface (the Tags section) always opens the window', () => {
+  it('even when the panel still thinks it is logged in (main says it is not): the window picks the session up again', async () => {
+    const { panel } = await makeApp({ loggedIn: true });
+    await vi.waitFor(() => expect(panel._loggedIn).toBe(true));
+    expect(await panel.login()).toBe(true);
+    expect(window.funsync.eroscriptsLoginWindow).toHaveBeenCalledTimes(1);
+    // The panel's own button, logged in, is Log Out and opens nothing.
+    panel._panel.querySelector('#es-auth-btn').click();
+    await settle(6);
+    expect(window.funsync.eroscriptsLoginWindow).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Dave, 2026-11-25, the tab's top row: the account as a picture with a menu
+// (the panel keeps the name, the picture and the waiting, and says when they
+// change); the search box the Library's (docked only); the band behind it.
+describe('the panel behind the tab\'s top row (2026-11-25)', () => {
+  const PIC = 'https://discuss.eroscripts.com/user_avatar/discuss.eroscripts.com/tester/64/5_2.png';
+
+  it('the login window\'s picture is kept (and saved with the session); the login check refreshes it; Log Out forgets it', async () => {
+    window.funsync.eroscriptsLoginWindow = vi.fn(async () => ({ success: true, cookie: 'NEWCOOKIE', username: 'tester', avatar: PIC }));
+    const { panel } = await makeApp({ loggedIn: false });
+    const changed = vi.fn();
+    panel.onProfileChanged = changed;
+    const opening = panel.openLogin();
+    expect(panel.loginPending).toBe(true);
+    await opening;
+    await settle();
+    expect(panel.loginPending).toBe(false);
+    expect(panel.username).toBe('tester');
+    expect(panel.avatarUrl).toBe(PIC);
+    expect(settings.get('eroscripts.session')).toEqual({ cookie: 'NEWCOOKIE', username: 'tester', avatar: PIC });
+    expect(changed.mock.calls.length).toBeGreaterThanOrEqual(2);       // waiting, then signed in
+    // A new picture from the forum.
+    const NEW = PIC.replace('5_2', '6_2');
+    window.funsync.eroscriptsCheckSession = vi.fn(async () => ({ state: 'valid', username: 'tester', avatar: NEW }));
+    changed.mockClear();
+    await panel.checkSession({ force: true });
+    expect(panel.avatarUrl).toBe(NEW);
+    expect(settings.get('eroscripts.session').avatar).toBe(NEW);
+    expect(changed).toHaveBeenCalledTimes(1);
+    await panel.checkSession({ force: true });                          // the same picture: no repaint
+    expect(changed).toHaveBeenCalledTimes(1);
+    await panel.logout();
+    expect(panel.avatarUrl).toBe('');
+    expect(panel.username).toBe('');
+    expect(window.funsync.eroscriptsLogout).toHaveBeenCalled();
+  });
+
+  it('a saved session restores its picture at start-up', async () => {
+    settings = null;
+    const panelSettings = new Map([['eroscripts.session', { ...SESSION, avatar: PIC }]]);
+    const panel = new EroScriptsPanel({ settings: { get: (k) => panelSettings.get(k), set: (k, v) => panelSettings.set(k, v) } });
+    await settle();
+    expect(panel.isLoggedIn).toBe(true);
+    expect(panel.avatarUrl).toBe(PIC);
+  });
+
+  it('docked, the search box is the Library\'s (magnifier, clear button, its classes); undocked, the panel\'s own again', async () => {
+    const { panel } = await makeApp();
+    const cleared = vi.fn();
+    panel.onQueryCleared = cleared;
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    panel.dock(host);
+    const input = panel._panel.querySelector('#es-search-input');
+    const box = input.parentElement;
+    expect(box.classList.contains('library__search')).toBe(true);
+    expect(input.classList.contains('library__search-input')).toBe(true);
+    expect(input.classList.contains('eroscripts-panel__search-input')).toBe(false);
+    expect(box.querySelector('.library__search-icon svg')).toBeTruthy();
+    const clear = box.querySelector('.library__search-clear');
+    expect(clear.hidden).toBe(true);
+    expect(clear.getAttribute('aria-label')).toBe(EN.library.clearSearchAria);
+    input.value = 'pmv';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    expect(clear.hidden).toBe(false);
+    clear.click();
+    expect(input.value).toBe('');
+    expect(clear.hidden).toBe(true);
+    expect(cleared).toHaveBeenCalledTimes(1);                           // the newest list comes back
+    expect(document.activeElement).toBe(input);
+    panel.undock();
+    expect(input.parentElement.classList.contains('eroscripts-panel__input-row')).toBe(true);
+    expect(input.classList.contains('eroscripts-panel__search-input')).toBe(true);
+    expect(input.classList.contains('library__search-input')).toBe(false);
+    panel.dock(host);                                                   // and again: one box, not two
+    expect(panel._panel.querySelectorAll('.library__search').length).toBe(1);
+  });
+
+  it('the styles: the floating panel\'s shadow never reaches the docked one (the band); docked, no login line or Search button of its own', () => {
+    const modern = fs.readFileSync('renderer/styles/modern.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+    const rule = /([^{}]*)\{[^{}]*box-shadow:\s*var\(--elev-3\), var\(--edge-highlight\)[^{}]*\}/g;
+    const panelRules = [...modern.matchAll(rule)].map((m) => m[1].trim()).filter((sel) => /\.eroscripts-panel(?![_-])/.test(sel));
+    expect(panelRules.length).toBeGreaterThan(0);
+    for (const sel of panelRules) expect(sel).toContain(':not(.eroscripts-panel--docked)');
+    const es = fs.readFileSync('renderer/styles/eroscripts.css', 'utf8');
+    expect(es).toMatch(/\.eroscripts-panel--docked \.eroscripts-panel__auth-bar \{ display: none; \}/);
+    expect(es).toMatch(/\.eroscripts-panel--docked #es-search-btn \{ display: none; \}/);
+  });
+});

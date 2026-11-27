@@ -80,6 +80,26 @@ export function planVariantAdds(files, { listedPaths = [], listedLabels = [] } =
 }
 
 /** What a file picker answered, as a list: null, one `{path, name}` or several. */
+/**
+ * A variation name no other entry of the list has (case and spaces aside),
+ * numbered "Name (2)", "Name (3)" ... as the bulk add numbers its starting
+ * names. A pin, the phone's switch and the pop-out pick a variation by its
+ * LABEL, so two alike left the second unreachable (N-02 note, TODO triage
+ * 2026-11-23: the one-file Add, Rename and the bulk naming step's edits).
+ * @param {string} label
+ * @param {Iterable<string>} takenLabels the list's other labels
+ */
+export function uniqueVariantLabel(label, takenLabels = []) {
+  const want = String(label ?? '').trim();
+  if (!want) return want;
+  const taken = new Set([...takenLabels].filter(Boolean).map((l) => String(l).trim().toLowerCase()));
+  if (!taken.has(want.toLowerCase())) return want;
+  for (let n = 2; ; n++) {
+    const candidate = `${want} (${n})`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
 export function pickedFiles(result) {
   if (!result) return [];
   return (Array.isArray(result) ? result : [result]).filter((f) => f && f.path);

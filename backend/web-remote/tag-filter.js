@@ -31,7 +31,7 @@ export const FACET_IDS = Object.freeze([
   'content', 'performer', 'creator', 'studio',
 ]);
 
-/** Filter modes. `facets`: OR within a facet, AND across facets (the default). */
+/** Filter modes. `facets` (the default): every included tag, except the length buckets, which are OR. */
 export const FILTER_MODES = Object.freeze(['facets', 'all', 'any']);
 
 const FACET_SET = new Set(FACET_IDS);
@@ -125,7 +125,7 @@ function hasTag(query, have) {
 
 /**
  * Keep the videos whose tags match. Same contract as the desktop's
- * filterByTags: `include` (OR within a facet, AND across facets by default;
+ * filterByTags: `include` (every tag, the length buckets OR, by default;
  * `mode: 'all'` / `'any'`), `exclude` drops a video with any of its keys, a
  * key with no known facet matches that value in any facet, a video with no
  * tags matches no include and no exclude, order kept.
@@ -142,9 +142,13 @@ export function filterByTags(videos, query = {}, tagsByPath = undefined) {
   if (!include.length && !exclude.length) return videos.slice();
   const mode = FILTER_MODES.includes(query?.mode) ? query.mode : 'facets';
 
+  // Every ticked tag must be on the video (Dave 2026-11-22: "only show
+  // videos with both"), except the length buckets: a video has one length,
+  // so two ticked lengths mean either. Change both copies together
+  // (renderer/js/video-tags.js and backend/web-remote/tag-filter.js).
   const groups = new Map();
   for (const q of include) {
-    const group = q.facet || '';
+    const group = q.facet === 'length' ? 'length' : (q.facet ? `${q.facet}:${q.value}` : `:${q.value}`);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(q);
   }

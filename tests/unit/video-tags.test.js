@@ -409,7 +409,7 @@ describe('filterByTags (beyond the parity fixture)', () => {
     expect(out).toEqual([b, a]);
     expect(out).not.toBe(videos);
     expect(out[0]).toBe(b);
-    expect(filterByTags(videos, { include: ['device:osr2', 'device:the-handy'] }, tags)).toEqual([b, a]);
+    expect(filterByTags(videos, { include: ['device:osr2', 'device:the-handy'], mode: 'any' }, tags)).toEqual([b, a]);
   });
 
   it('reads keys or tag objects, from a map, an object or the video', () => {

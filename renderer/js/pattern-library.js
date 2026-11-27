@@ -18,7 +18,8 @@
 //   renderPattern(id, { durationMs, from, startPos, startDir, speed, ramp: { to },
 //                       reversed, range: { min, max }, variation, seed, maxSpeed, allowFast })
 //     -> { actions: [{ at, pos }], vib: [bool], stats, warnings: [{ code, values }], params } | null
-//   renderLoop(id, { speed, reversed, range, seed, targetMs }) -> { actions, vib, loopMs, fallback } | null
+//   renderLoop(id, { speed, reversed, range, seed, targetMs }) -> { actions, vib, loopMs, fallback, warnings } | null
+//     (a range narrower than MIN_LOOP_BAND, 5 units, is widened about its middle: warning range-widened)
 //
 // Times are ms, positions 0-100, speeds u/s (the FunSync mean: |dpos| / dt over
 // the moving legs). vib[i] is true when the leg ENDING at actions[i] is a
@@ -1220,6 +1221,33 @@ export function describePattern(id) {
 // ---------- a seamless loop ----------
 /** ms of lead-in rendered before the loop may start (the move in and the first cycles settle there). */
 const LOOP_LEAD_MS = 3000;
+/**
+ * Units of the 0-100 range: the narrowest band a loop plays in (fix 2026-11-20, device session step 35). Why 5: on
+ * Dave's Handy with a 35-65 stroke zone (about 33 mm of its ~110 mm travel, so a unit is ~0.33 mm), Mixed flutters at
+ * the tip in 20-25 (5 units, ~1.7 mm) read back as a moving flutter, while Lowest = Highest (22-22, which the engine
+ * draws in 2 units, ~0.7 mm) read a flat 46 mm. At a full 0-100 zone 5 units are ~5.5 mm. More would override a band
+ * that was seen to move.
+ */
+export const MIN_LOOP_BAND = 5;
+
+/**
+ * [lo, hi] at least `width` units wide (lo <= hi, both 0-100): as given when it is wide enough, else `width` wide
+ * about its middle in whole units, moved in from an end of 0-100 (22-22 is 20-25, 0-0 is 0-5, 100-100 is 95-100).
+ */
+export function widenBand(lo, hi, width = MIN_LOOP_BAND) {
+  if (hi - lo >= width) return [lo, hi];
+  const w = Math.min(100, width);
+  const a = Math.round(clamp((lo + hi) / 2 - w / 2, 0, 100 - w));
+  return [a, a + w];
+}
+/** Units: a loop moves when its positions span at least this (MIN_LOOP_BAND less one unit of whole-unit rounding). */
+const MIN_LOOP_SPAN = MIN_LOOP_BAND - 1;
+/** How far a loop's positions spread, in units. */
+const spanOf = (actions) => {
+  let lo = 100, hi = 0;
+  for (const a of actions) { if (a.pos < lo) lo = a.pos; if (a.pos > hi) hi = a.pos; }
+  return actions.length ? hi - lo : 0;
+};
 
 /**
  * A loop of pattern `id` that tiles seamlessly: it starts at 0 on a bottom turn and ends (at loopMs) on a bottom
@@ -1229,10 +1257,12 @@ const LOOP_LEAD_MS = 3000;
  * speed cap. Options: speed, reversed, range ({ min, max }), seed (default 1), variation, targetMs (default 10000),
  * maxSpeed (u/s, as renderPattern's).
  * Returns { actions, vib, loopMs, fallback, warnings } (fallback true = no clean cut was found, the plain render was
- * cut and its end snapped), or null for an unknown id or an ending (not loopable). A range too narrow for the
- * pattern to move in (the render is one move from end to end: a flutter needs more room than 5 units) is widened
- * about its middle until the pattern plays, the pattern's own place last, with warnings [{ code: 'range-widened',
- * values: { from: [lo, hi], to: [lo, hi] } }]: a loop always moves and always has its two ends (fix-up 2026-11-17).
+ * cut and its end snapped), or null for an unknown id or an ending (not loopable). An asked range narrower than
+ * MIN_LOOP_BAND (5 units) is widened about its middle to it, within 0-100 (fix 2026-11-20: Lowest = Highest played a
+ * 2-unit loop that read flat on the Handy); a loop that still does not move (its positions span less than 4 units,
+ * or it is one move from end to end) is widened further about the same middle until it does, the pattern's own place
+ * last. Either way it says so: warnings [{ code: 'range-widened', values: { from: [lo, hi] asked, to: [lo, hi] played
+ * } }] (to: null = its own place). A loop always moves and always has its two ends (fix-up 2026-11-17).
  */
 export function renderLoop(id, opts = {}) {
   // A simple shape loops as the Orgasm Switch's Generated pattern did (pattern-library-shapes.js).
@@ -1241,19 +1271,28 @@ export function renderLoop(id, opts = {}) {
   if (!m || !isLoopable(m.kind)) return null;
   const o = opts || {};
   const playable = (loop) => !!loop && loop.actions.length >= 3 && loop.loopMs > 0;
-  const first = loopIn(id, m, o, o.range);
-  if (playable(first)) return { ...first, warnings: [] };
-  const lo0 = clamp(finiteOr(o.range?.min, 0), 0, 100), hi0 = clamp(finiteOr(o.range?.max, 100), 0, 100);
-  const from = [Math.min(lo0, hi0), Math.max(lo0, hi0)];
+  // In an asked band a loop must also move: a 10-action loop in 21-23 was "playable" and read a flat 46 mm.
+  const moves = (loop) => playable(loop) && spanOf(loop.actions) >= MIN_LOOP_SPAN;
+  const asked = rangeOf(o.range);
+  if (!asked) {
+    // Its own place: as it always was.
+    const own = loopIn(id, m, o, undefined);
+    return playable(own) ? { ...own, warnings: [] } : null;
+  }
+  const from = [clamp(Math.min(asked[0], asked[1]), 0, 100), clamp(Math.max(asked[0], asked[1]), 0, 100)];
+  const band = widenBand(from[0], from[1]);
+  const widened = (to, loop) => ({ ...loop, warnings: [{ code: 'range-widened', values: { from, to } }] });
+  const first = loopIn(id, m, o, { min: band[0], max: band[1] });
+  if (moves(first)) return band[0] === from[0] && band[1] === from[1] ? { ...first, warnings: [] } : widened(band, first);
   const mid = (from[0] + from[1]) / 2;
   for (const w of [10, 20, 30, 40, 60, 80, 100]) {
-    if (w <= from[1] - from[0]) continue;
+    if (w <= band[1] - band[0]) continue;
     const lo = Math.round(clamp(mid - w / 2, 0, 100 - w));
     const loop = loopIn(id, m, o, { min: lo, max: lo + w });
-    if (playable(loop)) return { ...loop, warnings: [{ code: 'range-widened', values: { from, to: [lo, lo + w] } }] };
+    if (moves(loop)) return widened([lo, lo + w], loop);
   }
   const own = loopIn(id, m, o, undefined);
-  if (playable(own)) return { ...own, warnings: [{ code: 'range-widened', values: { from, to: null } }] };
+  if (playable(own)) return widened(null, own);
   return null;
 }
 

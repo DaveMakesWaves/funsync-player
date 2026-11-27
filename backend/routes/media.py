@@ -4,6 +4,7 @@ Supports HTTP Range requests for seeking in large VR video files (5-20GB).
 Also serves funscript files and generates/caches thumbnails.
 """
 
+import codecs
 import hashlib
 import mimetypes
 import os
@@ -13,7 +14,8 @@ import stat
 import subprocess
 import sys
 import time
-from urllib.parse import unquote
+from typing import Optional
+from urllib.parse import unquote, urljoin
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse, Response
@@ -683,15 +685,87 @@ def remux(
     Declared `def` (not `async def`) so FastAPI runs it in its threadpool —
     the ffmpeg subprocess is blocking and shouldn't stall the event loop.
     """
-    from services.ffmpeg import remux_to_mp4
+    from services import ffmpeg as ffmpeg_service
     try:
-        return remux_to_mp4(video_path)
+        return ffmpeg_service.remux_to_mp4(video_path)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except ffmpeg_service.RemuxCodecError as e:
+        # 422 + a kind the app reads: the codec itself is the problem, so it
+        # names the codec and says to transcode (test day B027).
+        raise HTTPException(status_code=422, detail={"kind": "codec", "codec": e.codec, "message": str(e)})
     except RuntimeError as e:
         # 422: the file exists but can't be made playable by remuxing
         # (unsupported video codec, or ffmpeg failed).
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/transcode", dependencies=DESKTOP_ONLY)
+def transcode(
+    video_path: str = Query(..., description="Absolute path to the source video"),
+    cached_only: bool = Query(False, description="Only say whether a converted copy exists; start nothing"),
+):
+    """Convert to play (2026-11-26): start re-encoding a video whose codec the
+    player cannot decode (MPEG-4 Part 2, MPEG-2, VC-1 ...) to H.264, or answer
+    with the converted copy / the running job. The app polls /transcode/status.
+    404: no file. 422 {kind: 'noEncoder'}: this ffmpeg cannot make H.264.
+    `def`: ffprobe runs before the job starts."""
+    from services import ffmpeg as ffmpeg_service
+    try:
+        return ffmpeg_service.transcode_start(video_path, cached_only=cached_only)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ffmpeg_service.TranscodeUnavailable as e:
+        raise HTTPException(status_code=422, detail={"kind": "noEncoder", "message": str(e)})
+
+
+@router.get("/transcode/status", dependencies=DESKTOP_ONLY)
+def transcode_status(job: str = Query(..., description="The job id /transcode answered with")):
+    """A conversion's state: running (with progress 0-1), done (with path),
+    error, cancelled, or none."""
+    from services import ffmpeg as ffmpeg_service
+    return ffmpeg_service.transcode_status(job)
+
+
+@router.post("/transcode/cancel", dependencies=DESKTOP_ONLY)
+def transcode_cancel(job: str = Query(..., description="The job id /transcode answered with")):
+    """Stop a conversion; nothing of it is kept."""
+    from services import ffmpeg as ffmpeg_service
+    return ffmpeg_service.transcode_cancel(job)
+
+
+@router.get("/subtitle-tracks", dependencies=DESKTOP_ONLY)
+def subtitle_tracks(
+    video_path: str = Query(..., description="Absolute path to the video"),
+):
+    """The subtitle streams inside a video file (#268): index, codec,
+    language, title, default / forced, and `text` (False: pictures, which
+    the player cannot show). `def`, not `async def`: ffprobe blocks."""
+    from services.ffmpeg import list_subtitle_streams
+    try:
+        return {"tracks": list_subtitle_streams(video_path)}
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/subtitle-track", dependencies=DESKTOP_ONLY)
+def subtitle_track(
+    video_path: str = Query(..., description="Absolute path to the video"),
+    index: int = Query(..., ge=0, description="The file's stream index"),
+):
+    """One embedded text subtitle stream as WebVTT (#268). 404: no file or
+    no such stream; 415: a picture stream (PGS / VobSub), which cannot be
+    text; 422: ffmpeg could not read it."""
+    from services.ffmpeg import extract_subtitle_vtt
+    try:
+        vtt = extract_subtitle_vtt(video_path, index)
+    except (FileNotFoundError, LookupError) as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=415, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(content=vtt, media_type="text/vtt; charset=utf-8")
 
 
 # ---------------------------------------------------------------------------
@@ -706,17 +780,26 @@ def remux(
 
 # token -> {"streamUrl", "headers", "isHls"}. Bounded; oldest evicted.
 _remote_streams: "dict[str, dict]" = {}
-_REMOTE_MAX = 32
+_REMOTE_MAX = 64   # a single-file stream adds a token per quality (2026-11-23)
 
 
 @router.post("/resolve", dependencies=DESKTOP_ONLY)
-def resolve_remote(url: str = Query(..., description="Web page URL to resolve")):
+def resolve_remote(url: str = Query(..., description="Web page URL to resolve"),
+                   maxHeight: Optional[int] = Query(None, description="A single-file stream: the tallest file at or under this")):
     """Resolve a page URL to a playable stream via yt-dlp. `def` → threadpool
     (yt-dlp extraction blocks). Returns public metadata + a proxy URL; the
     signed upstream URL + headers are kept server-side under a token."""
     from services.resolver import resolve, ResolveError
+    from services import video_downloader as vd
     try:
-        info = resolve(url)
+        # Hosts the downloader knows first (FapTap, PMVHaven, Pixeldrain, a
+        # direct link: yt-dlp knows none of them), then yt-dlp (2026-11-22).
+        try:
+            own = vd.stream_source(url, max_height=maxHeight)
+        except vd.DownloadError as e:
+            raise ResolveError("unavailable" if e.code == "notFound" else "refused" if e.code == "denied" else "unsupported", str(e))
+        info = own and {"duration": None, "thumbnail": None, "webpageUrl": url, "isLive": False, "height": None, **own}
+        info = info or resolve(url, maxHeight)
     except ResolveError as e:
         # 422 + a category the UI can turn into a precise message.
         raise HTTPException(status_code=422, detail={"kind": e.kind, "message": str(e)})
@@ -729,6 +812,24 @@ def resolve_remote(url: str = Query(..., description="Web page URL to resolve"))
         "headers": info.get("headers") or {},
         "isHls": info["isHls"],
     }
+    # The other files of a single-file stream (its qualities, 2026-11-23): a
+    # token each, played only when picked. A Rule34Video button link is
+    # resolved to its CDN copy on its first play (remote_file).
+    levels = []
+    for alt in info.get("alternatives") or []:
+        if alt.get("streamUrl") == info["streamUrl"]:
+            levels.append({"height": alt.get("height"), "proxyUrl": f"/api/media/remote/{token}/file"})
+            continue
+        alt_token = secrets.token_urlsafe(12)
+        _remote_streams[alt_token] = {
+            "streamUrl": alt["streamUrl"],
+            "headers": alt.get("headers") or info.get("headers") or {},
+            "isHls": False,
+            "lazyRedirect": bool(alt.get("lazyRedirect")),
+        }
+        levels.append({"height": alt.get("height"), "proxyUrl": f"/api/media/remote/{alt_token}/file"})
+    levels.sort(key=lambda l: l.get("height") or 0, reverse=True)
+
     # Evict oldest entries so a long session doesn't grow unbounded.
     while len(_remote_streams) > _REMOTE_MAX:
         _remote_streams.pop(next(iter(_remote_streams)), None)
@@ -746,6 +847,7 @@ def resolve_remote(url: str = Query(..., description="Web page URL to resolve"))
         "height": info.get("height"),
         "proxyUrl": proxy_url,
         "token": token,
+        "levels": levels if len(levels) > 1 else [],
     }
 
 
@@ -835,6 +937,21 @@ async def remote_file(token: str, request: Request):
     entry = _remote_streams.get(token)
     if not entry:
         raise HTTPException(status_code=404, detail="unknown stream token")
+    if entry.get("lazyRedirect"):
+        # A button link (Rule34Video): where it redirects, found once.
+        import asyncio
+        import httpx
+        lock = entry.setdefault("_lock", asyncio.Lock())
+        async with lock:
+            if entry.get("lazyRedirect"):
+                try:
+                    async with httpx.AsyncClient(follow_redirects=False, timeout=20) as c:
+                        r = await c.get(entry["streamUrl"], headers={**entry["headers"], "Range": "bytes=0-0"})
+                        if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                            entry["streamUrl"] = urljoin(entry["streamUrl"], r.headers["location"])
+                except Exception:
+                    pass  # the plain fetch below follows the redirect itself
+                entry["lazyRedirect"] = False
     return await _proxy_fetch(entry["streamUrl"], entry["headers"], request.headers.get("range"))
 
 
@@ -1065,6 +1182,21 @@ MIME_TYPES = {
     ".ogg": "audio/ogg",
     ".flac": "audio/flac",
     ".m4a": "audio/mp4",
+    # The older formats the library lists since 2026-11-26 (Convert to play).
+    ".wmv": "video/x-ms-wmv",
+    ".asf": "video/x-ms-asf",
+    ".mpg": "video/mpeg",
+    ".mpeg": "video/mpeg",
+    ".vob": "video/mpeg",
+    ".ts": "video/mp2t",
+    ".m2ts": "video/mp2t",
+    ".mts": "video/mp2t",
+    ".flv": "video/x-flv",
+    ".f4v": "video/mp4",
+    ".3gp": "video/3gpp",
+    ".3g2": "video/3gpp2",
+    ".ogv": "video/ogg",
+    ".divx": "video/x-msvideo",
 }
 
 
@@ -1186,6 +1318,23 @@ class _WholeFileResponse(FileResponse):
         await super().__call__({**scope, "headers": headers}, receive, send)
 
 
+def _converted_copy_of(path: str) -> str | None:
+    """The browser-playable copy the desktop made of `path`, when there is
+    one: its converted copy (Convert to play), else its remuxed MP4 (H.264 in
+    a .ts / .mkv the desktop played through the remux). Never raises: a
+    missing original or any error answers None."""
+    from services import ffmpeg as ffmpeg_service
+    try:
+        if not os.path.isfile(path):
+            return None
+        for out in (ffmpeg_service.transcode_out_path(path), ffmpeg_service.remux_out_path(path)):
+            if os.path.isfile(out) and os.path.getsize(out) > 0:
+                return out
+        return None
+    except OSError:
+        return None
+
+
 @router.get("/stream/{video_id}")
 async def stream_video(video_id: str, request: Request):
     """Stream a video file with HTTP Range request support.
@@ -1198,6 +1347,13 @@ async def stream_video(video_id: str, request: Request):
         raise HTTPException(status_code=404, detail="Video not found")
 
     filepath = video.get("path", "")
+    # Convert to play (2026-11-26): when the desktop made an H.264 copy of a
+    # video the browser cannot decode (WMV, MPEG-2, Xvid...), the phone and
+    # the headset are served that copy; the original would only fail there.
+    if filepath:
+        copy = await run_in_threadpool(_converted_copy_of, filepath)
+        if copy:
+            filepath = copy
     # Off the event loop (E-12), and opened once before anything is sent:
     # see _readable_file_size.
     file_size, status = (
@@ -1361,6 +1517,12 @@ async def get_funscript(video_id: str, variant: str | None = None):
             raise HTTPException(status_code=403, detail="The funscript for this video cannot be read")
         raise HTTPException(status_code=404, detail="No funscript for this video")
 
+    # A leading UTF-8 BOM is not JSON: the phone's res.json() drops it, but a
+    # headset's parser (HereSphere, DeoVR) may not (FT-044 follow-up,
+    # 2026-11-22). Every desktop read strips it too (stripBOM).
+    if data.startswith(codecs.BOM_UTF8):
+        data = data[len(codecs.BOM_UTF8):]
+
     return Response(
         content=data,
         media_type="application/json",
@@ -1415,6 +1577,58 @@ async def get_subtitle(video_id: str):
         media_type=mime,
         headers={"Access-Control-Allow-Origin": "*"},
     )
+
+
+# --- Subtitles inside the file, by video id (#268, the phone, 2026-11-23) ---
+# The phone asks for a registered video's own subtitle streams when it opens
+# one with no subtitle file beside it. Keyed by id like /subtitle/{id} above:
+# only a video the desktop registered, never a path, so they are open to the
+# LAN as that route is. `def`, not `async def`: ffprobe / ffmpeg block.
+
+_EMBEDDED_SUB_EXTS = (".mkv", ".mp4", ".m4v", ".mov", ".webm")
+
+
+def _registered_video_path(video_id: str) -> str:
+    video = _video_registry.get(video_id)
+    if not video:
+        raise HTTPException(status_code=404, detail="Video not found")
+    return video.get("path") or ""
+
+
+@router.get("/subtitle/{video_id}/tracks")
+def get_embedded_subtitle_tracks(video_id: str):
+    """A registered video's own subtitle streams (the same shape as the
+    desktop's /subtitle-tracks). A file that cannot carry any: none."""
+    path = _registered_video_path(video_id)
+    if not path.lower().endswith(_EMBEDDED_SUB_EXTS):
+        return {"tracks": []}
+    from services.ffmpeg import list_subtitle_streams
+    try:
+        return {"tracks": list_subtitle_streams(path)}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="No file for this video")
+
+
+@router.get("/subtitle/{video_id}/track/{index}")
+def get_embedded_subtitle_track(video_id: str, index: int):
+    """One of a registered video's own text subtitle streams, as WebVTT.
+    404: no file or no such stream; 415: pictures (PGS / VobSub); 422: ffmpeg
+    could not read it."""
+    if index < 0:
+        raise HTTPException(status_code=422, detail="A stream index is 0 or more")
+    path = _registered_video_path(video_id)
+    if not path.lower().endswith(_EMBEDDED_SUB_EXTS):
+        raise HTTPException(status_code=404, detail="No such subtitle stream")
+    from services.ffmpeg import extract_subtitle_vtt
+    try:
+        vtt = extract_subtitle_vtt(path, index)
+    except (FileNotFoundError, LookupError) as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=415, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return Response(content=vtt, media_type="text/vtt; charset=utf-8")
 
 
 # --- Thumbnail Generation ---
@@ -1487,6 +1701,18 @@ async def get_thumbnail(video_id: str):
                             headers={"Access-Control-Allow-Origin": "*",
                                      "Cache-Control": "public, max-age=86400"})
 
+    # The frame the desktop's library already made for this video (R3-30,
+    # TODO triage 2026-11-23): the background job below only copies it, so
+    # a first phone visit showed each card blank for about a second and
+    # asked again. Served now (a stat and a JPEG check, no ffmpeg); the job
+    # still copies it into the phone's cache for next time.
+    ready = await run_in_threadpool(_desktop_thumb_ready, filepath, pin_pct)
+    if ready:
+        _queue_thumb_generation(video_id, filepath, thumb_path, seek_pct=pin_pct)
+        return FileResponse(ready, media_type="image/jpeg",
+                            headers={"Access-Control-Allow-Origin": "*",
+                                     "Cache-Control": "no-cache"})
+
     # No video stream (an audio file, N-05; also in v0.9.2): no frame will
     # ever come, and the 1x1 transparent placeholder below showed the
     # phone's and the headset's tile black. The app logo in grey instead,
@@ -1538,6 +1764,24 @@ NO_VIDEO_THUMB = os.path.join(
     getattr(sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
     "web-remote", "icons", "no-video-thumb.png",
 )
+
+
+def _desktop_thumb_ready(filepath, seek_pct=None):
+    """The thumbnail the desktop's generator already made for this video, at
+    the size and place the phone's job would ask for (320 px; 10 %, or a
+    pinned frame, exact), or None. Its cache key is path + size + mtime, so
+    this is a stat and a whole-JPEG check: never an ffmpeg run."""
+    import tempfile
+    from services.ffmpeg import _get_video_hash, is_complete_jpeg
+    try:
+        video_hash = _get_video_hash(filepath)
+    except OSError:
+        return None
+    pct = seek_pct if seek_pct is not None else 0.1
+    marker = "v4e" if seek_pct is not None else "v4"
+    path = os.path.join(tempfile.gettempdir(), "funsync_thumbs", video_hash,
+                        f"single_{marker}_{int(pct * 1000):04d}_320.jpg")
+    return path if os.path.isfile(path) and is_complete_jpeg(path) else None
 
 
 def _no_video_known(filepath):

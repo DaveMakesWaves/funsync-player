@@ -1228,6 +1228,28 @@ body::-webkit-scrollbar {
   position: relative;
   width: 100%;
 }
+/* Flat view (#426): the desktop's VR renderer draws one eye as a flat
+   picture on a canvas right after the <video>, under the controls overlay.
+   The video keeps decoding behind it (hidden, never display:none). A drag
+   looks around and a pinch zooms, so the browser must not scroll or zoom
+   the page for them. */
+.player__video-wrap .vr-projection-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.player__video-wrap--flat .player__video {
+  visibility: hidden;
+}
+.player__video-wrap--flat,
+.player__video-wrap--flat .pcx {
+  touch-action: none;
+}
+.pcx__btn[aria-pressed="true"] {
+  color: var(--accent);
+}
 .player__loading-overlay {
   position: absolute;
   inset: 0;
@@ -1317,6 +1339,20 @@ body::-webkit-scrollbar {
   color: #f66;
 }
 .player__sync-pill--expandable { cursor: pointer; user-select: none; text-align: left; }
+
+/* A video this browser cannot play (2026-11-26): said under the player. */
+.player__note {
+  margin: 8px 16px 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  font-size: 14px;
+  line-height: 1.45;
+}
+.player__note--error {
+  background: rgba(244, 67, 54, 0.08);
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  color: #f88;
+}
 .player__sync-pill--open { border-radius: 14px; }
 .player__sync-pill-summary {
   display: flex;
@@ -2308,3 +2344,43 @@ html.pfs-lock, html.pfs-lock body { overflow: hidden; }
 .sheet__option--selected .sheet__option-arrow {
   color: var(--accent);
 }
+
+/* Stop (DESIGN.md §1.6 S1, §2.15): the desktop's Stop all, in the hold row's
+   thumb zone (Hoober). The same pill as X and Z, outlined in the error red so
+   it reads as the stop, filled on press. 56 px tall: over the 44 px floor. */
+.player__stop-btn {
+  display: block;
+  margin-top: 10px;
+  min-height: 56px;
+  padding: 0 12px;
+  border: 1px solid #f44336;
+  border-radius: var(--radius-pill);
+  background: rgba(244, 67, 54, 0.12);
+  color: #ff8a80;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  -webkit-user-select: none;
+  user-select: none;
+  transition: background var(--dur-1), color var(--dur-1);
+}
+.player__stop-btn:active {
+  background: #f44336;
+  color: #fff;
+}
+/* Light theme: a darker red for 4.5:1 text contrast on the light surface. */
+:root[data-theme="light"] .player__stop-btn {
+  border-color: #c62828;
+  background: rgba(198, 40, 40, 0.08);
+  color: #b71c1c;
+}
+:root[data-theme="light"] .player__stop-btn:active {
+  background: #c62828;
+  color: #fff;
+}
+
+/* A video disabled on the desktop (zaikechi #381): still listed and
+   playable by a tap, dimmed so it reads as "not in the rotation". */
+.card--disabled,
+.list__row--disabled { opacity: 0.45; }

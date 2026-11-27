@@ -1,7 +1,7 @@
 // FT-045 (also in v0.9.2): kebab > Remove Funscript on a video with no script
 // of its own left the card under the Matched chip, and the phone and the
 // headset kept showing (and offering) the removed script. The kebab called
-// `_removeAssociation` without re-filtering (the dialog's Remove did), and no
+// `_removeAssociation` (gone since 2026-11-23) without re-filtering (the dialog's Remove did), and no
 // association change re-registered the library with the backend: app.js
 // re-sent the video list for `library.manualVRType` only.
 //
@@ -194,12 +194,21 @@ describe('FT-045: ⋮ > Unpair funscript (was kebab > Remove Funscript)', () => 
 
   it('an association made in the app reaches the backend too', async () => {
     await boot();
-    await kebabRemove(SQUARE);
+    // The removal's 400 ms re-register on FAKE timers, run out before the
+    // association: on real timers it could land after the association's and
+    // lastSent read the removal (flaky on a loaded machine; TODO triage
+    // 2026-11-23). As the test above: the dialog opens with real timers.
+    const unpair = await openUnpair(SQUARE);
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    await kebabRemove(SQUARE, unpair);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(lastSent(SQUARE)).toMatchObject({ hasFunscript: false, funscriptPath: null });
     const card = document.createElement('div');
     card.innerHTML = '<div class="library__card-thumbnail"></div><div class="library__card-info"></div>';
     await lib._applyAssociation(lib.getVideoByPath(SQUARE), card, ZULU, 'Zulu Last.funscript');
-    await vi.advanceTimersByTimeAsync(500);
+    // Wait for the register itself, not a fixed 500 ms (FLAKY-TESTS row 8): a later change re-arms the 400 ms
+    // debounce, so one fixed step could end just before it fired. At most 3 s of fake time.
+    for (let i = 0; i < 30 && lastSent(SQUARE)?.funscriptPath !== ZULU; i++) await vi.advanceTimersByTimeAsync(100);
     expect(lastSent(SQUARE)).toMatchObject({ hasFunscript: true, funscriptPath: ZULU });
   });
 });

@@ -183,7 +183,8 @@ describe('the desktop: the phone\'s Edge button is Z', () => {
     app._pushRemoteOrgasmState();
     app._pushRemoteEdgeState();
     expect(toPhone()).toEqual([
-      { type: 'orgasm-state', configured: true, active: false, mode: 'hold' },
+      // starting: the Handy still switching to the finisher (2026-11-24)
+      { type: 'orgasm-state', configured: true, active: false, mode: 'hold', starting: false },
       { type: 'edge-state', active: false, mode: 'hold' },
     ]);
   });

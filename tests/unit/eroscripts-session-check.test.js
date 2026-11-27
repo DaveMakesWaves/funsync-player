@@ -283,3 +283,32 @@ describe('search sends nothing logged out', () => {
     expect(answer.loginRequired).toBeUndefined();
   });
 });
+
+// Dave, 2026-11-25: "instead of the user name and a log out button have the
+// users profile picture or an avatar". The login check's answer carries it
+// (Discourse's current_user.avatar_template): no request more.
+describe('the login check names the avatar too', () => {
+  it('a relative template becomes the forum\'s address at 64 px; an absolute https one is kept; anything else is left out', () => {
+    const ask = (avatar_template) => classifySessionAnswer({ status: 200, text: JSON.stringify({ current_user: { username: 'dave', avatar_template } }) });
+    expect(ask('/user_avatar/discuss.eroscripts.com/dave/{size}/123_2.png')).toEqual({
+      state: 'valid', username: 'dave', avatar: 'https://discuss.eroscripts.com/user_avatar/discuss.eroscripts.com/dave/64/123_2.png',
+    });
+    expect(ask('https://avatars.discourse-cdn.com/v4/letter/d/e9a140/{size}.png').avatar).toBe('https://avatars.discourse-cdn.com/v4/letter/d/e9a140/64.png');
+    expect(ask('//cdn.example.com/a/{size}.png').avatar).toBe('https://cdn.example.com/a/64.png');
+    for (const bad of ['javascript:alert(1)', 'http://plain.example.com/{size}.png', 'data:image/png;base64,AAA', 42, null, '']) {
+      expect(ask(bad), String(bad)).toEqual({ state: 'valid', username: 'dave' });
+    }
+  });
+
+  it('checkSession hands it on, and the kept answer keeps it', async () => {
+    let now = 1_000_000;
+    globalThis.fetch = vi.fn(async () => response({ body: { current_user: { id: 1, username: 'dave', avatar_template: '/user_avatar/discuss.eroscripts.com/dave/{size}/9_2.png' } } }));
+    const api = loggedInApi();
+    api._now = () => now;
+    const url = 'https://discuss.eroscripts.com/user_avatar/discuss.eroscripts.com/dave/64/9_2.png';
+    expect(await api.checkSession()).toMatchObject({ state: 'valid', username: 'dave', avatar: url });
+    now += 1000;
+    expect(await api.checkSession()).toMatchObject({ state: 'valid', cached: true, avatar: url });
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+});

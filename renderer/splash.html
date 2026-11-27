@@ -2,52 +2,65 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'unsafe-inline'">
   <style>
+    /* The round FunSync logo (300 px) on a transparent window, a line's room
+       under it for a slow start (electron/splash-window.js: 300 x 340); its
+       bars animated by splash.js. It fades in, and out when the main window
+       shows ("leaving", set by main). On Linux the window is solid navy
+       ("card"): some desktops cannot show a see-through one. */
     * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: transparent; overflow: hidden; }
+    html.card, html.card body { background: #1a1a2e; }
     body {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      height: 100vh;
-      background: #1c2a4a;
-      border-radius: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      font-family: 'Segoe UI', system-ui, sans-serif;
-      color: #e0e0e0;
       -webkit-app-region: drag;
-      overflow: hidden;
+      user-select: none;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      /* backwards, not both: a fade-in that held its last frame (opacity 1)
+         outranked .leaving, and the fade-out never showed (live, 2026-11-25). */
+      animation: splash-in 180ms ease-out backwards;
+      transition: opacity 200ms ease-in;
     }
-    .title {
-      font-size: 22px;
-      font-weight: 600;
-      letter-spacing: 0.5px;
-      margin-bottom: 12px;
-    }
-    .title span {
-      color: #e94560;
-    }
-    .spinner {
-      width: 24px;
-      height: 24px;
-      border: 3px solid rgba(255, 255, 255, 0.1);
-      border-top-color: #e94560;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-bottom: 10px;
-    }
-    .status {
+    html.leaving body { opacity: 0; }
+    @keyframes splash-in { from { opacity: 0; transform: scale(0.97); } to { opacity: 1; transform: none; } }
+    svg { width: 300px; height: 300px; flex: none; display: block; }
+    .slow {
+      margin-top: 8px;
+      padding: 4px 12px;
+      border-radius: 999px;
+      background: rgba(26, 26, 46, 0.92);
+      color: #c9cbe0;
       font-size: 12px;
-      color: #a0a0a0;
+      letter-spacing: 0.2px;
+      opacity: 0;
+      transition: opacity 300ms ease-out;
+      white-space: nowrap;
     }
-    @keyframes spin {
-      to { transform: rotate(360deg); }
+    .slow.shown { opacity: 1; }
+    @media (prefers-reduced-motion: reduce) {
+      body { animation: none; transition: none; }
+      .slow { transition: none; }
     }
   </style>
 </head>
 <body>
-  <div class="title"><span>Fun</span>Sync Player</div>
-  <div class="spinner"></div>
-  <div class="status">Loading...</div>
+  <svg viewBox="0 0 256 256" role="img" aria-label="FunSync Player is starting">
+    <!-- The app icon (assets/icons/icon.png) redrawn: the navy disc and coral
+         ring, F and S traced from its 256 px image. -->
+    <circle cx="128" cy="128" r="118" fill="#1a1a2e" stroke="#e94560" stroke-width="6"/>
+    <g fill="none" stroke="#e94560" stroke-linejoin="round">
+      <path d="M38.5 172 V100 Q38.5 90 48.5 90 H121" stroke-width="20"/>
+      <path d="M38.5 126 H112" stroke-width="20"/>
+      <path d="M229 90 H147.5 Q135.5 90 135.5 102 V114 Q135.5 126 147.5 126 H207.5 Q219.5 126 219.5 138 V151 Q219.5 163 207.5 163 H128" stroke-width="19"/>
+    </g>
+    <clipPath id="bars-clip"><rect x="42" y="176" width="172" height="38"/></clipPath>
+    <g class="bars" clip-path="url(#bars-clip)" fill="#e94560"></g>
+    <line x1="128" y1="178" x2="128" y2="211" stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.85"/>
+  </svg>
+  <div class="slow" role="status" aria-live="polite"></div>
+  <script type="module" src="splash.js"></script>
 </body>
 </html>

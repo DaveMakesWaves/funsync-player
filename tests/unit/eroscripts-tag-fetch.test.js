@@ -436,3 +436,19 @@ describe('the words', () => {
     expect(outcomeText({ kind: 'error', answer: { errorCode: 'topicFailed', status: 502 } }, translate)).toBe('eroscripts.error.topicFailed|{"status":502}');
   });
 });
+
+// Dave, 2026-11-25 (the same evening): a video downloaded from a post with no
+// script still knows its post: "Where they came from" names it (it said "This
+// video has no script, so no EroScripts post is linked" beside no tags).
+describe('resolveTopic: a downloaded post on a video with no script', () => {
+  it('known from the record; a post only a script came from, or no record, is still "no script"', () => {
+    const rec = { topicId: 42, topicUrl: 'https://discuss.eroscripts.com/t/x/42', match: 'download', scriptPath: 'C:/Lib/Clip.funscript', tags: ['pov'], videoFromPost: true };
+    expect(resolveTopic({ record: rec, scriptPath: null, videoPath: 'C:/Lib/Clip.mp4' }))
+      .toEqual({ state: 'known', topicId: 42, topicUrl: rec.topicUrl, match: 'download', from: 'record' });
+    const { videoFromPost, ...scriptOnly } = rec;
+    expect(videoFromPost).toBe(true);
+    expect(resolveTopic({ record: scriptOnly, scriptPath: null, videoPath: 'C:/Lib/Clip.mp4' })).toEqual({ state: 'noScript' });
+    expect(resolveTopic({ record: { ...rec, match: 'search', videoFromPost: undefined }, scriptPath: null, videoPath: 'C:/Lib/Clip.mp4' })).toEqual({ state: 'noScript' });
+    expect(resolveTopic({ record: null, scriptPath: null, videoPath: 'C:/Lib/Clip.mp4' })).toEqual({ state: 'noScript' });
+  });
+});

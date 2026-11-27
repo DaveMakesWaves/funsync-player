@@ -132,6 +132,15 @@ describe('a card\u2019s tag line', () => {
     expect(line.title).toBe(`${long}, second, third, fourth, fifth`);
   });
 
+  it('the longest name gives way first: each chip shrinks by its length cubed (r3-verify-2, a short tag cut to "t…")', () => {
+    // jsdom has no layout; the weighting was measured in the app (2026-11-22): with these factors a
+    // 3-letter and an 8-letter tag stay whole beside a 40-letter one at 160 / 200 / 260 px.
+    const tags = ['tit', 'an extremely long tag name of forty chars', 'big tits']
+      .map((label, i) => ({ key: `content:s${i}`, facet: 'content', label }));
+    const shrink = [...lineFor(tags).querySelectorAll('.library__card-tag')].map((c) => Number(c.style.flexShrink));
+    expect(shrink).toEqual([27, 41 ** 3, 512]);
+  });
+
   it('the stylesheet: a chip ellipsizes, the "+N" does not shrink', () => {
     const css = fs.readFileSync('renderer/styles/library.css', 'utf8').replace(/\r/g, '');
     const rule = (sel) => new RegExp(`(^|\\n)${sel.replace(/[.-]/g, (m) => `\\${m}`)} \\{([^}]*)\\}`).exec(css)?.[2] || '';

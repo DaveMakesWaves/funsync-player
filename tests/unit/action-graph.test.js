@@ -1,5 +1,5 @@
 // Unit tests for ActionGraph — imports from real source
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ActionGraph } from '../../renderer/js/action-graph.js';
 import { EditableScript } from '../../renderer/js/editable-script.js';
 
@@ -215,31 +215,58 @@ describe('ActionGraph', () => {
 
   // --- Static speedToColor ---
 
-  describe('ActionGraph.speedToColor', () => {
-    it('returns black for zero speed', () => {
+  // OFS's two scales (OFS-lib/Funscript/FunscriptHeatmap.cpp, 2026-11-24),
+  // both full at 400 units/s (0.4 pos/ms): FunSync drew lines in the
+  // heatmap's colours, full at 300.
+  describe('ActionGraph.speedToColor (OFS heatmap: black, dodger blue, cyan, green, yellow, red)', () => {
+    it('is black only when still', () => {
       expect(ActionGraph.speedToColor(0)).toBe('rgb(0,0,0)');
+      expect(ActionGraph.speedToColor(0.002)).not.toBe('rgb(0,0,0)');
     });
 
-    it('returns red for high speed', () => {
-      expect(ActionGraph.speedToColor(0.3)).toBe('rgb(255,0,0)');
-    });
-
-    it('clamps above max speed', () => {
+    it('is red at 400 units/s and above, not before', () => {
+      expect(ActionGraph.speedToColor(0.4)).toBe('rgb(255,0,0)');
       expect(ActionGraph.speedToColor(1.0)).toBe('rgb(255,0,0)');
+      expect(ActionGraph.speedToColor(0.3)).not.toBe('rgb(255,0,0)');
     });
 
-    it('returns blue-ish for low speed', () => {
-      const color = ActionGraph.speedToColor(0.06);
-      expect(color).toMatch(/^rgb\(/);
-      // At normalized=0.2, should be pure blue
-      expect(ActionGraph.speedToColor(0.06)).toBe('rgb(0,0,255)');
+    it('is green at 240 units/s (60%)', () => {
+      expect(ActionGraph.speedToColor(0.24)).toBe('rgb(0,255,0)');
+    });
+  });
+
+  describe('ActionGraph.lineSpeedToColor (OFS lines: white, green, yellow, red)', () => {
+    it('is white when slow, never black', () => {
+      expect(ActionGraph.lineSpeedToColor(0)).toBe('rgb(255,255,255)');
     });
 
-    it('returns green for medium speed', () => {
-      // normalized = 0.6 → green (idx 3)
-      const speed = 0.3 * 0.6;
-      const color = ActionGraph.speedToColor(speed);
-      expect(color).toBe('rgb(0,255,0)');
+    it('is red at 400 units/s and above', () => {
+      expect(ActionGraph.lineSpeedToColor(0.4)).toBe('rgb(255,0,0)');
+      expect(ActionGraph.lineSpeedToColor(2)).toBe('rgb(255,0,0)');
+    });
+
+    it('passes OFS green and yellow on the way', () => {
+      expect(ActionGraph.lineSpeedToColor(0.4 / 3)).toBe('rgb(102,255,0)');
+      expect(ActionGraph.lineSpeedToColor(0.8 / 3 + 0.001)).toMatch(/^rgb\(25[0-5],255,0\)$/);
+    });
+  });
+
+  describe('ActionGraph speed limits (roa: 400 max, kinetics: 33 min)', () => {
+    afterEach(() => ActionGraph.setSpeedLimits({ max: 400, min: 33 }));
+
+    it('marks faster than the max, and moving slower than the min; a hold never', () => {
+      ActionGraph.setSpeedLimits({ max: 400, min: 33 });
+      expect(ActionGraph.speedMark(0.401)).toBe('fast');
+      expect(ActionGraph.speedMark(0.4)).toBeNull();
+      expect(ActionGraph.speedMark(0.032)).toBe('slow');
+      expect(ActionGraph.speedMark(0.033)).toBeNull();
+      expect(ActionGraph.speedMark(0)).toBeNull();
+    });
+
+    it('0 turns a mark off', () => {
+      ActionGraph.setSpeedLimits({ max: 0, min: 0 });
+      expect(ActionGraph.speedMark(5)).toBeNull();
+      expect(ActionGraph.speedMark(0.001)).toBeNull();
     });
   });
 

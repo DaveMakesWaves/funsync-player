@@ -43,6 +43,33 @@
   color: var(--text-primary);
 }
 
+/* The search over the playlist grid (Dave 2026-08-06: by name, no filters).
+   Same look as the library's tag finder. */
+.playlists__search {
+  flex: 0 1 260px;
+  min-width: 140px;
+  margin-left: auto;
+  box-sizing: border-box;
+  min-height: 32px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface-card);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+}
+.playlists__search:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.playlists__search-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 14px;
+}
+
 .playlists__detail-count {
   font-size: 12px;
   color: var(--text-secondary);
@@ -312,6 +339,34 @@
 
 .playlists__card-body {
   padding: 16px;
+}
+
+/* A playlist's cover (2026-11-23): only on a playlist whose cover the user
+   set; the rest look as they always did. */
+.playlists__card-cover {
+  aspect-ratio: 16 / 9;
+  background: var(--surface-base);
+}
+.playlists__card-cover img,
+.playlists__list-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.playlists__card-cover--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.playlists__list-cover {
+  flex: none;
+  width: 64px;
+  aspect-ratio: 16 / 9;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--surface-base);
 }
 
 .playlists__card-name {
@@ -781,6 +836,14 @@
   filter: none;
 }
 
+/* A script entry that cannot be found: the badge takes the corner and the
+ * tile's "Script" mark moves beside it, vertically centred on it. Both sat
+ * at 6px / 6px, the badge over the word (test day 2026-11-26, B103). */
+.playlists__video--unavailable .library__thumb-novideo-mark {
+  top: 8px;
+  left: 34px;
+}
+
 .playlists__unavailable-notice {
   display: flex;
   align-items: center;
@@ -1138,4 +1201,51 @@
 .playlists__video-card.playlists__stash-missing .playlists__stash-missing-note {
   display: block;
   margin-top: 2px;
+}
+
+/* A playlist tile or row is a tab stop that opens on Enter / Space (triage
+   2026-11-23): show where the keyboard is. */
+.playlists__card:focus-visible,
+.playlists__list-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Favourites (zaikechi #381): a filled heart before its name; it leads the grid. */
+.playlists__fav-mark {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-right: 6px;
+  color: var(--accent);
+}
+.playlists__fav-mark svg { fill: var(--accent); }
+
+/* Following playlists (zaikechi #381): the header control and the card line. */
+.playlists__follow-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 32px; padding: 0 12px; margin-left: 8px;
+  border: 1px solid var(--border-subtle); border-radius: 16px;
+  background: none; color: var(--text-secondary);
+  font-size: 12px; cursor: pointer; max-width: 340px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.playlists__follow-btn:hover,
+.playlists__follow-btn:focus-visible { color: var(--text-primary); background: var(--surface-overlay); }
+.playlists__follow-btn--on { color: var(--text-primary); border-color: var(--accent); }
+.playlists__card-follow {
+  display: flex; align-items: center; gap: 4px;
+  margin-top: 2px; font-size: 11px; color: var(--text-secondary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* A script with no video in a list row (2026-11-26): said in words. */
+.playlists__script-mark {
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.08));
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
 }

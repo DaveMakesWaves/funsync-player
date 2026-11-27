@@ -56,10 +56,11 @@ const {
 const { startBackend, stopBackend, setHealthListener, startHealthMonitor, restartBackend, getHealthState, getHealthDetail } = require('./python-bridge');
 const { resolveWindowColors } = require('./window-bg');
 const store = require('./store');
+const { splashWindowOptions, splashQuery, fadeOutSplash } = require('./splash-window');
 const dataBackup = require('./data-backup');
 const dataMigration = require('./data-migration');
 const { initAutoUpdater, checkForUpdates, downloadUpdate, quitAndInstall } = require('./auto-updater');
-const { EroScriptsAPI, EROSCRIPTS_USER_AGENT, installForumUserAgent } = require('./eroscripts-api');
+const { EroScriptsAPI, EROSCRIPTS_USER_AGENT, installForumUserAgent, sessionAvatarUrl } = require('./eroscripts-api');
 const editorPopout = require('./editor-popout-window');
 const audiencePopout = require('./audience-popout-window');
 const playerPopout = require('./player-popout-window');
@@ -102,18 +103,20 @@ if (IS_PORTABLE) {
 // and on an AMD box but failed in FunSync on an NVIDIA/Linux box. The store
 // isn't initialised until whenReady and Chromium flags must be set before
 // that, so read config.json directly here.
-if (process.platform === 'linux') {
-  let hwDecode = true;
+// Windows (2026-11-20): player.smoothOverlays (opt-in, default off) turns off
+// DirectComposition, which froze the window ~160 ms every ~10.4 s while the
+// timeline / simulator redrew over a video. Evidence in electron/gpu-switches.js.
+{
+  let player = null;
   try {
     const raw = fs.readFileSync(path.join(app.getPath('userData'), 'config.json'), 'utf8');
-    if (JSON.parse(raw)?.settings?.player?.hwVideoDecode === false) hwDecode = false;
-  } catch { /* no config yet → default ON */ }
-  if (hwDecode) {
-    app.commandLine.appendSwitch('enable-features', 'VaapiVideoDecoder,VaapiIgnoreDriverChecks');
-  } else {
-    // Force software decode. Chromium on Linux can't use NVDEC the way VLC/MPC
-    // do, so when VA-API is broken this is the only path that plays at all.
-    app.commandLine.appendSwitch('disable-accelerated-video-decode');
+    player = JSON.parse(raw)?.settings?.player ?? null;
+  } catch { /* no config yet → every default */ }
+  // Linux software decode: Chromium on Linux can't use NVDEC the way VLC/MPC
+  // do, so when VA-API is broken it is the only path that plays at all.
+  for (const [name, value] of require('./gpu-switches').gpuSwitches(process.platform, player)) {
+    if (value === undefined) app.commandLine.appendSwitch(name);
+    else app.commandLine.appendSwitch(name, value);
   }
 }
 
@@ -251,6 +254,44 @@ let _quitStopGuard = null;
 // electron/unsaved-edits-guard.js.
 const _unsavedEdits = createUnsavedEditsGuard({ ipcMain, log });
 
+// Windows: the app's own identity, the installer's appId (electron-builder.yml),
+// so a notification shows FunSync's name and logo, not Electron's (Dave,
+// 2026-11-22: "the funsync app logo has reverted to the electron logo", seen
+// on the EroScripts tab's download and feed notifications). Without it Windows
+// files them under the Electron executable. A dev build has an id of its own
+// and puts the icon on its windows (app-identity.js: under the installed id it
+// took it over, Electron's logo on the taskbar, 2026-11-24).
+const appIdentityModule = require('./app-identity');
+const appId = appIdentityModule.appIdentity({ packaged: app.isPackaged, appRoot: path.join(__dirname, '..') });
+if (appId) {
+  app.setAppUserModelId(appId.appId);
+  if (appId.windowDetails) {
+    app.on('browser-window-created', (_e, win) => {
+      try { win.setAppDetails(appId.windowDetails); } catch { /* the taskbar icon only */ }
+    });
+  }
+  // Dev build: the Start-menu shortcut Electron makes for notifications has
+  // no icon, so Windows showed Electron's logo again (2026-11-25). Written
+  // first, with FunSync's icon and a fixed CLSID: Electron keeps a matching one.
+  if (appId.toastClsid) {
+    try { app.setToastActivatorCLSID(appId.toastClsid); } catch { /* notifications still work */ }
+    app.whenReady().then(() => {
+      const lnk = appIdentityModule.devShortcut({
+        identity: appId,
+        execPath: process.execPath,
+        programsDir: path.join(app.getPath('appData'), 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+      });
+      if (!lnk) return;
+      try {
+        const { shell } = require('electron');
+        shell.writeShortcutLink(lnk.path, fs.existsSync(lnk.path) ? 'replace' : 'create', lnk.options);
+      } catch (err) {
+        console.warn('[AppIdentity] dev shortcut not written:', err?.message || err);
+      }
+    }).catch(() => {});
+  }
+}
+
 // Single instance lock — prevent multiple copies running at once.
 // Also handles the installer/updater trying to relaunch the app.
 const gotTheLock = app.requestSingleInstanceLock();
@@ -268,18 +309,16 @@ if (!gotTheLock) {
 
 function createWindow() {
   // Show splash screen immediately while main window loads
-  const splash = new BrowserWindow({
-    width: 320,
-    height: 200,
-    frame: false,
-    transparent: true,
-    alwaysOnTop: true,
-    resizable: false,
-    skipTaskbar: true,
-    icon: path.join(__dirname, '..', 'assets', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
-    webPreferences: { contextIsolation: true, nodeIntegration: false },
+  // The round logo on its own, its bars playing (renderer/splash.html; Dave,
+  // 2026-11-25): the 300 px circle ("make it twice as big" from 200, then
+  // "maybe make it 300"; the SVG keeps it sharp) on a transparent window, a
+  // line's room under it for a slow start; solid navy on Linux; it fades in
+  // and out (electron/splash-window.js).
+  const splash = new BrowserWindow(splashWindowOptions(process.platform,
+    path.join(__dirname, '..', 'assets', 'icons', process.platform === 'win32' ? 'icon.ico' : 'icon.png')));
+  splash.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html'), {
+    query: splashQuery({ locale: store.getSetting('player.language'), platform: process.platform }),
   });
-  splash.loadFile(path.join(__dirname, '..', 'renderer', 'splash.html'));
   splash.center();
 
   // Theme-matched window chrome (ScriptPlayer+-style "one surface" look):
@@ -332,13 +371,14 @@ function createWindow() {
   mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
 
   mainWindow.once('ready-to-show', () => {
-    splash.destroy();
     // What the first frame was drawn at, so a report of a wrong size can
     // be told apart from a late apply.
     if (scaleOpts.scale !== 100) {
       log.info(`[UI scale] Window shown at ${Math.round(mainWindow.webContents.getZoomFactor() * 100)}% (saved ${scaleOpts.scale}%)`);
     }
     mainWindow.show();
+    // The splash fades out over it (it stays on top while it goes), not a cut.
+    fadeOutSplash(splash);
     // electron-builder's auto-updater doesn't support the portable target
     // (no latest.yml is published for it), so skip it entirely in portable
     // mode — the user updates by replacing the exe. See SCOPE-portable-install.
@@ -388,6 +428,24 @@ async function _reloadWindow(win, ignoreCache) {
   else win.webContents.reload();
 }
 
+/**
+ * The View menu's F11 (it fires only for an F11 the page did not take).
+ * The main window and the player pop-out are told, and their player goes
+ * fullscreen or leaves it, as F does (`menu-toggle-fullscreen`; with no
+ * player on screen nothing happens). Any other window (the editor or
+ * Audience pop-out) still toggles window fullscreen, as the role did.
+ */
+function _toggleFullscreenFromMenu(win) {
+  if (!win || win.isDestroyed()) return;
+  let url = '';
+  try { url = win.webContents.getURL(); } catch { /* destroyed */ }
+  if (win === mainWindow || url.includes('player-popout.html')) {
+    win.webContents.send('menu-toggle-fullscreen');
+    return;
+  }
+  win.setFullScreen(!win.isFullScreen());
+}
+
 // Custom application menu. Mirrors Electron's default role-based menu
  // but overrides the zoomIn accelerator: the default is
  // `CommandOrControl+Plus`, which Electron parses as the literal `+`
@@ -418,7 +476,12 @@ function buildAppMenu() {
         // size and saves it (V79); in a pop-out they still zoom that window.
         ...uiScale.menuItems(),
         { type: 'separator' },
-        { role: 'togglefullscreen' },
+        // Not the built-in role: F11 is the PLAYER's fullscreen (Dave
+        // 2026-11-22). The role made the WINDOW fullscreen whenever the page
+        // did not take F11 itself (a text field focused, any view but the
+        // player), which the player did not know about: its button still
+        // said "Fullscreen", Esc did nothing and the menu bar was hidden.
+        { label: 'Toggle Full Screen', accelerator: 'F11', click: (_item, win) => _toggleFullscreenFromMenu(win) },
       ],
     },
     { role: 'windowMenu' },
@@ -582,11 +645,16 @@ app.on('before-quit', async (event) => {
     return;
   }
   event.preventDefault();
+  // An open EroScripts login window (modal over the app) goes first: it sat
+  // over the unsaved-edits question, and its page could cancel the quit
+  // (live, 2026-11-25: FunSync never finished quitting with one open).
+  if (closeEroScriptsLoginWindow()) log.info('[Quit] closed the EroScripts login window');
   // Unsaved editor edits are asked about first (R3-19): Cancel, or a
   // question already open (a second Ctrl+Q, a close), keeps the app running,
   // with nothing below done yet. A renderer that cannot ask lets it go.
-  if (!(await _unsavedEdits.confirm('quitting'))) return;
+  if (!(await _unsavedEdits.confirm('quitting'))) { log.info('[Quit] kept open (unsaved edits)'); return; }
   _finalSnapshotDone = true;
+  log.info('[Quit] stopping (snapshot, backend)');
 
   // An audience room is open: stop every viewer's device before quitting,
   // bounded (#361, research §4.11). Their Handys play on their own clocks,
@@ -632,12 +700,14 @@ app.on('before-quit', async (event) => {
   // (R3 fix-up, verifier 1: open 26 s after a 25 s busy loop). Closed for good.
   if (_unsavedEdits.rendererHung() && mainWindow && !mainWindow.isDestroyed()) mainWindow.destroy();
   // Re-trigger quit; the guard above lets it through this time.
+  log.info('[Quit] quitting');
   app.quit();
 });
 
 // Last-chance cleanup — runs even if a renderer crashed, a modal blocked
 // before-quit, or the OS sent SIGTERM. stopBackend is idempotent.
 app.on('will-quit', () => {
+  log.info('[Quit] will-quit');
   stopBackend();
 });
 
@@ -865,6 +935,51 @@ ipcMain.handle('trash-video-files', async (_event, paths) => {
   return results;
 });
 
+/**
+ * Delete a video's files from inside FunSync (2026-11-23, EroScripts #434;
+ * DESIGN.md §2.18). electron/delete-files.js does the work and holds the
+ * guards: regular files only, a video / script / subtitle extension, inside
+ * one of the library's source folders, the Recycle Bin unless the renderer's
+ * dialog had the user confirm permanent deletion. The roots are read here,
+ * from the stored sources, never taken from the renderer.
+ */
+function libraryRoots() {
+  const sources = store.getSetting('library.sources');
+  return (Array.isArray(sources) ? sources : []).map((s) => (typeof s === 'string' ? s : s?.path)).filter(Boolean);
+}
+
+ipcMain.handle('list-video-files', async (_event, videoPath) => {
+  const { listVideoFiles, isInside } = require('./delete-files');
+  if (typeof videoPath !== 'string' || !libraryRoots().some((r) => isInside(r, videoPath))) return [];
+  return listVideoFiles(videoPath);
+});
+
+ipcMain.handle('delete-video-files', async (_event, paths, opts) => {
+  const { deleteFiles } = require('./delete-files');
+  const { VIDEO_EXTS } = require('./media-extensions');
+  const { convertedDir, removeCopiesOf } = require('./converted-copies');
+  // A video's converted copy (Convert to play) goes with it: found BEFORE the
+  // delete (its name comes from the file's size and time), removed only when
+  // the video really went (2026-11-26: it stayed behind, counted, unplayable).
+  const copies = new Map();
+  for (const p of Array.isArray(paths) ? paths : []) {
+    if (typeof p !== 'string' || !VIDEO_EXTS.includes(path.extname(p).toLowerCase())) continue;
+    const answer = await askTranscode(`?video_path=${encodeURIComponent(p)}&cached_only=true`, 'POST');
+    if (answer?.state === 'done' && typeof answer.path === 'string') copies.set(p, answer.path);
+  }
+  const results = await deleteFiles(paths, {
+    permanent: opts?.permanent === true,
+    roots: libraryRoots(),
+    trashItem: (p) => shell.trashItem(p),
+    log,
+  });
+  if (copies.size > 0) {
+    const removed = await removeCopiesOf(results, copies, convertedDir(app.getPath('userData')));
+    if (removed.length) log.info(`[Convert] removed ${removed.length === 1 ? '1 converted copy with its video' : `${removed.length} converted copies with their videos`}`);
+  }
+  return results;
+});
+
 ipcMain.handle('get-portable-info', () => {
   return { portable: IS_PORTABLE, dataDir: app.getPath('userData') };
 });
@@ -940,7 +1055,9 @@ ipcMain.handle('collect-diagnostics', async (_event, rendererState) => {
 // settings). Returns `string[]` of absolute paths.
 ipcMain.handle('enumerate-folder-videos', async (_event, dirPath) => {
   if (!dirPath || typeof dirPath !== 'string') return [];
-  const VIDEO_EXT_SET = new Set(['.mp4', '.mkv', '.webm', '.avi', '.mov', '.m4v']);
+  // The video types (media-extensions.js; the older formats too since 2026-11-26).
+  const { VIDEO_EXTS: FOLDER_VIDEO_EXTS, isTransportStream } = require('./media-extensions');
+  const VIDEO_EXT_SET = new Set(FOLDER_VIDEO_EXTS);
   try {
     const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
     const out = [];
@@ -953,6 +1070,8 @@ ipcMain.handle('enumerate-folder-videos', async (_event, dirPath) => {
       if (dotAt < 0) continue;
       const ext = name.slice(dotAt).toLowerCase();
       if (!VIDEO_EXT_SET.has(ext)) continue;
+      // A .ts file is a video only as an MPEG transport stream, not TypeScript.
+      if (ext === '.ts' && !(await isTransportStream(path.join(dirPath, name)))) continue;
       out.push(path.join(dirPath, name));
     }
     return out;
@@ -1049,6 +1168,11 @@ ipcMain.handle('add-playlist', (_event, name) => {
   return store.addPlaylist(name);
 });
 
+// Favourites and following playlists (zaikechi #381, 2026-11-23).
+ipcMain.handle('ensure-favourites-playlist', (_event, name) => store.ensureFavouritesPlaylist(name));
+ipcMain.handle('set-playlist-follow', (_event, id, follow) => store.setPlaylistFollow(id, follow));
+ipcMain.handle('set-playlist-excluded', (_event, id, paths) => store.setPlaylistExcluded(id, paths));
+
 ipcMain.handle('rename-playlist', (_event, id, name) => {
   store.renamePlaylist(id, name);
 });
@@ -1110,8 +1234,10 @@ function _cursorOverCaption(win, rect) {
 }
 
 ipcMain.handle('update-window-chrome', (event, theme, opts = {}) => {
-  const { colorsForTheme } = require('./window-bg');
-  const colors = colorsForTheme(theme);
+  const { colorsForTheme, chromeSeason } = require('./window-bg');
+  // The Holiday interface style's season (v0.10.1): the renderer says it when
+  // the style changes; every other call keeps it (window-bg.js chromeSeason).
+  const colors = colorsForTheme(theme, chromeSeason(opts));
   // Target the window that ASKED, not mainWindow — the pop-outs run the same
   // themed overlay and each retints itself (a hardcoded mainWindow here made
   // a pop-out's theme change silently repaint the main window instead).
@@ -1249,6 +1375,10 @@ ipcMain.handle('assign-category', (_event, videoPath, catId) => {
   store.assignCategory(videoPath, catId);
 });
 
+ipcMain.handle('assign-category-to-videos', (_event, videoPaths, catId) => {
+  store.assignCategoryToVideos(videoPaths, catId);
+});
+
 ipcMain.handle('unassign-category', (_event, videoPath, catId) => {
   store.unassignCategory(videoPath, catId);
 });
@@ -1275,7 +1405,7 @@ ipcMain.handle('open-file-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile', 'multiSelections'],
     filters: [
-      { name: 'Media Files', extensions: ['mp4', 'm4v', 'mkv', 'webm', 'avi', 'mov', 'mp3', 'wav', 'ogg', 'flac', 'm4a'] },
+      { name: 'Media Files', extensions: require('./media-extensions').MEDIA_EXTS.map((e) => e.slice(1)) },
       { name: 'Funscript Files', extensions: ['funscript'] },
       { name: 'Subtitle Files', extensions: ['srt', 'vtt'] },
       { name: 'All Files', extensions: ['*'] },
@@ -1514,6 +1644,16 @@ ipcMain.handle('remux-video', async (_event, videoPath) => {
     // on slow/NAS storage plus an audio transcode can run long. This blocks
     // playback start, so the renderer shows a "Preparing…" toast meanwhile.
     const resp = await fetchWithTimeout(url, { method: 'POST' }, 600000);
+    if (resp.status === 422) {
+      // The codec itself needs a transcode (an MPEG-2 .mkv): say so, so the
+      // renderer names the codec instead of "Video format not supported"
+      // (test day 2026-11-24, B027). Any other 422 is a plain failure.
+      const body = await resp.json().catch(() => null);
+      if (body?.detail?.kind === 'codec') {
+        log.warn(`[Remux] not possible for ${videoPath}: ${body.detail.message}`);
+        return { path: null, kind: 'codec' };
+      }
+    }
     if (!resp.ok) throw new Error(`Backend returned ${resp.status}`);
     const meta = await resp.json();
     if (!meta?.path || !fs.existsSync(meta.path)) {
@@ -1528,16 +1668,102 @@ ipcMain.handle('remux-video', async (_event, videoPath) => {
 });
 
 /**
+ * Convert to play (Dave, 2026-11-26): the backend re-encodes a video whose
+ * codec the player cannot decode (MPEG-4 Part 2, MPEG-2, VC-1 ...) to H.264
+ * in the remux cache, as a job the renderer polls. All three answer the
+ * backend's job view `{ job, state, progress, path, error }` (state:
+ * running / done / error / cancelled / none), or `{ state: 'error', kind }`
+ * when it could not be asked: kind 'noEncoder' (this ffmpeg cannot make
+ * H.264), 'missing' (no file) or 'failed'. Never throws.
+ */
+async function askTranscode(pathAndQuery, method) {
+  const { getBackendPort } = require('./python-bridge');
+  const url = `http://localhost:${getBackendPort()}/api/media/transcode${pathAndQuery}`;
+  try {
+    const resp = await fetchWithTimeout(url, { method }, 30000);
+    const body = await resp.json().catch(() => null);
+    if (resp.status === 422 && body?.detail?.kind === 'noEncoder') return { state: 'error', kind: 'noEncoder', error: body.detail.message };
+    if (resp.status === 404) return { state: 'error', kind: 'missing', error: String(body?.detail || 'not found') };
+    if (!resp.ok || !body) return { state: 'error', kind: 'failed', error: `Backend returned ${resp.status}` };
+    return body;
+  } catch (err) {
+    return { state: 'error', kind: 'failed', error: err.message };
+  }
+}
+
+ipcMain.handle('transcode-video', async (_event, videoPath, opts = {}) => {
+  if (typeof videoPath !== 'string' || !videoPath || videoPath.startsWith('stream:')) return { state: 'error', kind: 'missing' };
+  const q = `?video_path=${encodeURIComponent(videoPath)}${opts?.cachedOnly === true ? '&cached_only=true' : ''}`;
+  const answer = await askTranscode(q, 'POST');
+  if (opts?.cachedOnly !== true) log.info(`[Convert] ${videoPath}: ${answer.state}${answer.cached ? ' (cached)' : ''}${answer.error ? ` (${answer.error})` : ''}`);
+  return answer;
+});
+ipcMain.handle('transcode-status', async (_event, job) => askTranscode(`/status?job=${encodeURIComponent(String(job || ''))}`, 'GET'));
+// Settings > Data: the converted copies in <userData>/converted (converted-copies.js).
+ipcMain.handle('converted-copies-info', async () => {
+  const { convertedDir, convertedInfo } = require('./converted-copies');
+  return convertedInfo(convertedDir(app.getPath('userData')));
+});
+ipcMain.handle('converted-copies-clear', async () => {
+  const { convertedDir, clearConverted } = require('./converted-copies');
+  const result = await clearConverted(convertedDir(app.getPath('userData')));
+  log.info(`[Convert] cleared ${result.removed} converted copies (${result.bytes} bytes), ${result.kept} in use kept`);
+  return result;
+});
+ipcMain.handle('transcode-cancel', async (_event, job) => {
+  log.info(`[Convert] cancel ${job}`);
+  return askTranscode(`/cancel?job=${encodeURIComponent(String(job || ''))}`, 'POST');
+});
+
+/**
+ * Embedded subtitles (#268, 2026-11-23). The backend lists a file's subtitle
+ * streams ({ tracks: [{ index, codec, language, title, default, forced,
+ * text }] }) and turns one text stream into WebVTT. null on any failure: the
+ * player then has nothing to show and says so where it matters.
+ */
+ipcMain.handle('subtitle-tracks', async (_event, videoPath) => {
+  if (typeof videoPath !== 'string' || !videoPath) return null;
+  const { getBackendPort } = require('./python-bridge');
+  const url = `http://localhost:${getBackendPort()}/api/media/subtitle-tracks?video_path=${encodeURIComponent(videoPath)}`;
+  try {
+    const resp = await fetchWithTimeout(url, {}, 30000);
+    if (!resp.ok) return null;
+    const body = await resp.json();
+    return Array.isArray(body?.tracks) ? body.tracks : null;
+  } catch (err) {
+    log.warn(`[Subtitles] listing failed: ${err.message}`);
+    return null;
+  }
+});
+
+ipcMain.handle('subtitle-track', async (_event, videoPath, index) => {
+  if (typeof videoPath !== 'string' || !videoPath || !Number.isInteger(index) || index < 0) return null;
+  const { getBackendPort } = require('./python-bridge');
+  const url = `http://localhost:${getBackendPort()}/api/media/subtitle-track?video_path=${encodeURIComponent(videoPath)}&index=${index}`;
+  try {
+    // ffmpeg reads the whole file for one stream's cues: a big file on a slow drive takes a while.
+    const resp = await fetchWithTimeout(url, {}, 300000);
+    if (!resp.ok) return { error: resp.status };
+    return { vtt: await resp.text() };
+  } catch (err) {
+    log.warn(`[Subtitles] reading stream ${index} failed: ${err.message}`);
+    return null;
+  }
+});
+
+/**
  * Resolve a remote video PAGE url (e.g. a streaming-site link) to a playable
  * stream via the backend's yt-dlp. Returns { ok, title, isHls, proxyUrl, ... }
  * with proxyUrl made ABSOLUTE (http://localhost:PORT/...) so the renderer can
  * play it directly; or { ok:false, kind, message } so the UI can show a
  * precise error. See SCOPE-remote-video-url.md.
  */
-ipcMain.handle('resolve-remote-video', async (_event, pageUrl) => {
+ipcMain.handle('resolve-remote-video', async (_event, pageUrl, opts) => {
   const { getBackendPort } = require('./python-bridge');
   const port = getBackendPort();
-  const url = `http://localhost:${port}/api/media/resolve?url=${encodeURIComponent(pageUrl)}`;
+  // A single-file stream: the tallest file at or under this (2026-11-23).
+  const maxHeight = Number.isInteger(opts?.maxHeight) && opts.maxHeight > 0 && opts.maxHeight <= 4320 ? opts.maxHeight : null;
+  const url = `http://localhost:${port}/api/media/resolve?url=${encodeURIComponent(pageUrl)}${maxHeight ? `&maxHeight=${maxHeight}` : ''}`;
   try {
     // yt-dlp extraction can take a few seconds (network + site parsing).
     const resp = await fetchWithTimeout(url, { method: 'POST' }, 90000);
@@ -1548,11 +1774,24 @@ ipcMain.handle('resolve-remote-video', async (_event, pageUrl) => {
       return { ok: false, kind, message: body?.detail?.message || '' };
     }
     log.info(`[Remote] resolved ${pageUrl} → ${body.isHls ? 'HLS' : 'progressive'} "${body.title}"`);
-    return { ok: true, ...body, proxyUrl: `http://localhost:${port}${body.proxyUrl}` };
+    // The page it came from rides along: an expired stream is looked up again from it.
+    return {
+      ok: true, ...body, pageUrl,
+      proxyUrl: `http://localhost:${port}${body.proxyUrl}`,
+      levels: (body.levels || []).map((l) => ({ height: l.height, proxyUrl: `http://localhost:${port}${l.proxyUrl}` })),
+    };
   } catch (err) {
     log.warn(`[Remote] resolve error for ${pageUrl}: ${err.message}`);
     return { ok: false, kind: 'error', message: err.message };
   }
+});
+
+// A watched post's script (EroScripts tab Watch, 2026-11-22): in the app's
+// own data, not the library, so watching leaves nothing for a scan to find.
+ipcMain.handle('get-stream-scripts-dir', async () => {
+  const dir = path.join(app.getPath('userData'), 'stream-scripts');
+  await fs.promises.mkdir(dir, { recursive: true });
+  return dir;
 });
 
 // --- IPC Handlers: Library ---
@@ -1600,6 +1839,10 @@ ipcMain.handle('select-funscript', async (_event, opts) => {
   if (opts && Object.prototype.hasOwnProperty.call(opts, 'defaultPath')) {
     const { nearestExistingFolder } = require('./dialog-default-path');
     defaultPath = (await nearestExistingFolder(opts.defaultPath)) || undefined;
+  }
+  // The EroScripts tab's "Pair a script…": a bought script is usually in Downloads.
+  if (!defaultPath && opts?.startIn === 'downloads') {
+    try { defaultPath = app.getPath('downloads'); } catch { defaultPath = undefined; }
   }
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: multiple ? ['openFile', 'multiSelections'] : ['openFile'],
@@ -1650,7 +1893,41 @@ ipcMain.handle('select-thumbnail-image', async () => {
   return { name: path.basename(filePath), path: filePath };
 });
 
-ipcMain.handle('import-custom-thumbnail', async (_event, videoPath, imagePath) => {
+ipcMain.handle('import-custom-thumbnail', async (_event, videoPath, imagePath) => importCustomThumbnailFile(videoPath, imagePath));
+
+/**
+ * A saved stream's picture (2026-11-23): fetched once from the page's (or the
+ * EroScripts post's) image address and kept as that stream's custom
+ * thumbnail, keyed by its 'stream:' key. https only, an image, 8 MB at most.
+ */
+ipcMain.handle('save-stream-thumbnail', async (_event, streamKey, imageUrl) => {
+  if (typeof streamKey !== 'string' || !streamKey.startsWith('stream:')) return null;
+  let u;
+  try { u = new URL(String(imageUrl || '')); } catch { return null; }
+  if (u.protocol !== 'https:') return null;
+  const crypto = require('crypto');
+  const tmp = path.join(app.getPath('temp'), `funsync-stream-thumb-${crypto.randomBytes(6).toString('hex')}`);
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15_000);
+    let res;
+    try { res = await fetch(u.href, { signal: ctrl.signal, redirect: 'follow' }); } finally { clearTimeout(timer); }
+    const type = String(res.headers.get('content-type') || '');
+    if (!res.ok || !type.startsWith('image/')) return null;
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (!bytes.length || bytes.length > 8 * 1024 * 1024) return null;
+    const ext = type.includes('png') ? '.png' : type.includes('webp') ? '.webp' : '.jpg';
+    fs.writeFileSync(tmp + ext, bytes);
+    return await importCustomThumbnailFile(streamKey, tmp + ext);
+  } catch (err) {
+    log.warn('[Streams] thumbnail fetch failed:', err.message);
+    return null;
+  } finally {
+    for (const e of ['.png', '.webp', '.jpg']) { try { fs.unlinkSync(tmp + e); } catch { /* not there */ } }
+  }
+});
+
+async function importCustomThumbnailFile(videoPath, imagePath) {
   try {
     const { nativeImage } = require('electron');
     const crypto = require('crypto');
@@ -1684,7 +1961,7 @@ ipcMain.handle('import-custom-thumbnail', async (_event, videoPath, imagePath) =
     log.warn('Custom thumbnail import failed:', err.message);
     return null;
   }
-});
+}
 
 // The backend serves custom-thumb images to the phone (F7) — it needs to
 // know (and validate against) the same dir the import IPC writes into.
@@ -1737,6 +2014,20 @@ ipcMain.handle('read-funscript', async (_event, filePath) => {
   }
 });
 
+// Script backups (editor work list 3.1, 2026-11-24): the version on disk is
+// kept in <userData>/script-backups before save-funscript or write-funscript
+// replaces it, and the editor's "Restore an earlier version…" lists them
+// (electron/script-backups.js). Every .funscript FunSync overwrites goes
+// through these two handlers: the editor's Save, autosave, Save As, both
+// exports, the embedded-axis extract and the EroScripts tab's Pair. Not
+// covered, on purpose: eroscripts-download (writes only a new file, 'wx'; a
+// file it replaces went to the Recycle Bin first) and pick-download-save-path
+// (writes nothing). userData is asked per call: portable mode moved it above.
+const scriptBackups = require('./script-backups').createScriptBackups({
+  getUserDataDir: () => app.getPath('userData'),
+  log,
+});
+
 // Save funscript to file
 ipcMain.handle('save-funscript', async (_event, content, suggestedName) => {
   const result = await dialog.showSaveDialog(mainWindow, {
@@ -1749,6 +2040,9 @@ ipcMain.handle('save-funscript', async (_event, content, suggestedName) => {
     properties: ['showOverwriteConfirmation'],
   });
   if (result.canceled || !result.filePath) return null;
+  // A file the user agreed to replace: its version is kept first (work list
+  // 3.1). Never throws; a failed backup only logs a warning.
+  await scriptBackups.backupBeforeWrite(result.filePath, content);
   try {
     fs.writeFileSync(result.filePath, content, 'utf-8');
     return result.filePath;
@@ -1790,6 +2084,10 @@ ipcMain.handle('pick-download-save-path', async (_event, suggestedName) => {
 
 // Write funscript directly to a known path (for autosave — no dialog)
 ipcMain.handle('write-funscript', async (_event, content, filePath) => {
+  // The version on disk is kept first (work list 3.1): the first overwrite of
+  // a path in a session, then one every 10 minutes. Never throws; a failed
+  // backup only logs a warning and the write goes ahead.
+  await scriptBackups.backupBeforeWrite(filePath, content);
   try {
     fs.writeFileSync(filePath, content, 'utf-8');
     return filePath;
@@ -1797,6 +2095,18 @@ ipcMain.handle('write-funscript', async (_event, content, filePath) => {
     log.error('write-funscript failed:', err.message);
     return null;
   }
+});
+
+// "Restore an earlier version…" (work list 3.1): the kept versions of one
+// script, newest first [{id, at, size, points}], and one version's text. The
+// id must name one of THAT path's own versions (script-backups.js checks it),
+// so no other file can be read through this.
+ipcMain.handle('list-script-backups', async (_event, filePath) => {
+  return scriptBackups.listBackups(filePath);
+});
+
+ipcMain.handle('read-script-backup', async (_event, filePath, id) => {
+  return scriptBackups.readBackup(filePath, id);
 });
 
 // Backend API proxy — convert funscript to CSV
@@ -1897,7 +2207,7 @@ ipcMain.handle('convert-funscript', async (_event, funscriptContent) => {
 
 // --- Data Export/Import ---
 
-ipcMain.handle('export-data', async () => {
+ipcMain.handle('export-data', async (_event, opts = {}) => {
   const { exportData } = require('./data-export');
 
   const result = await dialog.showSaveDialog(mainWindow, {
@@ -1914,6 +2224,8 @@ ipcMain.handle('export-data', async () => {
   return exportData(configData, result.filePath, {
     customThumbsDir: customThumbsDir(),
     stashDir: path.join(app.getPath('userData'), 'stash'),
+    // Keys and logins only when the user ticked "Include keys and logins".
+    includeSecrets: opts?.includeSecrets === true,
   });
 });
 
@@ -2576,7 +2888,17 @@ ipcMain.on('main-window:bring-forward', (event) => {
 // A dedicated session partition (`persist:eroscripts-login`) keeps
 // the cookies out of the main app session and lets `logout` clear
 // them cleanly.
+// The open EroScripts login window and its answer: one at a time (a second
+// ask focuses it and shares the answer), and a quit closes it first. Live,
+// 2026-11-25: the panel opened two (Log Out also logged in), and FunSync's
+// quit never finished with one open: the forum page could hold its unload.
+let _eroLogin = null;
+
 ipcMain.handle('eroscripts-login-window', async () => {
+  if (_eroLogin && !_eroLogin.win.isDestroyed()) {
+    try { _eroLogin.win.show(); _eroLogin.win.focus(); } catch { /* it is closing */ }
+    return _eroLogin.promise;
+  }
   const { session } = require('electron');
   const partition = 'persist:eroscripts-login';
   const sess = session.fromPartition(partition);
@@ -2591,6 +2913,15 @@ ipcMain.handle('eroscripts-login-window', async () => {
   // webContents takes it from there, and so does every later request of
   // this session (the cookie/CSRF preflights too).
   sess.setUserAgent(EROSCRIPTS_USER_AGENT);
+
+  // No video, audio or service worker in the login window (page-media-block.js):
+  // the login page's ad videos left FunSync unable to finish quitting (live,
+  // 2026-11-25; Electron 41, bisected in a bare Electron script). The forum's
+  // service worker outlives the window too: any kept registration is cleared.
+  require('./page-media-block').blockPageMedia(sess);
+  try { await sess.clearStorageData({ storages: ['serviceworkers'] }); } catch (err) {
+    log.warn('[EroScripts] login: could not clear service workers:', err.message);
+  }
 
   const win = new BrowserWindow({
     width: 520,
@@ -2607,12 +2938,17 @@ ipcMain.handle('eroscripts-login-window', async () => {
     },
   });
   win.setMenuBarVisibility(false);
+  // The forum's page never keeps this window open: a page's "leave this
+  // page?" (beforeunload) silently cancelled the close, and with it
+  // FunSync's quit (live, 2026-11-25).
+  win.webContents.on('will-prevent-unload', (event) => event.preventDefault());
 
-  return new Promise((resolve) => {
+  const promise = new Promise((resolve) => {
     let settled = false;
     const finalize = (result) => {
       if (settled) return;
       settled = true;
+      if (_eroLogin?.win === win) _eroLogin = null;
       if (!win.isDestroyed()) win.close();
       resolve(result);
     };
@@ -2664,6 +3000,8 @@ ipcMain.handle('eroscripts-login-window', async () => {
           success: true,
           cookie: tCookies[0].value,
           username,
+          // The tab's account button (2026-11-25); null when it has none.
+          avatar: sessionAvatarUrl(data?.current_user?.avatar_template),
         });
       } catch (err) {
         log.warn('[EroScripts] login-window capture error:', err.message);
@@ -2738,7 +3076,17 @@ ipcMain.handle('eroscripts-login-window', async () => {
       });
     });
   });
+  _eroLogin = { win, promise };
+  return promise;
 });
+
+/** Close an open EroScripts login window for good (a quit): its answer is "cancelled". */
+function closeEroScriptsLoginWindow() {
+  const open = _eroLogin;
+  if (!open || open.win.isDestroyed()) return false;
+  try { open.win.destroy(); } catch { /* already going */ }
+  return true;
+}
 
 ipcMain.handle('eroscripts-logout', async () => {
   eroScripts.logout();
@@ -2782,8 +3130,25 @@ ipcMain.handle('eroscripts-search', async (_event, query, page) => {
   return eroScripts.search(query, page);
 });
 
-ipcMain.handle('eroscripts-topic', async (_event, topicId) => {
-  return eroScripts.getTopicAttachments(topicId);
+// The EroScripts tab's opening list: the newest script threads (2026-11-22).
+// Every forum tag, for the feed window's tag box (2026-11-22).
+ipcMain.handle('eroscripts-tags', async () => eroScripts.tags());
+ipcMain.handle('eroscripts-tag-search', async (_event, query) => eroScripts.searchTags(typeof query === 'string' ? query : ''));
+
+ipcMain.handle('eroscripts-latest', async (_event, price, page, opts) => {
+  const o = opts && typeof opts === 'object' ? opts : {};
+  return eroScripts.latest(price === 'free' || price === 'paid' ? price : 'all', page, {
+    sort: o.sort === 'top' ? 'top' : 'newest',
+    period: typeof o.period === 'string' ? o.period : 'all',
+    tags: Array.isArray(o.tags) ? o.tags : [],
+    anyTags: o.anyTags === true,
+  });
+});
+
+ipcMain.handle('eroscripts-topic', async (_event, topicId, opts) => {
+  // opts.replies: the EroScripts tab's download window also wants the links
+  // in the replies (replacement links, 2026-11-22).
+  return eroScripts.getTopicAttachments(topicId, { replies: opts?.replies === true });
 });
 
 // "Get tags from EroScripts" for one video: one GET /t/{id}.json, logged in
@@ -2794,6 +3159,26 @@ ipcMain.handle('eroscripts-topic-meta', async (_event, topicId) => {
 
 ipcMain.handle('eroscripts-topic-image', async (_event, topicId) => {
   return eroScripts.getTopicImage(topicId);
+});
+
+// The EroScripts tab's download window (review 2.1 / 2.2, 2026-11-23): a
+// script's actions before it is downloaded (forum / issued URLs only), and a
+// post's images as data: URLs (forum images with the session; another
+// host's only on the user's "Show image").
+ipcMain.handle('eroscripts-script-preview', async (_event, url) => eroScripts.previewScript(url));
+ipcMain.handle('eroscripts-image', async (_event, url, opts) => eroScripts.fetchImage(url, { external: opts?.external === true }));
+
+// A Gofile link's video (2026-11-24): the Gofile page, opened in a hidden
+// window of our own, gives its folder listing and a guest cookie; the
+// backend downloads the file with that cookie (electron/gofile.js).
+ipcMain.handle('gofile-resolve', async (_event, url, hint) => {
+  const { resolveGofile, pickGofileVideo } = require('./gofile');
+  const r = await resolveGofile(url, { electron: require('electron') });
+  if (!r.ok) { log.info(`[Gofile] ${r.error}`); return r; }
+  const file = pickGofileVideo(r.files, typeof hint === 'string' ? hint.slice(0, 300) : '');
+  if (!file) return { error: 'noVideo' };
+  log.info(`[Gofile] ${r.files.length} file(s); offering ${file.name} (${file.size} bytes)`);
+  return { ok: true, name: file.name, size: file.size, link: file.link, cookie: r.cookie, count: r.files.length };
 });
 
 // An existing, different file is replaced only on `{ replace: true }`, and

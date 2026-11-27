@@ -38,6 +38,7 @@ import { openSessionHistory } from '../../renderer/components/session-history-mo
 import { openVideoOptionsDialog } from '../../renderer/components/video-options-dialog.js';
 import { DataService } from '../../renderer/js/data-service.js';
 import { liftAppClass } from './helpers/app-methods.js';
+import { ScriptEditor } from '../../renderer/components/script-editor.js';
 
 const LOCALES = ['en', 'de', 'es', 'fr', 'ja', 'ko', 'ru', 'zh'];
 const bundle = (l) => JSON.parse(fs.readFileSync(`renderer/locales/${l}.json`, 'utf8'));
@@ -261,6 +262,20 @@ describe('Settings dialogs that are not deletions (V74)', () => {
     }
   });
 
+  it('Clear converted copies… names the count and size, and its action says Clear (Convert to play, 2026-11-26)', async () => {
+    let cleared = 0;
+    window.funsync.convertedCopiesInfo = async () => ({ count: 2, bytes: 2 * 1024 * 1024 });
+    window.funsync.clearConvertedCopies = async () => { cleared++; return { removed: 2, bytes: 2 * 1024 * 1024, kept: 0 }; };
+    await openSettings(settingsFake(), 'data');
+    await flush();
+    document.querySelector('#sp-converted-clear').click();
+    await dialogs(2);
+    expect(actionText()).toBe(EN.settingsPanel.data.convertedClearGo);
+    expect(messageText()).toBe('Delete 2 converted copies (2 MB)? Your videos stay as they are; each converts again the next time you play it.');
+    await cancelTop();
+    expect(cleared).toBe(0);
+  });
+
   it('Restore From Backup asks to Restore', async () => {
     const snapshots = [{
       subdir: 'snapshots', filename: 'a.json', timestamp: Date.now(), trigger: 'manual', sizeBytes: 2048, summary: { playlists: 1 },
@@ -293,25 +308,9 @@ describe('Settings dialogs that are not deletions (V74)', () => {
 // --- The rest -----------------------------------------------------------------
 
 describe('the other non-deletions (V74)', () => {
-  // Block C fix-up (2026-11-06, real-app verifier 1): it was a Modal.confirm,
-  // so the notice showed Cancel next to a red, danger-style OK. A notice asks
-  // nothing: one OK in the primary style (Modal.alert), in every locale.
-  it.each(LOCALES)('the "All Assigned" notice is one plain OK, no Cancel and nothing red, in %s', async (locale) => {
-    useLocale(locale);
-    const lib = {
-      _settings: { getCategories: () => [{ id: 'c1', name: 'Fav' }], getVideoCategories: () => ['c1'] },
-    };
-    const done = Library.prototype._assignCategory.call(lib, 'C:/Videos/a.mp4', null);
-    await dialogs(1);
-    expect(top().querySelector('.modal-title').textContent).toBe(B[locale].library.allAssignedTitle);
-    const buttons = [...top().querySelectorAll('.modal-actions .modal-btn')];
-    expect(buttons.map((b) => b.textContent)).toEqual([B[locale].common.ok]);
-    expect(buttons[0].classList.contains('modal-btn--primary')).toBe(true);
-    expect(top().querySelector('.modal-btn--danger')).toBeNull();
-    buttons[0].click();
-    await done;
-    expect(overlays()).toHaveLength(0);
-  });
+  // The "All Assigned" notice (Block C fix-up, 2026-11-06) went with the ⋮
+  // menu's Assign Category (`_assignCategory`, removed 2026-11-23): the video
+  // options dialog's Organise ticks and the bulk Assign category never show it.
 
   // Round 2: an EroScripts download that would land on an existing, different
   // script asks first; the action is Replace (the old file goes to the
@@ -578,6 +577,19 @@ describe('Import and export say what really happens (FT-041)', () => {
     expect(messageText()).toContain('Playback and every device stop first.');
     expect(messageText()).toContain('Keys and logins you already have here are kept.');
     expect(messageText()).toContain('a playlist you already have is kept as it is');
+    // Test day 2026-11-24 (B021): the merge adds the backup's favourites to
+    // Favourites (data-export.js), which the text said nothing about.
+    expect(messageText()).toContain("except Favourites, which gets the backup's favourites added");
+  });
+
+  it('Favourites: what the text claims is what the merge does (the REAL mergeConfig)', () => {
+    const { mergeConfig } = createRequire(import.meta.url)('../../electron/data-export.js');
+    const here = { settings: {}, playlists: [{ id: 'favourites', name: 'Favourites', videoPaths: ['/v/a.mp4', '/v/c.mp4'], system: 'favourites' }], categories: [], videoCategories: {} };
+    const backup = { settings: {}, playlists: [{ id: 'favourites', name: 'Favourites', videoPaths: ['/v/a.mp4', '/v/b.mp4'], system: 'favourites' }], categories: [], videoCategories: {} };
+    const merged = mergeConfig(here, backup, 'merge');
+    const fav = merged.playlists.filter((p) => p.id === 'favourites');
+    expect(fav).toHaveLength(1);
+    expect([...fav[0].videoPaths].sort()).toEqual(['/v/a.mp4', '/v/b.mp4', '/v/c.mp4']);
   });
 
   it('what the text claims is what the merge does (the REAL mergeConfig)', () => {
@@ -600,6 +612,34 @@ describe('Import and export say what really happens (FT-041)', () => {
     expect(merged.settings.player.volume).toBe(90);
     expect(merged.settings.handy.connectionKey).toBe('LOCALKEY');
     expect(merged.settings.eroscripts.session).toEqual({ cookie: 'c-here', username: 'me' });
+  });
+});
+
+// The script editor's Export as separate files (multi-axis editing,
+// 2026-11-24): files of those names already in the folder are asked about.
+describe('script editor: Export as separate files', () => {
+  it('over files already there it asks "Replace 2 files?", names them, and its button reads "Replace"; Cancel writes nothing', async () => {
+    const ed = Object.create(ScriptEditor.prototype);
+    ed._collectAxes = async () => ({
+      mainPath: 'C:\\V\\Clip.funscript',
+      mainJson: { actions: [{ at: 0, pos: 0 }, { at: 500, pos: 100 }] },
+      axes: new Map([['twist', [{ at: 0, pos: 50 }, { at: 400, pos: 80 }]]]),
+    });
+    const written = [];
+    window.funsync = {
+      ...window.funsync,
+      selectDirectory: async () => 'C:\\Out',
+      filesExist: async (list) => list.map(() => true),
+      writeFunscript: async (json, path) => { written.push(path); return path; },
+    };
+    const exporting = ed._exportAxes('separate');
+    await dialogs(1);
+    expect(top().querySelector('.modal-title, h2')?.textContent).toBe('Replace 2 files?');
+    expect(messageText()).toContain('Clip.funscript, Clip.twist.funscript');
+    expect(actionText()).toBe('Replace');
+    await cancelTop();
+    await exporting;
+    expect(written).toEqual([]);
   });
 });
 
@@ -626,11 +666,14 @@ describe('coverage', () => {
       'renderer/components/categories.js': 1,           // Delete Category
       'renderer/components/connection-panel.js': 1,     // Safety Cap
       'renderer/components/duplicates-modal.js': 1,     // Move to Recycle Bin (duplicates-modal tests)
+      'renderer/components/eroscripts-view.js': 1,      // Delete feed (eroscripts-tab.test.js: its confirm button reads "Delete feed")
       'renderer/components/replace-question.js': 1,     // Replace <name>? / Replace N files? (round 2, R3-02: the EroScripts panel and Associate's search)
       'renderer/components/playlists.js': 2,            // Delete Playlist, Remove N selected videos (FT-104)
       'renderer/components/session-history-modal.js': 1, // Clear history
-      'renderer/components/settings-panel.js': 5,       // Remove source, Add anyway, Remove and add, Restore, Import
+      'renderer/components/settings-panel.js': 4,       // Remove source, Restore, Import, Clear converted copies (2026-11-26)
+      'renderer/js/source-overlap-ask.js': 2,           // Add anyway, Remove and add (Settings > Sources AND Library ▾ Add Source Folder…, test day B024)
       'renderer/components/settings-stash.js': 2,       // Remove Stash data…, remove the API key (Stash S1)
+      'renderer/components/script-editor.js': 1,        // Replace N files? (Export as separate files, multi-axis editing)
       'renderer/components/video-options-dialog.js': 1, // Unpair funscript, Unpair subtitle (one helper; stage 2a)
       'renderer/js/app.js': 1,                          // Delete Collection
     });

@@ -38,7 +38,7 @@ import * as PLAYERWIN from '../../renderer/js/player-popout-protocol.js';
 const LIFTED = [
   '_initPlayerWindow', '_onPlayerWindowMessage', '_onPopoutVideoEnded',
   '_playerWindowPlayback', '_startPlayback', '_mirrorPopoutVolume', '_sendPlayerWindowPlaybackState',
-  '_currentPopoutVideo', '_sendPlayerWindowInitialState', '_sendLoadVideoToPopout',
+  '_currentPopoutVideo', '_sendPlayerWindowInitialState', '_inlineTimelineView', '_sendLoadVideoToPopout',
   '_routeLoadedVideoToPlayerWindow', '_streamPlayerWindowData', '_activatePlayerWindow',
   '_deactivatePlayerWindow', '_syncUpNextSuppression', '_setUpNextContext', '_updateQueueUI',
   '_playQueueItem', '_advanceQueueOnEnded', '_playFromLibrary', '_withShuffledStart', '_onGlobalShortcut',
@@ -56,6 +56,8 @@ const ALPHA = 'D:\\Lib\\Alpha.mp4';
 const BRAVO = 'D:\\Lib\\Bravo.mp4';
 const CHARLIE = 'D:\\Lib\\Charlie.mp4';
 const DELTA = 'D:\\Lib\\Delta.mp4';
+// app.js's shouldOfferResume: no resume unless a test says so.
+let offerResume = () => false;
 const item = (path) => ({ name: path.split('\\').pop(), path, _isPathBased: true });
 
 /** The inline <video>: a real EventTarget with the fields the app reads. */
@@ -115,7 +117,7 @@ beforeAll(() => {
     RemotePlaybackProxy,
     PLAYBACK_RATE_PRESETS,
     INLINE_VIZ_OPACITY_DEFAULT: 80,
-    shouldOfferResume: () => false,
+    shouldOfferResume: (...a) => offerResume(...a),
     formatResumeTime: () => '',
     requestAnimationFrame: (fn) => fn(),
   });
@@ -384,6 +386,25 @@ describe('V13: the main window\'s playback keys drive the pop-out, never the hid
 
     expect(video.play).not.toHaveBeenCalled();
     expect(last(PLAYERWIN.LOAD_VIDEO)).toMatchObject({ src: pathToFileURL(BRAVO), autoplay: true, timeMs: 0 });
+  });
+
+  it('a playlist item with a resume point starts there in the pop-out, not at 0 (triage 2026-11-23)', () => {
+    popOut();
+    app._isPlaylistContext = () => true;
+    app.getResumeEntry = (p) => (p === BRAVO ? { position: 42, duration: 600 } : null);
+    app._playQueue = [item(ALPHA), item(BRAVO), item(CHARLIE)];
+    offerResume = (entry) => !!entry;
+    try {
+      app._playQueueItem(1);
+      video.fire('loadeddata');
+      expect(last(PLAYERWIN.LOAD_VIDEO)).toMatchObject({ src: pathToFileURL(BRAVO), autoplay: true, timeMs: 42000 });
+      // The next item has none: back to 0, never the previous one's point.
+      app._playQueueItem(2);
+      video.fire('loadeddata');
+      expect(last(PLAYERWIN.LOAD_VIDEO)).toMatchObject({ src: pathToFileURL(CHARLIE), timeMs: 0 });
+    } finally {
+      offerResume = () => false;
+    }
   });
 
   it('a dropped or opened file (drag-drop, Browse, O key) plays in the pop-out, not behind it', () => {

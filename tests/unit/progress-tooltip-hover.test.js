@@ -75,3 +75,29 @@ describe('the seek-bar hover preview shows only where the pointer is (CB-09)', (
     expect(shown()).toBe(true);
   });
 });
+
+// Test day 2026-11-26 (B097): centred on the cursor, the 160 px frame and
+// script preview went past the window's edge near either end of the bar.
+describe('the hover preview stays inside the bar (B097)', () => {
+  beforeEach(() => {
+    Object.defineProperty(tip(), 'offsetWidth', { value: 160, configurable: true });
+  });
+  const move = (x) => container.dispatchEvent(new MouseEvent('mousemove', { bubbles: true, clientX: x }));
+
+  it('near the left end it stops at its own half-width; the time is still the cursor\'s', () => {
+    move(110); // 1 % in: 1.2 s
+    expect(tip().style.left).toBe('8%'); // 80 px of 1000: its left edge on the bar's
+    expect(document.getElementById('tooltip-time').textContent).toBe('0:01');
+  });
+
+  it('near the right end likewise', () => {
+    move(1090); // 99 %: 118.8 s
+    expect(tip().style.left).toBe('92%');
+    expect(document.getElementById('tooltip-time').textContent).toBe('1:58');
+  });
+
+  it('in the middle it follows the cursor as before', () => {
+    move(600);
+    expect(tip().style.left).toBe('50%');
+  });
+});

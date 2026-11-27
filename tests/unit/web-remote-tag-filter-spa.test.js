@@ -157,13 +157,13 @@ describe('the phone\u2019s Tags filter (P1 tags)', () => {
     expect(badge.textContent).toBe('1');
   });
 
-  it('AND across facets, OR within a facet (the desktop\u2019s filterByTags)', async () => {
-    tick('device:the-handy');
+  it('every ticked tag must be on the video, as the desktop\u2019s filterByTags (Dave 2026-11-22)', async () => {
+    tick('device:the-handy');                              // pov AND the handy
     expect(await showsOnly(['Alpha Scene'])).toBe(true);
-    tick('device:osr2');                                   // OR within Device: still needs pov
-    expect(await showsOnly(['Alpha Scene'])).toBe(true);
-    tick('content:pov', false);                            // Device alone: the handy OR osr2
-    expect(await showsOnly(['Alpha Scene', 'Charlie Clip'])).toBe(true);
+    tick('device:osr2');                                   // no video has all three
+    expect(await showsOnly([])).toBe(true);
+    tick('content:pov', false);                            // the handy AND osr2: still none
+    expect(await showsOnly([])).toBe(true);
     expect(document.getElementById('filtersBadge').textContent).toBe('2');
   });
 

@@ -53,6 +53,9 @@ def _desktop_only_requests(secret_path):
     return [
         ("POST", "/api/media/register", {"json": {"videos": [{"path": secret_path, "name": "x"}]}}),
         ("POST", "/api/media/remux", {"params": {"video_path": missing}}),
+        ("POST", "/api/media/transcode", {"params": {"video_path": missing}}),
+        ("GET", "/api/media/transcode/status", {"params": {"job": "x"}}),
+        ("POST", "/api/media/transcode/cancel", {"params": {"job": "x"}}),
         ("POST", "/api/media/resolve", {"params": {"url": "http://example.invalid/v"}}),
         ("POST", "/thumbnails/generate", {"params": {"video_path": missing}}),
         ("POST", "/thumbnails/single", {"params": {"video_path": missing}}),
@@ -73,7 +76,7 @@ def _no_network_resolve(monkeypatch):
     from services import resolver as resolver_mod
     from services.resolver import ResolveError
 
-    def _boom(_url):
+    def _boom(_url, _max_height=None):
         raise ResolveError("unsupported", "unsupported page")
 
     monkeypatch.setattr(resolver_mod, "resolve", _boom)

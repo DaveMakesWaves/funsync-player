@@ -49,7 +49,11 @@ function toPascalCase(str) {
  * reaches the DOM and must not be treated as a missing icon.
  */
 function usedIconNames(htmlPath) {
-  const raw = fs.readFileSync(path.join(ROOT, htmlPath), 'utf8');
+  return iconNamesIn(fs.readFileSync(path.join(ROOT, htmlPath), 'utf8'));
+}
+
+/** The data-lucide names a page's markup really renders (comments dropped). */
+function iconNamesIn(raw) {
   const live = raw.replace(/<!--[\s\S]*?-->/g, '');
   return [...new Set(
     [...live.matchAll(/data-lucide="([^"]+)"/g)].map((m) => m[1]),
@@ -127,8 +131,10 @@ describe('commented-out markup is excluded', () => {
   // The Load-from-URL button is disabled on purpose and lives inside an HTML
   // comment. Counting it would produce a permanent false failure.
   it('ignores data-lucide inside HTML comments', () => {
-    const raw = fs.readFileSync(path.join(ROOT, 'renderer/index.html'), 'utf8');
-    expect(raw).toContain('data-lucide="link"');       // present in the file
-    expect(usedIconNames('renderer/index.html')).not.toContain('link'); // not in the DOM
+    // index.html's commented-out Load from URL button was the example here
+    // until it came back (2026-11-22); a sample of its own now.
+    const page = '<button><i data-lucide="plus"></i></button>\n<!-- off for now:\n<button><i data-lucide="link"></i></button>\n-->';
+    expect(iconNamesIn(page)).toEqual(['plus']);
+    expect(usedIconNames('renderer/index.html')).toContain('link'); // the button is live again, and registered
   });
 });

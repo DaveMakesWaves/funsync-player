@@ -165,6 +165,23 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
   border-left-color: var(--accent);
 }
 
+/* A short window (800x600, or 125% on 1280x720): the rail fits beside the
+   content instead of needing a scrollbar of its own next to the content's
+   (FT-039 note, TODO triage 2026-11-23: measured 26-80 px over at 800x600).
+   Area rows 28 px and section links 22 px, the areas still above the 24 px
+   minimum target. Taller windows keep the 36 px rows. */
+@media (max-height: 680px) {
+  .settings-panel__rail-item {
+    min-height: 28px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+  .settings-panel__rail-group {
+    padding-top: 3px;
+    padding-bottom: 3px;
+  }
+}
+
 .settings-panel__content {
   max-height: min(60vh, 560px);
   overflow-y: auto;
@@ -444,6 +461,14 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
   background: var(--surface-overlay);
 }
 
+/* A range too narrow to play (Lowest = Highest) plays 5 units wide or more:
+   the note naming that band sits under the line, over the graph, lined up
+   with it (2026-11-20). Two classes: .settings-panel__hint (later in this
+   file) sets its own top and bottom margins. */
+.pattern-summary .pattern-summary__note {
+  margin: 0 0 6px 88px;
+}
+
 /* "Set pattern…" opens the drawer over the whole Settings dialog: the
    dimmed dialog around it (a click there cancels), the sheet from the right.
    Inside the dialog, so it can never leave the window (the docked Fill
@@ -538,7 +563,8 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
 }
 
 @media (max-width: 900px) {
-  .pattern-summary__graph {
+  .pattern-summary__graph,
+  .pattern-summary .pattern-summary__note {
     margin-left: 0;
   }
 }
@@ -696,6 +722,11 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
   flex-direction: column;
   gap: 8px;
   margin-top: 8px;
+}
+/* Holiday's "Falling snow" row sits right under the style cards: give it the
+   cards' own gap and a little more, so it does not touch the last card (Dave). */
+#sp-holiday-snow-field {
+  margin-top: 14px;
 }
 .settings-panel__theme-option {
   display: flex;
@@ -871,6 +902,16 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
 :root[data-theme="light"] .toggle-switch--locked::before,
 :root[data-theme="light"] .settings-panel__source-toggle--locked::before {
   background: transparent;
+}
+
+/* On stays on in the light theme. The light OFF track above outranks the
+   plain `.toggle-switch--on::before` (it has :root and an attribute), so
+   every ON switch here drew grey, as if off: a Library folder that was on,
+   the pattern rows' switches (full manual test 2026-11-23; also in v0.9.2).
+   Holiday's green (holiday.css, loaded later) still wins. */
+:root[data-theme="light"] .toggle-switch--on::before,
+:root[data-theme="light"] .settings-panel__source-toggle--on::before {
+  background: var(--accent);
 }
 
 /* Modern style: rounder track + the shared motion curve, matching the other
@@ -2043,6 +2084,10 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
 .remote-video-modal__btn--primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
 .remote-video-modal__btn--small { padding: 5px 10px; font-size: 12px; }
 .remote-video-modal__hint { font-size: 11px; line-height: 1.5; color: var(--text-muted); }
+/* Not a web address (S029): said under the box, in the error colour drawn
+   toward the text colour, so small text stays readable: the plain error red
+   was 3.85:1 on the dark panel; this is about 4.9:1 there and 8.4:1 on light. */
+.remote-video-modal__hint--error { color: color-mix(in srgb, var(--state-error) 70%, var(--text-primary)); font-size: 12px; }
 .remote-video-modal__footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 
 .remote-video-modal__resolving {
@@ -2501,3 +2546,371 @@ html.backend-banner-shown body > .modal-overlay > .modal-panel {
 @media (prefers-reduced-motion: reduce) {
   .duplicates__item, .duplicates__batch-btn, .duplicates__remove-btn { transition: none; }
 }
+
+/* Load from URL's "Save to library" tick (2026-11-23). */
+.remote-video-modal__save {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.remote-video-modal__save-box { margin: 0; }
+
+/* --- Settings search (2026-11-23) ---
+   One box over the whole dialog. While it holds text, the content column
+   shows every area's matching rows under the area's name, then the
+   settings that live elsewhere in FunSync. Rows search leaves out get
+   `--search-hidden`, never `hidden`: `hidden` belongs to the settings
+   themselves (a threshold shown only while its feature is on). */
+.settings-panel__search {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+}
+.modal-panel--settings .settings-panel__search { flex: none; }
+.settings-panel__search-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+}
+.settings-panel__search-icon {
+  position: absolute;
+  left: 11px;
+  color: var(--text-secondary);
+  pointer-events: none;
+}
+.settings-panel__search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 36px;
+  padding: 8px 34px 8px 34px;
+  background: var(--surface-overlay);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+.settings-panel__search-input:focus { border-color: var(--accent); }
+.settings-panel__search-input:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* Our own clear button, so Chromium's is hidden. */
+.settings-panel__search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+.settings-panel__search-clear {
+  position: absolute;
+  right: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.settings-panel__search-clear:hover { color: var(--text-primary); background: var(--bg-hover, rgba(255, 255, 255, 0.06)); }
+.settings-panel__search-clear:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.settings-panel__search-status {
+  flex: none;
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.settings-panel__search-status:empty { display: none; }
+
+.settings-panel__search-hidden { display: none !important; }
+
+/* An area's name over its results while searching. */
+.settings-panel__area-heading {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin: 2px 0 8px;
+}
+/* Space above every result block but the first one shown (blocks reorder
+   by best match while searching). */
+.settings-panel__content--searching > :not([hidden]) ~ :not([hidden]) .settings-panel__area-heading { margin-top: 24px; }
+
+.settings-panel__rail-count {
+  display: inline-block;
+  min-width: 18px;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: var(--text-on-accent, #fff);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 14px;
+  text-align: center;
+  vertical-align: 1px;
+}
+.settings-panel__rail-item--no-results { opacity: 0.45; }
+
+/* Settings that live outside this dialog. */
+.settings-panel__elsewhere-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+}
+.settings-panel__elsewhere-row:last-child { border-bottom: none; }
+.settings-panel__elsewhere-text { flex: 1 1 auto; min-width: 0; }
+.settings-panel__elsewhere-title { font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.settings-panel__elsewhere-text .settings-panel__hint { margin: 2px 0 0; }
+/* The shared add-button grows to fill its row; here it is just a button. */
+.settings-panel__elsewhere-open {
+  flex: 0 0 auto;
+  width: auto;
+  min-width: 72px;
+  margin: 0;
+  padding: 6px 14px;
+  border-style: solid;
+}
+
+.settings-panel__search-empty { padding: 24px 4px; }
+.settings-panel__search-empty-line { font-size: 13px; color: var(--text-primary); margin-bottom: 4px; }
+
+/* Device motion's pointer to Devices. */
+.settings-panel__area-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.settings-panel__area-note > span { flex: 1 1 auto; min-width: 0; }
+.settings-panel__area-note-btn {
+  flex: none;
+  min-height: 30px;
+  padding: 4px 12px;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.settings-panel__area-note-btn:hover { border-color: var(--accent); }
+.settings-panel__area-note-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* The typed words, marked where they appear (no DOM change). */
+::highlight(settings-search) {
+  background-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: inherit;
+}
+
+/* While searching, results come from every area: no one area is "current". */
+.settings-panel__layout--searching .settings-panel__rail-item--active {
+  color: var(--text-secondary);
+  border-left-color: transparent;
+  font-weight: 400;
+}
+
+/* Long hints fold (DESIGN.md §1.8, §2.14): two lines, then "More". The text
+   stays in the DOM for search and screen readers. While the settings search
+   runs every fold opens, so a match is never hidden in a folded line. */
+.settings-panel__hint--folded {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  margin-bottom: 0;
+}
+.settings-panel__hint-more {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;           /* the filter-chip precedent (§2.3) */
+  margin: 0 0 6px;
+  padding: 0 4px;
+  border: none;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.settings-panel__hint-more:hover { color: var(--text-primary); }
+.settings-panel__hint-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+.settings-panel__content--searching .settings-panel__hint--folded {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: unset;
+  overflow: visible;
+}
+.settings-panel__content--searching .settings-panel__hint-more { display: none; }
+
+/* The delete dialog (DESIGN.md §2.18): every file with its kind and size,
+   files another video uses greyed and kept, the Recycle Bin by default, and
+   the permanent warning in the error colours with its forcing tick box. */
+.modal-panel.delete-files { max-width: 560px; }
+.delete-files__intro { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); }
+.delete-files__list {
+  list-style: none; margin: 0 0 8px; padding: 0;
+  max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+}
+.delete-files__row { display: flex; align-items: flex-start; gap: 10px; padding: 8px 12px; }
+.delete-files__row + .delete-files__row { border-top: 1px solid var(--border-subtle); }
+.delete-files__row--kept { opacity: 0.6; }
+.delete-files__check { margin-top: 2px; width: 16px; height: 16px; flex-shrink: 0; accent-color: var(--accent); }
+.delete-files__label { display: flex; flex-direction: column; gap: 2px; min-width: 0; cursor: pointer; }
+.delete-files__name { font-size: 13px; color: var(--text-primary); overflow-wrap: anywhere; }
+.delete-files__meta { font-size: 11px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.delete-files__shared { font-size: 11px; color: var(--state-warning); }
+.delete-files__total { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); }
+.delete-files__how { margin: 0 0 12px; padding: 0; border: none; display: flex; flex-direction: column; gap: 6px; }
+.delete-files__legend { margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.delete-files__option { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: 6px; cursor: pointer; }
+.delete-files__option:hover { background: var(--surface-overlay); }
+.delete-files__option input { margin-top: 2px; accent-color: var(--accent); }
+.delete-files__option-text { display: flex; flex-direction: column; gap: 2px; }
+.delete-files__option-label { font-size: 13px; color: var(--text-primary); }
+.delete-files__option-hint { font-size: 11px; color: var(--text-secondary); }
+.delete-files__note { margin: 0; font-size: 12px; color: var(--state-warning); }
+.delete-files__warning {
+  margin: 0 0 14px; padding: 10px 12px; border-radius: 8px;
+  background: var(--state-error-soft); border: 1px solid var(--state-error);
+}
+.delete-files__warning-text { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.delete-files__understand { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+.delete-files__understand input { width: 16px; height: 16px; accent-color: var(--state-error); }
+.delete-files__go:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Library ▾ Disabled videos (zaikechi #381): review, play, enable, delete. */
+.modal-panel.disabled-videos-panel { max-width: 620px; }
+.disabled-videos__intro { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
+.disabled-videos__count { margin: 0 0 8px; font-size: 12px; color: var(--text-secondary); }
+.disabled-videos__list { max-height: 360px; overflow-y: auto; border: 1px solid var(--border-subtle); border-radius: 8px; }
+.disabled-videos__list:empty { display: none; }
+.disabled-videos__row { display: flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px; }
+.disabled-videos__row + .disabled-videos__row { border-top: 1px solid var(--border-subtle); }
+.disabled-videos__mark { display: inline-flex; color: var(--text-secondary); flex-shrink: 0; }
+.disabled-videos__text { flex: 1; min-width: 0; }
+.disabled-videos__name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disabled-videos__folder { font-size: 11px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.disabled-videos__icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex-shrink: 0; padding: 0;
+  border: none; border-radius: 6px; background: none;
+  color: var(--text-secondary); cursor: pointer;
+}
+.disabled-videos__icon-btn:hover:not(:disabled),
+.disabled-videos__icon-btn:focus-visible { color: var(--text-primary); background: var(--surface-overlay); }
+.disabled-videos__icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.disabled-videos__delete:hover,
+.disabled-videos__delete:focus-visible { color: var(--state-error); background: var(--state-error-soft); }
+.disabled-videos__footer { display: flex; justify-content: flex-end; margin-top: 12px; }
+
+/* "Follow…" on a playlist (zaikechi #381). */
+.modal-panel.playlist-follow { max-width: 560px; }
+.playlist-follow__intro { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); }
+.playlist-follow__choices { margin: 0 0 12px; padding: 0; border: none; display: flex; flex-direction: column; gap: 8px; }
+.playlist-follow__legend { margin-bottom: 6px; font-size: 12px; font-weight: 600; color: var(--text-secondary); }
+.playlist-follow__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-height: 36px; }
+.playlist-follow__option { display: inline-flex; align-items: center; gap: 8px; min-width: 190px; font-size: 13px; color: var(--text-primary); cursor: pointer; }
+.playlist-follow__option input { accent-color: var(--accent); }
+.playlist-follow__select { flex: 1 1 200px; min-width: 0; height: 32px; }
+.playlist-follow__folder { display: flex; align-items: center; gap: 8px; flex: 1 1 240px; min-width: 0; }
+.playlist-follow__folder-path { flex: 1; min-width: 0; font-size: 12px; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.playlist-follow__note { margin: 0 0 14px; font-size: 12px; color: var(--text-secondary); }
+
+/* Devices ▸ Buttplug ▸ Sync test… (brokenobj #431). */
+.modal-panel.bt-sync-test { max-width: 560px; }
+.bt-sync-test__intro { margin: 0 0 8px; font-size: 13px; color: var(--text-secondary); }
+.bt-sync-test__devices { margin: 0 0 12px; font-size: 12px; color: var(--text-secondary); }
+.bt-sync-test__none { margin: 0 0 14px; font-size: 13px; color: var(--state-warning); }
+.bt-sync-test__step { margin: 0 0 14px; padding: 12px; border: 1px solid var(--border-subtle); border-radius: 8px; }
+.bt-sync-test__step-title { margin: 0 0 4px; font-size: 13px; font-weight: 600; color: var(--text-primary); }
+.bt-sync-test__hint { margin: 0 0 10px; font-size: 12px; color: var(--text-secondary); }
+.bt-sync-test__row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.bt-sync-test__result { font-size: 12px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.bt-sync-test__slider { flex: 1 1 180px; accent-color: var(--accent); }
+.bt-sync-test__value { min-width: 110px; font-size: 12px; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+/* The beat's flash: a dot that lights on each beat and fades (no glow). */
+.bt-sync-test__flash {
+  width: 44px; height: 44px; margin: 0 auto 12px; border-radius: 50%;
+  background: var(--surface-overlay); border: 2px solid var(--border-subtle);
+}
+.bt-sync-test__flash.is-on { animation: bt-sync-flash 300ms ease-out; }
+@keyframes bt-sync-flash { from { background: var(--accent); border-color: var(--accent); } to { background: var(--surface-overlay); border-color: var(--border-subtle); } }
+@media (prefers-reduced-motion: reduce) {
+  .bt-sync-test__flash.is-on { animation-duration: 120ms; }
+}
+
+/* === Script backups: "Restore an earlier version…" ===
+ * renderer/components/script-backups-dialog.js (editor work list 3.1,
+ * 2026-11-24). Flat on purpose: semantic tokens only (DESIGN.md §2.1), so
+ * dark, light, Modern and Holiday all follow without a theme block here; no
+ * glow, no shadow of its own. Rows are 44 px tall (Fitts, §2.3) and the list
+ * scrolls inside the dialog when 20 versions do not fit. Restore stays the
+ * secondary button: it writes nothing, Undo takes it back. */
+.modal-panel.script-backups { max-width: 520px; }
+.script-backups__file {
+  margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.script-backups__status { margin: 0 0 12px; font-size: 13px; color: var(--text-secondary); }
+.script-backups__intro { margin: 0 0 12px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+.script-backups__list {
+  list-style: none; margin: 0 0 16px; padding: 0;
+  max-height: 320px; overflow-y: auto;
+  border: 1px solid var(--border-subtle); border-radius: 8px;
+}
+.script-backups__row { display: flex; align-items: center; gap: 12px; min-height: 44px; padding: 6px 8px 6px 12px; }
+.script-backups__row + .script-backups__row { border-top: 1px solid var(--border-subtle); }
+.script-backups__row:hover { background: var(--surface-overlay); }
+.script-backups__label {
+  flex: 1 1 auto; min-width: 0; font-size: 13px; color: var(--text-primary);
+  font-variant-numeric: tabular-nums; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.script-backups__restore { flex: 0 0 auto; min-height: 32px; padding: 6px 14px; }
+.script-backups__restore:disabled { opacity: 0.5; cursor: default; }
+.script-backups__error { margin: 0 0 12px; font-size: 13px; color: var(--state-error); }
+.script-backups__list::-webkit-scrollbar { width: 6px; }
+.script-backups__list::-webkit-scrollbar-track { background: transparent; }
+.script-backups__list::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 3px; }
+/* Empty state (§2.11): dimmed icon, heading, hint. */
+.script-backups__empty { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 16px 8px 20px; text-align: center; }
+.script-backups__empty-icon { color: var(--text-secondary); opacity: 0.5; }
+.script-backups__empty-title { margin: 4px 0 0; font-size: 14px; font-weight: 600; color: var(--text-primary); }
+.script-backups__empty-hint { margin: 0; max-width: 380px; font-size: 13px; line-height: 1.5; color: var(--text-secondary); }
+/* The EroScripts download record of the files, offered to forget (2026-11-25). */
+.delete-files__forget { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 12px; padding: 8px 10px; border-radius: 6px; cursor: pointer; background: var(--surface-overlay); }
+.delete-files__forget input { margin-top: 2px; accent-color: var(--accent); }
+
+/* Export Backup File's question (2026-11-26): keys and logins out by default;
+   the option row looks like the delete dialog's "Also forget…" row, and once
+   ticked its "not recommended" note turns the warning colour. */
+.export-backup__secrets { display: flex; align-items: flex-start; gap: 10px; margin: 14px 0 4px; padding: 10px 12px; border-radius: 6px; cursor: pointer; background: var(--surface-overlay); border: 1px solid transparent; }
+.export-backup__secrets-check { margin-top: 2px; flex: none; accent-color: var(--accent); }
+.export-backup__secrets-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.export-backup__secrets-label { color: var(--text-primary); font-weight: 500; }
+.export-backup__secrets-hint { color: var(--text-secondary); font-size: 12px; line-height: 1.4; }
+.export-backup__secrets--on { border-color: var(--state-warning); }
+.export-backup__secrets--on .export-backup__secrets-hint { color: var(--state-warning); }

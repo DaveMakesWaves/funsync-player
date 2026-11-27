@@ -146,8 +146,8 @@ export function openKeyboardHelp(title, groups) {
 // against the active locale at modal-open time. Keyboard combos are written
 // in canonical English here (the clash test parses them) and translated
 // when the overlay renders them (localizeChordPart, CB-08).
-export function getPlayerShortcutGroups() {
-  return [
+export function getPlayerShortcutGroups({ vrZoomKeys } = {}) {
+  const groups = [
     {
       title: t('kbd.navigation'),
       rows: [
@@ -185,6 +185,8 @@ export function getPlayerShortcutGroups() {
         ['Shift+R',       t('kbd.vrFlatten')],
         ['Shift+Arrows',  t('kbd.vrPan')],
         ['Ctrl+Scroll',   t('kbd.vrZoom')],
+        // The defaults; the keys bound in Settings > Keyboard replace them below.
+        ['= / -',         t('kbd.vrZoomKeys')],
         ['Ctrl+0',        t('kbd.vrZoomReset')],
         ['<',             t('kbd.speedDown')],
         ['>',             t('kbd.speedUp')],
@@ -220,6 +222,8 @@ export function getPlayerShortcutGroups() {
                               ? t('kbd.edgeHoldPatternToggle') : t('kbd.edgeHoldPattern'))
                             : (dataService?.get?.('player.edgeHoldMode') === 'toggle'
                               ? t('kbd.edgeHoldToggle') : t('kbd.edgeHold'))],
+        // Stop all (DESIGN.md §2.15): the one stop, whatever drives the devices.
+        ['Shift+Space',   t('kbd.stopAll')],
       ],
     },
     {
@@ -259,15 +263,34 @@ export function getPlayerShortcutGroups() {
       ],
     },
   ];
+  // VR zoom with no Ctrl: the keys actually bound (Settings > Keyboard >
+  // VR zoom keys), the numpad's + / - with them.
+  const zoom = vrZoomKeys ? [vrZoomKeys.in, vrZoomKeys.out].filter(Boolean).map((b) => formatBindingLabel(b)) : null;
+  if (zoom) {
+    const label = t('kbd.vrZoomKeys');
+    for (const g of groups) {
+      // No key bound for either: the row goes (the Ctrl keys are listed above).
+      if (!zoom.length) { g.rows = g.rows.filter((row) => row[1] !== label); continue; }
+      for (const row of g.rows) if (row[1] === label) row[0] = zoom.join(' / ');
+    }
+  }
+  return groups;
 }
 
-export function getEditorShortcutGroups() {
+/**
+ * @param {object} [opts]
+ * @param {Array} [opts.customPositionKeys]  the bindings to list; the editor POP-OUT
+ *   passes the ones its parent sent (it has no settings store of its own, so its
+ *   '?' list left them out; FT-103, fixed 2026-11-22). Without it, read from the store.
+ */
+export function getEditorShortcutGroups({ customPositionKeys } = {}) {
   return [
     {
       title: t('kbd.editorSelection'),
       rows: [
-        ['Up / Down',           t('kbd.editorPrevNextAction')],
+        ['Down / Up',           t('kbd.editorPrevNextAction')], // Down = previous, Up = next, as in OFS (2026-11-22)
         ['Ctrl+Up / Ctrl+Down', t('kbd.editorPrevNextAcrossScripts')],
+        ['PageUp / PageDown',   t('kbd.editorPrevNextScript')],
         ['Left / Right',        t('kbd.editorStepFrame')],
         ['Ctrl+Left / Right',   t('kbd.editorFastFrame')],
         ['Ctrl+A',              t('kbd.editorSelectAll')],
@@ -287,6 +310,7 @@ export function getEditorShortcutGroups() {
         ['E',                   t('kbd.editorEqualize')],
         ['End',                 t('kbd.editorMoveToPlayhead')],
         ['Del / Backspace',     t('kbd.editorDelete')],
+        ['Shift+Del',           t('kbd.editorRippleDelete')],
         ['Ctrl+I',              t('kbd.editorInvert')],
         ['P',                   t('kbd.editorFillPattern')],
       ],
@@ -303,7 +327,9 @@ export function getEditorShortcutGroups() {
         ['B',                   t('kbd.editorBookmark')],
         ['Shift+B / Ctrl+B',    t('kbd.editorBookmarkNav')],
         ['R',                   t('kbd.editorRecording')],
+        ['Shift+R',             t('editor.gamepad.help')],
         ['W',                   t('kbd.editorWaveform')],
+        ['T',                   t('kbd.editorReference')],
         ['Shift+W',             t('kbd.editorMultiBand')],
         ['V',                   t('kbd.editorVAD')],
         ['[ / ]',                t('kbd.editorSpeedStep')],
@@ -318,6 +344,7 @@ export function getEditorShortcutGroups() {
         ['Ctrl+V',                t('kbd.editorPaste')],
         ['Ctrl+Shift+V',          t('kbd.editorPasteOriginal')],
         ['Ctrl+S',                t('kbd.editorSave')],
+        ['Ctrl+Shift+S',          t('kbd.editorSaveAs')],
       ],
     },
     {
@@ -328,7 +355,7 @@ export function getEditorShortcutGroups() {
         ['?',                   t('kbd.showHelp')],
       ],
     },
-    ...buildCustomPositionKeysGroup(),
+    ...buildCustomPositionKeysGroup(customPositionKeys),
   ];
 }
 
@@ -339,12 +366,16 @@ export function getEditorShortcutGroups() {
  * Nielsen #6 (recognition > recall), users should be able to find their
  * own bindings via `?` without rummaging through Settings.
  */
-function buildCustomPositionKeysGroup() {
+function buildCustomPositionKeysGroup(given) {
   let bindings = [];
-  try {
-    const raw = dataService?.get?.('editor.customPositionKeys');
-    if (Array.isArray(raw)) bindings = raw;
-  } catch { /* not initialised — fall through to empty group */ }
+  if (Array.isArray(given)) {
+    bindings = given;
+  } else {
+    try {
+      const raw = dataService?.get?.('editor.customPositionKeys');
+      if (Array.isArray(raw)) bindings = raw;
+    } catch { /* not initialised — fall through to empty group */ }
+  }
   if (bindings.length === 0) return [];
   return [{
     title: t('editor.customKeysHelpGroup'),

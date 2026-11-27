@@ -22,7 +22,8 @@
 // (V48). Silently failing to bind is how a hotkey feature becomes "it doesn't
 // work" with nothing to debug, so every failure is logged, once.
 
-const GLOBAL_ACTIONS = ['playPause', 'orgasm', 'edge'];
+// stopAll: Stop all (DESIGN.md §2.15), unbound by default like the rest.
+const GLOBAL_ACTIONS = ['playPause', 'orgasm', 'edge', 'stopAll'];
 
 /**
  * @param {object} deps
@@ -42,7 +43,7 @@ function createGlobalShortcuts({ globalShortcut, log, onFire }) {
 
   /**
    * Replace every registration with `bindings`.
-   * @param {{playPause?: string, orgasm?: string, edge?: string}} bindings
+   * @param {{playPause?: string, orgasm?: string, edge?: string, stopAll?: string}} bindings
    * @returns {{action: string, accelerator: string, ok: boolean, reason?: 'taken'|'invalid'}[]}
    */
   function apply(bindings = {}) {

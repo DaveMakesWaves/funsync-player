@@ -44,6 +44,9 @@ export const FILL_MIN_LEG_MS = 100;
 export const FILL_MIN_VIB_LEG_MS = 50;
 /** u/s: the default speed cap, unless 1.5x the fastest asked speed is higher. */
 export const FILL_DEFAULT_CAP = 600;
+/** u/s: "no cap" (the editor drawer since 2026-11-24, Dave: no limit). Finite on
+ *  purpose: Infinity turns the core's leg maths into NaN; no script moves this fast. */
+export const FILL_NO_CAP = 5000;            // Dave: "infinite can be 5000" (the Settings speed field's top)
 /** The tempo bounds of the "stretch" end fit. */
 export const FILL_TEMPO_MIN = 0.87;
 export const FILL_TEMPO_MAX = 1.15;
@@ -233,7 +236,8 @@ function resolveOptions(o, desc) {
   const rampTo = numOr(rampRaw, NaN) > 0 ? Number(rampRaw) : null;
   const speedA = speedGiven ? asked : own;
   const speedB = rampTo !== null ? rampTo : speedA;
-  const capAsked = numOr(o.maxSpeed, NaN);
+  // Infinity means no cap: FILL_NO_CAP (numOr reads Infinity as "not a number").
+  const capAsked = o.maxSpeed === Infinity ? FILL_NO_CAP : numOr(o.maxSpeed, NaN);
   const cap = capAsked > 0 ? capAsked : Math.max(FILL_DEFAULT_CAP, 1.5 * Math.max(speedA, speedB));
   const minLeg = numOr(o.minLegMs, NaN) > 0 ? Math.round(o.minLegMs) : FILL_MIN_LEG_MS;
   const minVib = Math.min(minLeg, numOr(o.minVibLegMs, NaN) > 0 ? Math.round(o.minVibLegMs) : FILL_MIN_VIB_LEG_MS);
@@ -248,6 +252,9 @@ function resolveOptions(o, desc) {
   const strokeOwn = numOr(desc.strokeMs, 0) > 0 ? desc.strokeMs : 1000;
   return {
     speedGiven, speedA, speedB, rampTo, cap, minLeg, minVib, range,
+    // allowFast: the pattern's own legs may be as short as FAST_LEG (17 ms)
+    // too (the editor drawer: no speed limit, Dave 2026-11-24).
+    allowFast: o.allowFast === true,
     reversed: o.reversed === true,
     variation: numOr(o.variation, 1),
     seed: o.seed !== undefined && o.seed !== null && o.seed !== '' ? o.seed : 1,
@@ -335,7 +342,7 @@ function fillStretch({ L, R, seed, vA, vB, cfg, render, patternId, warn }) {
   // Render D ms from t0 and turn it into the head (A, or the render's own first point when the start is free) and the
   // rendered points after it, started the way A is heading.
   const renderFrom = (D) => {
-    const opts = { durationMs: D, from: t0, reversed: cfg.reversed, variation: cfg.variation, seed, maxSpeed: cfg.cap };
+    const opts = { durationMs: D, from: t0, reversed: cfg.reversed, variation: cfg.variation, seed, maxSpeed: cfg.cap, allowFast: cfg.allowFast };
     if (cfg.range) opts.range = { min: cfg.range.min, max: cfg.range.max };
     if (!L.free) { opts.startPos = L.pos; if (L.headDir) opts.startDir = L.headDir; }
     if (cfg.speedGiven || vA !== vB) {

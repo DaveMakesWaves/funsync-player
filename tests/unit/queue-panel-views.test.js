@@ -23,6 +23,9 @@
 import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import { liftAppClass } from './helpers/app-methods.js';
+// _wireSpeedControl moves focus into its popover with these (menu-keys.js, 2026-11-25);
+// without them each test that opened the speed menu threw an uncaught ReferenceError.
+import { wireMenuKeys, moveMenuFocus, focusMenuFromKeyboard } from '../../renderer/js/menu-keys.js';
 import { QueuePanel } from '../../renderer/components/queue-panel.js';
 import { KeyboardHandler } from '../../renderer/js/keyboard.js';
 import { Library } from '../../renderer/components/library.js';
@@ -51,10 +54,10 @@ let panelEl;
 
 beforeAll(() => {
   Lifted = liftAppClass([
-    '_toggleQueuePanel', '_syncQueueToggles', '_positionQueuePanelForView',
+    '_toggleQueuePanel', '_syncQueueToggles', '_positionQueuePanelForView', '_applyQueueDock', '_toggleQueueDock',
     '_updateQueuePanelState', '_getUpcoming', '_keyboardOptions', '_currentView',
     '_wireSpeedControl',
-  ], { document, window, eventBus: { on() {} }, PLAYBACK_RATE_PRESETS: [0.5, 1, 1.5] });
+  ], { document, window, eventBus: { on() {} }, PLAYBACK_RATE_PRESETS: [0.5, 1, 1.5], wireMenuKeys, moveMenuFocus, focusMenuFromKeyboard });
 });
 
 function settingsFake(extra = {}) {
@@ -454,7 +457,9 @@ describe('V27: the queue opens from Playlists and Categories, below their header
       expect(bottomIn('library')).toMatch(/^0(px)?$/);
       expect(bottomIn('playlists')).toMatch(/^0(px)?$/);
       expect(bottomIn('categories')).toMatch(/^0(px)?$/);
-      expect(bottomIn('player')).toBe('100px');
+      // 100 px above the control bar, plus the TL / HM strip's height when
+      // it sits under the video and lifts the bar (0 otherwise; 2026-11-23).
+      expect(bottomIn('player')).toBe('calc(100px + var(--inline-viz-band-root, 0px))');
     } finally {
       style.remove();
     }
@@ -509,5 +514,65 @@ describe('R4-03: the Up Next card sits left of the open queue panel', () => {
     panelEl.classList.add('queue-panel--open');
     document.getElementById('player-container').classList.add('player-container--mini');
     expect(right()).toBe('8px');
+  });
+});
+
+// zaikechi #381 (2026-11-22): the queue docked beside the video, which gets smaller. The panel's own dock
+// button; the choice is saved; only in the player view while the panel is open.
+describe('the queue docked beside the video (#381)', () => {
+  function dockedApp(saved) {
+    const settings = settingsFake({ 'player.queueDocked': saved });
+    app.settings = settings;
+    app.queuePanel = new QueuePanel({
+      element: panelEl,
+      library: null,
+      settings,
+      onClose: () => app._toggleQueuePanel(),
+      isDocked: () => settings.get('player.queueDocked') === true,
+      onToggleDock: () => app._toggleQueueDock(),
+    });
+    return settings;
+  }
+  const docked = () => document.getElementById('app').classList.contains('app--queue-docked');
+  const dockBtn = () => panelEl.querySelector('.queue-panel__dock');
+
+  it('the dock button docks it and says so; a second press floats it again; the choice is saved', () => {
+    const settings = dockedApp(false);
+    app._toggleQueuePanel();
+    expect(docked()).toBe(false);
+    expect(dockBtn().getAttribute('aria-pressed')).toBe('false');
+    dockBtn().focus();
+    dockBtn().click();
+    expect(settings.get('player.queueDocked')).toBe(true);
+    expect(docked()).toBe(true);
+    expect(dockBtn().getAttribute('aria-pressed')).toBe('true');
+    expect(document.activeElement).toBe(dockBtn());           // the redraw keeps the focus on it
+    dockBtn().click();
+    expect(settings.get('player.queueDocked')).toBe(false);
+    expect(docked()).toBe(false);
+  });
+
+  it('docked is only while the panel is open, and only in the player view', () => {
+    dockedApp(true);
+    expect(docked()).toBe(false);
+    app._toggleQueuePanel();                                    // open
+    expect(docked()).toBe(true);
+    app._toggleQueuePanel();                                    // closed: the video gets its width back
+    expect(docked()).toBe(false);
+    app._toggleQueuePanel();
+    view('library');
+    app._positionQueuePanelForView();                           // what a view change runs while it is open
+    expect(docked()).toBe(false);
+    view('player');
+    app._positionQueuePanelForView();
+    expect(docked()).toBe(true);
+  });
+
+  it('the CSS gives the video and the strip the width the panel does not take, and hides the button outside the player', () => {
+    const css = fs.readFileSync('renderer/styles/queue-panel.css', 'utf8').replace(/\r\n/g, '\n');
+    expect(css).toMatch(/#app\.app--queue-docked \.player-container:not\(\.player-container--mini\) \.player__video-wrapper \{\n  width: calc\(100% - var\(--queue-panel-width\)\);/);
+    expect(css).toMatch(/#app\.app--queue-docked \.player-container:not\(\.player-container--mini\) \.inline-viz \{\n  right: var\(--queue-panel-width\);/);
+    expect(css).toMatch(/#app:not\(\[data-view="player"\]\) \.queue-panel__dock \{\n  display: none;/);
+    expect(fs.readFileSync('electron/store.js', 'utf8')).toMatch(/queueDocked: false,/);
   });
 });

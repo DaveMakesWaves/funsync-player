@@ -29,6 +29,20 @@ describe('cleanSearchName: the query a search starts with', () => {
     expect(cleanSearchName(name)).toBe(query);
   });
 
+  // v0.10.1: a slug-style name searched as one long word and found nothing
+  // (the auto-match and the nav button searched the raw name, 2026-11-20).
+  it.each([
+    ['anna-claire-clouds-takes-on-a-mouthful-of-cum_1080p.mp4', 'anna claire clouds takes on a mouthful of cum'],
+    ['AJVR-142-C_180_LR.mp4', 'AJVR 142 C 180 LR'],
+    ['my-scene-part-2-4k.mp4', 'my scene part 2'],
+    ['clip-name-2023-05-12.mp4', 'clip name'],
+    ['clip-name-12-05-2023.mp4', 'clip name'],
+    ['Kat Violet - Deep Throat.mp4', 'Kat Violet Deep Throat'],
+    ['Zoë-Ångström-Scene.mp4', 'Zoë Ångström Scene'],
+  ])('hyphens joining words: %s -> %s', (name, query) => {
+    expect(cleanSearchName(name)).toBe(query);
+  });
+
   it('keeps title words that only look like noise elsewhere, and a name that is all noise', () => {
     expect(cleanSearchName('Final Fantasy Raw Sub Training.mp4')).toBe('Final Fantasy Raw Sub Training');
     expect(cleanSearchName('Scene (1) Remastered.mp4')).toBe('Scene 1 Remastered');   // "(1)" only when trailing

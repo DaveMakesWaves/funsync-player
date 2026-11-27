@@ -1,7 +1,103 @@
 // EditableScript — Mutable funscript action array with undo/redo, selection, clipboard
 
 import { parseFunscriptTime } from './funscript-time.js';
-import { halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend } from './script-modifiers.js';
+import * as Modifiers from './script-modifiers.js';
+
+const { halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend } = Modifiers;
+
+/**
+ * What each undo step is called in the undo history menu (editor work list
+ * 4.5, 2026-11-24). Every undo / redo entry carries one of these locale keys
+ * plus its ICU params ({count} where the count is known); the menu
+ * translates them when it opens, so a language switch never leaves stale
+ * text in the history. This module stays free of i18n: keys only.
+ */
+export const HISTORY_LABELS = Object.freeze({
+  insert: 'editor.history.insert',
+  editPoint: 'editor.history.editPoint',
+  delete: 'editor.history.delete',
+  cut: 'editor.history.cut',
+  rippleDelete: 'editor.history.rippleDelete',
+  move: 'editor.history.move',
+  drag: 'editor.history.drag',
+  moveToPlayhead: 'editor.history.moveToPlayhead',
+  paste: 'editor.history.paste',
+  pasteExact: 'editor.history.pasteExact',
+  equalize: 'editor.history.equalize',
+  invert: 'editor.history.invert',
+  simplify: 'editor.history.simplify',
+  modify: 'editor.history.modify',
+  insertPoints: 'editor.history.insertPoints',
+  generatePattern: 'editor.history.generatePattern',
+  beats: 'editor.history.beats',
+  fillGaps: 'editor.history.fillGaps',
+  fill: 'editor.history.fill',
+  metadata: 'editor.history.metadata',
+  addBookmark: 'editor.history.addBookmark',
+  removeBookmark: 'editor.history.removeBookmark',
+  restore: 'editor.history.restore',
+  edit: 'editor.history.edit',
+});
+
+/**
+ * A modifier's undo label, from the EXPORTED function it is (editor work list
+ * 4.5): matched by reference against script-modifiers.js, so the Modify menu,
+ * its dialogs and the pop-out's name lookup (editor-popout-dispatch.js
+ * POPOUT_MODIFIERS) all land on the same name. The keys are the Modify
+ * menu's own (editor.modify.*), already in every locale; the menu strips
+ * their trailing "…". A function that is not an export (a lambda) is "Modify".
+ */
+const MODIFIER_LABEL_KEYS = {
+  halfSpeed: 'editor.modify.halfSpeed',
+  doubleSpeed: 'editor.modify.doubleSpeed',
+  reverseActions: 'editor.modify.reverse',
+  remapRange: 'editor.modify.remapRange',
+  offsetTime: 'editor.modify.offsetTime',
+  removePauses: 'editor.modify.removePauses',
+  rangeExtend: 'editor.modify.rangeExtend',
+  fadeIn: 'editor.modify.fadeIn',
+  fadeOut: 'editor.modify.fadeOut',
+  vibrateBetween: 'editor.modify.vibrate',
+};
+const MODIFIER_LABELS = new Map(
+  Object.entries(MODIFIER_LABEL_KEYS)
+    .filter(([name]) => typeof Modifiers[name] === 'function')
+    .map(([name, key]) => [Modifiers[name], key]),
+);
+
+/**
+ * The undo label for applyModifier(fn, ...args).
+ * @param {Function} fn
+ * @param {Array} [args]
+ * @returns {string} a locale key
+ */
+export function modifierLabel(fn, args = []) {
+  // fadeDepth(actions, 'in' | 'out') is the one export whose name depends on an argument.
+  if (fn === Modifiers.fadeDepth) return args[0] === 'out' ? MODIFIER_LABEL_KEYS.fadeOut : MODIFIER_LABEL_KEYS.fadeIn;
+  return MODIFIER_LABELS.get(fn) || HISTORY_LABELS.modify;
+}
+
+/**
+ * The metadata block OpenFunscripter writes (editor work list 5.3,
+ * 2026-11-24): OFS-lib/Funscript/Funscript.h `struct Metadata`, serialised by
+ * nlohmann::json, whose object keeps its keys in alphabetical order, so a
+ * block written here reads the same as one OFS wrote. Each value is OFS's
+ * empty default (type "basic", duration 0). `duration` is filled in at write
+ * time (toFunscriptJSON).
+ */
+const OFS_METADATA_DEFAULTS = Object.freeze({
+  creator: '',
+  description: '',
+  duration: 0,
+  license: '',
+  notes: '',
+  performers: [],
+  script_url: '',
+  tags: [],
+  title: '',
+  type: 'basic',
+  video_url: '',
+});
 
 /**
  * Modifiers that read the ORDER or SPACING of the points they are given, so
@@ -14,7 +110,8 @@ import { halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend } fro
  * function reference, so every route (Modify menu, modals, the pop-out's
  * name lookup) gets the same guard.
  */
-export const SEQUENCE_MODIFIERS = new Set([halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend]);
+// Vibrate fills the gaps between neighbouring points: a run only (2026-11-24).
+export const SEQUENCE_MODIFIERS = new Set([halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend, Modifiers.vibrateBetween]);
 
 const roundAction = (a) => ({ at: Math.round(a.at), pos: Math.round(Math.max(0, Math.min(100, a.pos))) });
 
@@ -61,6 +158,11 @@ export class EditableScript {
     this._maxUndoSteps = 100;
     this._metadata = {};
     this._bookmarks = [];
+    // The video's length in ms, for the saved metadata block's `duration`
+    // (editor work list 5.3). A property of the VIDEO, not the script, so no
+    // load, clear or axis switch resets it: the editor sets it whenever the
+    // video's length is known (setVideoDuration). 0 = unknown.
+    this._videoDurationMs = 0;
 
     /** @type {Function|null} Callback fired after every mutation */
     this.onChange = null;
@@ -79,7 +181,8 @@ export class EditableScript {
     this._lastCreated = new Set();
     this._undoStack = [];
     this._redoStack = [];
-    this._clipboard = [];
+    // The clipboard stays: copy on one axis, paste on another (OFS keeps one
+    // clipboard for the app; multi-axis editing, 2026-11-24).
     this._dirty = false;
     this._markLoaded();
 
@@ -114,7 +217,8 @@ export class EditableScript {
     this._lastCreated = new Set();
     this._undoStack = [];
     this._redoStack = [];
-    this._clipboard = [];
+    // The clipboard stays: copy on one axis, paste on another (OFS keeps one
+    // clipboard for the app; multi-axis editing, 2026-11-24).
     this._dirty = false;
     this._markLoaded();
     this.loadMetadata(data);
@@ -129,7 +233,8 @@ export class EditableScript {
     this._lastCreated = new Set();
     this._undoStack = [];
     this._redoStack = [];
-    this._clipboard = [];
+    // The clipboard stays: copy on one axis, paste on another (OFS keeps one
+    // clipboard for the app; multi-axis editing, 2026-11-24).
     this._dirty = false;
     this._markLoaded();
     this._metadata = {};
@@ -150,6 +255,59 @@ export class EditableScript {
     this._markLoaded();
     this._metadata = {};
     this._bookmarks = [];
+  }
+
+  /**
+   * Everything this script's editing holds, to keep one axis in memory while
+   * another is on screen (multi-axis editing, 2026-11-24): the points, the
+   * selection, undo / redo, the points the last modifier made, bookmarks,
+   * the file's other keys, and the revision ids that say whether it has
+   * unsaved edits (R4-18). A deep copy; importState() puts it back exactly.
+   * The clipboard is not part of it (one clipboard for every axis), nor is
+   * the video length (setVideoDuration: the video's, shared by every axis).
+   * Undo / redo entries keep their history labels (`label`, `params`: plain
+   * data, editor work list 4.5), so the undo history menu names an axis's
+   * steps the same after a switch away and back.
+   */
+  exportState() {
+    const created = [];
+    this._actions.forEach((a, i) => { if (this._lastCreated.has(a)) created.push(i); });
+    return structuredClone({
+      actions: this._actions,
+      selectedIndices: [...this._selectedIndices],
+      createdIndices: created,
+      undoStack: this._undoStack,
+      redoStack: this._redoStack,
+      metadata: this._metadata,
+      bookmarks: this._bookmarks,
+      revision: this._revision,
+      savedRevision: this._savedRevision,
+    });
+  }
+
+  /**
+   * Put back a state from exportState(): another axis comes on screen with
+   * its own points, history and unsaved edits. Counts as a load for the Fill
+   * with pattern drawer (loadId), so a preview never lands on another axis.
+   * @param {ReturnType<EditableScript['exportState']>} state
+   */
+  importState(state) {
+    const s = structuredClone(state);
+    this._actions = s.actions || [];
+    this._selectedIndices = new Set(s.selectedIndices || []);
+    this._lastCreated = new Set((s.createdIndices || []).map((i) => this._actions[i]).filter(Boolean));
+    this._undoStack = s.undoStack || [];
+    this._redoStack = s.redoStack || [];
+    this._metadata = s.metadata || {};
+    this._bookmarks = s.bookmarks || [];
+    this._batching = false;
+    this._batchMoved = new Set();
+    this._batchRedo = null;
+    this._revision = Number.isFinite(s.revision) ? s.revision : nextRevision();
+    this._savedRevision = Number.isFinite(s.savedRevision) ? s.savedRevision : this._revision;
+    this._syncDirtyToRevision();
+    this._loadId = (this._loadId || 0) + 1;
+    this._emit();
   }
 
   // --- Accessors ---
@@ -182,15 +340,20 @@ export class EditableScript {
 
   // --- Undo / Redo ---
 
-  /** Begin a batch — pushes undo state once, suppresses further pushes until endBatch(). */
-  beginBatch() {
+  /**
+   * Begin a batch — pushes undo state once, suppresses further pushes until endBatch().
+   * @param {string} [label] the step's name in the undo history (editor work
+   *   list 4.5): a drag by default, the only batch the editor makes today.
+   * @param {object} [params]
+   */
+  beginBatch(label = HISTORY_LABELS.drag, params) {
     if (this._batching) return;
     // The snapshot goes BEFORE the flag: _pushState() does nothing while
     // batching, so the old order recorded nothing and a drag was no undo
     // step at all; Ctrl+Z after a drag went back past the edit before it
     // (found with CB-02, also in v0.9.2).
     this._batchRedo = this._redoStack;
-    this._pushState();
+    this._pushState(label, params);
     this._batching = true;
   }
 
@@ -309,8 +472,17 @@ export class EditableScript {
    * ARRAY of indices into this entry's own `actions`: a Set would come back
    * from the editor's per-path undo cache (JSON) as `{}`, and references
    * would not survive the copy at all.
+   *
+   * `label` / `params` name the EDIT this entry undoes (or, on the redo
+   * stack, redoes): a locale key from HISTORY_LABELS or modifierLabel() and
+   * its ICU params, both plain data so exportState's structuredClone and the
+   * JSON copies in the tests carry them (editor work list 4.5, 2026-11-24).
+   * An entry made before labels (an older cached axis) has none; the menu
+   * calls it "Edit".
+   * @param {string|null} [label]
+   * @param {object} [params]
    */
-  _snapshot() {
+  _snapshot(label = null, params = undefined) {
     return {
       actions: this._actions.map(a => ({ at: a.at, pos: a.pos })),
       selectedIndices: new Set(this._selectedIndices),
@@ -318,6 +490,8 @@ export class EditableScript {
       metadata: JSON.parse(JSON.stringify(this._metadata)),
       bookmarks: this._bookmarks.map(b => ({ at: b.at, name: b.name })),
       revision: this._revision,
+      label: typeof label === 'string' && label ? label : null,
+      params: params && typeof params === 'object' ? { ...params } : {},
     };
   }
 
@@ -332,9 +506,15 @@ export class EditableScript {
     if (state.bookmarks) this._bookmarks = state.bookmarks;
   }
 
-  _pushState() {
+  /**
+   * Record the state before an edit as one undo step.
+   * @param {string} [label] what the edit is called in the undo history
+   *   (a HISTORY_LABELS key, or modifierLabel(fn)); editor work list 4.5
+   * @param {object} [params] its ICU params, e.g. { count }
+   */
+  _pushState(label = HISTORY_LABELS.edit, params = undefined) {
     if (this._batching) return;
-    this._undoStack.push(this._snapshot());
+    this._undoStack.push(this._snapshot(label, params));
     if (this._undoStack.length > this._maxUndoSteps) {
       this._undoStack.shift();
     }
@@ -343,25 +523,83 @@ export class EditableScript {
     this._revision = nextRevision();
   }
 
+  /**
+   * One undo, without the emit. The current state goes to the redo stack
+   * under the SAME label: redoing it re-applies that edit (editor work list
+   * 4.5), so the history menu names a redo row by what it brings back.
+   */
+  _undoOne() {
+    const entry = this._undoStack.pop();
+    this._redoStack.push(this._snapshot(entry.label, entry.params));
+    this._restoreSnapshot(entry);
+  }
+
+  /** One redo, without the emit; the label goes back to the undo stack with it. */
+  _redoOne() {
+    const entry = this._redoStack.pop();
+    this._undoStack.push(this._snapshot(entry.label, entry.params));
+    this._restoreSnapshot(entry);
+  }
+
   undo() {
-    if (this._undoStack.length === 0) return false;
-    // Save current state to redo stack
-    this._redoStack.push(this._snapshot());
-    this._restoreSnapshot(this._undoStack.pop());
-    // Clean when this is the saved state again, not dirty on every undo (R4-18).
-    this._syncDirtyToRevision();
-    this._emit();
-    return true;
+    return this.undoSteps(1) === 1;
   }
 
   redo() {
-    if (this._redoStack.length === 0) return false;
-    // Save current state to undo stack
-    this._undoStack.push(this._snapshot());
-    this._restoreSnapshot(this._redoStack.pop());
-    this._syncDirtyToRevision();
-    this._emit();
-    return true;
+    return this.redoSteps(1) === 1;
+  }
+
+  /**
+   * Undo `n` steps in one go: the undo history menu's "undo to here"
+   * (editor work list 4.5, 2026-11-24). Each step is still its own undo, so
+   * every one of them can be redone on its own, but onChange fires once at
+   * the end (one redraw, one pop-out broadcast, one autosave schedule).
+   * Clean when it lands on the saved state (R4-18), as a single undo is.
+   * @param {number} n — clamped to 0..canUndo depth; anything not a number is 0
+   * @returns {number} the steps actually undone
+   */
+  undoSteps(n) {
+    const want = clampWhole(n, 0, this._undoStack.length, 0);
+    for (let i = 0; i < want; i++) this._undoOne();
+    if (want > 0) {
+      this._syncDirtyToRevision();
+      this._emit();
+    }
+    return want;
+  }
+
+  /**
+   * Redo `n` steps in one go (the history menu's redo rows). As undoSteps.
+   * @param {number} n
+   * @returns {number} the steps actually redone
+   */
+  redoSteps(n) {
+    const want = clampWhole(n, 0, this._redoStack.length, 0);
+    for (let i = 0; i < want; i++) this._redoOne();
+    if (want > 0) {
+      this._syncDirtyToRevision();
+      this._emit();
+    }
+    return want;
+  }
+
+  /**
+   * The undo and redo steps by name, for the undo history menu (editor work
+   * list 4.5). `undo` is newest first: undoSteps(i + 1) goes back to before
+   * undo[i]. `redo` is next-to-redo first: redoSteps(j + 1) re-applies
+   * redo[0..j]. `label` is a locale key (null for an entry made before
+   * labels); `params` its ICU params. Copies: changing them changes nothing.
+   * @returns {{undo: Array<{label: string|null, params: object}>, redo: Array<{label: string|null, params: object}>}}
+   */
+  undoHistory() {
+    const view = (e) => ({
+      label: typeof e?.label === 'string' && e.label ? e.label : null,
+      params: e?.params && typeof e.params === 'object' ? { ...e.params } : {},
+    });
+    return {
+      undo: this._undoStack.map(view).reverse(),
+      redo: this._redoStack.map(view).reverse(),
+    };
   }
 
   get canUndo() { return this._undoStack.length > 0; }
@@ -384,14 +622,14 @@ export class EditableScript {
     const existing = this._actions[lo];
     if (existing && existing.at === at) {
       if (existing.pos === pos) return lo;
-      this._pushState();
+      this._pushState(HISTORY_LABELS.editPoint);
       existing.pos = pos;
       this._dirty = true;
       this._emit();
       return lo;
     }
 
-    this._pushState();
+    this._pushState(HISTORY_LABELS.insert);
     const action = { at, pos };
     this._actions.splice(lo, 0, action);
 
@@ -410,11 +648,14 @@ export class EditableScript {
   /**
    * Update an action's properties.
    * If `at` changes, re-sorts and adjusts selection.
+   * @param {number} index
+   * @param {{at?: number, pos?: number}} changes
+   * @param {string} [label] its name in the undo history (editor work list 4.5)
    * @returns {number} The new index of the action after potential re-sort
    */
-  updateAction(index, { at, pos }) {
+  updateAction(index, { at, pos }, label = HISTORY_LABELS.editPoint) {
     if (index < 0 || index >= this._actions.length) return index;
-    this._pushState();
+    this._pushState(label);
 
     const action = this._actions[index];
 
@@ -445,16 +686,47 @@ export class EditableScript {
 
   /**
    * Delete actions at the given indices.
+   * @param {Set<number>|number[]} indices
+   * @param {string} [label] its name in the undo history (cut() passes its own; editor work list 4.5)
    */
-  deleteActions(indices) {
+  deleteActions(indices, label = HISTORY_LABELS.delete) {
     if (!indices || indices.size === 0 && (!Array.isArray(indices) || indices.length === 0)) return;
-    this._pushState();
-
     const toDelete = new Set(indices instanceof Set ? indices : indices);
+    let count = 0;
+    for (const i of toDelete) if (i >= 0 && i < this._actions.length) count++;
+    this._pushState(label, { count });
+
     this._actions = this._actions.filter((_, i) => !toDelete.has(i));
     this._selectedIndices = new Set();
     this._dirty = true;
     this._emit();
+  }
+
+  /**
+   * Ripple delete (editor work list 4.3, 2026-11-24; FunGen 2 has it): delete
+   * the selected points and close the gap they leave. Every later point moves
+   * earlier by the selection's span (its first to its last point), as if that
+   * stretch of video were cut out, so what follows keeps its rhythm. One undo
+   * step. The selection must be one run of points (no unselected point inside
+   * it, which would end up after the points moved past it): refused otherwise.
+   * @returns {{changed: boolean, refused: boolean, count: number, shiftMs: number}}
+   */
+  rippleDeleteSelected() {
+    const sel = [...this._selectedIndices].filter(i => i >= 0 && i < this._actions.length).sort((a, b) => a - b);
+    if (sel.length === 0) return { changed: false, refused: false, count: 0, shiftMs: 0 };
+    if (!this._isContiguous(sel)) return { changed: false, refused: true, count: 0, shiftMs: 0 };
+    const first = this._actions[sel[0]].at;
+    const last = this._actions[sel[sel.length - 1]].at;
+    const shiftMs = last - first;
+    this._pushState(HISTORY_LABELS.rippleDelete, { count: sel.length });
+    const toDelete = new Set(sel);
+    this._actions = this._actions
+      .filter((_, i) => !toDelete.has(i))
+      .map(a => (a.at > last ? { ...a, at: a.at - shiftMs } : a));
+    this._selectedIndices = new Set();
+    this._dirty = true;
+    this._emit();
+    return { changed: true, refused: false, count: sel.length, shiftMs };
   }
 
   /**
@@ -463,7 +735,7 @@ export class EditableScript {
   moveActions(indices, deltaAt, deltaPos) {
     const idxSet = indices instanceof Set ? indices : new Set(indices);
     if (idxSet.size === 0) return;
-    this._pushState();
+    this._pushState(HISTORY_LABELS.move, { count: idxSet.size });
 
     for (const idx of idxSet) {
       if (idx < 0 || idx >= this._actions.length) continue;
@@ -528,6 +800,24 @@ export class EditableScript {
     this._emit();
   }
 
+  /**
+   * Select exactly these points (the Check script dialog's row and "Select
+   * all N", editor work list 4.2): indices outside the script, or not whole
+   * numbers, are skipped. Selection only, like Ctrl+1/2/3: no undo step,
+   * the unsaved flag untouched, one onChange. Returns how many are selected.
+   * @param {Iterable<number>} indices
+   * @returns {number}
+   */
+  selectIndices(indices) {
+    const next = new Set();
+    for (const i of indices || []) {
+      if (Number.isInteger(i) && i >= 0 && i < this._actions.length) next.add(i);
+    }
+    this._selectedIndices = next;
+    this._emit();
+    return next.size;
+  }
+
   // --- Clipboard ---
 
   copy() {
@@ -552,7 +842,7 @@ export class EditableScript {
    */
   paste(atMs) {
     if (this._clipboard.length === 0) return;
-    this._pushState();
+    this._pushState(HISTORY_LABELS.paste, { count: this._clipboard.length });
     const pasted = this._insertReplacing(this._clipboard.map(a => ({
       at: Math.round(atMs + a.at),
       pos: a.pos,
@@ -565,7 +855,7 @@ export class EditableScript {
   /** Paste at original absolute timestamps (not relative to cursor); replaces as paste() does. */
   pasteExact() {
     if (this._clipboard.length === 0 || !this._clipboardAbsolute) return;
-    this._pushState();
+    this._pushState(HISTORY_LABELS.pasteExact, { count: this._clipboardAbsolute.length });
     const pasted = this._insertReplacing(this._clipboardAbsolute.map(a => ({
       at: Math.round(a.at),
       pos: a.pos,
@@ -712,7 +1002,7 @@ export class EditableScript {
   equalizeSelected() {
     const sel = [...this._selectedIndices].sort((a, b) => a - b);
     if (sel.length < 3) return;
-    this._pushState();
+    this._pushState(HISTORY_LABELS.equalize, { count: sel.length });
 
     const first = this._actions[sel[0]];
     const last = this._actions[sel[sel.length - 1]];
@@ -745,7 +1035,7 @@ export class EditableScript {
   moveSelectedToTime(cursorMs) {
     if (this._selectedIndices.size !== 1) return -1;
     const idx = [...this._selectedIndices][0];
-    return this.updateAction(idx, { at: cursorMs });
+    return this.updateAction(idx, { at: cursorMs }, HISTORY_LABELS.moveToPlayhead);
   }
 
   /**
@@ -792,7 +1082,7 @@ export class EditableScript {
    */
   invertSelection() {
     if (this._selectedIndices.size === 0) return;
-    this._pushState();
+    this._pushState(HISTORY_LABELS.invert, { count: this._selectedIndices.size });
     for (const idx of this._selectedIndices) {
       if (idx >= 0 && idx < this._actions.length) {
         this._actions[idx].pos = 100 - this._actions[idx].pos;
@@ -846,7 +1136,7 @@ export class EditableScript {
     if (removeIndices.size === 0) return; // nothing to simplify
     // The undo step only once something changes: a no-op left a step that
     // made a state of its own, so a redo past it read as unsaved (R4-18).
-    this._pushState();
+    this._pushState(HISTORY_LABELS.simplify, { count: removeIndices.size });
 
     // Remove the simplified-out actions
     this._actions = this._actions.filter((_, i) => !removeIndices.has(i));
@@ -930,7 +1220,7 @@ export class EditableScript {
   cut() {
     if (this._selectedIndices.size === 0) return;
     this.copy();
-    this.deleteActions(this._selectedIndices);
+    this.deleteActions(this._selectedIndices, HISTORY_LABELS.cut);
   }
 
   // --- Modifier / Bulk Operations ---
@@ -985,7 +1275,7 @@ export class EditableScript {
       return { changed: false, refused: false, created: 0 };
     }
 
-    this._pushState();
+    this._pushState(modifierLabel(fn, args));
     if (scoped) {
       // Merge the output into the unselected rest in one pass. On a tie the
       // output point replaces the unselected one (CB-02).
@@ -1033,14 +1323,18 @@ export class EditableScript {
    * Bulk insert actions with undo. Used by pattern stamp and gap fill.
    * Selects the inserted points and makes them the created record.
    * @param {Array<{at: number, pos: number}>} newActions
+   * @param {string} [label] its name in the undo history (editor work list
+   *   4.5): HISTORY_LABELS.generatePattern / beats / fillGaps from the
+   *   editor's generators; "Add N points" when not given. Gets { count }.
    * @returns {{changed: boolean, refused: boolean, created: number}}
    */
-  insertActions(newActions) {
+  insertActions(newActions, label = HISTORY_LABELS.insertPoints) {
     if (!newActions || newActions.length === 0) return { changed: false, refused: false, created: 0 };
-    this._pushState();
+    const points = newActions.map(roundAction);
+    this._pushState(label, { count: new Set(points.map(p => p.at)).size });
 
     // A new point replaces any point at its time (CB-02).
-    const inserted = this._insertReplacing(newActions.map(roundAction));
+    const inserted = this._insertReplacing(points);
 
     // Select newly inserted actions (by reference)
     const insertedRefs = new Set(inserted);
@@ -1091,7 +1385,7 @@ export class EditableScript {
       .filter(p => p.at > a && p.at < b);
     if (fresh.length === 0) return none;
 
-    this._pushState();
+    this._pushState(HISTORY_LABELS.fill, { count: new Set(fresh.map(p => p.at)).size });
     const before = this._actions.length;
     if (mode !== 'gap') this._actions = this._actions.filter(x => !(x.at > a && x.at < b));
     const inserted = this._insertReplacing(fresh);
@@ -1102,6 +1396,44 @@ export class EditableScript {
     this._dirty = true;
     this._emit();
     return { changed: true, created: inserted.length, removed: before + inserted.length - this._actions.length };
+  }
+
+  /**
+   * Replace every point as ONE undoable edit: "Restore an earlier version…"
+   * (editor work list 3.1, 2026-11-24). Points without a finite at / pos are
+   * dropped; the rest are rounded like every edit (whole ms, 0-100) and put
+   * in time order. Points sharing a time are kept as they are, NOT merged:
+   * the version being restored is put back exactly, the way a file with
+   * duplicates loads (the one-point-per-time rule binds edits, CB-02, and
+   * this is a version coming back). The selection and the created record
+   * (N) are cleared; metadata and bookmarks are left alone.
+   *
+   * The same points as now change nothing: no undo step, not dirty, no
+   * onChange (as applyModifier: a pointless "change" is a file write plus a
+   * Handy re-upload with autosave on). An empty array is a real restore (of
+   * an empty version). Anything but an array is ignored.
+   *
+   * @param {Array<{at: number, pos: number}>} actions
+   * @param {string} [label] its name in the undo history (editor work list 4.5)
+   * @returns {{changed: boolean, count: number}} count = the points now in the script
+   */
+  replaceAll(actions, label = HISTORY_LABELS.restore) {
+    if (!Array.isArray(actions)) return { changed: false, count: this._actions.length };
+    const next = actions
+      .filter(a => a && Number.isFinite(Number(a.at)) && Number.isFinite(Number(a.pos)))
+      .map(a => roundAction({ at: Number(a.at), pos: Number(a.pos) }))
+      .sort((a, b) => a.at - b.at); // stable: same-time points keep their order
+    const same = next.length === this._actions.length
+      && next.every((a, i) => a.at === this._actions[i].at && a.pos === this._actions[i].pos);
+    if (same) return { changed: false, count: next.length };
+
+    this._pushState(label, { count: next.length });
+    this._actions = next;
+    this._selectedIndices = new Set();
+    this._lastCreated = new Set();
+    this._dirty = true;
+    this._emit();
+    return { changed: true, count: next.length };
   }
 
   // --- Created record + selection shape ---
@@ -1192,7 +1524,7 @@ export class EditableScript {
    * @param {*} value
    */
   setMetadataField(key, value) {
-    this._pushState();
+    this._pushState(HISTORY_LABELS.metadata);
     if (!this._metadata.metadata) {
       this._metadata.metadata = {};
     }
@@ -1209,7 +1541,7 @@ export class EditableScript {
    * @param {string} name
    */
   addBookmark(timeMs, name = '') {
-    this._pushState();
+    this._pushState(HISTORY_LABELS.addBookmark);
     timeMs = Math.round(timeMs);
 
     // Check if a bookmark already exists at this time
@@ -1235,7 +1567,7 @@ export class EditableScript {
     const idx = this._bookmarks.findIndex(b => b.at === timeMs);
     if (idx < 0) return false;
 
-    this._pushState();
+    this._pushState(HISTORY_LABELS.removeBookmark);
     this._bookmarks.splice(idx, 1);
     this._dirty = true;
     this._emit();
@@ -1253,8 +1585,47 @@ export class EditableScript {
   // --- Serialization ---
 
   /**
+   * The length of the video this script is edited against, in ms (editor
+   * work list 5.3): the saved metadata block's `duration` comes from it, in
+   * whole seconds, as OFS writes it. Kept across loads and axis switches (it
+   * belongs to the video); 0, a negative or a non-number = unknown.
+   * @param {number} ms
+   */
+  setVideoDuration(ms) {
+    const v = Number(ms);
+    this._videoDurationMs = Number.isFinite(v) && v > 0 ? v : 0;
+  }
+
+  /** The video length set by setVideoDuration, in ms; 0 = unknown. */
+  get videoDurationMs() { return this._videoDurationMs; }
+
+  /**
    * Build a full .funscript JSON string, preserving original metadata.
    * Uses internal metadata by default; pass metadata param for backward compat.
+   *
+   * The `metadata` block is OpenFunscripter's (editor work list 5.3,
+   * 2026-11-24): every key the file already had stays as it was, top level
+   * and inside `metadata`, unknown ones included; only the OFS keys it lacks
+   * are added, with OFS's empty defaults ('' / [] / type "basic"). A file
+   * with no block gets a whole one. `title` is NOT taken from the file name:
+   * OFS's block title is the project's own field, "" until the user types
+   * one (OFS-lib Funscript.cpp: the path-derived name is the script's tab
+   * name, never written into the block).
+   *
+   * `duration`: OFS writes the video's length in whole seconds
+   * (OpenFunscripter.cpp: metadata.duration = player->Duration(), a double
+   * stored in an int64, so truncated), and replaces the file's value with it
+   * whenever a video is loaded; so does this, when setVideoDuration() gave
+   * one. Unknown video length: the file's own value stays, else 0, OFS's
+   * default. Never the last point's time: FunSync reads a positive duration
+   * as the length of the video the script was MADE FOR (stream-session.js
+   * streamCutWarning, eroscripts-post.js lengthVerdict), and a script
+   * usually ends before its video does, so that would warn "made for another
+   * cut" on the next stream of the same video.
+   *
+   * A `metadata` that is not an object (a string, an array) is the file's
+   * own and is written back untouched.
+   *
    * @param {Object} [metadata] - Override metadata (optional, for backward compat)
    * @returns {string} JSON string
    */
@@ -1267,12 +1638,20 @@ export class EditableScript {
     }));
     if (!output.version) output.version = '1.0';
 
-    // Write bookmarks into metadata.metadata.bookmarks
-    if (this._bookmarks.length > 0) {
-      if (!output.metadata) output.metadata = {};
-      output.metadata.bookmarks = this._bookmarks.map(b => ({ at: b.at, name: b.name }));
-    } else if (output.metadata) {
-      delete output.metadata.bookmarks;
+    if (output.metadata === undefined || output.metadata === null) output.metadata = {};
+    const meta = output.metadata;
+    if (meta && typeof meta === 'object' && !Array.isArray(meta)) {
+      for (const [key, dflt] of Object.entries(OFS_METADATA_DEFAULTS)) {
+        if (!(key in meta)) meta[key] = Array.isArray(dflt) ? [] : dflt;
+      }
+      if (this._videoDurationMs > 0) meta.duration = Math.floor(this._videoDurationMs / 1000);
+
+      // Write bookmarks into metadata.metadata.bookmarks
+      if (this._bookmarks.length > 0) {
+        meta.bookmarks = this._bookmarks.map(b => ({ at: b.at, name: b.name }));
+      } else {
+        delete meta.bookmarks;
+      }
     }
 
     return JSON.stringify(output, null, 2);

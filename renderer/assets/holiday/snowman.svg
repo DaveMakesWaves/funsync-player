@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 32">
+  <!-- The Holiday style's snowman, beside the library title (renderer/styles/holiday.css). -->
+  <circle cx="12" cy="23.5" r="7.2" fill="#f4f6f8" stroke="#9fb2a8" stroke-width="0.7"/>
+  <circle cx="12" cy="12" r="5.2" fill="#f4f6f8" stroke="#9fb2a8" stroke-width="0.7"/>
+  <rect x="8.3" y="2.2" width="7.4" height="5" rx="0.8" fill="#1f2a25"/>
+  <rect x="6.4" y="6.6" width="11.2" height="1.7" rx="0.85" fill="#1f2a25"/>
+  <rect x="8.3" y="5.4" width="7.4" height="1.1" fill="#c41e3a"/>
+  <circle cx="10.2" cy="11.3" r="0.75" fill="#1f2a25"/>
+  <circle cx="13.8" cy="11.3" r="0.75" fill="#1f2a25"/>
+  <path d="M12 12.6 L15.6 13.5 L12 14.2 Z" fill="#f08a24"/>
+  <rect x="7.2" y="16" width="9.6" height="2.2" rx="1.1" fill="#c41e3a"/>
+  <rect x="13.4" y="16.8" width="2.2" height="4.8" rx="1" fill="#c41e3a"/>
+  <circle cx="12" cy="21.4" r="0.8" fill="#2a3a33"/>
+  <circle cx="12" cy="24.4" r="0.8" fill="#2a3a33"/>
+  <circle cx="12" cy="27.4" r="0.8" fill="#2a3a33"/>
+</svg>

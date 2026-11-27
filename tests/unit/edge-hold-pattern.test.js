@@ -56,6 +56,7 @@ import { liftCtorOptions } from './helpers/app-methods.js';
 import { patternChoicePlayer, orgasmChoiceInUse, readPatternChoice, choiceSource, scriptRangeAround } from '../../renderer/js/pattern-choice.js';
 import { teardownPlayback, isVideoInPip } from '../../renderer/js/pip-guard.js';
 import { shouldEnterMiniplayer } from '../../renderer/js/miniplayer.js';
+import { edgeCarriesAcrossVideos, edgeCarryNoticeKey, setEdgeCarryNotice } from '../../renderer/js/edge-hold-carry.js';
 
 const SCRIPT_A = JSON.stringify({ actions: [{ at: 0, pos: 10 }, { at: 600, pos: 90 }, { at: 1200, pos: 10 }] });
 const SCRIPT_B = JSON.stringify({ actions: [{ at: 0, pos: 90 }, { at: 400, pos: 10 }] });
@@ -83,6 +84,10 @@ const EDGE_METHODS = [
   '_onLeaveView', '_teardownPlayback', '_isOurVideoInPip', '_shouldEnterMiniplayer',
   // the shared pattern choice (pattern settings unification, 2026-11-19)
   '_patternScriptRange', '_orgasmFollowScriptNow', '_orgasmLibrarySettings', '_orgasmLibrarySource',
+  // the phone's button state ("Starting…", 2026-11-24); a no-op with no phone connected
+  '_pushRemoteOrgasmState',
+  // Z on a video change (lr_x3 #447): loadVideo calls it; reset by default.
+  '_edgeOnVideoChange', '_setEdgeCarryNotice', '_showCarryNotice',
 ];
 
 let Lifted;
@@ -145,6 +150,7 @@ beforeAll(() => {
       isVideoInPip,
       shouldEnterMiniplayer,
       exitFullscreenForNav: () => {},
+      edgeCarriesAcrossVideos, edgeCarryNoticeKey, setEdgeCarryNotice,
     },
   });
 });
@@ -1034,5 +1040,82 @@ describe('Z with an ending, and a flywheel machine on Z', () => {
     tickEdge(5000);
     app._onEdgeHold(false);
     expect(oscillates()).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Dave's phone, 2026-11-24 (main.log 11:55:19-11:55:25): X pressed three times
+// in 1.3 s. A release's restore (the video's script back, the sync engine
+// started) and the next press's engage ran side by side: the video sync
+// started in the middle of the third hold, the finisher only began just
+// before it was let go, and the Handy was started and stopped 4-5 times.
+// Now a press waits for its own previous release, and a release whose switch
+// was pressed again does not restore the video's script.
+describe('X pressed again before its release finished (Dave\'s phone, 2026-11-24)', () => {
+  const finisherPlaying = () => lastScript() !== 'A.csv' && deviceRunning();
+
+  it('release and press in the same moment: the new hold gets the finisher, the video sync stays off', async () => {
+    await playAlpha();
+    configureX();
+    app._onOrgasmHold(true);
+    await settle();
+    expect(finisherPlaying()).toBe(true);
+    const mark = h.sdk.calls.length;
+    app._onOrgasmHold(false);
+    app._onOrgasmHold(true);
+    await settle(40);
+    expect(app.orgasmSwitch.active).toBe(true);
+    expect(legsSince(mark)).not.toContain('setScript:A.csv');   // the video's script never came back
+    expect(engine._active).toBe(false);                          // the video sync stays off for the hold
+    expect(finisherPlaying()).toBe(true);
+  });
+
+  it('pressed again while the release was restoring: no video sync inside the new hold', async () => {
+    await playAlpha();
+    configureX();
+    app._onOrgasmHold(true);
+    await settle();
+    for (const gap of [1, 2, 3, 4, 6]) {
+      app._onOrgasmHold(false);
+      await settle(gap);                                         // part-way through the release
+      const started = vi.spyOn(engine, 'start');
+      app._onOrgasmHold(true);
+      await settle(40);
+      expect(app.orgasmSwitch.active, `gap ${gap}`).toBe(true);
+      expect(engine._active, `gap ${gap}: the video sync is off in the hold`).toBe(false);
+      expect(finisherPlaying(), `gap ${gap}: the finisher plays`).toBe(true);
+      started.mockRestore();
+    }
+  });
+
+  it('three quick presses end, after the last release, on the video\'s script and the video sync', async () => {
+    await playAlpha();
+    configureX();
+    for (let i = 0; i < 3; i++) {
+      app._onOrgasmHold(true);
+      await settle(2);
+      app._onOrgasmHold(false);
+      await settle(1);
+    }
+    await settle(60);
+    expect(app.orgasmSwitch.active).toBe(false);
+    expect(lastScript()).toBe('A.csv');
+    expect(engine._active).toBe(true);
+    expect(deviceRunning()).toBe(true);
+  });
+
+  it('the phone hears "starting" until the Handy plays the finisher', async () => {
+    await playAlpha();
+    configureX();
+    const pushed = [];
+    app.remoteBridge = { connected: true, sendToPhone: (m) => { if (m.type === 'orgasm-state') pushed.push({ active: m.active, starting: m.starting }); } };
+    app._onOrgasmHold(true);
+    expect(pushed.at(-1)).toEqual({ active: true, starting: true });
+    await settle();
+    expect(finisherPlaying()).toBe(true);
+    expect(pushed.at(-1)).toEqual({ active: true, starting: false });
+    app._onOrgasmHold(false);
+    expect(pushed.at(-1)).toEqual({ active: false, starting: false });
+    app.remoteBridge = null;
   });
 });

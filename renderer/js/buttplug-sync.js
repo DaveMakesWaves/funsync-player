@@ -43,6 +43,25 @@ const TICK_INTERVAL_MS = 40;     // ~25Hz polling — safe for BLE
 const MIN_SEND_INTERVAL_MS = 50; // Don't send derived-intensity commands faster than this
 const MAX_GAP_MS = 5000;         // Don't send commands for actions more than 5s away
 const MIN_POS_DELTA = 0.5;       // Skip sends when position change is < 0.5 (out of 100)
+// A speed derived over more time than this since the last send is measured on
+// the script instead (the first stroke after a hold or a gap; 2026-11-25).
+const MAX_SPEED_WINDOW_MS = 4 * MIN_SEND_INTERVAL_MS;
+/** A segment whose ends differ by less than this is a hold (the script stands still). */
+const HOLD_FLAT_UNITS = 1;
+/** Hybrid's fade during a hold (the setting): full for this long, then down to off over HYBRID_HOLD_FADE_MS. */
+export const HYBRID_HOLD_GRACE_MS = 150;
+export const HYBRID_HOLD_FADE_MS = 500;
+
+/**
+ * How much of Hybrid's position part is left this far into a hold, with
+ * "Hybrid fades to off during holds" on (EroScripts #434, 2026-11-23). Pure.
+ * @param {number} holdMs
+ * @returns {number} 1 → 0
+ */
+export function hybridHoldFactor(holdMs) {
+  if (!(holdMs > HYBRID_HOLD_GRACE_MS)) return 1;
+  return Math.max(0, 1 - (holdMs - HYBRID_HOLD_GRACE_MS) / HYBRID_HOLD_FADE_MS);
+}
 
 const DEFAULT_LOOKAHEAD_MS = 60;      // BLE round-trip compensation — fire command this far before action
 const DEFAULT_MIN_STROKE_MS = 60;     // Floor on stroke duration — clamp sub-BLE-roundtrip strokes up
@@ -64,6 +83,10 @@ export class ButtplugSync {
     this._lastActionIndex = -1;
     this._lastSendTime = 0;       // timestamp of last command sent
     this._lastSentPos = -1;       // last position sent (for dirty check)
+    // A hold (EroScripts #434): when it began, the fade step last sent, and the setting.
+    this._stillSince = null;
+    this._stillStep = null;
+    this._hybridHoldFade = false;
     this._actions = null;
     this._vibActions = null;       // separate vibration script actions (multi-axis)
     this._vibActionIndex = -1;
@@ -219,27 +242,50 @@ export class ButtplugSync {
     // bogus RE-ARMED line for a swap that never completed.
     this._awaitingResume = false;
 
-    if (this.buttplug?.stopAll) {
-      Promise.resolve(this.buttplug.stopAll()).catch((err) => {
-        // error, not debug: this is the path that leaves a device running.
-        console.error(
-          `[ButtplugSync] STOP-ALL FAILED on stop() — devices may still be running: ${err?.message || err}`
-        );
-      });
-    }
+    this._haltDevices('stop()');
 
     console.log('[ButtplugSync] Stopped');
   }
 
   /**
-   * Whether a video is currently driving this engine.
+   * Stop every device: each sustained output set to 0 explicitly (vibrate,
+   * oscillate, rotate, scalar), then Intiface's StopDeviceCmd. The explicit
+   * zeros are there because the StopDeviceCmd alone left a Lovense Solace Pro
+   * running at its last speed on pause (brokenobj #431, 2026-11-22): its one
+   * motor takes both position moves and an oscillate speed (the device
+   * config's feature 0), and the stop did not set that speed to 0. The same
+   * zeros the stall hold already sends (stopSustainedOutputs). Fire-and-
+   * forget, so a slow or gone client never holds up the player.
+   */
+  _haltDevices(where) {
+    const failed = (what) => (err) => {
+      // error, not debug: this is the path that leaves a device running.
+      console.error(`[ButtplugSync] ${what} FAILED on ${where} — devices may still be running: ${err?.message || err}`);
+    };
+    const bp = this.buttplug;
+    if (!bp) return;
+    if (bp.connected !== false && typeof bp.stopSustainedOutputs === 'function') {
+      try { Promise.resolve(bp.stopSustainedOutputs()).catch(failed('ZERO-OUTPUTS')); } catch (err) { failed('ZERO-OUTPUTS')(err); }
+    }
+    if (typeof bp.stopAll === 'function') {
+      try { Promise.resolve(bp.stopAll()).catch(failed('STOP-ALL')); } catch (err) { failed('STOP-ALL')(err); }
+    }
+  }
+
+  /**
+   * Whether a video is SENDING to the devices right now.
    *
-   * An off-clock driver (the filler test button) must not write to devices
-   * that playback already owns — two writers on one device leaves whichever
-   * loses holding a stale value.
+   * An off-clock driver (the pattern Test, a range-slider preview) must not
+   * write to devices that playback is driving — two writers on one device
+   * leaves whichever loses holding a stale value. A video that is loaded but
+   * PAUSED sends nothing (`_handlePause` stopped the scheduler and sent
+   * stopAll), so the devices are free then: refusing the Test there was the
+   * device-session finding of 2026-11-19 (step 27). A stall mid-play still
+   * counts as driving (the player is not paused, or the scheduler runs on).
+   * The Test stops itself when play starts (filler-test-player.js).
    */
   isDriving() {
-    return !!this._active;
+    return !!this._active && (!!this._intervalId || this.player?.paused === false);
   }
 
   /**
@@ -266,7 +312,7 @@ export class ButtplugSync {
    * @returns {boolean} false when refused (playback owns the devices)
    */
   sendPositionNow(position, durationMs, prevPosition = position, opts = {}) {
-    if (this._active) return false;
+    if (this.isDriving()) return false;
     if (!this.buttplug?.connected) return false;
     this._sendToDevices(position, durationMs, prevPosition, {
       sinceLastMs: durationMs,
@@ -282,7 +328,7 @@ export class ButtplugSync {
    * @returns {boolean} false when refused
    */
   sendLinearNow(position, durationMs, prevPosition = position) {
-    if (this._active) return false;
+    if (this.isDriving()) return false;
     if (!this.buttplug?.connected) return false;
     this._sendLinearToDevices(position, durationMs, prevPosition);
     return true;
@@ -307,7 +353,7 @@ export class ButtplugSync {
    *   gone, or it cannot move linearly)
    */
   previewDevicePosition(deviceIndex, position, durationMs) {
-    if (this._active) return false;
+    if (this.isDriving()) return false;
     if (!this.buttplug?.connected) return false;
     const dev = (this.buttplug.devices || []).find((d) => d.index === deviceIndex);
     if (!dev || !dev.canLinear) return false;
@@ -366,7 +412,7 @@ export class ButtplugSync {
    * sustained outputs hold their last value until told otherwise.
    */
   stopTestOutput() {
-    if (this._active) return;
+    if (this.isDriving()) return;
     if (this.buttplug?.stopAll) {
       Promise.resolve(this.buttplug.stopAll()).catch((err) => {
         console.error(
@@ -608,7 +654,7 @@ export class ButtplugSync {
     }
     this._stall.clear('pause');
     this._stopScheduler();
-    this.buttplug.stopAll();
+    this._haltDevices('pause');
     this._lastSentPos = -1;
     this._lastVibSentIntensity = -1;
     this._emitStatus('idle');
@@ -630,7 +676,7 @@ export class ButtplugSync {
     if (!this._active) return;
     this._stall.clear();
     this._stopScheduler();
-    this.buttplug.stopAll();
+    this._haltDevices('ended');
     this._lastSentPos = -1;
     this._lastVibSentIntensity = -1;
     this._emitStatus('idle');
@@ -785,16 +831,34 @@ export class ButtplugSync {
       this._lastActionIndex++;
     }
 
+    // The segment the script is in NOW. In Per-stroke (action-boundary) mode
+    // _dispatchLinearAtBoundary moves _lastActionIndex up to its lookahead
+    // EARLY, so a stroker gets its next keyframe in time; the derived outputs
+    // follow the script at the real time and must not take that early step:
+    // 60 ms before every action they read the NEXT segment, so a move into a
+    // hold settled to 0 a lookahead early, and a 100 ms snap out of a hold on
+    // Dave's Lovense Edge (2026-11-25) buzzed for one tick or not at all.
+    let currIdx = this._lastActionIndex;
+    while (currIdx >= 0 && this._actions[currIdx].at > timeMs) currIdx--;
+
     // Check we're within the action range
-    if (this._lastActionIndex < 0) return;
-    const nextIdx = this._lastActionIndex + 1;
-    if (nextIdx >= this._actions.length) return;
+    if (currIdx < 0) return;
+    const nextIdx = currIdx + 1;
+    const currAction = this._actions[currIdx];
+    // After the last action the script stands still at its last position.
+    if (nextIdx >= this._actions.length) { this._settleStill(currAction.pos, now); return; }
 
     const nextAction = this._actions[nextIdx];
     const duration = Math.max(MIN_SEND_INTERVAL_MS, nextAction.at - timeMs);
 
-    // Skip if next action is too far away (avoids very slow moves during gaps)
-    if (duration > MAX_GAP_MS) return;
+    // Skip if next action is too far away (avoids very slow moves during gaps);
+    // the derived outputs settle as for a hold.
+    if (duration > MAX_GAP_MS) { this._settleStill(currAction.pos, now); return; }
+
+    // A hold: the script stands still, so nothing moving is sent, and every
+    // speed-derived output would keep its last moving value for the whole
+    // hold (EroScripts #434: "the vibrations continue at the position level").
+    if (Math.abs(nextAction.pos - currAction.pos) < HOLD_FLAT_UNITS) { this._settleStill(currAction.pos, now); return; }
 
     // Compute interpolated position at current time
     if (!this._actions || !this._interpolator) return;
@@ -810,7 +874,7 @@ export class ButtplugSync {
     // Dirty check — skip if position barely changed (but always send first command)
     if (this._lastSentPos >= 0 && Math.abs(targetPos - this._lastSentPos) < MIN_POS_DELTA) return;
 
-    const prevPos = this._lastSentPos >= 0 ? this._lastSentPos : targetPos;
+    let prevPos = this._lastSentPos >= 0 ? this._lastSentPos : targetPos;
     // In action-boundary mode, skip linear emission here — it was handled above.
     const emitLinear = this._linearStrategy !== 'action-boundary';
     // Elapsed time since the LAST SEND, which is the only correct denominator
@@ -818,13 +882,68 @@ export class ButtplugSync {
     // is the time to the NEXT ACTION — right for LinearCmd's "reach this
     // position in N ms", wrong for speed, and mixing them is what made
     // derived intensity ramp within every stroke. See _computeVibeIntensity.
-    const sinceLastMs = this._lastSendTime > 0
+    let sinceLastMs = this._lastSendTime > 0
       ? Math.max(1, now - this._lastSendTime)
       : MIN_SEND_INTERVAL_MS;
+    // Out of a hold or a long silence: the last send was the hold's level,
+    // sent ONCE at its start (_settleStill), so the time since it spans the
+    // whole hold and the first stroke after it read near 0 (a 600 u/s snap out
+    // of a 3.9 s hold sent 1 % on Dave's Lovense Edge, 2026-11-25). Measure the
+    // stroke itself over the last tick of script time, from no earlier than
+    // the action it left (the hold's end), in real time at the playback rate.
+    if (this._stillSince != null || sinceLastMs > MAX_SPEED_WINDOW_MS) {
+      const backT = Math.max(timeMs - MIN_SEND_INTERVAL_MS, currAction.at);
+      const back = backT < timeMs ? this._interpolator(this._actions, backT) : null;
+      if (Number.isFinite(back)) {
+        const rate = this.player?.playbackRate > 0 ? this.player.playbackRate : 1;
+        prevPos = back;
+        sinceLastMs = Math.max(1, (timeMs - backT) / rate);
+      }
+    }
     this._sendToDevices(targetPos, duration, prevPos, { emitLinear, sinceLastMs });
     this._lastSendTime = now;
     this._lastSentPos = targetPos;
+    this._stillSince = null;
+    this._stillStep = null;
     if (this.onCommandSent) this.onCommandSent();
+  }
+
+  /**
+   * The script stands still (a hold, a gap, or past its last action). Before
+   * 2026-11-23 nothing was sent then, so vibrate / rotate / e-stim kept the
+   * last MOVING value for the whole hold: 16 % in Speed mode, 45 % in Hybrid,
+   * on the test script (EroScripts #434). Now the outputs are sent as the
+   * script stands: Speed 0, Position its level, Hybrid its position part
+   * (faded to off over HYBRID_HOLD_FADE_MS when "Hybrid fades to off during
+   * holds" is on). Linear is left alone (a stroker simply stays put), and so
+   * are flywheel machines (Oscillate): stopping one on every hold would mean
+   * a jump back to speed after it, which needs its own ramp first.
+   * Sent once per fade step, not every tick.
+   * @param {number} pos the script's position, 0-100
+   * @param {number} now performance.now()
+   */
+  _settleStill(pos, now) {
+    if (this._lastSentPos < 0) { this._stillSince = null; this._stillStep = null; }
+    if (this._stillSince == null) this._stillSince = now;
+    const factor = this._hybridHoldFade ? hybridHoldFactor(now - this._stillSince) : 1;
+    const step = Math.round(factor * 20);
+    if (this._stillStep === step) return;
+    this._stillStep = step;
+    this._sendToDevices(pos, MIN_SEND_INTERVAL_MS, pos, {
+      emitLinear: false, sinceLastMs: MIN_SEND_INTERVAL_MS, holdFactor: factor, still: true,
+    });
+    this._lastSendTime = now;
+    this._lastSentPos = pos;
+  }
+
+  /** "Hybrid fades to off during holds" (Devices ▸ Buttplug ▸ Output tuning; player.hybridHoldFade). */
+  setHybridHoldFade(on) {
+    this._hybridHoldFade = on === true;
+    this._stillStep = null; // the next still tick sends at the new setting
+  }
+
+  getHybridHoldFade() {
+    return this._hybridHoldFade;
   }
 
   /**
@@ -921,6 +1040,8 @@ export class ButtplugSync {
     // Time actually elapsed since the previous send. Derived-intensity modes
     // MUST divide by this, not by `durationMs` — see _computeVibeIntensity.
     // Falls back to the tick interval so older call sites keep working.
+    const holdFactor = Number.isFinite(opts.holdFactor) ? opts.holdFactor : 1;
+    const still = opts.still === true;
     const sinceLastMs = Number.isFinite(opts.sinceLastMs) && opts.sinceLastMs > 0
       ? opts.sinceLastMs
       : MIN_SEND_INTERVAL_MS;
@@ -964,14 +1085,14 @@ export class ButtplugSync {
       // both would fight over one motor.
       if (dev.canVibrate && !dev.canOscillate && !this._vibActions) {
         const mode = this._vibeModeMap.get(dev.index) || 'speed';
-        let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+        let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs, holdFactor);
         if (this._hasSafetyControls(dev)) intensity = this._applyScalarSafety(dev.index, intensity);
         this.buttplug.sendVibrate(dev.index, intensity);
       }
       // E-stim / scalar devices (skip if dedicated vib script is loaded — vib path drives them)
       if (dev.canScalar && !this._vibActions) {
         const mode = this._scalarModeMap.get(dev.index) || 'position';
-        let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+        let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs, holdFactor);
         intensity = this._applyScalarSafety(dev.index, intensity);
         this.buttplug.sendScalar(dev.index, intensity);
       }
@@ -986,7 +1107,7 @@ export class ButtplugSync {
       // config). Driving both sent a LinearCmd per stroke and a speed every
       // tick to the same motor, and they fought (brokenobj #379: "jerky").
       // The position command is the one that follows the script.
-      if (dev.canOscillate && !dev.canLinear && !this._vibActions) {
+      if (dev.canOscillate && !dev.canLinear && !this._vibActions && !still) {
         const mode = this._oscillateModeMap.get(dev.index) || 'speed';
         let speed = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
         speed = this._applyScalarSafety(dev.index, speed);
@@ -1001,7 +1122,7 @@ export class ButtplugSync {
           if (this._hasSafetyControls(dev)) speed = this._applyScalarSafety(dev.index, speed);
           this.buttplug.sendRotate(dev.index, speed, clockwise);
         } else {
-          let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs);
+          let intensity = this._computeVibeIntensity(mode, pos, prevPos, sinceLastMs, holdFactor);
           if (this._hasSafetyControls(dev)) intensity = this._applyScalarSafety(dev.index, intensity);
           const clockwise = pos >= prevPos;
           this.buttplug.sendRotate(dev.index, intensity, clockwise);
@@ -1594,14 +1715,16 @@ export class ButtplugSync {
    * @param {number} prevPos
    * @param {number} elapsedMs — time since the previous send
    */
-  _computeVibeIntensity(mode, pos, prevPos, elapsedMs) {
+  _computeVibeIntensity(mode, pos, prevPos, elapsedMs, holdFactor = 1) {
     const durationMs = elapsedMs;
     switch (mode) {
       case 'position':
         return Math.max(0, Math.min(100, pos));
 
       case 'intensity': {
-        const base = pos * 0.4;
+        // holdFactor: Hybrid's position part fades during a hold when that
+        // setting is on (1 otherwise, and always while the script moves).
+        const base = pos * 0.4 * (Number.isFinite(holdFactor) ? Math.max(0, Math.min(1, holdFactor)) : 1);
         const posDelta = Math.abs(pos - prevPos);
         const speed = durationMs > 0 ? (posDelta / durationMs) * 1000 : 0;
         const speedComponent = Math.min(100, (speed / 300) * 100) * 0.6;

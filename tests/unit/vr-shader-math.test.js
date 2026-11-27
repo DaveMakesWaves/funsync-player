@@ -19,6 +19,9 @@
 
 import { describe, it, expect } from 'vitest';
 import { VRProjectionRenderer } from '../../renderer/js/vr-projection-renderer.js';
+import fs from 'node:fs';
+import { FISHEYE_FRAG } from '../../renderer/js/shaders/fisheye.frag.js';
+import { EQUIRECT_FRAG } from '../../renderer/js/shaders/equirect.frag.js';
 
 // Mirror of the GLSL viewing-direction computation in both shaders.
 function rotateDir(dir, yawRad, pitchRad) {
@@ -63,7 +66,7 @@ function fisheyeLookup(dir, { sourceFov = Math.PI, stereoMode = 0, eye = 0 } = {
     ru = 0.25;
     cx = eye === 1 ? 0.75 : 0.25;
   }
-  return { u: cx + r * ux * ru, v: 0.5 - r * uy * 0.5 };
+  return { u: cx + r * ux * ru, v: 0.5 + r * uy * 0.5 };
 }
 
 describe('Viewing direction rotation (centre pixel)', () => {
@@ -151,8 +154,11 @@ describe('Fisheye-180 lookup', () => {
     // r ≈ 1.0 → on the circle edge; u stays at 0.5 (because dir.x=0).
     expect(uv).not.toBeNull();
     expect(uv.u).toBeCloseTo(0.5);
-    // v = 0.5 - 1 * 0.5 = 0  (top of texture because we flip Y)
-    expect(uv.v).toBeLessThan(0.01);
+    // v = 0.5 + 1 * 0.5 = 1: the picture's TOP row, because the upload
+    // flips Y (UNPACK_FLIP_Y_WEBGL). This test said v = 0 "because we flip
+    // Y" until 2026-11-27, pinning the upside-down, mirrored fisheye as
+    // correct (Buck Nakkidd, Discord).
+    expect(uv.v).toBeGreaterThan(0.99);
   });
 
   it('SBS-half: left eye centre is at u ≈ 0.25, right eye at u ≈ 0.75', () => {
@@ -176,5 +182,37 @@ describe('Yaw + lookup composition', () => {
     const uv = equirectLookup(dir);
     expect(uv).not.toBeNull();
     expect(uv.v).toBeCloseTo(0.25);
+  });
+});
+
+// Buck Nakkidd (Discord #bug-reports, 2026-11-27): every Fisheye 180 video
+// showed upside down, and Rotate 180 then left its text reading backwards.
+// The renderer uploads the video with UNPACK_FLIP_Y_WEBGL, so texture v grows
+// UPWARD (v = 1 is the picture's top row); equirect.frag follows that, while
+// fisheye.frag used v = 0.5 - r * y: a vertical MIRROR, which no rotation
+// undoes. The mirrors above only matched the GLSL by code review, and both
+// were wrong together; these tie them to the upload and to the GLSL text.
+describe('up is up in both projections (the upload flips Y)', () => {
+  const RENDERER_SRC = fs.readFileSync('renderer/js/vr-projection-renderer.js', 'utf8');
+  const UP = rotateDir({ x: 0, y: 0, z: 1 }, 0, -Math.PI / 6);    // look up 30°
+  const DOWN = rotateDir({ x: 0, y: 0, z: 1 }, 0, Math.PI / 6);   // look down 30°
+  const RIGHT = rotateDir({ x: 0, y: 0, z: 1 }, Math.PI / 6, 0);  // look right 30°
+
+  it("the premise: the video goes up with UNPACK_FLIP_Y_WEBGL, so the picture's top is v > 0.5", () => {
+    expect(RENDERER_SRC).toContain('gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);');
+  });
+
+  for (const [name, lookup] of [['equirect-180', equirectLookup], ['fisheye-180', fisheyeLookup]]) {
+    it(`${name}: looking up samples the top of the picture, down the bottom, right the right`, () => {
+      expect(lookup(UP).v, 'up').toBeGreaterThan(0.5);
+      expect(lookup(DOWN).v, 'down').toBeLessThan(0.5);
+      expect(lookup(RIGHT).u, 'right').toBeGreaterThan(0.5);
+    });
+  }
+
+  it('the GLSL computes v as these mirrors do (a mirror that drifts from its shader proves nothing)', () => {
+    expect(FISHEYE_FRAG).toContain('float v = cy_centre + r * unit.y * circleRadiusV;');
+    expect(FISHEYE_FRAG).toContain('float u = cx + r * unit.x * circleRadiusU;');
+    expect(EQUIRECT_FRAG).toContain('float v = (lat / PI) + 0.5;');
   });
 });

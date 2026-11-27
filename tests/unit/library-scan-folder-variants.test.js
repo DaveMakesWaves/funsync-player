@@ -102,9 +102,12 @@ describe('FT-102: a one-video folder offers its scripts as variants (opt-in)', (
     expect(v.variants[0].path).toBe(v.funscriptPath);              // index 0 is what a load plays
     expect(v.variants.find((x) => x.label === 'Round 10').path).toBe(path.join(src, 'Journey', 'Round 10.funscript'));
     // Axis files are never variants: the video's own companion stays its
-    // axis (matched, so not unmatched either); the orphan axis stays an orphan.
+    // axis (matched, so not unmatched either). "Round 1.twist" is Round 1's
+    // own axis file, and Round 1 is a variant here: it plays with that
+    // variant and is the video's too (TODO 2026-11-20; it stayed an orphan,
+    // see the "off" case, while variants never played their own axis files).
     expect(v.variants.some((x) => /\.(roll|twist)\.funscript$/.test(x.name))).toBe(false);
-    expect(unmatched(r)).toEqual(['Round 1.twist.funscript']);
+    expect(unmatched(r)).toEqual([]);
   });
 
   it('on, no script named after the video: it plays the first round and lists them all', async () => {

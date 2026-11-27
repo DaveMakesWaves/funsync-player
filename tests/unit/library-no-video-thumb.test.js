@@ -24,7 +24,10 @@ import { Library } from '../../renderer/components/library.js';
 import * as thumbCache from '../../renderer/js/thumbnail-cache.js';
 import { t } from '../../renderer/js/i18n.js';
 
-const AUDIO = 'C:\\Lib\\Audio Only.m4a';
+// (2026-11-26) An .mp3 / .m4a now gets its audio tile at once, without ffmpeg or
+// a <video> (audio-file-tile.test.js). This file keeps the generic path: a
+// file with no picture whose extension does not say so (an audio-only .mp4).
+const AUDIO = 'C:\\Lib\\Audio Only.mp4';
 const VIDEO = 'C:\\Lib\\Real Clip.mp4';
 
 let lib;
@@ -63,7 +66,7 @@ beforeEach(() => {
   };
   lib = new Library({ settings });
   const videos = [
-    { name: 'Audio Only.m4a', path: AUDIO, hasFunscript: false, variants: [] },
+    { name: 'Audio Only.mp4', path: AUDIO, hasFunscript: false, variants: [] },
     { name: 'Real Clip.mp4', path: VIDEO, hasFunscript: false, variants: [] },
   ];
   lib._videos = videos;
@@ -197,7 +200,16 @@ describe('N-05: a file with no video track gets the grey logo tile, not a black 
 });
 
 describe('N-05: the grey logo ships with the app and the tile has a look in both themes', () => {
-  const css = fs.readFileSync('renderer/styles/library.css', 'utf8');
+  // The tile's look lives in its own sheet since 2026-11-23 (shared with
+  // Playlists, Categories, the queue panel and Up Next, also in the pop-out).
+  const css = fs.readFileSync('renderer/styles/no-video-tile.css', 'utf8');
+
+  it('the sheet is linked by the main window and the player pop-out', () => {
+    for (const page of ['renderer/index.html', 'renderer/player-popout.html']) {
+      expect(fs.readFileSync(page, 'utf8'), page).toContain('<link rel="stylesheet" href="styles/no-video-tile.css">');
+    }
+    expect(fs.readFileSync('renderer/styles/library.css', 'utf8')).not.toMatch(/^\.library__thumb-novideo \{/m);
+  });
 
   it('the logo the CSS points at is a PNG inside renderer/ (electron-builder packs renderer/**)', () => {
     const m = css.match(/\.library__thumb-novideo-logo\s*{[^}]*url\('([^']+)'\)/);

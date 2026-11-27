@@ -150,3 +150,52 @@ describe('the Associate dialog\'s EroScripts search (library.js)', () => {
     expect(settings._store[SCRIPT_TAGS_KEY][VIDEO]).toMatchObject({ scriptPath: MAIN, tags: SEARCH.tags, title: SEARCH.title });
   });
 });
+
+// Dave, 2026-11-25: "when downloading a video and script to the libary why
+// doesnt it also get the tags?". A post the VIDEO came from (the EroScripts
+// tab) is marked, so its tags stay the video's when the video has no script;
+// a script-only download (Get Script above) is not.
+describe('a video downloaded from its post (videoFromPost)', () => {
+  it('the tab\'s download marks the record; Get Script\'s does not; the shapes are otherwise as before', () => {
+    const s = makeSettings();
+    recordDownloadTags(s, VIDEO, { topic: SEARCH, answer: TOPIC_ANSWER, scriptPath: SAVED, now: 5, video: true });
+    expect(getScriptTags(s, VIDEO)).toMatchObject({ topicId: 7, match: 'download', scriptPath: SAVED, videoFromPost: true });
+    recordDownloadTags(s, VIDEO, { topic: SEARCH, answer: TOPIC_ANSWER, scriptPath: SAVED, now: 6 });
+    expect('videoFromPost' in getScriptTags(s, VIDEO)).toBe(false);
+  });
+
+  it('with no script, its tags show and its post is known; a script-only record still shows none', () => {
+    const s = makeSettings();
+    recordDownloadTags(s, VIDEO, { topic: SEARCH, answer: TOPIC_ANSWER, now: 5, video: true });     // no script came
+    const record = getScriptTags(s, VIDEO);
+    const shown = (rec) => effectiveTags(VIDEO, { eroscripts: { [VIDEO]: eroscriptsRecordForTags(rec, null) } }, {});
+    expect(shown(record).length).toBeGreaterThan(0);
+    expect(resolveTopic({ record, scriptPath: null, videoPath: VIDEO })).toMatchObject({ state: 'known', topicId: 7, from: 'record' });
+    const { videoFromPost, ...scriptOnly } = record;
+    expect(videoFromPost).toBe(true);
+    expect(shown(scriptOnly)).toEqual([]);
+  });
+
+  it('downloads from before the mark: the tab\'s own list marks their records; nothing else is written or changed', async () => {
+    const { markVideosFromPosts } = await import('../../renderer/js/script-tags.js');
+    const OTHER = 'C:/v/Other.mp4';
+    const MANUAL = 'C:/v/Manual.mp4';
+    const s = makeSettings({
+      [SCRIPT_TAGS_KEY]: {
+        [VIDEO]: { tags: ['pov'], topicId: 7, match: 'download', scriptPath: SAVED },
+        [OTHER]: { tags: ['vr'], topicId: 9, match: 'download', scriptPath: 'C:/v/Other.funscript' },   // another post than the list says
+        [MANUAL]: { tags: ['x'], topicId: 11, match: 'manual', scriptPath: 'C:/v/Manual.funscript' },   // linked by hand
+      },
+    });
+    const downloaded = { 7: { video: VIDEO, at: 1 }, 8: { video: OTHER, at: 1 }, 11: { video: MANUAL, at: 1 }, 12: { script: 'C:/v/x.funscript' } };
+    expect(markVideosFromPosts(s, downloaded)).toBe(1);
+    const map = s._store[SCRIPT_TAGS_KEY];
+    expect(map[VIDEO]).toEqual({ tags: ['pov'], topicId: 7, match: 'download', scriptPath: SAVED, videoFromPost: true });
+    expect('videoFromPost' in map[OTHER]).toBe(false);
+    expect('videoFromPost' in map[MANUAL]).toBe(false);
+    expect(s.set).toHaveBeenCalledTimes(1);
+    expect(markVideosFromPosts(s, downloaded)).toBe(0);                 // again: nothing to do, nothing written
+    expect(s.set).toHaveBeenCalledTimes(1);
+    expect(markVideosFromPosts(s, null)).toBe(0);
+  });
+});

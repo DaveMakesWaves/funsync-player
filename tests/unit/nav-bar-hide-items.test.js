@@ -47,8 +47,14 @@ const shown = (el) => el && !el.hidden;
 /** The bar left to right as the user sees it: labels, and `|` for a gap. */
 function visibleBar(el) {
   const out = [];
-  for (const child of el.children) {
+  // Devices, Stop all, Web Remote and VR sit in one button group since
+  // 2026-11-25: read through it, as the user sees the buttons.
+  const kids = [...el.children].flatMap((c) => (c.classList.contains('nav-bar__group') && !c.hidden ? [...c.children] : [c]));
+  for (const child of kids) {
     if (child.hidden) continue;
+    if (child.classList.contains('nav-bar__stop-all')) { out.push('Stop all'); continue; }
+    // The Holiday style's logo (v0.10.1): decorative, shown by holiday.css only under Holiday.
+    if (child.classList.contains('nav-bar__holiday-logo')) continue;
     if (child.classList.contains('nav-bar__cluster-gap')) { out.push('|'); continue; }
     if (child.classList.contains('nav-bar__library-wrapper')) { out.push('Library'); continue; }
     if (child.classList.contains('nav-bar__item')) { out.push(child.textContent.trim()); continue; }
@@ -68,6 +74,7 @@ function pushedRight(el) {
     c.classList.contains('nav-bar__eroscripts') || c.classList.contains('nav-bar__action--push')));
 }
 
+// Load URL went to the Library menu on 2026-11-26 (Dave).
 const ALL = ['Library', 'Playlists', 'Categories', 'EroScripts', '|', 'Devices', 'Web Remote', 'VR', '|', 'Settings'];
 
 describe('nav bar: hiding buttons (#381)', () => {
@@ -121,7 +128,8 @@ describe('nav bar: hiding buttons (#381)', () => {
     const { bar, el } = mountNavBar();
     bar.setHiddenItems({ eroscripts: true });
     expect(visibleBar(el)).toEqual(['Library', 'Playlists', 'Categories', 'Devices', 'Web Remote', 'VR', '|', 'Settings']);
-    expect(pushedRight(el).map((c) => c.className)).toEqual(['nav-bar__action nav-bar__handy nav-bar__action--push']);
+    // The connections group takes it, Devices first inside it.
+    expect(pushedRight(el).map((c) => c.className)).toEqual(['nav-bar__group nav-bar__action--push']);
   });
 
   it('with only Settings left on the right, Settings takes the push and no gap shows', () => {
@@ -147,12 +155,25 @@ describe('nav bar: hiding buttons (#381)', () => {
     bar.setHiddenItems({ devices: true });
     // app.js flashes the LED on every device command through this field.
     expect(bar._handyLed.isConnected).toBe(true);
-    bar.setHandyStatus('connected', 2);
+    bar.setDeviceStatus({ devices: [{ label: 'The Handy', state: 'connected' }, { label: 'Lovense Edge', state: 'connected' }] });
     bar.setHiddenItems({});
     const handy = el.querySelector('.nav-bar__handy');
     expect(shown(handy)).toBe(true);
     expect(handy.querySelector('.nav-bar__handy-led').classList.contains('nav-bar__handy-led--connected')).toBe(true);
-    expect(handy.querySelector('.nav-bar__handy-text').textContent).toBe(t('nav.deviceCount', { count: 2 }));
+    expect(handy.querySelector('.nav-bar__handy-text').textContent).toBe(t('nav.deviceTotal', { count: 2 }));
+  });
+
+  it('the connections group hides with its last button, and Stop all alone keeps it', () => {
+    const { bar, el } = mountNavBar();
+    const group = el.querySelector('.nav-bar__group');
+    bar.setHiddenItems({ devices: true, remote: true, vr: true });
+    expect(group.hidden).toBe(true);                       // no empty bordered box
+    // Something connected: Stop all shows, so the group comes back for it.
+    bar.setDeviceStatus({ devices: [{ label: 'The Handy', state: 'connected' }] });
+    expect(group.hidden).toBe(false);
+    expect(visibleBar(el)).toEqual(['Library', 'Playlists', 'Categories', 'EroScripts', '|', 'Stop all', '|', 'Settings']);
+    bar.setDeviceStatus({ devices: [] });
+    expect(group.hidden).toBe(true);
   });
 
   it('a live language switch keeps the hidden buttons hidden', () => {

@@ -414,7 +414,8 @@ describe('data-export', () => {
       expect(exported.settings.library.collections).toHaveLength(1);
       expect(exported.settings.library.associations).toEqual({ '/v/a.mp4': '/v/a.funscript' });
       expect(exported.settings.library.customRouting).toEqual({ dev0: 'L0' });
-      expect(exported.settings.handy.connectionKey).toBe('FAKEKEY1');
+      // Keys and logins are left out unless asked for (2026-11-26; below).
+      expect(exported.settings.handy.connectionKey).toBeUndefined();
       expect(exported.playlists).toHaveLength(1);
       expect(exported.categories).toHaveLength(1);
       expect(exported.videoCategories).toEqual({ '/v/a.mp4': ['cat1'] });
@@ -444,7 +445,10 @@ describe('data-export', () => {
       const result = await dataExport.exportData(minimal, path.join(tmpDir, 'backup.zip'));
       expect(result.success).toBe(true);
       const exported = await readZipConfig(path.join(tmpDir, 'backup.zip'));
-      expect(exported.settings.handy.connectionKey).toBe('k');
+      // Keys are left out unless asked for (2026-11-26); asked for, it is there.
+      expect(exported.settings.handy).toEqual({});
+      await dataExport.exportData(minimal, path.join(tmpDir, 'backup.zip'), { includeSecrets: true });
+      expect((await readZipConfig(path.join(tmpDir, 'backup.zip'))).settings.handy.connectionKey).toBe('k');
     });
   });
 

@@ -12,6 +12,58 @@ import { t } from './i18n.js';
 export const STASH_MARKER_COLOR = '#7fd8ff';
 export const STASH_MARKER_RANGE_COLOR = 'rgba(127, 216, 255, 0.45)';
 
+/**
+ * The script at the cursor in the seek bar's hover card (powerkool #433,
+ * Dave 2026-11-23: "a script timeline preview at the mouse location"):
+ * this much of the script either side of the hovered time, in ms.
+ */
+export const SCRIPT_PREVIEW_HALF_MS = 4000;
+export const SCRIPT_PREVIEW_SIZE = Object.freeze({ w: 160, h: 40 });
+
+/** Index of the last action at or before `atMs` (-1: before the first). Actions sorted by `at`. */
+function lastAtOrBefore(actions, atMs) {
+  let lo = 0;
+  let hi = actions.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (actions[mid].at <= atMs) { found = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return found;
+}
+
+/**
+ * Where the script is at `atMs`: its position (0-100, between two actions
+ * by straight line, as the heat strip reads it) and the speed of that
+ * stroke in units per second. Before the first action or after the last:
+ * that action's position, speed 0.
+ * @returns {{ pos: number, speed: number }}
+ */
+export function scriptAt(actions, atMs) {
+  if (!Array.isArray(actions) || !actions.length) return { pos: 0, speed: 0 };
+  const i = lastAtOrBefore(actions, atMs);
+  if (i < 0) return { pos: actions[0].pos, speed: 0 };
+  if (i >= actions.length - 1) return { pos: actions[actions.length - 1].pos, speed: 0 };
+  const a = actions[i];
+  const b = actions[i + 1];
+  const dt = b.at - a.at;
+  if (dt <= 0) return { pos: b.pos, speed: 0 };
+  const frac = (atMs - a.at) / dt;
+  return { pos: a.pos + (b.pos - a.pos) * frac, speed: (Math.abs(b.pos - a.pos) / dt) * 1000 };
+}
+
+/** The actions that draw [atMs - halfMs, atMs + halfMs]: one either side, so the lines reach the edges. */
+export function scriptWindow(actions, atMs, halfMs = SCRIPT_PREVIEW_HALF_MS) {
+  if (!Array.isArray(actions) || !actions.length) return [];
+  const lo = Math.max(0, lastAtOrBefore(actions, atMs - halfMs));
+  const hi = Math.min(actions.length - 1, lastAtOrBefore(actions, atMs + halfMs) + 1);
+  return actions.slice(lo, hi + 1);
+}
+
+/** The frame strip's height (CSS too) and how long it waits after a hover before taking the hidden video back. */
+const STRIP_HEIGHT = 40;
+const STRIP_YIELD_MS = 400;
+
 export class ProgressBar {
   constructor({ containerElement, videoPlayer, backendPort }) {
     this.container = containerElement;
@@ -27,6 +79,17 @@ export class ProgressBar {
     this._thumbReady = false;
     this._thumbPending = null; // queued seek time while a seek is in progress
     this._thumbSeeking = false;
+
+    // The frame strip (powerkool #433; off by default: player.seekFrameStrip).
+    this._stripOn = false;
+    this._stripAllowed = false; // a local file (file:), never a stream
+    this._stripEl = null;
+    this._stripSlots = [];
+    this._stripQueue = [];
+    this._stripSeek = null; // the slot whose seek is in flight
+    this._stripTimer = null;
+    this._lastHoverAt = -Infinity; // no hover yet
+    this._stripResize = null;
 
     this._cacheElements();
     this._bindTooltipVisibility();
@@ -83,8 +146,12 @@ export class ProgressBar {
    */
   setVideoSource(src) {
     this._destroyThumbVideo();
+    this._clearStrip();
 
     if (!src) return;
+    // The strip reads a local file only: a stream would be downloaded again
+    // frame by frame (saved streams, HLS, Load from URL).
+    this._stripAllowed = /^file:/i.test(String(src));
 
     const video = document.createElement('video');
     video.preload = 'auto';
@@ -113,9 +180,26 @@ export class ProgressBar {
       if (video.videoWidth > 0 && video.videoHeight > 0) {
         canvas.height = Math.round(160 * (video.videoHeight / video.videoWidth));
       }
+      this._buildStrip();
     });
 
     video.addEventListener('seeked', () => {
+      // A frame for the strip: draw it into its slot, then the hover's
+      // queued seek (if any) goes first, then the next slot.
+      if (this._stripSeek !== null) {
+        const slot = this._stripSeek;
+        this._stripSeek = null;
+        this._drawStripSlot(slot);
+        this._thumbSeeking = false;
+        if (this._thumbPending !== null) {
+          const next = this._thumbPending;
+          this._thumbPending = null;
+          this._seekThumbVideo(next);
+        } else {
+          this._scheduleStrip(60);
+        }
+        return;
+      }
       this._captureFrame();
       this._thumbSeeking = false;
 
@@ -139,6 +223,7 @@ export class ProgressBar {
    * Called on progress bar hover. Throttled to avoid hardware decoder contention.
    */
   updateThumbnailPreview(timeSeconds) {
+    this._lastHoverAt = performance.now();
     if (!this._thumbReady || !this._thumbVideo || !this.tooltipThumbnail) return;
 
     // Throttle: skip if less than 150ms since last seek request
@@ -227,6 +312,123 @@ export class ProgressBar {
       this.tooltipThumbnail.innerHTML = '';
       this.tooltipThumbnail.style.backgroundImage = '';
     }
+  }
+
+  // --- The frame strip (powerkool #433, 2026-11-23) ---
+  //
+  // "replace the current seek bar with a preview strip": a row of frames
+  // along the top of the seek bar, opt-in (Settings ▸ Appearance ▸ Timeline
+  // and heatmap; player.seekFrameStrip, default off), as Dave chose. The
+  // frames come from the hidden <video> the hover preview already uses, one
+  // seek per frame, never ffmpeg (an ffmpeg thumbnail filter breaks VR
+  // libraries; memory: thumbnail filters). It fills when the hover is idle
+  // and gives way to it at once. A local file only. It sits inside the seek
+  // bar, so a click or a hover on it seeks and previews exactly as the bar.
+
+  /** Turn the strip on or off (app.js, from the setting). */
+  setFrameStrip(on) {
+    this._stripOn = !!on;
+    if (this._stripOn) this._buildStrip();
+    else this._clearStrip();
+  }
+
+  /** How many frames fit, and their width, for the bar's width and the video's shape. */
+  _stripLayout() {
+    const width = this.container?.getBoundingClientRect?.().width || 0;
+    const v = this._thumbVideo;
+    const aspect = v && v.videoWidth > 0 && v.videoHeight > 0 ? v.videoWidth / v.videoHeight : 16 / 9;
+    const slotW = Math.max(40, Math.min(120, Math.round(STRIP_HEIGHT * aspect)));
+    const count = width > 0 ? Math.max(3, Math.floor(width / slotW)) : 0;
+    return { width, count, slotW };
+  }
+
+  _buildStrip() {
+    if (!this._stripOn || !this._stripAllowed || !this._thumbReady || !this._thumbVideo || !this.container) return;
+    const duration = this._thumbVideo.duration;
+    if (!isFinite(duration) || duration <= 0) return;
+    const { count } = this._stripLayout();
+    if (!count) return;
+    if (this._stripEl && this._stripSlots.length === count) return; // already laid out at this width
+    this._clearStrip({ keepOn: true });
+    const strip = document.createElement('div');
+    strip.className = 'progress__frame-strip';
+    strip.setAttribute('aria-hidden', 'true');
+    const slots = [];
+    for (let i = 0; i < count; i++) {
+      const c = document.createElement('canvas');
+      c.className = 'progress__frame';
+      c.width = 160;
+      c.height = Math.max(1, Math.round(160 / (this._thumbVideo.videoWidth / this._thumbVideo.videoHeight || 16 / 9)));
+      strip.appendChild(c);
+      slots.push({ canvas: c, time: ((i + 0.5) / count) * duration, done: false });
+    }
+    this.container.appendChild(strip);
+    this.container.classList.add('has-frame-strip');
+    this._stripEl = strip;
+    this._stripSlots = slots;
+    this._stripQueue = slots.map((_, i) => i);
+    // Re-lay it out when the bar's width changes the number of frames.
+    if (typeof ResizeObserver === 'function' && !this._stripResize) {
+      this._stripResize = new ResizeObserver(() => {
+        if (!this._stripEl) return;
+        const { count: n } = this._stripLayout();
+        if (n && n !== this._stripSlots.length) {
+          this._clearStrip({ keepOn: true });
+          this._buildStrip();
+        }
+      });
+      this._stripResize.observe(this.container);
+    }
+    this._scheduleStrip(0);
+  }
+
+  /** The next frame, when the hidden video is free and the hover has been quiet for a moment. */
+  _scheduleStrip(delay) {
+    if (this._stripTimer) clearTimeout(this._stripTimer);
+    this._stripTimer = setTimeout(() => {
+      this._stripTimer = null;
+      if (!this._stripEl || !this._stripQueue.length || !this._thumbVideo) return;
+      const sinceHover = performance.now() - this._lastHoverAt;
+      if (this._thumbSeeking || sinceHover < STRIP_YIELD_MS) {
+        this._scheduleStrip(Math.max(80, STRIP_YIELD_MS - sinceHover));
+        return;
+      }
+      const i = this._stripQueue.shift();
+      const slot = this._stripSlots[i];
+      if (!slot) return;
+      this._stripSeek = i;
+      this._thumbSeeking = true;
+      this._thumbVideo.currentTime = Math.max(0, Math.min(slot.time, this._thumbVideo.duration || slot.time));
+    }, delay);
+  }
+
+  _drawStripSlot(i) {
+    const slot = this._stripSlots[i];
+    const v = this._thumbVideo;
+    if (!slot || !v) return;
+    try {
+      slot.canvas.getContext('2d')?.drawImage(v, 0, 0, slot.canvas.width, slot.canvas.height);
+      slot.done = true;
+      slot.canvas.classList.add('is-ready');
+    } catch {
+      // A frame that cannot be drawn stays blank; the rest go on.
+    }
+  }
+
+  /** How many of the strip's frames are drawn, of how many (tests, the driver). */
+  frameStripState() {
+    return { on: this._stripOn, shown: !!this._stripEl, count: this._stripSlots.length, drawn: this._stripSlots.filter((s) => s.done).length };
+  }
+
+  _clearStrip({ keepOn = false } = {}) {
+    if (this._stripTimer) { clearTimeout(this._stripTimer); this._stripTimer = null; }
+    this._stripEl?.remove();
+    this._stripEl = null;
+    this._stripSlots = [];
+    this._stripQueue = [];
+    if (this._stripSeek !== null) { this._stripSeek = null; this._thumbSeeking = false; }
+    this.container?.classList?.remove('has-frame-strip');
+    if (!keepOn && this._stripResize) { this._stripResize.disconnect(); this._stripResize = null; }
   }
 
   /**
@@ -634,6 +836,89 @@ export class ProgressBar {
   _speedToColor(speed) {
     // Shared with the HM overlay strip (inline-viz.js) so the two agree.
     return heatmapSpeedToColor(speed);
+  }
+
+  /**
+   * The hover card's script preview (powerkool #433, Dave 2026-11-23): a
+   * small graph of the loaded script SCRIPT_PREVIEW_HALF_MS either side of
+   * the hovered time, each stroke in the seek bar's own speed colours, the
+   * cursor as a line, and the position and speed there. Built on first use
+   * between the frame and the time (the same in the player pop-out); hidden
+   * with no script (clearHeatmap drops the actions).
+   * @param {number} timeSeconds
+   */
+  updateScriptPreview(timeSeconds) {
+    const el = this._scriptPreviewEls();
+    if (!el) return;
+    const actions = this._heatmapData?.actions;
+    if (!Array.isArray(actions) || actions.length < 2 || !Number.isFinite(timeSeconds)) {
+      el.box.hidden = true;
+      return;
+    }
+    el.box.hidden = false;
+    const atMs = timeSeconds * 1000;
+    const here = scriptAt(actions, atMs);
+    el.readout.textContent = t('player.scriptPreview.readout', { pos: Math.round(here.pos), speed: Math.round(here.speed) });
+    this._drawScriptPreview(el.canvas, actions, atMs);
+  }
+
+  _scriptPreviewEls() {
+    if (this._scriptPreview) return this._scriptPreview;
+    const tip = typeof document !== 'undefined' ? document.getElementById('progress-tooltip') : null;
+    if (!tip) return null;
+    const box = document.createElement('div');
+    box.className = 'tooltip__script';
+    box.hidden = true;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'tooltip__script-graph';
+    canvas.style.width = `${SCRIPT_PREVIEW_SIZE.w}px`;
+    canvas.style.height = `${SCRIPT_PREVIEW_SIZE.h}px`;
+    const readout = document.createElement('div');
+    readout.className = 'tooltip__script-readout';
+    box.append(canvas, readout);
+    const time = tip.querySelector('#tooltip-time');
+    if (time) tip.insertBefore(box, time);
+    else tip.appendChild(box);
+    this._scriptPreview = { box, canvas, readout };
+    return this._scriptPreview;
+  }
+
+  _drawScriptPreview(canvas, actions, atMs) {
+    const ctx = canvas.getContext?.('2d');
+    if (!ctx) return;
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    const { w, h } = SCRIPT_PREVIEW_SIZE;
+    if (canvas.width !== Math.round(w * dpr)) {
+      canvas.width = Math.round(w * dpr);
+      canvas.height = Math.round(h * dpr);
+    }
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    const from = atMs - SCRIPT_PREVIEW_HALF_MS;
+    const span = SCRIPT_PREVIEW_HALF_MS * 2;
+    const x = (ms) => ((ms - from) / span) * w;
+    const y = (pos) => h - 3 - (Math.max(0, Math.min(100, pos)) / 100) * (h - 6);
+    const pts = scriptWindow(actions, atMs);
+    ctx.lineWidth = 2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i];
+      const b = pts[i + 1];
+      const dt = b.at - a.at;
+      ctx.strokeStyle = heatmapSpeedToColor(dt > 0 ? Math.abs(b.pos - a.pos) / dt : 0);
+      ctx.beginPath();
+      ctx.moveTo(x(a.at), y(a.pos));
+      ctx.lineTo(x(b.at), y(b.pos));
+      ctx.stroke();
+    }
+    // The hovered moment.
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(w / 2 + 0.5, 0);
+    ctx.lineTo(w / 2 + 0.5, h);
+    ctx.stroke();
   }
 
   /**

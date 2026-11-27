@@ -16,6 +16,7 @@ import { createVideoSyncOffsetRow } from './video-sync-offset-row.js';
 import { VIDEO_SYNC_OFFSET_DEVICE_SIGN } from '../js/video-sync-offset.js';
 import { describeConnectFailure } from '../js/connect-failure-reason.js';
 import { GO_HOME_MOVE_MS } from '../js/tcode-sync.js';
+import { MIN_PLAUSIBLE_BLE_RTT_MS } from '../js/bt-sync-test.js';
 
 /** Probes per "Measure" press. Odd, so the median is a real sample. */
 const LATENCY_SAMPLE_COUNT = 5;
@@ -342,7 +343,8 @@ export class ConnectionPanel {
 
         <div id="bp-lookahead-row">
           <label class="connection-panel__label" for="bp-lookahead" data-i18n="settingsPanel.playback.fieldLookahead">${_esc(t('settingsPanel.playback.fieldLookahead'))}</label>
-          <input type="range" id="bp-lookahead" class="connection-panel__input" min="0" max="200" value="60" step="10" aria-describedby="bp-tuning-hint">
+          <!-- Up to 500 ms, as far as the engine goes: a Bluetooth round trip can be longer than 200 ms (brokenobj #431, 2026-11-22). -->
+          <input type="range" id="bp-lookahead" class="connection-panel__input" min="0" max="500" value="60" step="10" aria-describedby="bp-tuning-hint">
           <span id="bp-lookahead-val" class="connection-panel__hint">60ms</span>
         </div>
 
@@ -353,6 +355,24 @@ export class ConnectionPanel {
         </div>
 
         <div class="connection-panel__hint" id="bp-tuning-hint">${_esc(t('settingsPanel.playback.bpHint'))}</div>
+
+        <!-- The Bluetooth sync test (brokenobj #431, 2026-11-23): measure the
+             delay through Intiface, then feel it against a flash and set the offset. -->
+        <div class="connection-panel__setting-row bp-sync-test-row">
+          <span class="connection-panel__setting-label" data-i18n="connection.syncTest.rowLabel">${_esc(t('connection.syncTest.rowLabel'))}</span>
+          <button id="bp-sync-test-btn" type="button" class="connection-panel__action connection-panel__action--utility" aria-haspopup="dialog" data-i18n="connection.syncTest.open">${_esc(t('connection.syncTest.open'))}</button>
+        </div>
+        <div class="connection-panel__hint" data-i18n="connection.syncTest.rowHint">${_esc(t('connection.syncTest.rowHint'))}</div>
+
+        <!-- Hybrid during a hold (EroScripts #434, 2026-11-23): its position
+             part fades to off when the script stands still. Off by default:
+             Hybrid keeps a base level, as its help says. Speed is already
+             off during a hold. -->
+        <label class="connection-panel__device-toggle" style="margin-top:12px;display:flex;align-items:center;gap:6px">
+          <input type="checkbox" id="bp-hybrid-hold-fade" aria-describedby="bp-hybrid-hold-fade-hint">
+          <span data-i18n="connection.buttplug.hybridHoldFade">${_esc(t('connection.buttplug.hybridHoldFade'))}</span>
+        </label>
+        <div class="connection-panel__setting-hint" id="bp-hybrid-hold-fade-hint" data-i18n="connection.buttplug.hybridHoldFadeHint">${_esc(t('connection.buttplug.hybridHoldFadeHint'))}</div>
       </div>
 
       </div><!-- end tab-buttplug -->
@@ -787,6 +807,7 @@ export class ConnectionPanel {
     // model as the Range Extender — HSSP bakes it into the uploaded script).
     this._initHandyCutoff();
     this._initHandyInvert();
+    this._initHybridHoldFade();
 
     // Tab switching — click activates a tab; arrow keys move focus
     // within the tablist per WAI-ARIA APG (Left/Right + Home/End,
@@ -1471,6 +1492,17 @@ export class ConnectionPanel {
    * on, so a missing key is off) and commits changes back, then tells the
    * app so it can flip HDSP live and re-arm HSSP when it is safe.
    */
+  /** "Hybrid fades to off during holds" (EroScripts #434): player.hybridHoldFade, live on the engine. */
+  _initHybridHoldFade() {
+    const cb = this._panel.querySelector('#bp-hybrid-hold-fade');
+    if (!cb) return;
+    cb.checked = this.settings?.get?.('player.hybridHoldFade') === true;
+    cb.addEventListener('change', () => {
+      this.settings?.set?.('player.hybridHoldFade', cb.checked);
+      this.buttplugSync?.setHybridHoldFade?.(cb.checked);
+    });
+  }
+
   _initHandyInvert() {
     const cb = this._panel.querySelector('#handy-invert-toggle');
     if (!cb) return;
@@ -1722,6 +1754,19 @@ export class ConnectionPanel {
       });
     };
 
+    this._panel.querySelector('#bp-sync-test-btn')?.addEventListener('click', async () => {
+      const { openBtSyncTestDialog } = await import('./bt-sync-test-dialog.js');
+      const res = await openBtSyncTestDialog({
+        manager: this.buttplug,
+        settings: this.settings,
+        sync: this.buttplugSync,
+        pausePlayback: () => { try { window.app?.videoPlayer?.video?.pause?.(); } catch { /* no player */ } },
+      });
+      if (res?.saved) {
+        showToast(t('connection.syncTest.saved', { ms: res.offsetMs }), 'success', 3000);
+        this._refreshSyncTab?.();
+      }
+    });
     wireRange(lookahead, lookaheadVal, 'player.linearLookaheadMs', 60,
       (v) => this.buttplugSync?.setLinearLookaheadMs?.(v));
     wireRange(minStroke, minStrokeVal, 'player.minStrokeMs', 60,
@@ -3572,7 +3617,11 @@ export class ConnectionPanel {
         // No real BLE-RTT measurement yet — use the device preset as the
         // baseline component so the suggestion still moves with VR
         // jitter + display-lag changes.
-        buttplugPingMs: Math.abs(DEVICE_OFFSET_PRESETS.buttplug) * 2,
+        // The Sync test's measured round trip (#431) when there is one.
+        // (One faster than Bluetooth can answer was Intiface's, not the toy's.)
+        buttplugPingMs: Number(this.settings.get('buttplug.measuredRoundTripMs')) >= MIN_PLAUSIBLE_BLE_RTT_MS
+          ? Number(this.settings.get('buttplug.measuredRoundTripMs'))
+          : Math.abs(DEVICE_OFFSET_PRESETS.buttplug) * 2,
         vrJitterMs: jitter ?? 0,
         vrPlayerType,
       });

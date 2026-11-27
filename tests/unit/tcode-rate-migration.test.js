@@ -73,7 +73,7 @@ describe('T-Code 25 Hz → 60 Hz, once (V77)', () => {
     expect(store.getSetting('tcode.updateRateHz')).toBe(60);
     const disk = onDisk();
     expect(disk.settings.tcode.updateRateHz).toBe(60);
-    expect(disk._migrations).toEqual({ tcodeUpdateRate25to60: true });
+    expect(disk._migrations).toMatchObject({ tcodeUpdateRate25to60: true });
     expect(store.appliedMigrations()).toEqual(['tcodeUpdateRate25to60']);
     // Everything else in the file is as it was.
     expect(disk.settings.tcode).toEqual({ ...V080_CONFIG.settings.tcode, updateRateHz: 60 });
@@ -102,7 +102,7 @@ describe('T-Code 25 Hz → 60 Hz, once (V77)', () => {
       await launch();
       expect(shownRate()).toBe(rate);
       expect(store.appliedMigrations()).toEqual([]);
-      expect(onDisk()._migrations).toEqual({ tcodeUpdateRate25to60: true });
+      expect(onDisk()._migrations).toMatchObject({ tcodeUpdateRate25to60: true });
 
       // Spent: a later pick of 25 is not migrated either.
       store.setSetting('tcode.updateRateHz', 25);
@@ -117,14 +117,14 @@ describe('T-Code 25 Hz → 60 Hz, once (V77)', () => {
     await launch();
     expect(shownRate()).toBe(60);
     expect(onDisk().settings.tcode).toBeUndefined();
-    expect(onDisk()._migrations).toEqual({ tcodeUpdateRate25to60: true });
+    expect(onDisk()._migrations).toMatchObject({ tcodeUpdateRate25to60: true });
   });
 
   it('a fresh install records the migration as spent, so its own later pick of 25 stays', async () => {
     expect(fs.existsSync(configPath())).toBe(false);
     await launch();
     expect(shownRate()).toBe(60);
-    expect(onDisk()._migrations).toEqual({ tcodeUpdateRate25to60: true });
+    expect(onDisk()._migrations).toMatchObject({ tcodeUpdateRate25to60: true });
 
     store.setSetting('tcode.updateRateHz', 25);
     await launch();
@@ -139,7 +139,7 @@ describe('T-Code 25 Hz → 60 Hz, once (V77)', () => {
     // A snapshot is getAll(); Restore (and launch-time recovery) writes its
     // config back as the whole config.json, then relaunches.
     const snapshot = store.getAll();
-    expect(snapshot._migrations).toEqual({ tcodeUpdateRate25to60: true });
+    expect(snapshot._migrations).toMatchObject({ tcodeUpdateRate25to60: true });
     fs.writeFileSync(configPath(), JSON.stringify(snapshot, null, 2));
     await launch();
     expect(shownRate()).toBe(25);

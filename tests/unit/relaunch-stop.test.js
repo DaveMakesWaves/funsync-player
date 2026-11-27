@@ -227,4 +227,16 @@ describe('_stopForRelaunch (the REAL app.js method)', () => {
     expect(settled).toBe(true);
     expect(order).toContain('handy.hsspStop');
   });
+
+  it('Buttplug "connected" with its client gone (its stop never answers) does not hold it either (TODO: possible quit hang)', async () => {
+    vi.useFakeTimers();
+    const order = [];
+    const app = fakeApp({ order });
+    app.buttplugManager = { connected: true, stopAll: vi.fn(() => { order.push('buttplug.stopAll'); return new Promise(() => {}); }) };
+    let settled = false;
+    makeStop({ funsync: {} }, PLAYERWIN).call(app).then(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(settled).toBe(true);
+    expect(order).toContain('buttplug.stopAll');
+  });
 });

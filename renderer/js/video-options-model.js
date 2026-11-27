@@ -470,7 +470,8 @@ export function handMadeSlots(raw, { ownScriptPath = null } = {}) {
  * How the video's script is paired.
  *   kind: 'single' | 'multi' | 'custom' (you made it), 'auto-multi' (FunSync
  *   paired the script and its axis files by name), 'by-name', 'folder' (the
- *   first script of a one-video folder, FT-102), 'none'.
+ *   first script of a one-video folder, FT-102), 'stream' (a saved stream's
+ *   own script, picked when the link was saved), 'none'.
  */
 function pairingOf(slots, input) {
   const playing = slots.find((s) => s.active && s.applied);
@@ -479,6 +480,12 @@ function pairingOf(slots, input) {
     return { kind: playing.slot, hand: true, main: playing.main };
   }
   const shown = input.funscriptPath || null;
+  // A saved stream's script was picked when its link was saved (Load from
+  // URL, EroScripts Watch), never matched by a file name: it said "Paired by
+  // name" and "Rename or move the .funscript to unpair it", which would only
+  // have broken another video's pairing (test day 2026-11-26, B101). A
+  // script chosen with Change… is an association and is caught above.
+  if (shown && /^stream:/.test(String(input.videoPath || ''))) return { kind: 'stream', hand: false, main: shown };
   if (input.folderVariantMain && shown) return { kind: 'folder', hand: false, main: shown };
   const own = input.ownScriptPath !== undefined ? input.ownScriptPath : shown;
   if (own || shown) return { kind: 'by-name', hand: false, main: own || shown };
@@ -506,7 +513,15 @@ function ownOf(input, pairing) {
 export function eroscriptsRecordState(record, scriptPath) {
   if (!isPlainObject(record)) return 'none';
   if (typeof record.scriptPath !== 'string' || !record.scriptPath) return 'unknown';
-  if (!scriptPath) return 'another-script';
+  // No script now. A post the VIDEO came from (the EroScripts tab's download,
+  // `videoFromPost`) still applies: the video is that post's, whether its
+  // script never came (the post had none, or it did not save) or is gone
+  // (Dave, 2026-11-25: "when downloading a video and script to the libary
+  // why doesnt it also get the tags?"; reproduced: Video options showed
+  // none, "This video has no script"). A post only a SCRIPT came from (Get
+  // Script, a link, a search) was about that script: set aside, as after an
+  // Unpair.
+  if (!scriptPath) return record.videoFromPost === true ? 'applies' : 'another-script';
   const fold = (p) => String(p).replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
   return fold(record.scriptPath) === fold(scriptPath) ? 'applies' : 'another-script';
 }
@@ -531,6 +546,7 @@ const NOT_OFFERED_KEY = Object.freeze({
   'auto-multi': 'videoOptions.script.unpair.autoMulti',
   folder: 'videoOptions.script.unpair.folder',
   'own-script': 'videoOptions.script.unpair.ownScript',
+  stream: 'videoOptions.script.unpair.stream',
   'no-main': 'videoOptions.script.unpair.noMain',
   none: null,
 });
@@ -538,7 +554,7 @@ const NOT_OFFERED_KEY = Object.freeze({
 /** The pairing line's key per kind (`videoOptions.script.pairing.*`). */
 const PAIRING_KEY = Object.freeze({
   none: 'none', 'by-name': 'byName', folder: 'folder', 'auto-multi': 'autoMulti',
-  single: 'single', multi: 'multi', custom: 'custom',
+  single: 'single', multi: 'multi', custom: 'custom', stream: 'stream',
 });
 
 function unpairOffer(pairing, own) {
@@ -615,8 +631,8 @@ function statusWord(answer) {
  *   'keep'    a single script, multi-axis set or custom routing you saved in
  *             another slot: it stays, for Change… to use again;
  *   'empty'   nothing there.
- * No slot kept: the whole entry goes, mirrors included (today's
- * `_removeAssociation`). Something kept: the entry stays with
+ * No slot kept: the whole entry goes, mirrors included (as the old ⋮
+ * menu's Remove did). Something kept: the entry stays with
  * `active: null`, so nothing it holds plays.
  *
  * @param {object} input as scriptView

@@ -130,13 +130,25 @@ export class VRProjectionRenderer {
     }
 
     this._mounted = true;
+    // A seek (or the first frame) while paused gives no video-frame callback
+    // to draw on: draw once for it (_requestRender).
+    this._onVideoFrameReady = () => this._requestRender();
+    videoEl.addEventListener('seeked', this._onVideoFrameReady);
+    videoEl.addEventListener('loadeddata', this._onVideoFrameReady);
     this._startRenderLoop();
+    this._requestRender();
   }
 
   /** Tear down the renderer and remove the canvas. */
   unmount() {
     if (!this._mounted) return;
     this._stopRenderLoop();
+    if (this._pendingDraw != null) { try { cancelAnimationFrame(this._pendingDraw); } catch { /* swallow */ } this._pendingDraw = null; }
+    if (this._videoEl && this._onVideoFrameReady) {
+      this._videoEl.removeEventListener('seeked', this._onVideoFrameReady);
+      this._videoEl.removeEventListener('loadeddata', this._onVideoFrameReady);
+    }
+    this._onVideoFrameReady = null;
     if (this._resizeObserver) {
       this._resizeObserver.disconnect();
       this._resizeObserver = null;
@@ -172,22 +184,26 @@ export class VRProjectionRenderer {
     }
     this._state.projection = name;
     if (this._mounted) this._ensureProgram(name);
+    this._requestRender();
   }
 
   /** Eye selector — 'left' (or 'top') vs 'right' (or 'bottom'). */
   setEye(eye) {
     this._state.eye = eye === 'right' ? 'right' : 'left';
+    this._requestRender();
   }
 
   /** Stereo mode: 0 mono, 1 sbs-half, 2 tb-half. */
   setStereoMode(mode) {
     this._state.stereoMode = (mode === 0 || mode === 1 || mode === 2) ? mode : 1;
+    this._requestRender();
   }
 
   /** Viewport FOV in degrees (clamped 30-160). */
   setFov(degrees) {
     const clamped = Math.max(30, Math.min(160, Number(degrees) || 90));
     this._state.fov = clamped * Math.PI / 180;
+    this._requestRender();
   }
 
   /** Pan offsets in degrees. */
@@ -198,6 +214,7 @@ export class VRProjectionRenderer {
     // crosses the pole.
     const pitch = Math.max(-85, Math.min(85, Number(pitchDeg) || 0));
     this._state.pitch = pitch * Math.PI / 180;
+    this._requestRender();
   }
 
   /** Reset yaw + pitch to 0 (double-click recenter callsite).
@@ -205,12 +222,14 @@ export class VRProjectionRenderer {
   recenter() {
     this._state.yaw = 0;
     this._state.pitch = 0;
+    this._requestRender();
   }
 
   /** Roll in degrees (rotates around the forward axis). 180° flips
    *  upside-down source content. No clamp — full ±360° is valid. */
   setRoll(degrees) {
     this._state.roll = (Number(degrees) || 0) * Math.PI / 180;
+    this._requestRender();
   }
 
   /**
@@ -248,6 +267,23 @@ export class VRProjectionRenderer {
       this.canvas.height = h;
     }
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    this._requestRender();
+  }
+
+  /**
+   * Draw once on the next frame, whatever the video is doing. The render
+   * loop follows the video's own frames (requestVideoFrameCallback), so while
+   * PAUSED nothing drew: a projection applied while paused, or a seek while
+   * paused, left the view black until play, and a drag to look around did
+   * not move it (found 2026-11-22). Every change of view, a resize, a seek
+   * and the first decoded frame ask for one draw here.
+   */
+  _requestRender() {
+    if (!this._mounted || this._pendingDraw != null || typeof requestAnimationFrame !== 'function') return;
+    this._pendingDraw = requestAnimationFrame(() => {
+      this._pendingDraw = null;
+      if (this._mounted) this._render();
+    });
   }
 
   _ensureProgram(name) {

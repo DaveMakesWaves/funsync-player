@@ -46,6 +46,7 @@ export class ActionGraph {
     // Fill with pattern preview (pattern library, Round 2): a dashed line
     // drawn over the real one while the drawer is open. Never in the script.
     this._ghost = null; // { points: [{at, pos}] sorted, from, to } | null
+    this._reference = null; // [{at, pos}] sorted | null: the stroke behind an axis (setReference)
     // A time range marked for a fill (a rubber band over 0 or 1 points): a
     // shaded band over the whole height while it holds. Never in the script.
     this._timeRange = null; // { from, to, isLive } | null
@@ -88,6 +89,7 @@ export class ActionGraph {
       selectedDot: 'rgb(11, 252, 3)',           // OFS green
       selectedGlow: 'rgba(11, 252, 3, 0.3)',
       selectedLine: 'rgb(3, 194, 252)',         // cyan for selected segments
+      overSpeed: 'rgb(200, 140, 255)',          // lilac: faster than the max speed (speedMark)
       hoveredDot: '#ff6b81',
       cursor: '#4caf50',
       rubberBand: 'rgba(3, 252, 207, 0.15)',   // OFS cyan
@@ -100,6 +102,9 @@ export class ActionGraph {
       ghostEdge: 'rgba(255, 255, 255, 0.35)',
       ghostUnder: 'rgba(0, 0, 0, 0.6)',
       ghostLine: 'rgba(255, 255, 255, 0.95)',
+      // The stroke behind the axis being edited (setReference): a quiet
+      // white line, under the real one, readable on the purple in both themes.
+      reference: 'rgba(255, 255, 255, 0.26)',
       // A marked fill range: the rubber band's cyan, fainter, dashed edges.
       timeRange: 'rgba(3, 252, 207, 0.10)',
       timeRangeEdge: 'rgba(3, 252, 207, 0.65)',
@@ -290,6 +295,28 @@ export class ActionGraph {
   clearGhost() {
     this._ghost = null;
   }
+
+  /**
+   * A reference line drawn faintly UNDER the script: the stroke behind the
+   * axis being edited (editor work list 2.3, 2026-11-24; FunGen 2's ghost
+   * overlay, and acedog #190's "second script layer"), so a roll or twist is
+   * shaped against the stroke it goes with. Never selectable, no dots, a copy
+   * (the other script is not touched). Null or empty clears it. Call draw() after.
+   * @param {Array<{at:number,pos:number}>|null} points
+   */
+  setReference(points) {
+    if (!Array.isArray(points) || points.length < 2) {
+      this._reference = null;
+      return;
+    }
+    this._reference = points
+      .filter((p) => p && Number.isFinite(p.at) && Number.isFinite(p.pos))
+      .map((p) => ({ at: p.at, pos: p.pos }))
+      .sort((a, b) => a.at - b.at);
+  }
+
+  /** The reference line on show (setReference), or null. */
+  get reference() { return this._reference; }
 
   /** The preview on show (a copy of what setGhost got), or null. */
   get ghost() { return this._ghost; }
@@ -583,41 +610,91 @@ export class ActionGraph {
     this.draw();
   }
 
-  // --- Speed to color (OFS heatmap gradient) ---
+  // --- Speed to color (OFS's two scales) ---
+  //
+  // OFS (OFS-lib/Funscript/FunscriptHeatmap.cpp, checked 2026-11-24) has TWO
+  // scales, both full at FunscriptHeatmap::MaxSpeedPerSecond = 400 units/s:
+  // the heatmap's 6 stops (black, dodger blue, cyan, green, yellow, red) and
+  // the timeline LINES' 4 (white, #66ff00, yellow, red). FunSync drew its
+  // lines in the heatmap's colours and full at 300: a slow stroke was a black
+  // line on the dark graph, and 300 and 700 units/s looked the same.
 
   /**
-   * Map action speed to OFS 6-stop heatmap color.
-   * Speed is |deltaPos| / deltaTime (pos-units per millisecond).
-   * @param {number} speed — pos/ms
+   * The heatmap colour (the editor's heatmap bar), OFS's 6 stops.
+   * @param {number} speed — |deltaPos| / deltaTime in pos-units per ms
    * @returns {string} CSS color
    */
   static speedToColor(speed) {
-    // Use pre-computed LUT for O(1) lookup
     if (!ActionGraph._speedColorLUT) {
-      ActionGraph._buildSpeedColorLUT();
+      ActionGraph._speedColorLUT = ActionGraph._buildLUT([
+        [0, [0, 0, 0]], [1 / 255, [0x1e, 0x90, 0xff]], [0.4, [0, 255, 255]],
+        [0.6, [0, 255, 0]], [0.8, [255, 255, 0]], [1, [255, 0, 0]],
+      ]);
     }
-    const idx = Math.min(255, Math.floor(Math.min(1, speed / 0.3) * 255));
-    return ActionGraph._speedColorLUT[idx];
+    return ActionGraph._speedColorLUT[ActionGraph._lutIndex(speed)];
   }
 
-  static _buildSpeedColorLUT() {
-    const stops = [
-      [0, 0, 0], [0, 0, 255], [0, 255, 255],
-      [0, 255, 0], [255, 255, 0], [255, 0, 0],
-    ];
+  /**
+   * A line's colour, OFS's line scale: white (slow), green, yellow, red at
+   * 400 units/s.
+   * @param {number} speed — pos-units per ms
+   * @returns {string} CSS color
+   */
+  static lineSpeedToColor(speed) {
+    if (!ActionGraph._lineColorLUT) {
+      ActionGraph._lineColorLUT = ActionGraph._buildLUT([
+        [0, [255, 255, 255]], [1 / 3, [0x66, 0xff, 0]], [2 / 3, [255, 255, 0]], [1, [255, 0, 0]],
+      ]);
+    }
+    return ActionGraph._lineColorLUT[ActionGraph._lutIndex(speed)];
+  }
+
+  /** Speed (pos/ms) to a LUT index; full scale at OFS's 400 units/s. */
+  static _lutIndex(speed) {
+    const n = Number.isFinite(speed) && speed > 0 ? Math.min(1, speed / 0.4) : 0;
+    return Math.min(255, Math.floor(n * 255));
+  }
+
+  /** 256 colours along [position 0-1, [r, g, b]] stops. */
+  static _buildLUT(stops) {
     const lut = new Array(256);
     for (let i = 0; i < 256; i++) {
       const t = i / 255;
-      const idx = t * (stops.length - 1);
-      const lo = Math.floor(idx);
-      const hi = Math.min(lo + 1, stops.length - 1);
-      const frac = idx - lo;
-      const r = Math.round(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac);
-      const g = Math.round(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac);
-      const b = Math.round(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac);
-      lut[i] = `rgb(${r},${g},${b})`;
+      let k = 0;
+      while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+      const [p0, c0] = stops[k];
+      const [p1, c1] = stops[k + 1];
+      const f = p1 > p0 ? Math.min(1, Math.max(0, (t - p0) / (p1 - p0))) : 1;
+      const ch = (j) => Math.round(c0[j] + (c1[j] - c0[j]) * f);
+      lut[i] = `rgb(${ch(0)},${ch(1)},${ch(2)})`;
     }
-    ActionGraph._speedColorLUT = lut;
+    return lut;
+  }
+
+  /**
+   * The speed limits every graph in this window marks (Settings > Keyboard >
+   * Editor speed limits; the editor sets them, the pop-out from SETTINGS).
+   * max: a line faster than this many units/s is lilac (OFS's max speed
+   * highlight; roa: 400). min: a moving line slower than this is dashed
+   * (kinetics: the Handy stops under about 33). 0 / null = not marked.
+   * @param {{max?: number, min?: number}} limits
+   */
+  static setSpeedLimits({ max, min } = {}) {
+    const ok = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : 0);
+    ActionGraph.speedLimits = { max: ok(max), min: ok(min) };
+  }
+
+  /**
+   * How a segment is marked against the limits: 'fast', 'slow' or null.
+   * A hold (no movement) is never slow.
+   * @param {number} speed — pos-units per ms
+   */
+  static speedMark(speed) {
+    const { max, min } = ActionGraph.speedLimits;
+    const perSec = speed * 1000;
+    if (max > 0 && perSec > max) return 'fast';
+    if (min > 0 && perSec > 0 && perSec < min) return 'slow';
+    return null;
   }
 
   // --- Drawing ---
@@ -691,6 +768,21 @@ export class ActionGraph {
     if (this._timeRange && this._timeRange.isLive && !this._timeRange.isLive()) this._timeRange = null;
     if (this._timeRange) this._drawTimeRange(ctx, area);
 
+    // The line, its dots, the reference and the fill preview stay in the plot
+    // (a dot's width spare at each side): zoomed in, the line to the point
+    // past the view's edge ran under the 0-100 scale and, in the stacked
+    // tracks view, under the tracks' names (Dave, 2026-11-24).
+    const canClip = typeof ctx.clip === 'function' && typeof ctx.rect === 'function';
+    if (canClip) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(area.x - 6, 0, area.w + 12, h);
+      ctx.clip();
+    }
+
+    // 5c. The stroke behind the axis being edited (setReference), under the line
+    if (this._reference) this._drawReference(ctx, area);
+
     // 6. Connection lines (speed-colored, OFS style)
     this._drawConnections(ctx, area);
 
@@ -700,11 +792,13 @@ export class ActionGraph {
     // 7b. Fill with pattern preview, over the real line and its dots
     if (this._ghost) this._drawGhost(ctx, area);
 
+    if (canClip) ctx.restore();
+
     // 8. Playback cursor (centered during playback)
     this._drawCursor(ctx, area);
 
-    // 9. Heatmap bar at bottom
-    this._drawHeatmapBar(ctx, area);
+    // 9. Heatmap bar at bottom (not on a compact lane)
+    if (!this._compact) this._drawHeatmapBar(ctx, area);
 
     // 10. Rubber-band selection
     if (this._rubberBand) {
@@ -719,22 +813,70 @@ export class ActionGraph {
     ctx.restore();
   }
 
+  /**
+   * A stacked lane's graph (2026-11-24): slim padding, and no scale numbers,
+   * time labels or heatmap strip (the main graph under the lanes shows them),
+   * so a lane stays readable down to ~30 px. The lane's left edge still lines
+   * up with the main graph's (the same left padding).
+   */
+  setCompact(on = true) {
+    this._compact = !!on;
+    this._padding = on ? { top: 3, right: 20, bottom: 3, left: 40 } : { top: 10, right: 20, bottom: 28, left: 40 };
+    this._cachedArea = null;
+  }
+
+  /**
+   * The left gutter (the 0-100 scale's column): 40 px, wider in the stacked
+   * tracks view, where the track's name sits in it (fixed-order tracks,
+   * 2026-11-24). The compact lanes line up with it (alignTo).
+   */
+  setGutter(px = 40) {
+    if (this._compact) return;
+    const left = Math.max(0, Math.round(px));
+    if (this._padding.left === left) return;
+    this._padding = { ...this._padding, left };
+    this._cachedArea = null;
+  }
+
+  /**
+   * Line a compact lane's time axis up with another graph's (the main one):
+   * the same moment at the same x on screen. The lanes sit inset in their
+   * area (padding, border) and lose width to its scrollbar once more lanes
+   * than fit scroll, so fixed padding put a lane's end ~13 px off the main
+   * graph's (fit-on-screen pass, 2026-11-24).
+   */
+  alignTo(other) {
+    if (!this._compact || !other?.canvas?.getBoundingClientRect) return;
+    const a = this.canvas.getBoundingClientRect();
+    const b = other.canvas.getBoundingClientRect();
+    if (!a.width || !b.width) return;
+    const left = Math.max(0, Math.round(b.left + other._padding.left - a.left));
+    const right = Math.max(0, Math.round(a.right - (b.right - other._padding.right)));
+    if (left === this._padding.left && right === this._padding.right) return;
+    this._padding = { ...this._padding, left, right };
+    this._cachedArea = null;
+  }
+
   _drawGrid(ctx, area) {
     ctx.strokeStyle = this._colors.grid;
     ctx.lineWidth = 1;
     ctx.font = '10px sans-serif';
     ctx.fillStyle = this._colors.gridLabel;
 
-    // Horizontal grid (position: 0, 25, 50, 75, 100)
+    // Horizontal grid (position: 0, 25, 50, 75, 100). One path for all the
+    // lines, one stroke (2026-11-25: every graph, the stacked tracks too,
+    // draws this each frame during playback; a stroke per line added up).
+    ctx.beginPath();
     for (const pos of [0, 25, 50, 75, 100]) {
       const y = this.posToY(pos);
-      ctx.beginPath();
       ctx.moveTo(area.x, y);
       ctx.lineTo(area.x + area.w, y);
-      ctx.stroke();
+    }
+    ctx.stroke();
+    if (!this._compact) {
       ctx.textAlign = 'right';
       ctx.textBaseline = 'middle';
-      ctx.fillText(String(pos), area.x - 6, y);
+      for (const pos of [0, 25, 50, 75, 100]) ctx.fillText(String(pos), area.x - 6, this.posToY(pos));
     }
 
     // Vertical grid (time — adaptive intervals)
@@ -749,13 +891,15 @@ export class ActionGraph {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'top';
 
+    ctx.beginPath();
     for (let t = firstTick; t <= this._viewEndMs; t += interval) {
       const x = this.timeToX(t);
-      ctx.beginPath();
       ctx.moveTo(x, area.y);
       ctx.lineTo(x, area.y + area.h);
-      ctx.stroke();
-      ctx.fillText(this._formatTime(t), x, area.y + area.h + 6);
+    }
+    ctx.stroke();
+    if (!this._compact) {
+      for (let t = firstTick; t <= this._viewEndMs; t += interval) ctx.fillText(this._formatTime(t), this.timeToX(t), area.y + area.h + 6);
     }
   }
 
@@ -933,14 +1077,17 @@ export class ActionGraph {
       const i = first + si;
       const bothSelected = selected.has(i) && selected.has(i + 1);
 
+      const deltaTime = actions[i + 1].at - actions[i].at;
+      const deltaPos = Math.abs(actions[i + 1].pos - actions[i].pos);
+      const speed = deltaTime > 0 ? deltaPos / deltaTime : 0;
+      const mark = ActionGraph.speedMark(speed);
       let color;
       if (bothSelected) {
         color = this._colors.selectedLine;
+      } else if (mark === 'fast') {
+        color = this._colors.overSpeed;
       } else {
-        const deltaTime = actions[i + 1].at - actions[i].at;
-        const deltaPos = Math.abs(actions[i + 1].pos - actions[i].pos);
-        const speed = deltaTime > 0 ? deltaPos / deltaTime : 0;
-        color = ActionGraph.speedToColor(speed);
+        color = ActionGraph.lineSpeedToColor(speed);
       }
 
       const x1 = xs[si], y1 = ys[si], x2 = xs[si + 1], y2 = ys[si + 1];
@@ -975,7 +1122,10 @@ export class ActionGraph {
 
       ctx.strokeStyle = color;
       ctx.lineWidth = 3;
+      // Too slow for the device: dashed, in its own colour.
+      if (mark === 'slow') ctx.setLineDash?.([6, 5]);
       ctx.stroke(path);
+      if (mark === 'slow') ctx.setLineDash?.([]);
     }
   }
 
@@ -1203,6 +1353,47 @@ export class ActionGraph {
   }
 
   /**
+   * The reference line (setReference): only the visible slice, straight or
+   * curved like the real line, thin and faint, no dots.
+   */
+  _drawReference(ctx, area) {
+    const pts = this._reference;
+    const { first, last } = this._visibleRange(pts);
+    if (!(last > first)) return;
+    const n = last - first + 1;
+    const xs = new Array(n);
+    const ys = new Array(n);
+    for (let i = 0; i < n; i++) {
+      xs[i] = this.timeToX(pts[first + i].at);
+      ys[i] = this.posToY(pts[first + i].pos);
+    }
+    const tangents = this._splineMode ? this._monotoneTangents(xs, ys) : null;
+    const [yLo, yHi] = this._curveYBounds();
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(xs[0], ys[0]);
+    for (let i = 0; i < n - 1; i++) {
+      const x1 = xs[i], y1 = ys[i], x2 = xs[i + 1], y2 = ys[i + 1];
+      if (!tangents) { ctx.lineTo(x2, y2); continue; }
+      const dx = x2 - x1;
+      const m1 = tangents[i] * dx;
+      const m2 = tangents[i + 1] * dx;
+      for (let st = 1; st <= 12; st++) {
+        const t = st / 12, t2 = t * t, t3 = t2 * t;
+        ctx.lineTo(
+          x1 + dx * t,
+          Math.min(yHi, Math.max(yLo, (2 * t3 - 3 * t2 + 1) * y1 + (t3 - 2 * t2 + t) * m1 + (-2 * t3 + 3 * t2) * y2 + (t3 - t2) * m2)),
+        );
+      }
+    }
+    ctx.strokeStyle = this._colors.reference;
+    ctx.lineWidth = 2;
+    ctx.setLineDash?.([]);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  /**
    * The Fill with pattern preview (setGhost): a faint band over the filled
    * stretch, then the fill as a dashed light line on a dark underlay, curved
    * like the real line when Curves is on, with small hollow dots once they
@@ -1356,3 +1547,7 @@ export class ActionGraph {
     };
   }
 }
+
+// Until the editor applies the settings: OFS / roa max 400, kinetics min 33.
+// The max: the fastest any supported toy moves (device-speed-caps.js FASTEST_DEVICE_CAP, 640).
+ActionGraph.speedLimits = { max: 640, min: 33 };

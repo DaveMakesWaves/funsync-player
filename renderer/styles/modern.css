@@ -123,7 +123,8 @@
 :root[data-style="modern"] .nav-bar__item:active {
   transform: scale(0.96);
 }
-:root[data-style="modern"] .nav-bar__item--active::after {
+:root[data-style="modern"] .nav-bar__item--active::after,
+:root[data-style="modern"] .nav-bar__eroscripts--active::after {
   height: 3px;
   border-radius: var(--radius-pill);
   box-shadow: 0 0 8px rgba(var(--accent-rgb), 0.55);
@@ -205,6 +206,7 @@
 :root[data-style="modern"] .playlists__loop-btn:focus-visible,
 :root[data-style="modern"] .categories__card-action-btn:focus-visible,
 :root[data-style="modern"] .queue-panel__close:focus-visible,
+:root[data-style="modern"] .queue-panel__dock:focus-visible,
 :root[data-style="modern"] .queue-panel__section-action:focus-visible,
 :root[data-style="modern"] .eroscripts-panel__btn:focus-visible,
 :root[data-style="modern"] .eroscripts-panel__input:focus-visible,
@@ -275,11 +277,13 @@
   transform: translateX(2px);
 }
 :root[data-style="modern"] .queue-panel__close,
+:root[data-style="modern"] .queue-panel__dock,
 :root[data-style="modern"] .queue-panel__section-action {
   border-radius: var(--radius-md);
   transition: background var(--dur-1) var(--ease-out), transform var(--dur-1) var(--ease-out);
 }
 :root[data-style="modern"] .queue-panel__close:active,
+:root[data-style="modern"] .queue-panel__dock:active,
 :root[data-style="modern"] .queue-panel__section-action:active {
   transform: scale(0.94);
 }
@@ -302,7 +306,12 @@
 }
 
 /* --- EroScripts panel + login modal --------------------------------------- */
-:root[data-style="modern"] .eroscripts-panel {
+/* The FLOATING panel only. Docked in the EroScripts tab it is the search row,
+   not a window: this rule (0,3,0) beat the docked one's `box-shadow: none`
+   (0,2,0), and the tab drew a shadowed, rounded band behind everything from
+   the search box to Log Out (Dave, 2026-11-25: "a weird bar behind
+   everything from search to the log out button"). */
+:root[data-style="modern"] .eroscripts-panel:not(.eroscripts-panel--docked) {
   border-radius: var(--radius-xl);
   box-shadow: var(--elev-3), var(--edge-highlight);
 }
@@ -388,6 +397,7 @@
   :root[data-style="modern"] .playlists__loop-btn,
   :root[data-style="modern"] .queue-panel__row,
   :root[data-style="modern"] .queue-panel__close,
+  :root[data-style="modern"] .queue-panel__dock,
   :root[data-style="modern"] .queue-panel__section-action,
   :root[data-style="modern"] .up-next__end-cta,
   :root[data-style="modern"] .up-next__dismiss,
@@ -409,6 +419,7 @@
   :root[data-style="modern"] .playlists__play-all-btn:active,
   :root[data-style="modern"] .playlists__loop-btn:active,
   :root[data-style="modern"] .queue-panel__close:active,
+  :root[data-style="modern"] .queue-panel__dock:active,
   :root[data-style="modern"] .queue-panel__section-action:active,
   :root[data-style="modern"] .up-next__end-cta:active,
   :root[data-style="modern"] .up-next__dismiss:active,

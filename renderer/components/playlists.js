@@ -1,15 +1,17 @@
 // Playlists — Grid view of playlists with detail view for individual playlist
 
 import { Modal } from './modal.js';
-import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check, Unplug, ArrowDownAZ, ArrowDownZA, Link, ListVideo } from '../js/icons.js';
+import { icon, Play, Plus, Pencil, Trash2, ArrowLeft, X, Clapperboard, FileX, FileCheck, Gauge, LayoutGrid, LayoutList, Repeat, Shuffle, SlidersHorizontal, GripVertical, ChevronUp, ChevronDown, History, RotateCcw, Check, Unplug, ArrowDownAZ, ArrowDownZA, Link, ListVideo, ImagePlus, ImageMinus } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
-import { computeSpeedStats, compareNames } from '../js/library-search.js';
+import { computeSpeedStats, compareNames, fuzzySearch } from '../js/library-search.js';
 import { computeBins, queueRenderBins } from '../js/heatmap-strip.js';
 import { normalizeAssociation, resolveActiveConfig } from '../js/association-shape.js';
 import { pathToFileURL } from '../js/path-utils.js';
 import { thumbRequestOpts, customThumbImagePath, dockedEditorOnScreen } from './library.js';
 import * as thumbCache from '../js/thumbnail-cache.js';
+import { buildNoVideoTile, fileNameOf, isScriptPath } from '../js/no-video-tile.js';
+import { isAudioPath, audioDuration } from '../js/video-load-check.js';
 import { dedupeThumbRequest } from '../js/thumb-inflight.js';
 import { noticeUnreadableScript } from '../js/script-access-notice.js';
 import { applyResumeBar, createResumeBar } from './resume-bar.js';
@@ -27,12 +29,22 @@ import {
   availabilityPredicate,
   partitionByAvailability,
   groupByVolume,
+  foldersPresent,
 } from '../js/playlist-availability.js';
 import { stashData, onStashChanged, isStashSettingPath } from '../js/stash-store.js';
 import { stashGroupPlaylists, isStashGroupPlaylistId } from '../js/stash-groups.js';
+import { showToast } from '../js/toast.js';
 import { anyLibraryPlayOption, readLibraryPlayOptions, setLibraryPlayOption } from '../js/library-play-options.js';
 
 /** The name a playlist card shows for a path: the file name without its extension. */
+import { isStreamPath } from '../js/saved-streams.js';
+import { isDisabled } from '../js/disabled-videos.js';
+import { isFavouritesPlaylist } from '../js/favourites.js';
+import { Heart, FolderSync } from '../js/icons.js';
+import { describeRule } from '../js/playlist-follow.js';
+import { openPlaylistFollowDialog } from './playlist-follow-dialog.js';
+import { applyDisabledMark } from './disabled-mark.js';
+
 const shownName = (videoPath) => String(videoPath).split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
 
 /**
@@ -42,11 +54,11 @@ const shownName = (videoPath) => String(videoPath).split(/[\\/]/).pop().replace(
  * full file name, then the full path, so the result never depends on the
  * order it started in, and Z-A is exactly A-Z reversed. EroScripts #370 (V78).
  */
-export function sortPlaylistPathsByName(paths, dir = 'asc') {
+export function sortPlaylistPathsByName(paths, dir = 'asc', nameOf = shownName) {
   const sign = dir === 'desc' ? -1 : 1;
   const codepoint = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
   return (paths || [])
-    .map((p) => ({ p, name: shownName(p), file: String(p).split(/[\\/]/).pop() }))
+    .map((p) => ({ p, name: nameOf(p), file: String(p).split(/[\\/]/).pop() }))
     .sort((a, b) => sign * (compareNames(a.name, b.name)
       || compareNames(a.file, b.file)
       || compareNames(a.p, b.p)
@@ -153,6 +165,24 @@ export function stashGroupSignature(groups) {
   ]));
 }
 
+/**
+ * The playlists whose name matches the search, best match first; all of them
+ * in their own order for an empty search. The phone's playlist search
+ * (backend/web-remote/app.js renderGroupingsList) makes the same call with the
+ * same wrap, so both find the same playlists in the same order (the search
+ * parity rule). Dave (2026-08-06): search by name, no filtering or sorting.
+ * @template {{ name?: string }} P
+ * @param {P[]} list
+ * @param {string} query
+ * @returns {P[]}
+ */
+export function filterPlaylistsByName(list, query) {
+  const items = Array.isArray(list) ? list : [];
+  if (!query || !String(query).trim()) return items;
+  const wrapped = items.map((p) => ({ name: p?.name || '', path: p?.name || '', _orig: p }));
+  return fuzzySearch(wrapped, query).map((w) => w._orig);
+}
+
 export class Playlists {
   /**
    * `onAddPathsToQueue(paths)`: puts several videos on the end of the user's
@@ -183,6 +213,10 @@ export class Playlists {
     this._selectPlaylistId = null;
     this._detailGrid = null;
     this._selectionBar = null;
+    // The search over the playlist grid: kept while going into a playlist
+    // and back, cleared when the Playlists view is left.
+    this._playlistQuery = '';
+    this._searchInput = null;
   }
 
   show(containerEl) {
@@ -230,6 +264,8 @@ export class Playlists {
 
   hide() {
     this._shown = false;
+    this._playlistQuery = '';
+    this._searchInput = null;
     this._supersedeRender();
     this._clearSelectState();
     this._detailGrid = null;
@@ -262,6 +298,10 @@ export class Playlists {
   }
 
   _renderGrid() {
+    // A re-render while typing (the availability probe's answer, a Stash
+    // change) must not take the search box away from the typist.
+    const typing = !!this._searchInput && document.activeElement === this._searchInput;
+    const caret = typing ? [this._searchInput.selectionStart, this._searchInput.selectionEnd] : null;
     this._supersedeRender();
     this._clearSelectState();
     this._detailGrid = null;
@@ -284,14 +324,78 @@ export class Playlists {
     header.className = 'playlists__header';
     header.innerHTML = `<span class="playlists__title">${t('playlists.title')}</span>`;
 
+    this._searchInput = null;
+    if (playlists.length + stashGroups.length > 0) header.appendChild(this._createPlaylistSearch());
     this._addViewToggle(header);
     this._addQueueToggle(header);
     this._container.appendChild(header);
 
     const wrapper = document.createElement('div');
     wrapper.className = 'playlists__grid-wrapper';
+    this._gridWrapper = wrapper;
+    this._gridPlaylists = playlists;
+    this._gridStashGroups = stashGroups;
+    this._renderGridBody();
+    this._container.appendChild(wrapper);
+    if (typing && this._searchInput) {
+      this._searchInput.focus();
+      try { this._searchInput.setSelectionRange(caret[0], caret[1]); } catch { /* not a text field any more */ }
+    }
+  }
 
-    if (playlists.length === 0) {
+  /**
+   * The search box in the playlist grid's header. It filters as you type
+   * (_renderGridBody only, so the box keeps the focus); Escape empties it
+   * first, and only an empty box lets Escape go on to the app.
+   */
+  _createPlaylistSearch() {
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'playlists__search';
+    input.placeholder = t('playlists.searchPlaceholder');
+    input.setAttribute('aria-label', t('playlists.searchPlaceholder'));
+    input.setAttribute('autocomplete', 'off');
+    input.spellcheck = false;
+    input.value = this._playlistQuery || '';
+    input.addEventListener('input', () => {
+      this._playlistQuery = input.value;
+      this._renderGridBody();
+    });
+    input.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape' || !input.value) return;
+      e.preventDefault();
+      e.stopPropagation();
+      input.value = '';
+      this._playlistQuery = '';
+      this._renderGridBody();
+    });
+    this._searchInput = input;
+    return input;
+  }
+
+  /** The grid's cards for the current search (_renderGrid keeps the lists). */
+  _renderGridBody() {
+    const wrapper = this._gridWrapper;
+    if (!wrapper) return;
+    wrapper.innerHTML = '';
+    const all = this._gridPlaylists || [];
+    const allGroups = this._gridStashGroups || [];
+    const query = (this._playlistQuery || '').trim();
+    // Favourites (zaikechi #381) always leads the grid.
+    const playlists = filterPlaylistsByName(all, query)
+      .sort((a, b) => Number(isFavouritesPlaylist(b)) - Number(isFavouritesPlaylist(a)));
+    const stashGroups = filterPlaylistsByName(allGroups, query);
+
+    if (query && playlists.length === 0 && stashGroups.length === 0) {
+      const none = document.createElement('div');
+      none.className = 'playlists__search-empty';
+      none.setAttribute('role', 'status');
+      none.textContent = t('playlists.searchNoMatches', { query });
+      wrapper.appendChild(none);
+      return;
+    }
+
+    if (all.length === 0) {
       wrapper.innerHTML = `
         <div class="playlists__empty">
           <div class="playlists__empty-icon"></div>
@@ -304,7 +408,12 @@ export class Playlists {
       wrapper.querySelector('.playlists__empty-cta')
         .addEventListener('click', () => this._createPlaylist());
       if (stashGroups.length > 0) wrapper.appendChild(this._createStashGroupSection(stashGroups));
-      this._container.appendChild(wrapper);
+      return;
+    }
+
+    if (playlists.length === 0) {
+      // Searching: none of the user's playlists match, some Stash groups do.
+      if (stashGroups.length > 0) wrapper.appendChild(this._createStashGroupSection(stashGroups));
       return;
     }
 
@@ -312,13 +421,23 @@ export class Playlists {
     grid.className = 'playlists__grid';
     grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
 
-    // Playlist cards
+    // Playlist cards. Once any has a cover, every card keeps the picture's
+    // room (a plain plate on the rest) so a row lines up (2026-11-23).
+    const covers = this._covers();
+    const coverSlot = playlists.some((pl) => covers[pl.id]?.imagePath);
     for (const pl of playlists) {
-      const card = this._viewMode === 'list' ? this._createPlaylistListItem(pl) : this._createPlaylistCard(pl);
+      const card = this._viewMode === 'list' ? this._createPlaylistListItem(pl) : this._createPlaylistCard(pl, { coverSlot });
       grid.appendChild(card);
     }
 
-    // Create new card (dashed)
+    // Create new card (dashed). Not while searching: it is not a match.
+    if (!query) grid.appendChild(this._createNewPlaylistCard());
+
+    wrapper.appendChild(grid);
+    if (stashGroups.length > 0) wrapper.appendChild(this._createStashGroupSection(stashGroups));
+  }
+
+  _createNewPlaylistCard() {
     const createCard = document.createElement('div');
     createCard.className = 'playlists__card playlists__card--create';
     createCard.innerHTML = `
@@ -328,11 +447,7 @@ export class Playlists {
     createCard.querySelector('.playlists__card-create-icon')
       .appendChild(icon(Plus, { width: 28, height: 28 }));
     createCard.addEventListener('click', () => this._createPlaylist());
-    grid.appendChild(createCard);
-
-    wrapper.appendChild(grid);
-    if (stashGroups.length > 0) wrapper.appendChild(this._createStashGroupSection(stashGroups));
-    this._container.appendChild(wrapper);
+    return createCard;
   }
 
   /**
@@ -368,9 +483,23 @@ export class Playlists {
     return availabilityPredicate(this._availablePaths);
   }
 
-  _createPlaylistCard(pl) {
+  _createPlaylistCard(pl, { coverSlot = false } = {}) {
     const card = document.createElement('div');
     card.className = 'playlists__card';
+    // A cover only when the user set one (Dave, 2026-08-06: never assigned).
+    // Beside covered cards, an uncovered one keeps the room with a plain
+    // plate and the playlist icon: never a picture taken from its videos.
+    const cover = this._coverElement(pl, 'playlists__card-cover');
+    if (cover) {
+      card.classList.add('playlists__card--cover');
+      card.appendChild(cover);
+    } else if (coverSlot) {
+      const plate = document.createElement('div');
+      plate.className = 'playlists__card-cover playlists__card-cover--empty';
+      plate.setAttribute('aria-hidden', 'true');
+      plate.appendChild(icon(ListVideo, { width: 28, height: 28 }));
+      card.appendChild(plate);
+    }
 
     const body = document.createElement('div');
     body.className = 'playlists__card-body';
@@ -378,13 +507,19 @@ export class Playlists {
     const name = document.createElement('div');
     name.className = 'playlists__card-name';
     name.textContent = pl.name;
+    if (isFavouritesPlaylist(pl)) {
+      card.classList.add('playlists__card--favourites');
+      name.prepend(this._favouritesMark());
+    }
 
     const count = document.createElement('div');
     count.className = 'playlists__card-count';
-    count.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
+    count.textContent = this._entryCount(pl);
 
     body.appendChild(name);
     body.appendChild(count);
+    const follows = this._followLine(pl);
+    if (follows) body.appendChild(follows);
 
     // Progress summary — "4 of 12 watched · 2h 15m left". Rendered only
     // once something has actually been watched, so untouched playlists
@@ -454,19 +589,40 @@ export class Playlists {
       this._deletePlaylist(pl);
     });
 
+    actions.append(...this._coverButtons(pl));
     actions.appendChild(renameBtn);
-    actions.appendChild(deleteBtn);
+    // Favourites is never deleted: it IS the favourites (store.js).
+    if (!isFavouritesPlaylist(pl)) actions.appendChild(deleteBtn);
     body.appendChild(actions);
 
     card.appendChild(body);
 
-    card.addEventListener('click', () => {
+    this._makePlaylistOpenable(card, pl);
+
+    return card;
+  }
+
+  /**
+   * Click, or Enter / Space on the tile itself, opens the playlist (triage
+   * 2026-11-23: a keyboard user could Tab to Rename and Delete but never
+   * open it; the Stash group tiles already worked this way). A key pressed
+   * on a button inside the tile is that button's.
+   */
+  _makePlaylistOpenable(el, pl) {
+    el.tabIndex = 0;
+    el.setAttribute('role', 'button');
+    el.setAttribute('aria-label', pl.name);
+    const open = () => {
       this._view = 'detail';
       this._detailPlaylistId = pl.id;
       this._renderDetail(pl.id);
+    };
+    el.addEventListener('click', open);
+    el.addEventListener('keydown', (e) => {
+      if (e.target !== el || (e.key !== 'Enter' && e.key !== ' ')) return;
+      e.preventDefault();
+      open();
     });
-
-    return card;
   }
 
   async _renderDetail(playlistId) {
@@ -509,11 +665,13 @@ export class Playlists {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'playlists__detail-count';
-    countSpan.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
+    countSpan.textContent = this._entryCount(pl);
 
     header.appendChild(backBtn);
     header.appendChild(title);
     header.appendChild(countSpan);
+    // Follow a category or a folder (zaikechi #381). Not Favourites: its videos are the hearts.
+    if (!isFavouritesPlaylist(pl)) header.appendChild(this._followControl(pl));
 
     if (pl.videoPaths.length > 0) {
       const playAllBtn = document.createElement('button');
@@ -537,6 +695,7 @@ export class Playlists {
           pl.videoPaths,
           this._playlistProgress(pl.id)?.lastVideoPath || null,
           (p) => this._resumeEntryFor(p),
+          (p) => !isDisabled(this._settings, p),
         )
         : null;
       if (continueTarget) {
@@ -545,7 +704,7 @@ export class Playlists {
         continueBtn.className = 'playlists__continue-btn';
         continueBtn.appendChild(icon(History, { width: 14, height: 14 }));
         continueBtn.appendChild(document.createTextNode(' ' + t('playlists.continueWatching')));
-        const targetName = continueTarget.path.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+        const targetName = this._nameOf(continueTarget.path);
         continueBtn.title = t('playlists.continueWatchingNamed', { name: targetName });
         continueBtn.setAttribute('aria-label', continueBtn.title);
         continueBtn.addEventListener('click', () => this._continueFromLastWatched(pl));
@@ -642,7 +801,7 @@ export class Playlists {
       // so both directions cost no menu. It replaces the hand-made order,
       // so the toast it raises carries an Undo that puts that order back.
       if (pl.videoPaths.length > 1) {
-        const az = sameOrder(pl.videoPaths, sortPlaylistPathsByName(pl.videoPaths, 'asc'));
+        const az = sameOrder(pl.videoPaths, sortPlaylistPathsByName(pl.videoPaths, 'asc', (p) => this._nameOf(p)));
         const dir = az ? 'desc' : 'asc';
         const sortBtn = document.createElement('button');
         sortBtn.type = 'button';
@@ -701,10 +860,11 @@ export class Playlists {
     const { unavailable } = partitionByAvailability(pl.videoPaths, isAvailable);
 
     if (validPaths.length === 0) {
+      const fav = isFavouritesPlaylist(pl);
       wrapper.innerHTML = `
         <div class="playlists__empty">
-          <div class="playlists__empty-text">${t('playlists.detailEmpty')}</div>
-          <div class="playlists__empty-hint">${t('playlists.detailEmptyHint')}</div>
+          <div class="playlists__empty-text">${t(fav ? 'library.favourites.emptyTitle' : 'playlists.detailEmpty')}</div>
+          <div class="playlists__empty-hint">${t(fav ? 'library.favourites.emptyHint' : 'playlists.detailEmptyHint')}</div>
         </div>
       `;
       this._container.appendChild(wrapper);
@@ -722,17 +882,24 @@ export class Playlists {
     grid.className = 'playlists__grid';
     grid.classList.toggle('playlists__grid--list', this._viewMode === 'list');
 
-    for (const videoPath of validPaths) {
+    // ONE snapshot of the list (and of what was unreachable) per render,
+    // shared by every card: contexts are never mutated (SCOPE §3.5). A copy
+    // and an indexOf per card was a million steps for a 1,000-video playlist
+    // (DESIGN.md §2.17), and indexOf gave a path listed twice the first
+    // place's index.
+    const contextList = validPaths.slice();
+    const contextUnavailable = unavailable.slice();
+    for (const [index, videoPath] of validPaths.entries()) {
       const playContext = {
         source: 'playlist',
         sourceLabel: `playlist "${pl.name}"`,
         sourceContext: { playlistId: pl.id },
-        list: validPaths.slice(),
-        index: validPaths.indexOf(videoPath),
+        list: contextList,
+        index,
         // Snapshot of what was reachable when playback started. app.js's
         // prev/next stepping reads this so N/P skip over an unplugged drive
         // instead of dead-ending on it.
-        unavailablePaths: unavailable.slice(),
+        unavailablePaths: contextUnavailable,
       };
       // An offline entry reads nothing from disk or the backend (FT-071, as
       // categories.js since V01): the card used to request its thumbnail
@@ -742,6 +909,7 @@ export class Playlists {
         ? this._createVideoListItem(videoPath, pl, playContext, available)
         : this._createVideoCard(videoPath, pl, playContext, available);
       if (!available) this._markUnavailable(el, videoPath);
+      this._markIfDisabled(el, videoPath);
       grid.appendChild(el);
     }
 
@@ -774,25 +942,46 @@ export class Playlists {
     notice.className = 'playlists__unavailable-notice';
     notice.setAttribute('role', 'status');
 
-    notice.appendChild(icon(Unplug, { width: 16, height: 16 }));
+    const mark = icon(Unplug, { width: 16, height: 16 });
+    notice.appendChild(mark);
 
+    // What is missing, in the right word: a script entry is not a video, so
+    // a list with scripts among them says "scripts" or "entries" (test day
+    // 2026-11-26, S028: 2 videos and a script read "3 videos").
+    const scripts = unavailablePaths.filter((p) => isScriptPath(p)).length;
+    const [onVolumeKey, countKey] = scripts === 0
+      ? ['playlists.unavailableOnVolume', 'playlists.unavailableCount']
+      : scripts === unavailablePaths.length
+        ? ['playlists.unavailableScriptsOnVolume', 'playlists.unavailableScriptsCount']
+        : ['playlists.unavailableEntriesOnVolume', 'playlists.unavailableEntriesCount'];
     const text = document.createElement('span');
     const groups = groupByVolume(unavailablePaths);
     const named = [...groups.entries()].filter(([root]) => root);
     if (named.length === 1 && named[0][1].length === unavailablePaths.length) {
-      text.textContent = t('playlists.unavailableOnVolume', {
+      text.textContent = t(onVolumeKey, {
         count: unavailablePaths.length,
         volume: named[0][0],
       });
     } else {
-      text.textContent = t('playlists.unavailableCount', { count: unavailablePaths.length });
+      text.textContent = t(countKey, { count: unavailablePaths.length });
     }
     notice.appendChild(text);
 
     const hint = document.createElement('span');
     hint.className = 'playlists__unavailable-hint';
-    hint.textContent = t('playlists.unavailableHint');
+    // The count, so one video reads "play it. It stays" (test day B028).
+    hint.textContent = t('playlists.unavailableHint', { count: unavailablePaths.length });
     notice.appendChild(hint);
+
+    // Their folders all there: the drive is connected, the files were
+    // renamed, moved or deleted. Say that instead of "reconnect the drive"
+    // (S030). Kept for tests; the notice is already on the page meanwhile.
+    this._unavailableHintCheck = foldersPresent(unavailablePaths).then((present) => {
+      if (!present) return false;
+      hint.textContent = t('playlists.unavailableMovedHint', { count: unavailablePaths.length });
+      mark.replaceWith(icon(FileX, { width: 16, height: 16 }));
+      return true;
+    });
 
     return notice;
   }
@@ -806,6 +995,81 @@ export class Playlists {
    * The remove button stays live so a genuinely dead entry can still be
    * cleared by hand.
    */
+  /** "Follows: …" for a following playlist (zaikechi #381), or null. */
+  _followText(pl) {
+    const rule = describeRule(pl?.follow, {
+      categories: this._settings.getCategories?.() || [],
+      sources: this._settings.get?.('library.sources') || [],
+    });
+    if (!rule) return null;
+    if (!rule.name) return t('playlists.follow.followsGone');
+    return t(`playlists.follow.follows${rule.kind === 'category' ? 'Category' : rule.kind === 'source' ? 'Source' : 'Folder'}`, { name: rule.name });
+  }
+
+  _followLine(pl) {
+    const text = this._followText(pl);
+    if (!text) return null;
+    const line = document.createElement('div');
+    line.className = 'playlists__card-follow';
+    line.append(icon(FolderSync, { width: 12, height: 12 }), document.createTextNode(` ${text}`));
+    line.title = t('playlists.follow.cardTitle');
+    return line;
+  }
+
+  /**
+   * The detail header's Follow control: a "Follow…" button, or, while the
+   * playlist follows something, a chip saying what (a click changes it).
+   */
+  _followControl(pl) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    const text = this._followText(pl);
+    btn.className = text ? 'playlists__follow-btn playlists__follow-btn--on' : 'playlists__follow-btn';
+    btn.append(icon(FolderSync, { width: 14, height: 14 }), document.createTextNode(` ${text || t('playlists.follow.button')}`));
+    btn.title = text ? t('playlists.follow.change') : t('playlists.follow.buttonTitle');
+    btn.setAttribute('aria-haspopup', 'dialog');
+    btn.addEventListener('click', () => this._editFollow(pl));
+    return btn;
+  }
+
+  async _editFollow(pl) {
+    const res = await openPlaylistFollowDialog({
+      playlist: pl,
+      categories: this._settings.getCategories?.() || [],
+      sources: this._settings.get?.('library.sources') || [],
+      pickFolder: () => window.funsync?.selectDirectory?.(),
+    });
+    if (!res) return; // cancelled
+    const before = pl.videoPaths.length;
+    await this._settings.setPlaylistFollow?.(pl.id, res.follow);
+    // The app takes in the rule's videos on the 'follow' event; then say what happened.
+    await new Promise((r) => setTimeout(r, 0));
+    const now = this._settings.getPlaylist?.(pl.id);
+    const added = Math.max(0, (now?.videoPaths?.length || 0) - before);
+    const { showToast } = await import('../js/toast.js');
+    if (res.follow) showToast(t('playlists.follow.saved', { count: added }), 'success', 3500);
+    else showToast(t('playlists.follow.stopped'), 'info', 3000);
+    if (this._view === 'detail' && this._detailPlaylistId === pl.id) this._renderDetail(pl.id);
+  }
+
+  /** The heart before the Favourites playlist's name (zaikechi #381). */
+  _favouritesMark() {
+    const mark = document.createElement('span');
+    mark.className = 'playlists__fav-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.appendChild(icon(Heart, { width: 14, height: 14 }));
+    return mark;
+  }
+
+  /** A disabled video (zaikechi #381): dimmed and marked, still yours to play by hand. */
+  _markIfDisabled(el, videoPath) {
+    if (!isDisabled(this._settings, videoPath)) return;
+    applyDisabledMark(el, true, {
+      thumb: el.querySelector('.playlists__video-thumbnail'),
+      title: el.querySelector('.playlists__list-name') || el.querySelector('.playlists__video-title'),
+    });
+  }
+
   _markUnavailable(el, videoPath) {
     el.classList.add('playlists__video--unavailable');
     el.dataset.unavailable = 'true';
@@ -887,7 +1151,7 @@ export class Playlists {
     const pl = this._settings.getPlaylist(playlistId);
     if (!pl || !Array.isArray(pl.videoPaths) || pl.videoPaths.length < 2) return;
     const before = pl.videoPaths.slice();
-    const sorted = sortPlaylistPathsByName(before, dir);
+    const sorted = sortPlaylistPathsByName(before, dir, (p) => this._nameOf(p));
     if (sameOrder(before, sorted)) return;
 
     const undo = this._takeOrderUndo(playlistId, before);
@@ -981,7 +1245,7 @@ export class Playlists {
   _syncSortButton(pl) {
     const btn = this._container?.querySelector('.playlists__sort-btn');
     if (!btn || !pl || !Array.isArray(pl.videoPaths)) return;
-    const az = sameOrder(pl.videoPaths, sortPlaylistPathsByName(pl.videoPaths, 'asc'));
+    const az = sameOrder(pl.videoPaths, sortPlaylistPathsByName(pl.videoPaths, 'asc', (p) => this._nameOf(p)));
     const dir = az ? 'desc' : 'asc';
     if (btn.dataset.sortDir === dir) return;
     btn.dataset.sortDir = dir;
@@ -1407,7 +1671,7 @@ export class Playlists {
 
     const info = document.createElement('div');
     info.className = 'playlists__video-info';
-    const name = videoPath.split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+    const name = this._nameOf(videoPath);
     // Identity for Select mode and an in-place reorder, as the list rows have.
     card.dataset.videoPath = videoPath;
     card.dataset.videoName = name;
@@ -1421,7 +1685,12 @@ export class Playlists {
     info.appendChild(titleEl);
     card.appendChild(info);
 
-    if (available) {
+    if (isScriptPath(videoPath)) {
+      // A script with no video (2026-11-26): its tile, no picture to load.
+      card.classList.add('playlists__video-card--script');
+      thumbnail.querySelector('.playlists__video-placeholder')?.remove();
+      thumbnail.insertBefore(buildNoVideoTile(name, { script: true }), thumbnail.firstChild);
+    } else if (available) {
       // Lazy-load thumbnail
       this._loadVideoThumbnail(card, thumbnail, videoPath);
 
@@ -1527,12 +1796,25 @@ export class Playlists {
       if (shuffle) fileData._shuffle = shuffle;
     }
 
+    // A script with no video (2026-11-26): the app plays it in the script
+    // player (_playFromLibrary sees the .funscript path), in this order.
+    if (isScriptPath(videoPath)) {
+      fileData.name = fileName.replace(/\.funscript$/i, '');
+      this._onPlayVideo(fileData, null, null, []);
+      return;
+    }
+
     // Prefer the library's full video record when available — that's
     // where `_multiAxis` and `_customRouting` live for videos with
     // explicit (or auto-promoted) associations. Falling back to the
     // path-only resolution covers playlist items whose source has been
     // removed since the entry was added.
     const libVideo = this._library?.getVideoByPath?.(videoPath);
+    // A saved stream: the library plays it (its page looked up, its script
+    // from its record), in this playlist's order (2026-11-23).
+    if (libVideo?._stream) {
+      return this._library._playVideo({ ...libVideo, _playContextOverride: fileData._playContext || undefined, _autoPlayOnNextLoad: !!fileData._autoPlayOnLoad });
+    }
     const fsPath = (libVideo?.hasFunscript && libVideo.funscriptPath)
       ? libVideo.funscriptPath
       : this._getFunscriptPath(videoPath);
@@ -1634,7 +1916,7 @@ export class Playlists {
   /** Playlist entries as the queue items Play All hands app.js. */
   _queueItems(paths) {
     return paths.map((p) => {
-      const name = p.split(/[\\/]/).pop();
+      const name = isStreamPath(p) ? this._nameOf(p) : p.split(/[\\/]/).pop();
       const funscriptPath = this._getFunscriptPath(p);
       // A scanned pairing or an association is expected; `<name>.funscript`
       // is only a guess, and Play All must not warn when it is not there
@@ -1652,6 +1934,22 @@ export class Playlists {
     } catch {
       this._showBrokenLink(cardEl, thumbnailEl, videoPath);
     }
+    this._markStreamTile(thumbnailEl, videoPath);
+  }
+
+  /** A saved stream's tile (2026-11-23): its link icon and its length, as its library card has. */
+  _markStreamTile(thumbnailEl, videoPath) {
+    if (!isStreamPath(videoPath) || !thumbnailEl) return;
+    const v = this._library?.getVideoByPath?.(videoPath);
+    this._addDurationBadge(thumbnailEl, v?.duration);
+    if (thumbnailEl.querySelector('.stream-tile-badge')) return;
+    const b = document.createElement('span');
+    b.className = 'library__stream-badge stream-tile-badge';
+    const label = v?.site ? t('library.streams.badgeSite', { site: v.site }) : t('library.streams.badge');
+    b.title = label;
+    b.setAttribute('aria-label', label);
+    b.appendChild(icon(Link, { width: 13, height: 13, 'stroke-width': 2.5 }));
+    thumbnailEl.appendChild(b);
   }
 
   /**
@@ -1665,6 +1963,15 @@ export class Playlists {
 
   /** Put a capture result on the tile. False when there is no image. */
   _applyThumbnail(thumbnailEl, result) {
+    // No video track (an audio file): the grey logo tile, as the Library
+    // shows it (N-05, TODO triage 2026-11-23: a black frame here).
+    if (result?.noVideo) {
+      thumbnailEl.querySelector('.playlists__video-placeholder')?.remove();
+      thumbnailEl.querySelector('.library__thumb-novideo')?.remove();
+      thumbnailEl.insertBefore(buildNoVideoTile(result.name), thumbnailEl.firstChild);
+      if (result.duration) this._addDurationBadge(thumbnailEl, result.duration);
+      return true;
+    }
     const dataUrl = result?.dataUrl || result;
     if (!dataUrl) return false;
     const img = document.createElement('img');
@@ -1684,6 +1991,14 @@ export class Playlists {
   }
 
   _showBrokenLink(cardEl, thumbnailEl, videoPath) {
+    // A saved stream with no picture of its own is not broken: the link
+    // icon, and it still plays (2026-11-23).
+    if (isStreamPath(videoPath)) {
+      const ph = thumbnailEl.querySelector('.playlists__video-placeholder');
+      if (ph) { ph.innerHTML = ''; ph.appendChild(icon(Link, { width: 28, height: 28 })); }
+      cardEl.title = t('library.streams.badge');
+      return;
+    }
     const placeholder = thumbnailEl.querySelector('.playlists__video-placeholder');
     if (placeholder) {
       placeholder.innerHTML = '';
@@ -1714,11 +2029,15 @@ export class Playlists {
     // pin change (thumbCache.remove) clears them for every view at once.
     const cached = thumbCache.getEntry(videoPath, 0);
     if (cached) return cached;
+    const known = this._noVideo?.get(videoPath);
+    if (known) return known;
     // Deduped: shares in-flight captures with the library/categories views.
     const result = await dedupeThumbRequest(videoPath, () => this._captureFrameUncached(videoPath));
     const dataUrl = result?.dataUrl || result;
     if (typeof dataUrl === 'string' && dataUrl) {
       thumbCache.set(videoPath, 0, dataUrl, result?.duration);
+    } else if (result?.noVideo) {
+      (this._noVideo ||= new Map()).set(videoPath, result);
     }
     return result;
   }
@@ -1734,6 +2053,12 @@ export class Playlists {
         const img = await window.funsync.readCustomThumbnail(imagePath);
         if (img?.dataUrl) return { dataUrl: img.dataUrl, duration: 0 };
       } catch { /* fall through to frame path */ }
+    }
+    if (isStreamPath(videoPath)) return null;          // no file to grab a frame from
+    // An audio file: its tile, never ffmpeg (a 500 for every one, every
+    // launch; Dave's log 2026-11-26) or a hidden <video>.
+    if (isAudioPath(videoPath)) {
+      return { noVideo: true, audio: true, name: fileNameOf(videoPath), duration: await audioDuration(videoPath, this._library?.getVideoByPath?.(videoPath)?.duration, window.funsync) };
     }
     const { seekPct, exact } = thumbRequestOpts(custom);
     if (window.funsync?.generateSingleThumbnail) {
@@ -1766,6 +2091,15 @@ export class Playlists {
       const timeout = setTimeout(() => { cleanup(); resolve(null); }, 8000);
 
       video.addEventListener('loadedmetadata', () => {
+        // No video track (an audio file, N-05): a blank canvas would encode
+        // to a black JPEG, cached and shown for good. Say so instead.
+        if (!(video.videoWidth > 0 && video.videoHeight > 0)) {
+          clearTimeout(timeout);
+          const duration = isFinite(video.duration) ? video.duration : 0;
+          cleanup();
+          resolve({ dataUrl: null, duration, noVideo: true, name: fileNameOf(videoPath) });
+          return;
+        }
         video.currentTime = (typeof pinnedSeekPct === 'number' && isFinite(pinnedSeekPct))
           ? video.duration * pinnedSeekPct
           : Math.min(video.duration * 0.1, 5);
@@ -1826,11 +2160,103 @@ export class Playlists {
     const confirmed = await Modal.confirm(t('playlists.deletePlaylist'), t('playlists.confirmDelete'), { confirmText: t('common.delete') });
     if (!confirmed) return;
     this._settings.deletePlaylist(pl.id);
+    this._forgetCover?.(pl.id);
     this._renderGrid();
+  }
+
+  // --- Covers (Dave, 2026-08-06: "possible to set a cover image per playlist",
+  // explicitly NOT assigned from its videos; built 2026-11-23) ---------------
+  // `library.playlistCovers` = { [playlistId]: { imagePath } }: the picked
+  // image imported into userData/custom-thumbs exactly as a video's own
+  // poster is (`importCustomThumbnail`, keyed `playlist:<id>`). No cover:
+  // the tile is as it always was.
+
+  _covers() {
+    const map = this._settings?.get?.('library.playlistCovers');
+    return map && typeof map === 'object' ? map : {};
+  }
+
+  /** The cover picture for a playlist, or null when it has none. */
+  _coverElement(pl, className) {
+    const entry = this._covers()[pl?.id];
+    if (!entry?.imagePath) return null;
+    const box = document.createElement('div');
+    box.className = className;
+    const img = document.createElement('img');
+    img.alt = '';
+    img.decoding = 'async';
+    box.appendChild(img);
+    this._coverCache ||= new Map();
+    const cached = this._coverCache.get(entry.imagePath);
+    if (cached) img.src = cached;
+    else {
+      Promise.resolve(window.funsync?.readCustomThumbnail?.(entry.imagePath)).then((r) => {
+        const url = typeof r === 'string' ? r : r?.dataUrl;
+        if (!url) { box.hidden = true; return; } // the file is gone: no broken picture
+        this._coverCache.set(entry.imagePath, url);
+        img.src = url;
+      }).catch(() => { box.hidden = true; });
+    }
+    return box;
+  }
+
+  /** "Set a cover image" (and "Remove the cover image" once there is one). */
+  _coverButtons(pl) {
+    const out = [];
+    const has = !!this._covers()[pl.id]?.imagePath;
+    const setBtn = document.createElement('button');
+    setBtn.type = 'button';
+    setBtn.className = 'playlists__card-action-btn playlists__cover-set';
+    setBtn.appendChild(icon(ImagePlus, { width: 14, height: 14 }));
+    setBtn.title = t('playlists.coverSet');
+    setBtn.setAttribute('aria-label', `${t('playlists.coverSet')}: ${pl.name}`);
+    setBtn.addEventListener('click', (e) => { e.stopPropagation(); this._setCover(pl); });
+    out.push(setBtn);
+    if (has) {
+      const rmBtn = document.createElement('button');
+      rmBtn.type = 'button';
+      rmBtn.className = 'playlists__card-action-btn playlists__cover-remove';
+      rmBtn.appendChild(icon(ImageMinus, { width: 14, height: 14 }));
+      rmBtn.title = t('playlists.coverRemove');
+      rmBtn.setAttribute('aria-label', `${t('playlists.coverRemove')}: ${pl.name}`);
+      rmBtn.addEventListener('click', (e) => { e.stopPropagation(); this._removeCover(pl); });
+      out.push(rmBtn);
+    }
+    return out;
+  }
+
+  async _setCover(pl) {
+    const picked = await window.funsync?.selectThumbnailImage?.();
+    if (!picked?.path) return; // cancelled
+    const imported = await window.funsync?.importCustomThumbnail?.(`playlist:${pl.id}`, picked.path);
+    if (!imported?.path) {
+      showToast(t('playlists.coverFailed'), 'error');
+      return;
+    }
+    this._coverCache ||= new Map();
+    if (imported.dataUrl) this._coverCache.set(imported.path, imported.dataUrl);
+    this._settings.set('library.playlistCovers', { ...this._covers(), [pl.id]: { imagePath: imported.path } });
+    this._renderGrid();
+    showToast(t('playlists.coverSaved'), 'success');
+  }
+
+  _removeCover(pl) {
+    if (!this._forgetCover(pl.id)) return;
+    this._renderGrid();
+  }
+
+  /** Drop a playlist's cover entry; true when there was one. */
+  _forgetCover(id) {
+    const map = { ...this._covers() };
+    if (!(id in map)) return false;
+    delete map[id];
+    this._settings.set('library.playlistCovers', map);
+    return true;
   }
 
   async _checkFunscriptBadge(cardEl, thumbnailEl, videoPath) {
     const fsPath = this._getFunscriptPath(videoPath);
+    if (!fsPath) return;
     try {
       const content = await window.funsync.readFunscript(fsPath);
       if (!content) return;
@@ -1874,6 +2300,20 @@ export class Playlists {
     containerEl.appendChild(speedBadge);
   }
 
+  /** A video's shown name: a saved stream's title (2026-11-23), else its file name without the extension. */
+  /** "3 videos", or "3 videos · 1 script" with script entries (2026-11-26). */
+  _entryCount(pl) {
+    const paths = pl?.videoPaths || [];
+    const scripts = paths.filter((p) => isScriptPath(p)).length;
+    const videos = t('playlists.videoCount', { count: paths.length - scripts });
+    return scripts ? `${videos} · ${t('playlists.scriptCount', { count: scripts })}` : videos;
+  }
+
+  _nameOf(videoPath) {
+    const v = isStreamPath(videoPath) ? this._library?.getVideoByPath?.(videoPath) : null;
+    return v?.name || String(videoPath).split(/[\\/]/).pop().replace(/\.[^/.]+$/, '');
+  }
+
   _getFunscriptPath(videoPath) {
     // Library scan is the source of truth — it holds scanner-normalized
     // auto-detects (e.g. "Foo (Part B).mp4" → "Foo (Part B).funscript") AND
@@ -1881,6 +2321,7 @@ export class Playlists {
     // normalized matches, so try library first.
     const libVideo = this._library?.getVideoByPath(videoPath);
     if (libVideo?.funscriptPath) return libVideo.funscriptPath;
+    if (isStreamPath(videoPath)) return null;          // a saved stream's script is on its record
 
     const associations = this._settings.get('library.associations') || {};
     const resolved = resolveActiveConfig(normalizeAssociation(associations[videoPath]));
@@ -1892,8 +2333,10 @@ export class Playlists {
         if (mainRoute?.scriptPath) return mainRoute.scriptPath;
       }
     }
-    // Basename fallback — swap extension to .funscript
-    return videoPath.replace(/\.[^/.]+$/, '.funscript');
+    // Basename fallback — swap extension to .funscript. The FILE's extension
+    // only: [^/\\.] also stops at a Windows separator, so C:\Lib.d\Clip never
+    // becomes C:\Lib.funscript (FT-069 / FT-070, 2026-11-22).
+    return videoPath.replace(/\.[^/\\.]+$/, '.funscript');
   }
 
   /**
@@ -2036,10 +2479,11 @@ export class Playlists {
     const name = document.createElement('span');
     name.className = 'playlists__list-name';
     name.textContent = pl.name;
+    if (isFavouritesPlaylist(pl)) name.prepend(this._favouritesMark());
 
     const count = document.createElement('span');
     count.className = 'playlists__list-count';
-    count.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
+    count.textContent = this._entryCount(pl);
 
     const actions = document.createElement('div');
     actions.className = 'playlists__list-actions';
@@ -2056,14 +2500,13 @@ export class Playlists {
     deleteBtn.title = t('common.delete');
     deleteBtn.addEventListener('click', (e) => { e.stopPropagation(); this._deletePlaylist(pl); });
 
-    actions.append(renameBtn, deleteBtn);
+    actions.append(...this._coverButtons(pl), renameBtn);
+    if (!isFavouritesPlaylist(pl)) actions.append(deleteBtn);
+    const cover = this._coverElement(pl, 'playlists__list-cover');
+    if (cover) row.append(cover);
     row.append(name, count, actions);
 
-    row.addEventListener('click', () => {
-      this._view = 'detail';
-      this._detailPlaylistId = pl.id;
-      this._renderDetail(pl.id);
-    });
+    this._makePlaylistOpenable(row, pl);
 
     return row;
   }
@@ -2100,11 +2543,13 @@ export class Playlists {
       validPaths,
       this._playlistProgress(pl.id)?.lastVideoPath || null,
       (p) => this._resumeEntryFor(p),
-      isAvailable,
+      (p) => isAvailable(p) && !isDisabled(this._settings, p),
     );
     if (!target) {
       const { showToast } = await import('../js/toast.js');
-      showToast(t('toast.playlistAllUnavailable'), 'warn');
+      // Reachable but every one disabled: say that, not "reconnect the drive".
+      const allDisabled = validPaths.some((p) => isAvailable(p)) && validPaths.every((p) => !isAvailable(p) || isDisabled(this._settings, p));
+      showToast(t(allDisabled ? 'library.disabled.allDisabled' : 'toast.playlistAllUnavailable'), allDisabled ? 'info' : 'warn');
       return;
     }
 
@@ -2131,7 +2576,8 @@ export class Playlists {
     if (!this._durationMemo) this._durationMemo = new Map();
     const memo = this._durationMemo;
     return summarisePlaylistProgress(
-      pl.videoPaths || [],
+      // A script entry has no watched state (2026-11-26): only videos count.
+      (pl.videoPaths || []).filter((p) => !isScriptPath(p)),
       (p) => this._resumeEntryFor(p),
       (p) => {
         if (memo.has(p)) return memo.get(p);
@@ -2227,7 +2673,7 @@ export class Playlists {
   /** @param {boolean} [available=true] see `_createVideoCard`. */
   _createVideoListItem(videoPath, playlist, playContext, available = true) {
     const fileName = videoPath.split(/[\\/]/).pop() || videoPath;
-    const displayName = fileName.replace(/\.[^/.]+$/, '');
+    const displayName = this._nameOf(videoPath);
     const row = document.createElement('div');
     row.className = 'playlists__list-item';
     // Identity for reorder: derive order from the DOM, key by path.
@@ -2335,6 +2781,14 @@ export class Playlists {
     fsBadge.appendChild(icon(FileCheck, { width: 14, height: 14, 'stroke-width': 2.5 }));
     fsBadge.hidden = true;
     badges.appendChild(fsBadge);
+    if (isScriptPath(videoPath)) {
+      // A script with no video (2026-11-26): said in words, not only by the strip.
+      row.classList.add('playlists__list-item--script');
+      const mark = document.createElement('span');
+      mark.className = 'playlists__script-mark';
+      mark.textContent = t('library.scripts.mark');
+      badges.appendChild(mark);
+    }
 
     const removeBtn = document.createElement('button');
     removeBtn.className = 'playlists__card-action-btn playlists__card-action-btn--danger playlists__remove-one';
@@ -2417,6 +2871,7 @@ export class Playlists {
   }
 
   async _loadListStats(videoPath, funscriptPath, fsBadgeEl, badgesEl, heatmapEl, rowEl) {
+    if (!funscriptPath) return;
     const cachedBins = this._binsByPath.get(videoPath);
     if (cachedBins && heatmapEl) {
       queueRenderBins(heatmapEl, cachedBins);
@@ -2566,7 +3021,7 @@ export class Playlists {
   }
 
   _stashGroupCountText(pl) {
-    const parts = [t('playlists.videoCount', { count: pl.videoPaths.length })];
+    const parts = [this._entryCount(pl)];
     if (pl.missing > 0) parts.push(t('playlists.stashGroups.missingCount', { count: pl.missing }));
     return parts.join(' · ');
   }
@@ -2661,7 +3116,7 @@ export class Playlists {
 
     const countSpan = document.createElement('span');
     countSpan.className = 'playlists__detail-count';
-    countSpan.textContent = t('playlists.videoCount', { count: pl.videoPaths.length });
+    countSpan.textContent = this._entryCount(pl);
 
     header.append(backBtn, title, countSpan, this._createReadOnlyBadge());
 
@@ -2677,7 +3132,7 @@ export class Playlists {
     header.appendChild(playAllBtn);
 
     const continueTarget = this._playlistHasProgress(view)
-      ? pickContinueTarget(view.videoPaths, this._playlistProgress(view.id)?.lastVideoPath || null, (p) => this._resumeEntryFor(p))
+      ? pickContinueTarget(view.videoPaths, this._playlistProgress(view.id)?.lastVideoPath || null, (p) => this._resumeEntryFor(p), (p) => !isDisabled(this._settings, p))
       : null;
     if (continueTarget) {
       const continueBtn = document.createElement('button');
@@ -2685,7 +3140,7 @@ export class Playlists {
       continueBtn.className = 'playlists__continue-btn';
       continueBtn.appendChild(icon(History, { width: 14, height: 14 }));
       continueBtn.appendChild(document.createTextNode(' ' + t('playlists.continueWatching')));
-      continueBtn.title = t('playlists.continueWatchingNamed', { name: shownName(continueTarget.path) });
+      continueBtn.title = t('playlists.continueWatchingNamed', { name: this._nameOf(continueTarget.path) });
       continueBtn.setAttribute('aria-label', continueBtn.title);
       continueBtn.addEventListener('click', () => { const g = now(); if (g) this._continueFromLastWatched(g); });
       header.appendChild(continueBtn);
@@ -2786,6 +3241,7 @@ export class Playlists {
         ? this._createVideoListItem(entry.path, view, playContext, available)
         : this._createVideoCard(entry.path, view, playContext, available);
       if (!available) this._markUnavailable(el, entry.path);
+      this._markIfDisabled(el, entry.path);
       grid.appendChild(el);
     }
     wrapper.appendChild(grid);

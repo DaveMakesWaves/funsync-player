@@ -5,6 +5,8 @@
 
 import { icon, X, Play } from '../js/icons.js';
 import { t } from '../js/i18n.js';
+import { buildNoVideoTile, isScriptPath } from '../js/no-video-tile.js';
+import { isAudioPath } from '../js/video-load-check.js';
 import { eventBus } from '../js/event-bus.js';
 
 function _esc(str) {
@@ -331,8 +333,29 @@ export class UpNextCard {
     } catch {
       return;
     }
+    if (result?.noVideo) {
+      this.setNoVideoThumbnail(path, { stream: !!result.stream });
+      return;
+    }
     const dataUrl = result?.dataUrl || result;
     this.setThumbnail(path, dataUrl);
+  }
+
+  /**
+   * No picture to show (an audio file, or a saved stream with none of its
+   * own): the grey logo tile, as the Library shows it (N-05,
+   * TODO triage 2026-11-23: the skeleton stayed). Same guards as
+   * setThumbnail; public for the player pop-out, which is sent it.
+   */
+  setNoVideoThumbnail(path, { stream = false } = {}) {
+    if (!this._el || this._el.hidden) return;
+    if (this._currentPath !== path) return;
+    const thumb = this._el.querySelector('.up-next__thumb');
+    if (!thumb || thumb.querySelector('.up-next__thumb-img, .library__thumb-novideo')) return;
+    thumb.querySelector('.up-next__thumb-skeleton')?.remove();
+    // 96x54 with the name beside it: the logo only.
+    // A script with no video (2026-11-26) is marked as one.
+    thumb.insertBefore(buildNoVideoTile(this._resolveMeta(path).name, { stream, compact: true, script: isScriptPath(path), audio: !stream && isAudioPath(path) }), thumb.firstChild);
   }
 
   /**

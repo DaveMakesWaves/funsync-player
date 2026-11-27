@@ -1,0 +1,184 @@
+/* Holiday interface style (Settings > Appearance > Interface style > Holiday;
+   v0.10.1, Dave 2026-11-21: "modern classic holiday ... unobtrusive snow ...
+   a santa hat on the logo ... gold ring on the logo, small red and green
+   touches, as it is optional").
+
+   Linked just BEFORE modern.css, which stays last (Design System note); a
+   rule here that must beat Modern's adds [data-style="modern"] to win on
+   specificity, not on order.
+
+   theme-manager.js applies it as <html data-style="modern" data-season="holiday">:
+   Modern's corners, depth and motion, with this palette on top, in both Dark
+   and Light. Everything here is scoped to [data-season="holiday"], so with
+   Classic or Modern chosen this file changes nothing.
+
+   No glow (Dave: no glows in FunSync graphics). The snow is a few slow dots
+   that move by CSS transform only, hidden while a video is on screen (the
+   player or the docked mini player), with "Falling snow" off, and for anyone
+   whose OS asks for reduced motion. */
+
+:root[data-season="holiday"]:not([data-theme="light"]) {
+  --surface-base: #0e1915;
+  --surface-elevated: #12231d;
+  --surface-card: #173027;
+  --surface-card-hover: #1e3d32;
+  --bg-dropdown-option: #19342b;
+  --surface-overlay: rgba(235, 245, 238, 0.07);
+  --surface-overlay-strong: rgba(235, 245, 238, 0.13);
+  --text-primary: #ece7dc;
+  --text-secondary: #a9b3ab;
+  --text-muted: #6c7a72;
+  --text-dropdown: #d4dcd5;
+  --accent: #e23f55;
+  --accent-hover: #ff6a7d;
+  --accent-soft: rgba(226, 63, 85, 0.15);
+  --accent-rgb: 226, 63, 85;
+  --progress-filled: #e23f55;
+  --border-subtle: rgba(217, 180, 90, 0.10);
+  --border-strong: rgba(217, 180, 90, 0.22);
+  --holiday-gold: #d9b45a;
+  --holiday-green: #3a9a68;
+  --holiday-green-soft: rgba(58, 154, 104, 0.16);
+  --holiday-green-text: #7fd0a4;
+  --holiday-snow-dots: rgba(255, 255, 255, 0.05);
+  --holiday-flake: rgba(255, 255, 255, 0.85);
+}
+
+:root[data-season="holiday"][data-theme="light"] {
+  --surface-base: #f7f3ec;
+  --surface-elevated: #fffdf8;
+  --surface-card: #ffffff;
+  --surface-card-hover: #f0e9dd;
+  --bg-dropdown-option: #f3ede2;
+  --text-primary: #1b2621;
+  --text-secondary: #4d5b53;
+  --text-muted: #85918a;
+  --text-dropdown: #26322c;
+  --accent: #c41e3a;
+  --accent-hover: #a3172f;
+  --accent-soft: rgba(196, 30, 58, 0.10);
+  --accent-rgb: 196, 30, 58;
+  --progress-filled: #c41e3a;
+  --border-subtle: rgba(29, 70, 54, 0.12);
+  --border-strong: rgba(29, 70, 54, 0.24);
+  --holiday-gold: #b8892f;
+  --holiday-green: #1f6b45;
+  --holiday-green-soft: rgba(31, 107, 69, 0.10);
+  --holiday-green-text: #1f6b45;
+  --holiday-snow-dots: rgba(29, 70, 54, 0.06);
+  --holiday-flake: rgba(140, 168, 182, 0.75);
+}
+
+/* Light: the nav bar is pine green with its own light text, so the caption
+   buttons (window-bg.js HOLIDAY_LIGHT_CHROME) sit on the same green. */
+:root[data-season="holiday"][data-theme="light"] .nav-bar {
+  background: #1d4636;
+  border-bottom-color: #163829;
+  --text-primary: #ffffff;
+  --text-secondary: rgba(255, 255, 255, 0.78);
+  --text-muted: rgba(255, 255, 255, 0.55);
+  --surface-overlay: rgba(255, 255, 255, 0.10);
+  --surface-overlay-strong: rgba(255, 255, 255, 0.16);
+  --border-subtle: rgba(255, 255, 255, 0.14);
+}
+
+/* Gold: the active tab's underline, without Modern's coloured glow under it. */
+:root[data-season="holiday"][data-style="modern"] .nav-bar__item--active::after,
+:root[data-season="holiday"][data-style="modern"] .nav-bar__eroscripts--active::after {
+  background: var(--holiday-gold);
+  box-shadow: none;
+}
+
+/* The round logo with a gold ring and a Santa hat, first in the nav bar
+   (nav-bar.js adds the element; it is display:none outside Holiday). */
+.nav-bar__holiday-logo { display: none; }
+:root[data-season="holiday"] .nav-bar__holiday-logo {
+  display: block;
+  position: relative;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 28px;
+  /* 12 px on top lowers it 6 px in the 48 px bar, so the hat stays inside the window. */
+  margin: 12px 10px 0 2px;
+  border-radius: 50%;
+  border: 2px solid var(--holiday-gold);
+  background: url('../assets/holiday/logo-round.png') center / cover no-repeat;
+  pointer-events: none;
+}
+:root[data-season="holiday"] .nav-bar__holiday-logo::after {
+  content: '';
+  position: absolute;
+  left: -3px;
+  top: -16px;
+  width: 29px;
+  height: 24px;
+  background: url('../assets/holiday/santa-hat.svg') center / contain no-repeat;
+  transform: rotate(-10deg);
+}
+
+/* The snowman, beside the library title. */
+:root[data-season="holiday"] .library__title::after {
+  content: '';
+  display: inline-block;
+  width: 16px;
+  height: 21px;
+  margin-left: 8px;
+  vertical-align: -4px;
+  background: url('../assets/holiday/snowman.svg') center / contain no-repeat;
+}
+
+/* Green touches: switches that are on, and the active filter chips. */
+:root[data-season="holiday"] .toggle-switch--on::before,
+:root[data-season="holiday"] .settings-panel__source-toggle--on::before {
+  background: var(--holiday-green);
+}
+:root[data-season="holiday"] .filter-chip {
+  background: var(--holiday-green-soft);
+  border-color: var(--holiday-green);
+  color: var(--holiday-green-text);
+}
+:root[data-season="holiday"] .filter-chip:hover { background: var(--holiday-green-soft); filter: brightness(1.12); }
+:root[data-season="holiday"] .filter-chip:focus-visible { outline-color: var(--holiday-green); }
+
+/* A faint, still pattern of snow dots on the page backgrounds. */
+:root[data-season="holiday"] .library,
+:root[data-season="holiday"] .playlists,
+:root[data-season="holiday"] .categories {
+  background-image:
+    radial-gradient(circle, var(--holiday-snow-dots) 1.2px, transparent 1.8px),
+    radial-gradient(circle, var(--holiday-snow-dots) 1.8px, transparent 2.4px);
+  background-size: 137px 149px, 233px 211px;
+  background-position: 0 0, 71px 103px;
+}
+
+/* Falling snow (renderer/js/holiday.js mounts .holiday-snow once). Above the
+   page, below every menu and dialog, never in the way of a click. */
+.holiday-snow { display: none; }
+:root[data-season="holiday"]:not([data-snow="off"]) .holiday-snow {
+  display: block;
+  position: fixed;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+/* Never over a video: the player view, or the mini player docked in a corner. */
+:root[data-season="holiday"]:has(#player-container:not([hidden])) .holiday-snow { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-season="holiday"] .holiday-snow { display: none; }
+}
+.holiday-snow i {
+  position: absolute;
+  top: -12px;
+  left: var(--x);
+  width: var(--s);
+  height: var(--s);
+  border-radius: 50%;
+  background: var(--holiday-flake);
+  opacity: var(--o);
+  animation: holiday-snow-fall var(--d) linear var(--delay) infinite;
+}
+@keyframes holiday-snow-fall {
+  from { transform: translate3d(0, -2vh, 0); }
+  to { transform: translate3d(var(--dx), 104vh, 0); }
+}

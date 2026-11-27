@@ -1,8 +1,9 @@
 // NavBar — Persistent top navigation bar
 
-import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown, Link } from '../js/icons.js';
+import { icon, Library, ListVideo, Tag, Download, Unplug, Settings, Smartphone, Goggles, ChevronDown, CircleStop } from '../js/icons.js';
 import { t } from '../js/i18n.js';
 import { eventBus } from '../js/event-bus.js';
+import { moveMenuFocus, focusMenuFromKeyboard } from '../js/menu-keys.js';
 
 /**
  * Nav-bar buttons a user can hide (zaikechi #381), in bar order, with the
@@ -20,11 +21,67 @@ export const NAV_HIDEABLE_ITEMS = Object.freeze([
 ]);
 
 /** How many `nav-bar--fit-N` steps nav-bar.css defines (see `_fitToWidth`). */
-const NAV_FIT_LEVELS = 6;
+const NAV_FIT_LEVELS = 5;
+
+/**
+ * What the Devices pill says (Dave, 2026-11-25: one status pill, "but with 1
+ * what if more than one device is connected?"). `devices` is every connected
+ * device as `{ label, state }`, state 'connected' | 'slow' | 'unresponsive'.
+ *
+ *   none                 grey   "No devices"
+ *   one                  green  its own name ("The Handy")
+ *   two or more          green  "3 devices"; the tooltip lists each one
+ *   one not responding   red    "The Handy not responding": a problem
+ *                               outranks the count and names the device
+ *   connecting           amber  "Connecting…"
+ *   one slow to respond  amber  the name or count as usual; the tooltip says which
+ *
+ * A count rather than "The Handy +2": among a Handy, Intiface toys, T-Code
+ * and an Autoblow there is no first device to name.
+ * @returns {{status: string, text: string, title: string, aria: string, count: number}}
+ */
+export function deviceStatusSummary(devices = [], { connecting = false } = {}) {
+  const list = (Array.isArray(devices) ? devices : [])
+    .filter((d) => d && typeof d.label === 'string' && d.label.trim());
+  const stateText = (s) => (s === 'unresponsive' ? t('nav.notResponding')
+    : s === 'slow' ? t('nav.deviceSlow') : t('nav.connected'));
+  const lines = list.map((d) => `${d.label.trim()} · ${stateText(d.state)}`);
+  const bad = list.find((d) => d.state === 'unresponsive');
+  let status;
+  let text;
+  if (bad) {
+    status = 'unresponsive';
+    text = t('nav.deviceNotResponding', { name: bad.label.trim() });
+  } else if (connecting) {
+    status = 'connecting';
+    text = t('nav.connecting');
+  } else if (!list.length) {
+    status = 'disconnected';
+    text = t('nav.noDevices');
+  } else {
+    status = list.some((d) => d.state === 'slow') ? 'slow' : 'connected';
+    text = list.length === 1 ? list[0].label.trim() : t('nav.deviceTotal', { count: list.length });
+  }
+  const said = connecting && !bad ? [text, ...lines] : (lines.length ? lines : [text]);
+  return {
+    status,
+    text,
+    title: lines.length ? lines.join('\n') : t('nav.deviceConnection'),
+    aria: t('nav.devicesAria', { status: said.join(', ') }),
+    count: list.length,
+  };
+}
+
+/** The LED class for each pill status ('slow' is amber, as before). */
+const LED_FOR_STATUS = Object.freeze({
+  connected: 'connected', slow: 'connecting', connecting: 'connecting', unresponsive: 'unresponsive',
+});
 
 export class NavBar {
-  constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLoadUrlClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource }) {
+  constructor({ onNavigate, onHandyClick, onSettingsClick, onRemoteClick, onVRClick, onEroScriptsClick, onLoadUrlClick, onLibraryCollectionChange, onNewCollection, onRenameCollection, onDeleteCollection, onAddSource, onStopAll, onDisabledVideos }) {
     this._onNavigate = onNavigate;
+    // Stop all (DESIGN.md §2.15): the stop sign beside the device status.
+    this._onStopAll = onStopAll;
     this._onHandyClick = onHandyClick;
     this._onSettingsClick = onSettingsClick;
     this._onRemoteClick = onRemoteClick;
@@ -32,6 +89,8 @@ export class NavBar {
     this._onEroScriptsClick = onEroScriptsClick;
     this._onLoadUrlClick = onLoadUrlClick;
     this._onLibraryCollectionChange = onLibraryCollectionChange;
+    // "Scripts without a video" (v0.10.1, the script player).
+    this._onDisabledVideos = onDisabledVideos;
     this._onNewCollection = onNewCollection;
     this._onRenameCollection = onRenameCollection;
     this._onDeleteCollection = onDeleteCollection;
@@ -61,6 +120,13 @@ export class NavBar {
     this._el.className = 'nav-bar';
     this._el.setAttribute('role', 'navigation');
     this._el.setAttribute('aria-label', t('nav.mainNavAria'));
+
+    // The Holiday style's logo (gold ring, Santa hat). Decorative, and hidden
+    // by renderer/styles/holiday.css unless <html data-season="holiday">.
+    const holidayLogo = document.createElement('span');
+    holidayLogo.className = 'nav-bar__holiday-logo';
+    holidayLogo.setAttribute('aria-hidden', 'true');
+    this._el.appendChild(holidayLogo);
 
     for (const item of this._items) {
       if (item.id === 'library') {
@@ -99,7 +165,7 @@ export class NavBar {
         arrow.setAttribute('aria-expanded', 'false');
         arrow.addEventListener('click', (e) => {
           e.stopPropagation();
-          this._toggleLibraryDropdown();
+          this._toggleLibraryDropdown({ fromKeyboard: e.detail === 0 });
         });
 
         this._libraryDropdown = document.createElement('div');
@@ -166,39 +232,50 @@ export class NavBar {
     this._gapAfterEroScripts = this._buildClusterGap();
     this._el.appendChild(this._gapAfterEroScripts);
 
-    // Device status widget — LED dot + "Devices" label + status text.
-    // LED is aria-hidden; status text gets aria-live so screen readers
-    // announce connect/disconnect transitions without re-focusing.
+    // The connections, one button group (Dave, 2026-11-25): Devices, Stop
+    // all, Web Remote and VR, as the EroScripts tab's Paste / Downloads /
+    // account group. Settings stays on its own at the far right.
+    this._connGroup = document.createElement('div');
+    this._connGroup.className = 'nav-bar__group';
+    this._connGroup.setAttribute('role', 'group');
+    this._connGroup.setAttribute('aria-label', t('nav.connectionsGroup'));
+    this._el.appendChild(this._connGroup);
+
+    // Device status pill: a dot and what is connected (deviceStatusSummary).
+    // It was "Devices · 2 Connected", which read as two things. The LED is
+    // aria-hidden; the text is aria-live so connects are announced.
     this._handyBtn = document.createElement('button');
     this._handyBtn.className = 'nav-bar__action nav-bar__handy';
-    this._handyBtn.title = t('nav.deviceConnection');
-    this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: t('nav.notConnected') }));
 
     this._handyLed = document.createElement('span');
     this._handyLed.className = 'nav-bar__handy-led';
     this._handyLed.setAttribute('aria-hidden', 'true');
 
-    this._handyLabel = document.createElement('span');
-    this._handyLabel.className = 'nav-bar__handy-label nav-bar__action-label';
-    this._handyLabel.textContent = t('nav.devices');
-
     this._handyText = document.createElement('span');
     this._handyText.className = 'nav-bar__handy-text';
-    // Default state is "Not connected" (neutral) — was "Disconnected"
-    // which read as a failure even on first launch. Reserve
-    // "Disconnected" for actual drop-out (see setHandyStatus).
-    this._handyText.textContent = t('nav.notConnected');
     this._handyText.setAttribute('aria-live', 'polite');
 
     this._handyBtn.appendChild(this._handyLed);
-    this._handyBtn.appendChild(this._handyLabel);
     this._handyBtn.appendChild(this._handyText);
 
     this._handyBtn.addEventListener('click', () => {
       if (this._onHandyClick) this._onHandyClick();
     });
 
-    this._el.appendChild(this._handyBtn);
+    this._connGroup.appendChild(this._handyBtn);
+
+    // Stop all (DESIGN.md §1.6 S1, §2.15): beside the device status it acts
+    // on, shown while a device is connected (setDeviceStatus). Icon-only: the
+    // stop sign is universal, and its name is in the tooltip and aria-label.
+    this._stopAllBtn = document.createElement('button');
+    this._stopAllBtn.type = 'button';
+    this._stopAllBtn.className = 'nav-bar__action nav-bar__stop-all';
+    this._stopAllBtn.hidden = true;
+    this._stopAllBtn.title = t('nav.stopAllTitle');
+    this._stopAllBtn.setAttribute('aria-label', t('nav.stopAll'));
+    this._stopAllBtn.appendChild(icon(CircleStop, { width: 18, height: 18 }));
+    this._stopAllBtn.addEventListener('click', () => this._onStopAll?.());
+    this._connGroup.appendChild(this._stopAllBtn);
 
     // Web Remote — opens the phone/tablet connection modal. Now
     // surfaces a connected-state tint when ≥1 phone is connected
@@ -216,7 +293,7 @@ export class NavBar {
     this._remoteBtn.addEventListener('click', () => {
       if (this._onRemoteClick) this._onRemoteClick();
     });
-    this._el.appendChild(this._remoteBtn);
+    this._connGroup.appendChild(this._remoteBtn);
 
     // VR — opens VR server / PCVR companion modal. Tints accent when
     // the PCVR companion bridge is actively connected.
@@ -233,32 +310,7 @@ export class NavBar {
     this._vrBtn.addEventListener('click', () => {
       if (this._onVRClick) this._onVRClick();
     });
-    this._el.appendChild(this._vrBtn);
-
-    // TEMP DISABLED (2026-07-30): Load-from-URL hidden until it works reliably.
-    // Restore this block + the #btn-load-url button in index.html + the app.js
-    // wiring (onLoadUrlClick + #btn-load-url listener) together.
-    // See notes/SCRATCHPAD.md "Load-from-URL — disabled, revisit".
-    /*
-    // Load from URL — resolve a streaming-site page link (yt-dlp) and play it
-    // synced with a funscript. Lives in the persistent nav bar (not the player
-    // overlay) so it's reachable from the Library/home view where you'd start
-    // a session. See SCOPE-remote-video-url.md.
-    this._loadUrlBtn = document.createElement('button');
-    this._loadUrlBtn.className = 'nav-bar__action nav-bar__load-url';
-    this._loadUrlBtn.title = t('remoteVideo.openAria');
-    this._loadUrlBtn.setAttribute('aria-label', t('remoteVideo.openAria'));
-    this._loadUrlBtn.appendChild(icon(Link, { width: 16, height: 16 }));
-    const loadUrlLabel = document.createElement('span');
-    loadUrlLabel.className = 'nav-bar__action-label';
-    loadUrlLabel.dataset.i18nKey = 'remoteVideo.navLabel';
-    loadUrlLabel.textContent = t('remoteVideo.navLabel');
-    this._loadUrlBtn.appendChild(loadUrlLabel);
-    this._loadUrlBtn.addEventListener('click', () => {
-      if (this._onLoadUrlClick) this._onLoadUrlClick();
-    });
-    this._el.appendChild(this._loadUrlBtn);
-    */
+    this._connGroup.appendChild(this._vrBtn);
 
     this._gapBeforeSettings = this._buildClusterGap();
     this._el.appendChild(this._gapBeforeSettings);
@@ -279,6 +331,9 @@ export class NavBar {
       if (this._onSettingsClick) this._onSettingsClick();
     });
     this._el.appendChild(this._settingsBtn);
+
+    // The pill's first state, before app.js reports any device.
+    this.setDeviceStatus();
 
     // Insert at the top of the parent
     parentEl.prepend(this._el);
@@ -322,8 +377,8 @@ export class NavBar {
     // drew: these used to replay only after a setter had run, so with no
     // saved device and no remote/VR activity the device widget, the remote
     // tooltip and the VR tooltip kept the boot language (app test V50).
-    const handy = this._lastHandyStatus || { status: 'disconnected', deviceCount: 0 };
-    this.setHandyStatus(handy.status, handy.deviceCount);
+    this.setDeviceStatus(this._lastDeviceStatus || {});
+    this._connGroup?.setAttribute('aria-label', t('nav.connectionsGroup'));
     const remote = this._lastRemoteState || { connected: false, count: 0 };
     this.setRemoteState(remote.connected, remote.count);
     const vr = this._lastVRTooltip || { status: 'disconnected', detail: {} };
@@ -340,9 +395,14 @@ export class NavBar {
       arrow.setAttribute('aria-label', t('nav.switchLibrary'));
     }
     if (this._esBtn) this._esBtn.title = t('nav.eroscriptsTitle');
-    if (this._handyBtn) this._handyBtn.title = t('nav.deviceConnection');
+    // The Devices pill's title is its device list, replayed above by
+    // setDeviceStatus; a fixed title here put "Device Connection" back over it.
     if (this._remoteBtn) this._remoteBtn.setAttribute('aria-label', t('nav.webRemote'));
     if (this._vrBtn) this._vrBtn.setAttribute('aria-label', t('nav.vr'));
+    if (this._stopAllBtn) {
+      this._stopAllBtn.title = t('nav.stopAllTitle');
+      this._stopAllBtn.setAttribute('aria-label', t('nav.stopAll'));
+    }
     if (this._settingsBtn) {
       this._settingsBtn.title = t('nav.settings');
       this._settingsBtn.setAttribute('aria-label', t('nav.settings'));
@@ -450,8 +510,14 @@ export class NavBar {
 
   /** Collapse cluster gaps around hidden buttons; move the right-side push. */
   _layoutRightSide() {
-    const seq = [this._esBtn, this._gapAfterEroScripts, this._handyBtn, this._remoteBtn,
-      this._vrBtn, this._gapBeforeSettings, this._settingsBtn].filter(Boolean);
+    // The connections group shows while any button in it does: with Devices,
+    // Web Remote and VR all switched off (and nothing for Stop all to stop)
+    // it would be an empty bordered box.
+    if (this._connGroup) {
+      this._connGroup.hidden = ![...this._connGroup.children].some((b) => !b.hidden);
+    }
+    const seq = [this._esBtn, this._gapAfterEroScripts, this._connGroup,
+      this._gapBeforeSettings, this._settingsBtn].filter(Boolean);
     // A gap shows only with a visible button before it (since the last gap
     // that showed) AND one after it.
     let pending = null;
@@ -478,6 +544,14 @@ export class NavBar {
     if (!this._el) return;
     for (const btn of this._el.querySelectorAll('.nav-bar__item')) {
       btn.classList.toggle('nav-bar__item--active', btn.dataset.viewId === viewId);
+    }
+    // The EroScripts button opens a view too since 2026-11-22: marked while
+    // open, with the views' underline since 2026-11-25 (it turned coral
+    // instead, a second way of saying "you are here").
+    if (this._esBtn) {
+      this._esBtn.classList.toggle('nav-bar__eroscripts--active', viewId === 'eroscripts');
+      if (viewId === 'eroscripts') this._esBtn.setAttribute('aria-current', 'page');
+      else this._esBtn.removeAttribute('aria-current');
     }
   }
 
@@ -566,55 +640,37 @@ export class NavBar {
     this._vrBtn.title = title;
   }
 
-  setHandyStatus(status, deviceCount = 0) {
+  /**
+   * Paint the Devices pill (deviceStatusSummary). app.js calls this on every
+   * device event with every connected device; `connecting` while the Handy
+   * is connecting.
+   * @param {{devices?: {label: string, state?: string}[], connecting?: boolean}} [opts]
+   */
+  setDeviceStatus({ devices = [], connecting = false } = {}) {
     if (!this._handyLed || !this._handyText) return;
-    this._lastHandyStatus = { status, deviceCount };
-    const shownBefore = `${this._handyLabel?.textContent}|${this._handyText.textContent}`;
+    this._lastDeviceStatus = { devices, connecting };
+    const shownBefore = this._handyText.textContent;
+    const sum = deviceStatusSummary(devices, { connecting });
     this._handyLed.className = 'nav-bar__handy-led';
-
-    if (this._handyLabel) {
-      this._handyLabel.textContent = deviceCount === 1 ? t('nav.device') : t('nav.devices');
+    const led = LED_FOR_STATUS[sum.status];
+    if (led) this._handyLed.classList.add(`nav-bar__handy-led--${led}`);
+    this._handyText.textContent = sum.text;
+    this._handyBtn.title = sum.title;
+    this._handyBtn.setAttribute('aria-label', sum.aria);
+    this._handyBtn.dataset.status = sum.status;
+    // Stop all (DESIGN.md §1.6 S1) shows while anything is connected,
+    // a device that is not responding included.
+    if (this._stopAllBtn) {
+      const hide = sum.count === 0;
+      if (this._stopAllBtn.hidden !== hide) {
+        this._stopAllBtn.hidden = hide;
+        this._layoutRightSide();
+        this._scheduleFit();
+      }
     }
-
-    // "Not connected" is the neutral default — no failure framing
-    // implied. "Disconnected" was the prior wording but read as
-    // "something went wrong" even on first launch when nothing had
-    // ever been connected (Nielsen #2 match real world). The status
-    // strings here are user-facing.
-    let textValue = t('nav.notConnected');
-    switch (status) {
-      case 'connected':
-        this._handyLed.classList.add('nav-bar__handy-led--connected');
-        textValue = deviceCount > 0 ? t('nav.deviceCount', { count: deviceCount }) : t('nav.connected');
-        break;
-      case 'connecting':
-        this._handyLed.classList.add('nav-bar__handy-led--connecting');
-        textValue = t('nav.connecting');
-        break;
-      // Connected, but recent commands are not landing. Distinct from both
-      // "connected" and "disconnected" on purpose: the session is still up, so
-      // saying disconnected would be wrong, but saying connected is the lie
-      // that sends people hunting for a fault in their own setup while the
-      // device sits dead (Dave, 2026-08-26).
-      case 'unresponsive':
-        this._handyLed.classList.add('nav-bar__handy-led--unresponsive');
-        textValue = t('nav.notResponding');
-        break;
-      case 'disconnected':
-      default:
-        textValue = t('nav.notConnected');
-        break;
-    }
-    this._handyText.textContent = textValue;
-    // Refresh button-level aria-label so the announcement reads
-    // "Devices: 2 Connected" or similar (Norman signifier — text is
-    // canonical, colour is secondary).
-    if (this._handyBtn) {
-      this._handyBtn.setAttribute('aria-label', t('nav.devicesAria', { status: textValue }));
-    }
-    // "Not connected" and "2 Connected" differ in width (CB-20). Only when
-    // the text changed: app.js calls this on every device event.
-    if (`${this._handyLabel?.textContent}|${this._handyText.textContent}` !== shownBefore) this._scheduleFit();
+    // "No devices" and "Lovense Edge not responding" differ in width (CB-20).
+    // Only when the text changed: app.js calls this on every device event.
+    if (this._handyText.textContent !== shownBefore) this._scheduleFit();
   }
 
   setCollections(collections, activeCollectionId, sources, unavailablePaths, unavailableCollectionIds) {
@@ -635,7 +691,7 @@ export class NavBar {
     }
   }
 
-  _toggleLibraryDropdown() {
+  _toggleLibraryDropdown({ fromKeyboard = false } = {}) {
     if (!this._libraryDropdown) return;
     const arrow = this._el?.querySelector('.nav-bar__library-arrow');
     if (!this._libraryDropdown.hidden) {
@@ -658,6 +714,31 @@ export class NavBar {
     // Reads the field when it fires: a close in the meantime nulls it, and
     // addEventListener(null) is a no-op, so no stale listener is armed.
     setTimeout(() => document.addEventListener('pointerdown', this._libraryDropdownClose, true), 0);
+
+    // Escape closes it and gives the focus back to the arrow (the
+    // menu-button pattern). It did nothing (test day 2026-11-24, B022). The
+    // key goes no further: the app's own Escape must not also fire.
+    if (this._libraryDropdownKey) document.removeEventListener('keydown', this._libraryDropdownKey, true);
+    this._libraryDropdownKey = (e) => {
+      // Down / Up / Home / End move through its items (the menu pattern,
+      // menu-keys.js): it said aria-haspopup="menu", but only Tab moved
+      // (test day 2026-11-26, S023).
+      if (!this._libraryDropdown.hidden && !e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey
+        && this._libraryDropdown.contains(document.activeElement)
+        && moveMenuFocus(this._libraryDropdown, e.key)) {
+        e.preventDefault();
+        return;
+      }
+      if (e.key !== 'Escape' || this._libraryDropdown.hidden) return;
+      e.preventDefault();
+      e.stopPropagation();
+      this._closeLibraryDropdown();
+      const a = this._el?.querySelector('.nav-bar__library-arrow');
+      if (a?.isConnected) { try { a.focus({ preventScroll: true }); } catch { /* not focusable */ } }
+    };
+    document.addEventListener('keydown', this._libraryDropdownKey, true);
+    // Opened from the keyboard: the library shown now takes the focus.
+    if (fromKeyboard) focusMenuFromKeyboard(this._libraryDropdown, '.nav-bar__library-option--active');
   }
 
   /**
@@ -687,6 +768,10 @@ export class NavBar {
     if (this._libraryDropdownClose) {
       document.removeEventListener('pointerdown', this._libraryDropdownClose, true);
       this._libraryDropdownClose = null;
+    }
+    if (this._libraryDropdownKey) {
+      document.removeEventListener('keydown', this._libraryDropdownKey, true);
+      this._libraryDropdownKey = null;
     }
   }
 
@@ -779,6 +864,31 @@ export class NavBar {
     divider.className = 'nav-bar__library-divider';
     dd.appendChild(divider);
 
+    // Load from URL (Dave, 2026-11-26: "since we have drag and drop
+    // functionality anyway, i think load from url should be an option under
+    // libary instead of on the navbar"). It was a nav-bar button since
+    // 2026-11-22; the player's top bar keeps its own. Resolves a streaming
+    // site's page link (yt-dlp) and plays it with a funscript
+    // (SCOPE-remote-video-url.md).
+    if (this._onLoadUrlClick) {
+      const urlBtn = document.createElement('button');
+      urlBtn.className = 'nav-bar__library-option nav-bar__library-option--url';
+      urlBtn.textContent = t('remoteVideo.title');
+      urlBtn.addEventListener('click', () => { this._closeLibraryDropdown(); this._onLoadUrlClick(); });
+      dd.appendChild(urlBtn);
+    }
+    // "Scripts without a video" was here (v0.10.1) until Filters > Scripts
+    // replaced it (Dave, 2026-11-26: "we can probably get rid of the scripts
+    // without a video menu item under libary now").
+    // Disabled videos, to review, enable or delete (zaikechi #381).
+    if (this._onDisabledVideos) {
+      const offBtn = document.createElement('button');
+      offBtn.className = 'nav-bar__library-option nav-bar__library-option--disabled';
+      offBtn.textContent = t('library.disabled.navItem');
+      offBtn.addEventListener('click', () => { this._closeLibraryDropdown(); this._onDisabledVideos(); });
+      dd.appendChild(offBtn);
+    }
+
     const addSourceBtn = document.createElement('button');
     addSourceBtn.className = 'nav-bar__library-option nav-bar__library-option--new';
     addSourceBtn.textContent = t('nav.addSourceFolder');
@@ -793,12 +903,35 @@ export class NavBar {
       if (this._onNewCollection) this._onNewCollection();
     });
     dd.appendChild(newBtn);
+
+    // A menu of menu items (the arrows move through these; a collection's
+    // rename / delete buttons stay Tab stops beside them).
+    dd.setAttribute('role', 'menu');
+    for (const b of dd.querySelectorAll('.nav-bar__library-option')) b.setAttribute('role', 'menuitem');
   }
 
   setEroScriptsStatus(loggedIn) {
     if (this._esBtn) {
       this._esBtn.classList.toggle('nav-bar__eroscripts--connected', loggedIn);
     }
+  }
+
+  /**
+   * New threads across the EroScripts feeds (2026-11-22): a small count on the
+   * button, gone at 0. Its words go in the title for a screen reader.
+   */
+  setEroScriptsBadge(count, label = '') {
+    if (!this._esBtn) return;
+    let badge = this._esBtn.querySelector('.nav-bar__badge');
+    const n = Number(count) || 0;
+    if (!n) { badge?.remove(); this._esBtn.title = t('nav.eroscriptsTitle'); return; }
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'nav-bar__badge';
+      this._esBtn.appendChild(badge);
+    }
+    badge.textContent = n > 99 ? '99+' : String(n);
+    this._esBtn.title = label ? `${t('nav.eroscriptsTitle')} · ${label}` : t('nav.eroscriptsTitle');
   }
 
   show() {

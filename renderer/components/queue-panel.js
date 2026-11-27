@@ -10,8 +10,10 @@
 // surface.
 
 import { createCategoryMark } from '../js/category-icon.js';
-import { icon, X, Trash2, GripVertical, FileCheck, Captions, Gauge, Layers2, Cable, Shuffle, Columns2 } from '../js/icons.js';
+import { icon, X, Trash2, PanelRight, GripVertical, FileCheck, Captions, Gauge, Layers2, Cable, Shuffle, Columns2 } from '../js/icons.js';
 import { t } from '../js/i18n.js';
+import { buildNoVideoTile, fileNameOf, isScriptPath } from '../js/no-video-tile.js';
+import { isAudioPath } from '../js/video-load-check.js';
 import { eventBus } from '../js/event-bus.js';
 
 function _esc(str) {
@@ -93,6 +95,8 @@ export class QueuePanel {
     onClose,
     onOpenLibrary,
     onCancelAutoAdvance,
+    isDocked,
+    onToggleDock,
   }) {
     this._el = element;
     this._library = library || null;
@@ -106,6 +110,9 @@ export class QueuePanel {
     // in place; current + history stay put. Optional.
     this.onShuffleUpcoming = onShuffleUpcoming || null;
     this.onClose = onClose || null;
+    // Docked beside the video or over it (#381): the header's dock button.
+    this.isDocked = isDocked || null;
+    this.onToggleDock = onToggleDock || null;
     this.onOpenLibrary = onOpenLibrary || null;
     this.onCancelAutoAdvance = onCancelAutoAdvance || null;
 
@@ -151,6 +158,18 @@ export class QueuePanel {
   }
 
   // --- Public API ---
+
+  /**
+   * The header's dock button (zaikechi #381, 2026-11-22): beside the video,
+   * the video gets smaller and nothing of it is covered; over the video, as
+   * the panel always was. Only when the app wired `onToggleDock`.
+   */
+  _dockButtonHtml() {
+    if (typeof this.onToggleDock !== 'function') return '';
+    const docked = this.isDocked?.() === true;
+    const label = t(docked ? 'queuePanel.undockAria' : 'queuePanel.dockAria');
+    return `<button type="button" class="queue-panel__dock" aria-pressed="${docked}" aria-label="${_esc(label)}" title="${_esc(label)}"></button>`;
+  }
 
   /** Show the panel (slide in). */
   open() {
@@ -342,6 +361,7 @@ export class QueuePanel {
     this._el.innerHTML = `
       <div class="queue-panel__header">
         <h2 class="queue-panel__title">${_esc(t('queuePanel.title'))}</h2>
+        ${this._dockButtonHtml()}
         <button type="button" class="queue-panel__close" aria-label="${_esc(t('queuePanel.closeAria'))}" title="${_esc(t('queuePanel.closeAria'))}"></button>
       </div>
       <div class="queue-panel__body">
@@ -356,6 +376,20 @@ export class QueuePanel {
       closeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         this.onClose?.();
+      });
+    }
+
+    // Dock beside the video / float over it (#381). The player view only:
+    // queue-panel.css hides the button in the browse views.
+    const dockBtn = this._el.querySelector('.queue-panel__dock');
+    if (dockBtn) {
+      dockBtn.appendChild(icon(PanelRight, { width: 16, height: 16 }));
+      dockBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const hadFocus = document.activeElement === dockBtn;
+        this.onToggleDock?.();
+        // The toggle redraws the panel: the focus stays on the (new) button.
+        if (hadFocus) this._el.querySelector('.queue-panel__dock')?.focus({ preventScroll: true });
       });
     }
 
@@ -702,8 +736,23 @@ export class QueuePanel {
       try {
         const result = await this._library._captureVideoFrame(path);
         if (result?.dataUrl) this._applyThumb(thumb, result.dataUrl);
+        else if (result?.noVideo) this._applyNoVideo(thumb, path);
       } catch { /* missing file / cross-origin / etc — leave skeleton */ }
     }
+  }
+
+  /**
+   * No picture to show (an audio file, or a saved stream with none of its
+   * own): the grey logo, as the Library shows it (N-05, TODO triage
+   * 2026-11-23: the skeleton stayed for good). The row is small and its
+   * title is beside it, so the logo only.
+   */
+  _applyNoVideo(thumb, path) {
+    if (!thumb || thumb.querySelector('.library__thumb-novideo')) return;
+    thumb.querySelector('.queue-panel__thumb-skel')?.remove();
+    const stream = String(path ?? '').startsWith('stream:');
+    // A script with no video (2026-11-26) is marked as one.
+    thumb.insertBefore(buildNoVideoTile(fileNameOf(path), { stream, compact: true, script: isScriptPath(path), audio: !stream && isAudioPath(path) }), thumb.firstChild);
   }
 
   _applyThumb(thumb, dataUrl) {

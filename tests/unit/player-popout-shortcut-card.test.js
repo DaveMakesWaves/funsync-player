@@ -98,6 +98,7 @@ describe('the detached player\'s shortcut card speaks the window\'s language (R3
     expect(rows.find((r) => r.text === EN.player.loopVideo.menuLabel).keys).toEqual(['Shift+L']);
     expect(rows.map((r) => r.keys.join(' / '))).toEqual([
       'Space / K', 'Left Arrow / Right Arrow', 'J / L', 'M', 'F', '< / >', 'Shift+L', 'P / N',
+      'Shift+Space', // Stop all (2026-11-23, DESIGN.md §2.15)
     ]);
   });
 
@@ -108,7 +109,7 @@ describe('the detached player\'s shortcut card speaks the window\'s language (R3
     expect($('ppo-shortcuts')).toBeNull();
     press('?', { shiftKey: true });
     expect($('ppo-shortcuts')).not.toBeNull();
-    expect($('ppo-shortcuts').querySelectorAll('.ppo-shortcuts__row').length).toBe(8);
+    expect($('ppo-shortcuts').querySelectorAll('.ppo-shortcuts__row').length).toBe(9); // + Shift+Space, Stop all
     press('Escape');
     expect($('ppo-shortcuts')).toBeNull();
   });

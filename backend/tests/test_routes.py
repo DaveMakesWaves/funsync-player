@@ -127,7 +127,7 @@ async def test_converted_script_is_servable(client):
 async def test_resolve_remote_returns_proxy_url(client, monkeypatch):
     """A successful resolve returns public metadata + a proxy URL + token."""
     from services import resolver as resolver_mod
-    monkeypatch.setattr(resolver_mod, "resolve", lambda _url: {
+    monkeypatch.setattr(resolver_mod, "resolve", lambda _url, _max_height=None: {
         "title": "Clip", "duration": 120, "thumbnail": "http://t/x.jpg",
         "site": "Example", "webpageUrl": "http://example.com/v",
         "isLive": False, "streamUrl": "http://cdn/master.m3u8",
@@ -148,7 +148,7 @@ async def test_resolve_remote_returns_proxy_url(client, monkeypatch):
 @pytest.mark.anyio
 async def test_resolve_remote_progressive_returns_file_proxy(client, monkeypatch):
     from services import resolver as resolver_mod
-    monkeypatch.setattr(resolver_mod, "resolve", lambda _url: {
+    monkeypatch.setattr(resolver_mod, "resolve", lambda _url, _max_height=None: {
         "title": "Direct", "duration": None, "thumbnail": None, "site": None,
         "webpageUrl": "http://x", "isLive": False, "streamUrl": "http://cdn/f.mp4",
         "isHls": False, "headers": {}, "height": 1080,
@@ -162,7 +162,7 @@ async def test_resolve_remote_progressive_returns_file_proxy(client, monkeypatch
 async def test_resolve_remote_error_returns_422_with_kind(client, monkeypatch):
     from services import resolver as resolver_mod
     from services.resolver import ResolveError
-    def boom(_url):
+    def boom(_url, _max_height=None):
         raise ResolveError("drm", "DRM protected")
     monkeypatch.setattr(resolver_mod, "resolve", boom)
     resp = await client.post("/api/media/resolve", params={"url": "http://x"})

@@ -157,6 +157,51 @@
   bottom: 0;
 }
 
+/* Docked beside the video (zaikechi #381, 2026-11-22; app.js _applyQueueDock
+   sets #app.app--queue-docked in the player view while the panel is open and
+   docked). The video and the TL / HM strip get the width the panel does not
+   take, so none of the picture is under it; the control bar stays full width
+   below both. Not the mini player. The dock button shows in the player view
+   only (the browse views have no video to make room for). */
+#app.app--queue-docked .player-container:not(.player-container--mini) .player__video-wrapper {
+  width: calc(100% - var(--queue-panel-width));
+}
+#app.app--queue-docked .player-container:not(.player-container--mini) .inline-viz {
+  right: var(--queue-panel-width);
+}
+#app:not([data-view="player"]) .queue-panel__dock {
+  display: none;
+}
+/* With the timeline / heatmap UNDER the video the control bar is lifted by
+   the strip's height (player.css), so the panel ends that much higher too:
+   docked or not, it never covers the bar (full manual test, 2026-11-23:
+   docked, the bar's right end, Devices / ⋮ / Fullscreen, ran under it).
+   --inline-viz-band-root is set by InlineViz while the strip is below; in
+   fullscreen the panel is inside the player, which has its own value. */
+#app[data-view="player"] > .queue-panel {
+  bottom: calc(100px + var(--inline-viz-band-root, 0px));
+}
+.player-container--viz-below:not(.player-container--mini) > .queue-panel {
+  bottom: calc(100px + var(--inline-viz-band, 0px));
+}
+/* With the script editor docked open, the control bar sits on the editor
+   (editor.css), so the panel ends above it there: it ran down behind the
+   editor, most of its list hidden (fit-on-screen pass, 2026-11-24; with
+   stacked lanes all but its header). --editor-toolbar-extra is the editor's
+   height past 250 px (toolbar rows + lanes), on body and the player. */
+#app[data-view="player"]:has(.player-container--editor-open:not(.player-container--mini)) > .queue-panel,
+.player-container--editor-open:not(.player-container--mini) > .queue-panel {
+  bottom: calc(350px + var(--editor-toolbar-extra, 0px));
+}
+/* Beside the close button, at the header's right end. */
+.queue-panel__dock {
+  margin-left: auto;
+}
+.queue-panel__dock[aria-pressed="true"],
+.queue-panel__dock[aria-pressed="true"]:hover {
+  color: var(--accent);
+}
+
 /* WCO: the OS caption strip (min/max/close) is painted over the top of the
    player, so a panel starting at `top: 0` runs underneath it. Start below
    that row instead — level with the queue toggle, which uses the same offset.
@@ -198,7 +243,8 @@ html.has-wco #app[data-view="player"] > .queue-panel {
   color: var(--video-overlay-text);
 }
 
-.queue-panel__close {
+.queue-panel__close,
+.queue-panel__dock {
   background: transparent;
   border: none;
   color: var(--video-overlay-text-dim);
@@ -212,12 +258,14 @@ html.has-wco #app[data-view="player"] > .queue-panel {
   transition: background 0.15s, color 0.15s;
 }
 
-.queue-panel__close:hover {
+.queue-panel__close:hover,
+.queue-panel__dock:hover {
   background: var(--video-overlay-control-hover);
   color: var(--video-overlay-text);
 }
 
-.queue-panel__close:focus-visible {
+.queue-panel__close:focus-visible,
+.queue-panel__dock:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }

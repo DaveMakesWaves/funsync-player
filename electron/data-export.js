@@ -4,7 +4,7 @@
 const fs = require('fs');
 const path = require('path');
 const { stripBlacklist } = require('./data-backup');
-const { SECRET_SETTINGS: SHARED_SECRET_SETTINGS } = require('./secret-settings');
+const { SECRET_SETTINGS: SHARED_SECRET_SETTINGS, SECRET_SETTING_PATHS } = require('./secret-settings');
 const {
   FILE_NAME: STASH_LIBRARY_FILE,
   MAX_BYTES: STASH_LIBRARY_MAX_BYTES,
@@ -106,6 +106,8 @@ async function _stashLibraryFromZip(zip) {
  *   poster images referenced by the config are bundled from it
  * @param {string} [options.stashDir] — userData/stash; its library.json (only
  *   that file) is bundled as stash/library.json
+ * @param {boolean} [options.includeSecrets=false] — keep the keys and logins
+ *   (every SECRET_SETTINGS path) in the file; left out unless asked for
  * @returns {Promise<{success: boolean, path: string, error?: string}>}
  */
 async function exportData(configData, outputPath, options = {}) {
@@ -120,7 +122,14 @@ async function exportData(configData, outputPath, options = {}) {
     // share the .funsync-backup file. Single source of truth =
     // data-backup.js::BACKUP_BLACKLIST so both surfaces stay in sync.
     // SCOPE-data-backup.md §4.8 + §7.6a.
-    const exportable = stripBlacklist(configData);
+    // Keys and logins stay out unless the user asks for them (Dave,
+    // 2026-11-26: "include them in but exclude them as default, like RDM
+    // would, recommends its insecure to keep them in the backup but doesnt
+    // exclude it as an option"). A merge import keeps the ones set where it
+    // lands (_keepLocalSecrets), so a backup without them wipes nothing.
+    const includeSecrets = options.includeSecrets === true;
+    const stripped = stripBlacklist(configData);
+    const exportable = includeSecrets ? stripped : stripSecrets(stripped);
     zip.file('config.json', JSON.stringify(exportable, null, 2));
 
     // Optionally include funscript files
@@ -168,6 +177,8 @@ async function exportData(configData, outputPath, options = {}) {
       version: '1.0',
       exportedAt: new Date().toISOString(),
       appVersion: require('../package.json').version || '0.1.0',
+      // Whether the keys and logins are in it (see includeSecrets above).
+      secretsIncluded: includeSecrets,
     }, null, 2));
 
     const buffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
@@ -301,6 +312,25 @@ function _setPath(obj, path, value) {
     cur = cur[key];
   }
   cur[path[path.length - 1]] = value;
+}
+
+/**
+ * The config without its credentials: every path of secret-settings.js's ONE
+ * list (the Handy key, the Autoblow token, the EroScripts login, the Audience
+ * roster of other people's keys) taken out of `settings`. A copy; the
+ * config passed in is not changed. A new secret added to that list is left
+ * out of backups with no change here.
+ */
+function stripSecrets(config) {
+  const copy = JSON.parse(JSON.stringify(config || {}));
+  const settings = copy.settings;
+  if (!_isPlainObject(settings)) return copy;
+  for (const dotted of SECRET_SETTING_PATHS) {
+    const path = dotted.split('.');
+    const parent = _getPath(settings, path.slice(0, -1));
+    if (_isPlainObject(parent)) delete parent[path[path.length - 1]];
+  }
+  return copy;
 }
 
 /** Put back every credential that is set here (see SECRET_SETTINGS). */
@@ -464,7 +494,7 @@ function _keepLocalTagMapsIfAbsent(out, existing) {
 
 // --- Stash (DESIGN-stash-s1.md (c) "Backups and import merge") ---
 //
-// Only these four fields of `settings.stash` ever come from a backup. The
+// Only these five fields of `settings.stash` ever come from a backup. The
 // API key is not a setting (electron/stash-secret.js keeps it in its own
 // file); a backup that carries one under `stash` anyway, or any other
 // field, brings nothing in.
@@ -474,6 +504,9 @@ function _stashFieldsOf(block) {
   if (typeof block.enabled === 'boolean') out.enabled = block.enabled;
   if (typeof block.url === 'string') out.url = block.url;
   if (typeof block.syncOnStart === 'boolean') out.syncOnStart = block.syncOnStart;
+  // "Use Stash's tag aliases and sub-tags" (the next lot): an overwrite
+  // import reset it to off and a merge never took it (triage 2026-11-23).
+  if (typeof block.useTagRules === 'boolean') out.useTagRules = block.useTagRules;
   if (Array.isArray(block.pathRules)) {
     out.pathRules = block.pathRules
       .filter((r) => _isPlainObject(r) && typeof r.local === 'string' && typeof r.stash === 'string')
@@ -484,8 +517,8 @@ function _stashFieldsOf(block) {
 
 /**
  * Merge mode, after the deep merge: this machine's `enabled` stays; `url`
- * and `pathRules` fill only an empty local value; `syncOnStart` follows the
- * backup like any other setting. Nothing else under `stash` is taken.
+ * and `pathRules` fill only an empty local value; `syncOnStart` and
+ * `useTagRules` follow the backup like any other setting. Nothing else under `stash` is taken.
  */
 function _mergeStashSettings(mergedSettings, localSettings, importedSettings) {
   if (!_isPlainObject(mergedSettings)) return;
@@ -502,11 +535,12 @@ function _mergeStashSettings(mergedSettings, localSettings, importedSettings) {
   const localRules = Array.isArray(out.pathRules) && out.pathRules.length > 0;
   if (!localRules && Array.isArray(incoming.pathRules) && incoming.pathRules.length > 0) out.pathRules = incoming.pathRules;
   if (typeof incoming.syncOnStart === 'boolean') out.syncOnStart = incoming.syncOnStart;
+  if (typeof incoming.useTagRules === 'boolean') out.useTagRules = incoming.useTagRules;
   mergedSettings.stash = out;
 }
 
 /**
- * Overwrite mode: the backup's `stash` block (its four fields only), or,
+ * Overwrite mode: the backup's `stash` block (its five fields only), or,
  * when the backup has none (made before Stash), this machine's block as it
  * is: unknown is not "never set up".
  */
@@ -579,6 +613,16 @@ function mergeConfig(existing, imported, mode) {
     const existingIds = new Set(merged.playlists.map(p => p.id));
     const existingNames = new Set(merged.playlists.map(p => p.name));
     for (const playlist of imported.playlists) {
+      // Favourites (zaikechi #381): the same built-in playlist on both
+      // machines, so the backup's favourites are added to this one's.
+      if (playlist?.id === 'favourites' && existingIds.has('favourites')) {
+        const mine = merged.playlists.find((p) => p.id === 'favourites');
+        const have = new Set(Array.isArray(mine.videoPaths) ? mine.videoPaths : (mine.videoPaths = []));
+        for (const p of Array.isArray(playlist.videoPaths) ? playlist.videoPaths : []) {
+          if (typeof p === 'string' && !have.has(p)) { mine.videoPaths.push(p); have.add(p); }
+        }
+        continue;
+      }
       if (hasId(existingIds, playlist)) continue;
       if (!existingNames.has(playlist.name)) {
         merged.playlists.push(playlist);
@@ -814,4 +858,4 @@ function _sameShape(a, b) {
   return Array.isArray(a) ? Array.isArray(b) : (_isPlainObject(a) && _isPlainObject(b));
 }
 
-module.exports = { exportData, importData, mergeConfig, applyImport, restoreCustomThumbs };
+module.exports = { exportData, importData, mergeConfig, applyImport, restoreCustomThumbs, stripSecrets };

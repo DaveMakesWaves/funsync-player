@@ -60,6 +60,7 @@ const LABEL_KEYS = {
   playPause: 'settingsPanel.playback.globalHotkeyPlayPause',
   orgasm: 'settingsPanel.playback.globalHotkeyOrgasm',
   edge: 'settingsPanel.playback.globalHotkeyEdge',
+  stopAll: 'settingsPanel.playback.globalHotkeyStopAll',
 };
 
 export class GlobalHotkeysSettings {

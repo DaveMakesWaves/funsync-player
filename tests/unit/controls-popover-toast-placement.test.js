@@ -19,6 +19,8 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vite
 import fs from 'node:fs';
 import { liftAppClass } from './helpers/app-methods.js';
 import { showToast } from '../../renderer/js/toast.js';
+// _wireSpeedControl moves focus into its popover with these (menu-keys.js, 2026-11-25).
+import { wireMenuKeys, moveMenuFocus, focusMenuFromKeyboard } from '../../renderer/js/menu-keys.js';
 
 const CSS = fs.readFileSync('renderer/styles/player.css', 'utf8');
 const flush = () => new Promise((r) => setTimeout(r, 0));
@@ -28,9 +30,10 @@ let app;
 let observer;
 
 beforeAll(() => {
-  Lifted = liftAppClass(['_wireControlsPopoverToasts', '_showVariantDropdown', '_variantLabelText', '_wireSpeedControl'], {
+  Lifted = liftAppClass(['_wireControlsPopoverToasts', '_showVariantDropdown', '_markVariantItemIfMissing', '_variantLabelText', '_wireSpeedControl'], {
     document, window, t: (k) => k, showToast,
     eventBus: { on() {} }, PLAYBACK_RATE_PRESETS: [0.5, 1, 1.5],
+    wireMenuKeys, moveMenuFocus, focusMenuFromKeyboard,
   });
 });
 

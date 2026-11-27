@@ -5,6 +5,7 @@
  */
 // Unit tests for GapSkipEngine — imports from real source
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import fs from 'node:fs';
 import { GapSkipEngine, DEFAULT_THRESHOLD_MS, LEAD_TIME_MS, COOLDOWN_MS } from '../../renderer/js/gap-skip.js';
 
 function makeActions(times) {
@@ -570,5 +571,66 @@ describe('GapSkipEngine skip ordering', () => {
     const result = engine.skipToNextAction();
     expect(result.skippedMs).toBeGreaterThan(0);
     expect(player.video.currentTime).toBeCloseTo(18.5, 1);
+  });
+});
+
+// Eroto, EroScripts #442 (2026-11-25): "G to skip to the next movement not
+// working but Shift+G to go back being fine", and he could not make it happen
+// again. G landed 1.5 s before the next ACTION: while the script moves (or in
+// a pause under ~1.5 s) that is behind the playhead, and G did nothing. Shift+G
+// goes back to the previous action GROUP, so it always moved. Now G, mid-
+// movement, goes to the next movement (the next group, 1.5 s before it).
+describe('G during movement (Eroto #442)', () => {
+  let engine, player;
+  // A movement 0-8 s (an action every 400 ms), a 20 s pause, a movement 28-36 s, then the end.
+  const MOVE_A = Array.from({ length: 21 }, (_, i) => i * 400);
+  const MOVE_B = Array.from({ length: 21 }, (_, i) => 28000 + i * 400);
+  beforeEach(() => {
+    player = mockVideoPlayer(0, false, 120);
+    engine = new GapSkipEngine({ videoPlayer: player, funscriptEngine: mockFunscriptEngine([]) });
+    engine._actions = makeActions([...MOVE_A, ...MOVE_B]);
+  });
+  afterEach(() => engine.stop());
+
+  it('mid-movement: the next movement, 1.5 s before it (it did nothing)', () => {
+    player._state.ct = 3.1;                                   // the next action is 100 ms away
+    const r = engine.skipToNextAction();
+    expect(r).not.toBeNull();
+    expect(player.video.currentTime).toBeCloseTo((28000 - LEAD_TIME_MS) / 1000, 3);
+    expect(engine._skipOrigin).toBe(3100);                    // Undo goes back
+  });
+
+  it('in a long pause, as before: 1.5 s before the next action', () => {
+    player._state.ct = 12;
+    engine.skipToNextAction();
+    expect(player.video.currentTime).toBeCloseTo((28000 - LEAD_TIME_MS) / 1000, 3);
+  });
+
+  it('in the last movement, with nothing after it: nothing moves, and the engine says why', () => {
+    player._state.ct = 30.1;
+    expect(engine.skipToNextAction()).toBeNull();
+    expect(player.video.currentTime).toBeCloseTo(30.1, 3);
+    expect(engine.hasScript).toBe(true);
+  });
+
+  it('a G press that cannot move says so (with a script loaded), one that moves or has no script says nothing', () => {
+    const nothing = vi.fn();
+    engine.onNothingAhead = nothing;
+    player._state.ct = 30.1;
+    expect(engine.skipNextFromKey()).toBeNull();
+    expect(nothing).toHaveBeenCalledTimes(1);
+    player._state.ct = 3.1;
+    expect(engine.skipNextFromKey()).not.toBeNull();
+    expect(nothing).toHaveBeenCalledTimes(1);                 // it moved: no notice
+    engine._actions = null;
+    expect(engine.skipNextFromKey()).toBeNull();
+    expect(nothing).toHaveBeenCalledTimes(1);                 // no script: G stays quiet
+  });
+
+  it('the G key goes through it; the gap button and auto-skip do not (they run in a gap)', () => {
+    const kb = fs.readFileSync('renderer/js/keyboard.js', 'utf8');
+    const g = kb.slice(kb.indexOf("case 'g':"), kb.indexOf("case 'G':"));
+    expect(g).toMatch(/this.gapSkipEngine.skipNextFromKey()/);
+    expect(fs.readFileSync('renderer/js/app.js', 'utf8')).toMatch(/gapSkipEngine.onNothingAhead = /);
   });
 });

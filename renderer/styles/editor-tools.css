@@ -1,0 +1,204 @@
+/* Editor tools (editor work list 4.2 / 4.5, 2026-11-24): the Check script
+   dialog (components/script-check-panel.js) and the undo history menu
+   (components/undo-history-menu.js). Linked from renderer/index.html and
+   renderer/editor-popout.html after editor.css.
+   Flat, semantic tokens only (DESIGN §2.1), so dark / light and Classic /
+   Modern / Holiday all follow; no glow (§2.14). */
+
+/* ---- Check script ------------------------------------------------------ */
+
+.modal-panel.script-check-panel {
+  width: min(560px, 92vw);
+}
+
+.script-check {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.script-check__status:empty {
+  display: none;
+}
+
+.script-check__status {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--state-warning-soft);
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.script-check__summary {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* Empty state (DESIGN §2.11): heading + hint. */
+.script-check__empty {
+  padding: 20px 8px;
+  text-align: center;
+}
+
+.script-check__empty-title {
+  margin: 0 0 4px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.script-check__empty-hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+/* One kind: a form-panel section, so a border on top (DESIGN §2.3). */
+.script-check__group {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+}
+
+.script-check__group-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.script-check__group-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.script-check__count {
+  flex: none;
+  min-width: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--surface-overlay-strong);
+  color: var(--text-primary);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
+}
+
+/* The speed kinds take the speed badges' colours as an outline (DESIGN
+   §2.1: purple = insane speed, info = slow); the text stays the body colour,
+   which reads on both themes where white on those fills would not. */
+.script-check__group[data-kind="tooFast"] .script-check__count {
+  border-color: var(--badge-purple);
+}
+
+.script-check__group[data-kind="tooSlow"] .script-check__count {
+  border-color: var(--badge-info);
+}
+
+.script-check__group[data-kind="outOfRange"] .script-check__count,
+.script-check__group[data-kind="sameTime"] .script-check__count {
+  border-color: var(--state-error);
+  background: var(--state-error-soft);
+}
+
+.script-check__select-all {
+  flex: none;
+  min-height: 32px;
+}
+
+.script-check__hint {
+  margin: 4px 0 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.script-check__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.script-check__row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  width: 100%;
+  min-height: 32px;   /* the timeline menu's row height (Fitts, DESIGN §2.3) */
+  padding: 4px 8px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.script-check__row:hover,
+.script-check__row:focus {
+  background: var(--surface-overlay-strong);
+  outline: none;
+}
+
+.script-check__row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.script-check__time {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-secondary);
+}
+
+.script-check__detail {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.script-check__more,
+.script-check__limits {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+/* ---- Undo history menu ------------------------------------------------- */
+/* The shared timeline menu (.editor-context-menu, editor.css) with a cap on
+   its height, quieter redo rows and the divider between undo and redo. */
+
+.editor-context-menu.undo-history-menu {
+  max-height: min(70vh, 720px);
+  overflow-y: auto;
+}
+
+.undo-history-menu__item--redo {
+  color: var(--text-secondary);
+}
+
+.undo-history-menu__item--redo:hover,
+.undo-history-menu__item--redo:focus {
+  color: var(--text-primary);
+}
+
+.undo-history-menu__divider {
+  margin: 4px 6px 2px;
+  padding: 6px 4px 2px;
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  user-select: none;
+}

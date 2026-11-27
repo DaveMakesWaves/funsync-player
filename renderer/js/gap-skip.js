@@ -38,6 +38,7 @@ export class GapSkipEngine {
     this.onShowOverlay = null;    // (gap, countdownSeconds|null) => {}
     this.onHideOverlay = null;    // () => {}
     this.onCountdownTick = null;  // (remaining) => {}
+    this.onNothingAhead = null;   // () => {}: a G press with nothing ahead to go to
     this.onSkipped = null;        // (skippedMs) => {}
   }
 
@@ -128,7 +129,17 @@ export class GapSkipEngine {
     let targetMs;
     if (next) {
       targetMs = Math.max(0, next.at - LEAD_TIME_MS);
-      if (targetMs <= timeMs) return null; // already past it
+      // Mid-movement (or in a pause under the lead time) "1.5 s before the
+      // next action" is behind the playhead: the next MOVEMENT instead, the
+      // first action after a gap, as Shift+G goes back to the previous one
+      // (Eroto, EroScripts #442: "G to skip to the next movement not working
+      // but Shift+G to go back being fine"; it did nothing there).
+      if (targetMs <= timeMs) {
+        const group = this._findNextActionGroupStart(timeMs);
+        if (group === null) return null; // the last movement: nothing ahead
+        targetMs = Math.max(0, group - LEAD_TIME_MS);
+        if (targetMs <= timeMs) return null;
+      }
     } else if (this.player.duration > 0) {
       // No next action — skip to end of video (trailing gap)
       targetMs = this.player.duration * 1000;
@@ -161,6 +172,21 @@ export class GapSkipEngine {
     if (this.onSkipped) this.onSkipped(skippedMs);
 
     return { skippedMs };
+  }
+
+  /** A script is loaded (G with nothing ahead is worth saying then). */
+  get hasScript() { return !!this._actions && this._actions.length > 0; }
+
+  /**
+   * The G key: skip to the next action or movement; when there is nothing
+   * ahead to go to (the last movement) and a script is loaded, say so
+   * (`onNothingAhead`) instead of doing nothing silently.
+   * @returns {{skippedMs: number}|null}
+   */
+  skipNextFromKey() {
+    const r = this.skipToNextAction();
+    if (!r && this.hasScript) this.onNothingAhead?.();
+    return r;
   }
 
   /**
@@ -304,6 +330,22 @@ export class GapSkipEngine {
     }
 
     return lo < this._actions.length ? this._actions[lo] : null;
+  }
+
+  /**
+   * The start of the next action group after `timeMs`: the first later
+   * action that follows a gap of at least the threshold. Null when the
+   * movement now is the last one.
+   */
+  _findNextActionGroupStart(timeMs) {
+    const a = this._actions;
+    if (!a || a.length === 0) return null;
+    let i = 0;
+    while (i < a.length && a[i].at <= timeMs) i++;
+    for (i = Math.max(i, 1); i < a.length; i++) {
+      if (a[i].at > timeMs && a[i].at - a[i - 1].at >= this._threshold) return a[i].at;
+    }
+    return null;
   }
 
   /**

@@ -23,7 +23,7 @@ from typing import Any, Optional
 class ResolveError(Exception):
     """A resolve failure with a UI-facing category.
 
-    kind ∈ {unsupported, login, drm, geo, live, unavailable, error}
+    kind ∈ {unsupported, login, drm, geo, live, refused, unavailable, error}
     """
 
     def __init__(self, kind: str, message: str = ""):
@@ -65,6 +65,10 @@ def _categorise(message: str) -> str:
         return "unsupported"
     if "is live" in m or "livestream" in m or "live event" in m:
         return "live"
+    # The site answered, and said no to an app (Pornhub's 410, SpankBang's
+    # 403): "open it in your browser" is the useful answer (2026-11-23).
+    if any(x in m for x in ("http error 403", "http error 410", "403: forbidden", "410: gone")):
+        return "refused"
     if "unavailable" in m or "removed" in m or "deleted" in m or "404" in m:
         return "unavailable"
     return "error"
@@ -74,7 +78,7 @@ def _is_http(proto: Optional[str]) -> bool:
     return bool(proto) and proto.startswith("http") and "m3u8" not in proto and "dash" not in proto
 
 
-def _pick_format(info: dict) -> Optional[dict]:
+def _pick_format(info: dict, max_height: Optional[int] = None) -> Optional[dict]:
     """Choose the best directly-playable format.
 
     Priority:
@@ -97,13 +101,25 @@ def _pick_format(info: dict) -> Optional[dict]:
         if f.get("url") and both_av(f) and _is_http(f.get("protocol")) and f.get("ext") == "mp4"
     ]
     if progressive:
-        best = max(progressive, key=lambda f: f.get("height") or 0)
+        # One file per height (the best of each), so the player can offer
+        # them as qualities; the one for `max_height` plays first (2026-11-23).
+        by_height: dict = {}
+        for f in progressive:
+            h = f.get("height") or 0
+            if h not in by_height or (f.get("tbr") or 0) > (by_height[h].get("tbr") or 0):
+                by_height[h] = f
+        files = [{"height": h, "f": f} for h, f in by_height.items()]
+        from services.video_downloader import pick_height
+        best = pick_height(files, max_height)["f"]
         return {
             "url": best["url"],
             "isHls": False,
             "headers": best.get("http_headers") or info.get("http_headers") or {},
             "height": best.get("height"),
             "ext": "mp4",
+            "alternatives": [{"height": x["height"], "streamUrl": x["f"]["url"],
+                              "headers": x["f"].get("http_headers") or info.get("http_headers") or {}}
+                             for x in sorted(files, key=lambda x: x["height"], reverse=True)] if len(files) > 1 else [],
         }
 
     hls = [f for f in formats if "m3u8" in (f.get("protocol") or "")]
@@ -131,7 +147,7 @@ def _pick_format(info: dict) -> Optional[dict]:
     return None
 
 
-def resolve(page_url: str) -> dict[str, Any]:
+def resolve(page_url: str, max_height: Optional[int] = None) -> dict[str, Any]:
     """Resolve a page URL to a playable stream.
 
     Returns a dict:
@@ -162,7 +178,7 @@ def resolve(page_url: str) -> dict[str, Any]:
     if info.get("is_live"):
         raise ResolveError("live", "Live streams can't be synced")
 
-    chosen = _pick_format(info)
+    chosen = _pick_format(info, max_height)
     if not chosen or not chosen.get("url"):
         raise ResolveError("unsupported", "Couldn't find a playable stream")
 
@@ -177,4 +193,5 @@ def resolve(page_url: str) -> dict[str, Any]:
         "isHls": chosen["isHls"],
         "headers": chosen["headers"] or {},
         "height": chosen.get("height"),
+        "alternatives": chosen.get("alternatives") or [],
     }

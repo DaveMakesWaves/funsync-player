@@ -29,6 +29,7 @@
 import { stripBOM } from './funscript-engine.js';
 import { interpolatePosition } from './handy-hdsp-sync.js';
 import { applyCutoff } from './device-transform-stack.js';
+import { jumpEaseMs, POSITION_AXES } from './jump-ease.js';
 
 const DEFAULT_TICK_MS = 40;   // ~25 Hz, same cadence as the Buttplug engine
 const MIN_POS_DELTA = 1;      // skip sends that wouldn't move the device
@@ -73,7 +74,10 @@ export class OrgasmSwitch {
    * @param {object} [opts]
    * @param {number} [opts.tickIntervalMs=40]
    */
-  constructor({ buttplugManager, tcodeManager, handyManager, onActivate, onDeactivate, handyReady, getCutoff, now, oscillate } = {}, opts = {}) {
+  constructor({ buttplugManager, tcodeManager, handyManager, onActivate, onDeactivate, handyReady, getCutoff, now, oscillate, logTag } = {}, opts = {}) {
+    // The log prefix. Edge Hold and the pattern Test run this same engine, and
+    // their lines read "[OrgasmSwitch]" as if X were on (2026-11-20).
+    this._logTag = typeof logTag === 'string' && logTag ? logTag : 'OrgasmSwitch';
     this.buttplugManager = buttplugManager || null;
     this.tcodeManager = tcodeManager || null;
     this.handyManager = handyManager || null;
@@ -222,6 +226,9 @@ export class OrgasmSwitch {
     this._chanLast = new Map();
     this._onceDone = false;
     this._lastOscMs = null;
+    // T-Code's first move eases from where the device is (_sendTcode).
+    this._tcStarted = false;
+    this._tcEaseUntil = 0;
     try { this.onActivate?.(); } catch { /* swallow — best-effort */ }
     this._timer = this._setIntervalImpl(() => this._tick(), this._tickMs);
     this._tick();  // respond immediately, don't wait a full interval
@@ -304,6 +311,61 @@ export class OrgasmSwitch {
   }
 
   /**
+   * The loop's T-Code frame. Its frames are bare (no move time), so the first
+   * one used to take the device from wherever it was to the pattern at full
+   * speed (Eroto #423, Edge Hold). Now the first frame of a hold sends each
+   * position axis that is far from the pattern to where the pattern WILL be
+   * when the move lands, at the jump pace, and nothing more goes to T-Code
+   * until it has; the bare frames then carry on from there.
+   */
+  _sendTcode(tc, plan, loopMs) {
+    const now = this._now();
+    if (this._tcEaseUntil > now) return;
+    const cutoff = this._getCutoff('tcode');
+    const place = (code, pos) => (code === 'L0' ? applyCutoff(pos, cutoff) : pos);
+    const axes = {};
+    const intervals = {};
+    let longest = 0;
+    const first = !this._tcStarted;
+    this._tcStarted = true;
+    for (const [code, actions] of Object.entries(plan.tcodeAxes)) {
+      if (first && POSITION_AXES.has(code) && typeof tc.estimatePosition === 'function') {
+        const from = tc.estimatePosition(code);
+        const now0 = interpolatePosition(actions, loopMs);
+        let ease = now0 === null ? 0 : jumpEaseMs(from, place(code, now0));
+        if (ease > 0) {
+          const ahead = interpolatePosition(actions, this._loopTimeAt(loopMs + ease));
+          const target = place(code, ahead ?? now0);
+          ease = Math.max(ease, jumpEaseMs(from, target));
+          axes[code] = target;
+          intervals[code] = ease;
+          this._chanLast.set(`tcode:${code}`, ahead ?? now0);
+          longest = Math.max(longest, ease);
+          continue;
+        }
+      }
+      const ch = this._chanPos(`tcode:${code}`, actions, loopMs);
+      if (!ch || !ch.moved) continue;
+      // The configured floor/ceiling is a STROKE limit — apply it to L0
+      // only; rotation/vibe channels pass through raw.
+      axes[code] = place(code, ch.pos);
+    }
+    if (longest > 0) this._tcEaseUntil = now + longest;
+    if (Object.keys(axes).length > 0) {
+      try {
+        if (Object.keys(intervals).length > 0) tc.sendAxes(axes, undefined, intervals);
+        else tc.sendAxes(axes);
+      } catch { /* */ }
+    }
+  }
+
+  /** The plan's clock at `ms` past its start (wraps, or holds the end of a one-shot). */
+  _loopTimeAt(ms) {
+    if (!(this._durationMs > 0)) return 0;
+    return this._plan?.once === true ? Math.min(ms, this._durationMs) : ms % this._durationMs;
+  }
+
+  /**
    * Per-channel position with its own MIN_POS_DELTA skip. Returns
    * { pos, prev, moved } or null when the channel can't interpolate.
    */
@@ -338,18 +400,7 @@ export class OrgasmSwitch {
     // --- T-Code: ONE sendAxes call carrying every channel that moved ---
     const tc = this.tcodeManager;
     if (tc?.connected && typeof tc.sendAxes === 'function' && plan.tcodeAxes) {
-      const axes = {};
-      const cutoff = this._getCutoff('tcode');
-      for (const [code, actions] of Object.entries(plan.tcodeAxes)) {
-        const ch = this._chanPos(`tcode:${code}`, actions, loopMs);
-        if (!ch || !ch.moved) continue;
-        // The configured floor/ceiling is a STROKE limit — apply it to L0
-        // only; rotation/vibe channels pass through raw.
-        axes[code] = code === 'L0' ? applyCutoff(ch.pos, cutoff) : ch.pos;
-      }
-      if (Object.keys(axes).length > 0) {
-        try { tc.sendAxes(axes); } catch { /* */ }
-      }
+      this._sendTcode(tc, plan, loopMs);
     }
 
     // --- Handy (HDSP direct-drive when a manager is injected; the app
@@ -366,7 +417,7 @@ export class OrgasmSwitch {
     // stroke (script playing) or a stuck value. ~2 lines/sec, safe for the log.
     if (mainMoved && pos !== null && (!this._lastLogMs || this._now() - this._lastLogMs > 500)) {
       this._lastLogMs = this._now();
-      try { console.log(`[OrgasmSwitch] loop pos=${pos.toFixed(1)} (${plan.mode})`); } catch { /* */ }
+      try { console.log(`[${this._logTag}] loop pos=${pos.toFixed(1)} (${plan.mode})`); } catch { /* */ }
     }
   }
 

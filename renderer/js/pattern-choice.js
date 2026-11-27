@@ -55,7 +55,7 @@ import {
   patternSourceLoop, patternSourceKey, buildPatternSourceContent,
   patternBasis, isStaleChoice, canonicalSource,
 } from './pattern-source.js';
-import { buildGapFiller, DEFAULT_MAX_JOIN_SPEED } from './filler-engine.js';
+import { buildGapFiller, DEFAULT_MAX_JOIN_SPEED, joinReserveMs } from './filler-engine.js';
 import { buildLibraryGapFiller, depthBand, scriptBandSpeed, NEUTRAL_RANGE } from './filler-pattern.js';
 import { computeNaturalRange } from './device-transform-stack.js';
 
@@ -493,6 +493,69 @@ export function renderPatternSample(choice, opts = {}) {
   } catch (err) {
     return { actions: [], warnings: [{ code: 'render-failed', values: { message: String(err?.message || err) } }] };
   }
+}
+
+/**
+ * The band a sample plays in when the engine widened the one asked for
+ * (renderLoop's range-widened: a range under 5 units, or one the pattern
+ * cannot move in), as [lo, hi] whole numbers; null when it plays the band
+ * asked for, when the choice has no band of its own (range mode 'own'), or
+ * when the engine gave no numbers. The block's note under the range rows and
+ * the summary row's note both read it, so they name the same band.
+ * @param {object} choice
+ * @param {Array} warnings  renderPatternSample's
+ * @param {{at:number,pos:number}[]} [actions]  the sample (an old bare 'range-widened' is named from where it goes)
+ * @returns {[number, number]|null}
+ */
+export function widenedBand(choice, warnings, actions = []) {
+  if (normalizePatternChoice(choice).rangeMode === 'own') return null;
+  for (const w of Array.isArray(warnings) ? warnings : []) {
+    if (w && typeof w === 'object' && w.code === 'range-widened' && Array.isArray(w.values?.to)) {
+      return [Math.round(w.values.to[0]), Math.round(w.values.to[1])];
+    }
+    if (w === 'range-widened' && Array.isArray(actions) && actions.length) {
+      const pos = actions.map((a) => a.pos);
+      return [Math.round(Math.min(...pos)), Math.round(Math.max(...pos))];
+    }
+  }
+  return null;
+}
+
+// ---------- the summary graph's window ----------
+/** ms: the shortest stretch of a pattern a summary graph shows (a shorter loop is drawn again to fill it). */
+export const SUMMARY_MIN_MS = 4000;
+/**
+ * ms: the longest. Every loop of the library fits (renderLoop's are at most
+ * 2x its 10 s target); a slower one, or a long ending (up to ~57 s), shows
+ * its first 20 s. On the 240 px graph that is 12 px a second, about the
+ * densest that still reads as strokes.
+ */
+export const SUMMARY_MAX_MS = 20000;
+
+/**
+ * How long a sample must be to show the whole pattern once (TODO 2026-11-19:
+ * the summary showed the first 4 s, so a pattern that builds up, the
+ * upgraded Crescendo / Building preset, drew a flat line): one loop of what
+ * X and Z play (an ending: once through; a simple shape: its whole beats
+ * near 10 s, the build of 'escalating' included), held to SUMMARY_MIN_MS -
+ * SUMMARY_MAX_MS. For the Gap Filler (feature 'gapFiller') its joins either
+ * side are added, so the pattern between them is that long. SUMMARY_MIN_MS
+ * when nothing is chosen or nothing can be rendered.
+ * @param {object} choice
+ * @param {{ scriptRange?: {min:number,max:number}|null, feature?: PatternFeature, maxJoinSpeed?: number }} [opts]
+ * @returns {number} ms
+ */
+export function representativeMs(choice, opts = {}) {
+  const o = isObj(opts) ? opts : {};
+  let body = SUMMARY_MIN_MS;
+  try {
+    const p = resolveChoice(choice, { scriptRange: validRange(o.scriptRange) ? o.scriptRange : NEUTRAL_RANGE });
+    const loop = p ? patternSourceLoop(p) : null;
+    if (loop && loop.loopMs > 0) body = clamp(Math.round(loop.loopMs), SUMMARY_MIN_MS, SUMMARY_MAX_MS);
+  } catch { /* nothing to measure: the shortest */ }
+  if (o.feature !== 'gapFiller') return body;
+  const join = Number.isFinite(o.maxJoinSpeed) && o.maxJoinSpeed > 0 ? o.maxJoinSpeed : DEFAULT_MAX_JOIN_SPEED;
+  return body + 2 * joinReserveMs(join);
 }
 
 /** ms: a leg this short is an instant jump (square's and sawtooth's 1 ms edges), not a stroke. */

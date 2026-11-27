@@ -273,3 +273,48 @@ def test_observer_edge_state_reaches_the_phone(client):
             obs.send_json({"type": "edge-state", "active": True, "mode": "toggle"})
             msg = phone.receive_json()
             assert msg == {"type": "edge-state", "active": True, "mode": "toggle"}
+
+
+# --- Liveness: GET /api/remote/sync/status (DESIGN.md §2.16, 2026-11-23) ---
+# The desktop asks every 10 s while it shows a Web Remote session; two "no
+# phone" answers in a row end the session. Found by the full manual test: one
+# throw in the disconnect handler left the card on "Paused" for good.
+
+def _status_from_desktop():
+    """GET the status as the desktop does: from loopback, no Origin (the gate)."""
+    import asyncio
+    from httpx import AsyncClient, ASGITransport
+
+    async def ask():
+        transport = ASGITransport(app=app, client=("127.0.0.1", 50000))
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:5123") as c:
+            r = await c.get("/api/remote/sync/status")
+            assert r.status_code == 200
+            return r.json()
+    return asyncio.run(ask())
+
+
+def test_sync_status_follows_the_phone(client):
+    assert _status_from_desktop()["phoneConnected"] is False
+    with client.websocket_connect("/api/remote/sync?videoId=abc"):
+        body = _status_from_desktop()
+        assert body["phoneConnected"] is True
+        assert body["ip"]
+    import time
+    time.sleep(0.05)
+    assert _status_from_desktop()["phoneConnected"] is False
+
+
+def test_sync_status_is_desktop_only():
+    """It names the phone's address, so a LAN host or a web page gets 403."""
+    import asyncio
+    from httpx import AsyncClient, ASGITransport
+
+    async def ask(client_host, headers=None):
+        transport = ASGITransport(app=app, client=(client_host, 50000))
+        async with AsyncClient(transport=transport, base_url="http://127.0.0.1:5123") as c:
+            return (await c.get("/api/remote/sync/status", headers=headers or {})).status_code
+
+    assert asyncio.run(ask("192.168.1.50")) == 403
+    assert asyncio.run(ask("127.0.0.1", {"Origin": "http://evil.example"})) == 403
+    assert asyncio.run(ask("127.0.0.1")) == 200

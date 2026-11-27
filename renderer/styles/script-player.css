@@ -1,0 +1,218 @@
+/* The script player (v0.10.1): the bar along the bottom, the player's pill,
+   and the "Scripts without a video" dialog. renderer/js/script-player.js. */
+
+:root { --script-bar-h: 66px; }
+
+/* The window's content ends above the bar, so nothing sits under it: the
+   library's last row, the player's controls. */
+html.has-script-bar #app { height: calc(100vh - var(--script-bar-h)); }
+html.has-script-bar .player-container--mini { bottom: calc(16px + var(--script-bar-h)); }
+
+.script-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--script-bar-h);
+  z-index: 70;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 14px;
+  background: var(--surface-elevated);
+  border-top: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 13px;
+}
+.script-bar[hidden] { display: none; }
+
+.script-bar__btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.script-bar__btn:hover { background: var(--surface-overlay); color: var(--text-primary); }
+.script-bar__btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.script-bar__play { background: var(--accent); color: #fff; }
+.script-bar__play:hover { background: var(--accent-hover); color: #fff; }
+.script-bar__loop--on { color: var(--accent); background: var(--accent-soft); }
+
+.script-bar__label {
+  flex: 0 1 200px;
+  min-width: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.script-bar__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+/* The moving stroke graph over a thin seek strip (the strip sits on the
+   script's heat strip, drawn by heatmap-strip.js in the accent colour). */
+.script-bar__track {
+  flex: 1 1 auto;
+  min-width: 120px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-self: stretch;
+  justify-content: center;
+}
+.script-bar__graph {
+  display: block;
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.22);
+}
+.script-bar__strip {
+  position: relative;
+  height: 10px;
+}
+.script-bar__heat {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 10px;
+  color: var(--accent);
+  opacity: 0.6;
+  pointer-events: none;
+}
+.script-bar__seek {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.script-bar__seek::-webkit-slider-runnable-track { height: 10px; background: rgba(255, 255, 255, 0.06); border-radius: 5px; }
+.script-bar__seek::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 4px;
+  height: 10px;
+  background: var(--text-primary);
+  border-radius: 2px;
+}
+.script-bar__seek:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.script-bar__readout {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-variant-numeric: tabular-nums;
+}
+.script-bar__pos { font-size: 15px; font-weight: 600; color: var(--text-primary); }
+.script-bar__time {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.script-bar__devices {
+  font-size: 11px;
+  color: var(--state-connected);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.script-bar__devices--none { color: var(--text-muted); }
+
+/* The player's pill: the devices follow the script player, not this video. */
+.player__script-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 10px;
+  background: var(--video-overlay-control-hover);
+  color: var(--video-overlay-text);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.player__script-pill[hidden] { display: none; }
+.player__script-pill-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+.player__script-pill-text { overflow: hidden; text-overflow: ellipsis; }
+.player__script-pill-btn {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: 999px;
+  padding: 3px 10px;
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--video-overlay-text);
+  font: inherit;
+  cursor: pointer;
+}
+.player__script-pill-btn:hover { background: rgba(255, 255, 255, 0.26); }
+.player__script-pill-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* "Scripts without a video" */
+.loose-scripts-panel { width: min(640px, 92vw); }
+.loose-scripts__count { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
+.loose-scripts__list { max-height: 60vh; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.loose-scripts__row { border-radius: var(--radius-md); padding: 6px 8px; background: var(--surface-overlay); }
+.loose-scripts__top { display: flex; align-items: center; gap: 10px; }
+.loose-scripts__play {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex: 0 0 auto;
+  border: none; border-radius: 50%;
+  background: var(--accent); color: #fff; cursor: pointer;
+}
+.loose-scripts__play:hover { background: var(--accent-hover); }
+.loose-scripts__play:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.loose-scripts__text { flex: 1 1 auto; min-width: 0; }
+.loose-scripts__name { font-size: 13px; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loose-scripts__folder { font-size: 11px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.loose-scripts__pair { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; }
+.loose-scripts__finder { margin: 8px 0 2px 40px; }
+.loose-scripts__finder[hidden] { display: none; }
+.loose-scripts__find {
+  width: 100%; box-sizing: border-box; padding: 6px 8px;
+  border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+  background: var(--surface-card); color: var(--text-primary); font: inherit;
+}
+.loose-scripts__matches { display: flex; flex-direction: column; margin-top: 4px; }
+.loose-scripts__match {
+  text-align: left; padding: 5px 8px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--text-primary); font: inherit; font-size: 12px; cursor: pointer;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.loose-scripts__match:hover, .loose-scripts__match:focus-visible { background: var(--surface-overlay-strong); outline: none; }
+.loose-scripts__none { font-size: 12px; color: var(--text-muted); padding: 5px 8px; }
+
+/* Delete on a loose script's row (DESIGN.md §2.18): an icon button, 36 px,
+   neutral at rest and the error red on hover / focus. */
+.loose-scripts__delete {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; flex-shrink: 0; padding: 0;
+  border: none; border-radius: 6px; background: none;
+  color: var(--text-secondary); cursor: pointer;
+}
+.loose-scripts__delete:hover,
+.loose-scripts__delete:focus-visible { color: var(--state-error); background: var(--state-error-soft); }

@@ -49,11 +49,18 @@ function baseNameOf(p) {
  *   entry survives. Defaults to "never provable", i.e. always copy.
  * @returns {Array<{from: string, to: string, keepSource: boolean}>}
  */
+/** A saved stream's key (renderer/js/saved-streams.js): never a file. */
+function isStreamKey(p) {
+  return typeof p === 'string' && p.startsWith('stream:');
+}
+
 export function planAssociationRehome({
   storedPaths, scannedPaths, isUnavailable, isProvablyGone,
 } = {}) {
-  const stored = Array.isArray(storedPaths) ? storedPaths : [];
-  const scanned = Array.isArray(scannedPaths) ? scannedPaths : [];
+  // A saved stream's key ('stream:<host><path>', 2026-11-23) is no file:
+  // it never moves, and its last segment is no file name to match on.
+  const stored = Array.isArray(storedPaths) ? storedPaths.filter((p) => !isStreamKey(p)) : [];
+  const scanned = Array.isArray(scannedPaths) ? scannedPaths.filter((p) => !isStreamKey(p)) : [];
   if (stored.length === 0 || scanned.length === 0) return [];
 
   const scannedSet = new Set(scanned);
@@ -169,7 +176,8 @@ export function findMovedFile(candidates, missingPath) {
  * @returns {string|null} the single safe candidate, or null
  */
 export function pickRehomeCandidate({ storedPaths, videoPath, isLive } = {}) {
-  if (!videoPath || !Array.isArray(storedPaths) || storedPaths.length === 0) return null;
+  if (!videoPath || isStreamKey(videoPath) || !Array.isArray(storedPaths) || storedPaths.length === 0) return null;
+  storedPaths = storedPaths.filter((p) => !isStreamKey(p));
   const wanted = baseNameOf(videoPath);
   if (!wanted) return null;
   const live = typeof isLive === 'function' ? isLive : () => false;

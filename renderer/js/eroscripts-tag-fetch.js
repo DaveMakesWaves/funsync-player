@@ -123,7 +123,17 @@ export function topicUrlFor(topicId) {
  *   | {state: 'noScript'}}
  */
 export function resolveTopic({ record = null, scriptPath = null, scriptMeta = null, link = null, videoPath = null } = {}) {
-  if (typeof scriptPath !== 'string' || !scriptPath) return { state: 'noScript' };
+  if (typeof scriptPath !== 'string' || !scriptPath) {
+    // A video downloaded from a post whose script never came (or is gone)
+    // is still that post's (Dave, 2026-11-25; video-options-model.js
+    // eroscriptsRecordState): its record says so. Anything else needs a
+    // script to find a post by.
+    const id = record && typeof record === 'object' ? topicIdOf(record.topicId) : null;
+    if (id != null && record.videoFromPost === true && !isAutoHubRecord(record)) {
+      return { state: 'known', topicId: id, topicUrl: record.topicUrl || topicUrlFor(id), match: TAG_MATCH.DOWNLOAD, from: 'record' };
+    }
+    return { state: 'noScript' };
+  }
 
   const linkId = topicIdOf(link?.topicId);
   if (linkId != null) {

@@ -177,6 +177,14 @@ export class RemoteSyncClient {
   }
 
   /**
+   * Stop (DESIGN.md §2.15): the desktop's Stop all, whatever drives the
+   * devices. The page pauses its own video itself, at once.
+   */
+  sendStopAll() {
+    this._send({ type: 'stop-all' });
+  }
+
+  /**
    * Per-device offset adjustment from the phone (F4). `device` is the
    * kind key the desktop's device-status list uses (handy/buttplug/
    * tcode/autoblow); ms is clamped desktop-side (untrusted LAN input).

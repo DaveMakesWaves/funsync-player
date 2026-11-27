@@ -112,9 +112,20 @@ describe('TCodeSync.previewAxisPosition', () => {
   });
 
   it('refuses while a video is driving — playback owns the device', () => {
+    // Driving = a video is loaded AND playing (its scheduler runs).
     h.sync._active = true;
+    h.sync._intervalId = 1;
+    h.sync.player.paused = false;
     expect(h.sync.previewAxisPosition('L0', 100, 250)).toBe(false);
     expect(h.tcode.sendAxes).not.toHaveBeenCalled();
+  });
+
+  it('a loaded but PAUSED video sends nothing, so the preview works then (device session 2026-11-19)', () => {
+    h.sync._active = true;
+    h.sync._intervalId = null;
+    h.sync.player.paused = true;
+    expect(h.sync.previewAxisPosition('L0', 100, 250)).toBe(true);
+    expect(h.tcode.sendAxes).toHaveBeenCalledTimes(1);
   });
 
   it('refuses a missing axis id rather than sending an undefined channel', () => {
@@ -214,8 +225,19 @@ describe('ButtplugSync.previewDevicePosition', () => {
   });
 
   it('refuses while a video is driving — playback owns the devices', () => {
+    // Driving = a video is loaded AND playing (its scheduler runs).
     h.sync._active = true;
+    h.sync._intervalId = 1;
+    h.sync.player.paused = false;
     expect(h.sync.previewDevicePosition(0, 100, 250)).toBe(false);
     expect(h.buttplug.sendLinear).not.toHaveBeenCalled();
+  });
+
+  it('a loaded but PAUSED video sends nothing, so the preview works then (device session 2026-11-19)', () => {
+    h.sync._active = true;
+    h.sync._intervalId = null;
+    h.sync.player.paused = true;
+    expect(h.sync.previewDevicePosition(0, 100, 250)).toBe(true);
+    expect(h.buttplug.sendLinear).toHaveBeenCalledTimes(1);
   });
 });

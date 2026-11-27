@@ -188,7 +188,9 @@ describe('the Playlists view: a "From Stash" section of read-only group playlist
     // The user's playlist is as it always was.
     const own = container.querySelector('.playlists__card:not(.playlists__card--stash):not(.playlists__card--create)');
     expect(own.querySelector('.playlists__card-name').textContent).toBe('Mine');
-    expect(own.querySelectorAll('.playlists__card-action-btn')).toHaveLength(2);
+    // Set a cover (2026-11-23), Rename, Delete.
+    expect(own.querySelectorAll('.playlists__card-action-btn')).toHaveLength(3);
+    expect(own.querySelector('.playlists__cover-set')).not.toBeNull();
     // Its own labelled section, after the user's grid.
     expect(section().querySelector('h2').textContent).toBe(t('playlists.stashGroups.sectionTitle'));
     expect(section().getAttribute('aria-labelledby')).toBe(section().querySelector('h2').id);

@@ -846,6 +846,9 @@ describe('Select mode in a playlist (FT-104, #370)', () => {
       videoPlayer: { clearAbLoop },
       connectionPanel: { hide: vi.fn() },
       getView: () => 'playlists',
+      // The card shows outside the player only on the mini player (since
+      // 2026-11-22 a card nobody can see takes no Esc: FT-104 re-check).
+      hasOffViewPlayer: () => true,
       isQueueOpen: () => false,
       onToggleQueue: vi.fn(),
     });

@@ -39,12 +39,23 @@ export const AXIS_DEFINITIONS = [
   { suffix: 'twist', tcode: 'R0', label: 'Twist / Yaw',     aliases: ['yaw', 'r0'],       type: 'rotate'  },
   { suffix: 'roll',  tcode: 'R1', label: 'Roll',            aliases: ['r1'],              type: 'rotate'  },
   { suffix: 'pitch', tcode: 'R2', label: 'Pitch',           aliases: ['r2'],              type: 'rotate'  },
-  { suffix: 'vib',   tcode: 'V0', label: 'Vibe',            aliases: ['vibrate', 'v0'],   type: 'vibrate' },
+  { suffix: 'vib',   tcode: 'V0', label: 'Vibe',            aliases: ['vibrate', 'vibe', 'v0'],   type: 'vibrate' },
   { suffix: 'pump',  tcode: 'V1', label: 'Pump',            aliases: ['v1'],              type: 'vibrate' },
   { suffix: 'valve', tcode: 'A0', label: 'Valve',           aliases: ['a0'],              type: 'linear'  },
   { suffix: 'suck',  tcode: 'A1', label: 'Suck / Suction',  aliases: ['suction', 'a1'],   type: 'vibrate' },
   { suffix: 'lube',  tcode: 'A2', label: 'Lube',            aliases: ['a2'],              type: 'vibrate' },
 ];
+
+/** The short name of each axis in the editor's script list (any spelling in, by its canonical axis). */
+const SHORT_LABELS = Object.freeze({
+  surge: 'Surge', sway: 'Sway', twist: 'Twist', roll: 'Roll', pitch: 'Pitch',
+  vib: 'Vibe', pump: 'Pump', valve: 'Valve', suck: 'Suction', lube: 'Lube',
+});
+
+export function axisShortLabel(suffix) {
+  const axis = getAxisBySuffix(suffix);
+  return axis ? SHORT_LABELS[axis.suffix] || axis.label : String(suffix || '');
+}
 
 /**
  * Every accepted spelling for an axis, canonical first.
@@ -226,6 +237,36 @@ export function detectCompanionFilesIndexed(primaryPath, index) {
   const primaryBase = getBaseName(primaryPath).toLowerCase();
   if (!primaryBase) return [];
   return index.get(primaryBase) || [];
+}
+
+/**
+ * The companion axis files that sit beside one script in its own folder:
+ * `<stem>.<axis>.funscript` next to `<stem>.funscript`, matched as
+ * `detectCompanionFiles` matches them (any case, every spelling in
+ * AXIS_DEFINITIONS). A script variant plays with these ("Title (muted).vib
+ * .funscript" beside "Title (muted).funscript": app.js `_multiAxisForScript`,
+ * TODO 2026-11-20), and the scan claims the same files for its video
+ * (electron/library-scan.js). Another folder's file of that name belongs to
+ * another copy of the script, so only the script's own folder counts.
+ *
+ * @param {string} scriptPath — the script (a variant) the axes go with
+ * @param {string[]} allFiles — every known funscript path
+ * @returns {Object<string, string>} canonical axis suffix → path, the first
+ *   file found per axis
+ */
+export function sameFolderCompanions(scriptPath, allFiles) {
+  const out = {};
+  if (!scriptPath || !Array.isArray(allFiles) || allFiles.length === 0) return out;
+  const folderOf = (p) => {
+    const s = String(p).replace(/\\/g, '/');
+    return s.slice(0, Math.max(0, s.lastIndexOf('/'))).toLowerCase();
+  };
+  const folder = folderOf(scriptPath);
+  for (const c of detectCompanionFiles(scriptPath, allFiles)) {
+    if (folderOf(c.path) !== folder) continue;
+    if (!out[c.axis.suffix]) out[c.axis.suffix] = c.path;
+  }
+  return out;
 }
 
 /**

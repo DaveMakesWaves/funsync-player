@@ -92,8 +92,12 @@ void main() {
   }
 
   float u = cx + r * unit.x * circleRadiusU;
-  // Flip V so that "up" in world space lands on the top of the texture.
-  float v = cy_centre - r * unit.y * circleRadiusV;
+  // The renderer uploads the video with UNPACK_FLIP_Y_WEBGL, so v grows
+  // UPWARD (v = 1 is the picture's top row), the same as equirect.frag's
+  // v = lat / PI + 0.5: "up" in the world is +v. It was "- r * unit.y",
+  // which drew every fisheye video upside down AND mirrored, so Rotate 180
+  // left its text reading backwards (Buck Nakkidd, Discord, 2026-11-27).
+  float v = cy_centre + r * unit.y * circleRadiusV;
 
   fragColor = texture(u_video, vec2(u, v));
 }

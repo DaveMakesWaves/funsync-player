@@ -10,6 +10,12 @@
 
 const PRECISION_LIMITS = { 3: 999, 4: 9999 };
 
+// How long a stop's rest frame (UDP / WebSocket) takes to bring the position
+// axes to the middle: the same as the Go home button (tcode-sync.js
+// GO_HOME_MOVE_MS), slow enough for L0 and every rotation across half their
+// travel at once.
+export const REST_MOVE_MS = 2000;
+
 export class TCodeManager {
   constructor() {
     this._connected = false;
@@ -20,10 +26,38 @@ export class TCodeManager {
     this._precision = 3;       // digits per axis value
     this._valueMax = 999;      // derived from precision
 
+    // Where each axis was last sent, to estimate where it is now (a move
+    // after a jump eases from there, jump-ease.js; Eroto #423).
+    // axis -> { from, to, at, ms }: moving from `from` to `to` over `ms`
+    // from `at` (performance.now). ms 0 = a bare frame (as fast as it goes).
+    this._axisMoves = new Map();
+
     // Callbacks
     this.onConnect = null;
     this.onDisconnect = null;
     this.onError = null;
+  }
+
+  /**
+   * Where an axis is now, estimated from the commands sent to it (0-100), or
+   * null when nothing has moved it since connecting. A timed move is taken
+   * to go in a straight line over its interval, as T-Code firmware does.
+   * @param {string} axis e.g. 'L0'
+   * @param {number} [now] performance.now()
+   * @returns {number|null}
+   */
+  estimatePosition(axis, now = performance.now()) {
+    const m = this._axisMoves.get(axis);
+    if (!m) return null;
+    if (!(m.ms > 0)) return m.to;
+    const f = Math.min(1, Math.max(0, (now - m.at) / m.ms));
+    return m.from + (m.to - m.from) * f;
+  }
+
+  /** Record a move sent to an axis (for estimatePosition). */
+  _recordMove(axis, to, ms, now = performance.now()) {
+    const from = this.estimatePosition(axis, now);
+    this._axisMoves.set(axis, { from: from ?? to, to, at: now, ms: ms > 0 ? ms : 0 });
   }
 
   /**
@@ -156,6 +190,8 @@ export class TCodeManager {
   async disconnect() {
     const wasConnected = this._connected;
     this._connected = false;
+    // The device may be moved or re-homed before the next connect.
+    this._axisMoves.clear();
     if (this._disconnectCleanup) {
       this._disconnectCleanup();
       this._disconnectCleanup = null;
@@ -199,8 +235,10 @@ export class TCodeManager {
     if (!this._connected || !axisValues) return;
 
     const parts = [];
+    const now = performance.now();
     for (const [axis, value] of Object.entries(axisValues)) {
-      const tcodeVal = Math.round(Math.max(0, Math.min(100, value)) / 100 * this._valueMax);
+      const clamped = Math.max(0, Math.min(100, value));
+      const tcodeVal = Math.round(clamped / 100 * this._valueMax);
       const valStr = String(tcodeVal).padStart(this._precision, '0');
       let cmd = `${axis}${valStr}`;
       const iv = (axisIntervals && axisIntervals[axis] != null) ? axisIntervals[axis] : durationMs;
@@ -208,6 +246,7 @@ export class TCodeManager {
         cmd += `I${Math.round(iv)}`;
       }
       parts.push(cmd);
+      this._recordMove(axis, clamped, iv && iv > 0 ? Math.round(iv) : 0, now);
     }
 
     if (parts.length > 0) {
@@ -220,21 +259,32 @@ export class TCodeManager {
    * still emit `DSTOP\n` because OSR2/SR6 builds recognise it as a
    * shorthand. For MFP-protocol consumers (WebSocket → restim, Howl,
    * etc.) DSTOP is non-standard — they expect axis values — so we ALSO
-   * send a rest frame: position axes centred, intensity axes zeroed.
+   * send a rest frame: position axes (A0, the valve, included) glide to the
+   * middle over REST_MOVE_MS, intensity axes go to zero at once.
    * Sending both is
    * harmless on the firmware side (the second frame wins; DSTOP just
    * acts as a hint).
+   *
+   * @returns {string[]} the position axes the rest frame sent to the middle
+   *   (none over serial), so the sync engine's next play moves them from there
+   *   at the script's pace instead of a one-tick snap (tcode-sync.js).
    */
   stop() {
-    if (!this._connected) return;
+    if (!this._connected) return [];
     this.send('DSTOP\n');
+    // DSTOP halts in place: every axis stays where it has got to.
+    const now = performance.now();
+    for (const axis of [...this._axisMoves.keys()]) {
+      const at = this.estimatePosition(axis, now);
+      this._axisMoves.set(axis, { from: at, to: at, at: now, ms: 0 });
+    }
     // The neutral-position fallback frame (50% on every axis) is ONLY for
     // MFP-protocol consumers (restim, Howl, etc. over ws/udp) that don't
     // understand DSTOP and expect explicit axis values. On real TCode firmware
     // (serial OSR2+/SR6) DSTOP already halts motion in place, and a BARE
     // (interval-less) 50% frame makes the device slam to center at full speed —
     // the "violent jump on pause" OSR2+ users reported. So skip it on serial.
-    if (this._transportKind === 'serial') return;
+    if (this._transportKind === 'serial') return [];
     const mid = String(Math.round(this._valueMax / 2)).padStart(this._precision, '0');
     const off = '0'.padStart(this._precision, '0');
     // Position axes centre; intensity axes go to ZERO. A "neutral" frame that
@@ -242,12 +292,21 @@ export class TCodeManager {
     // The lists must cover every channel we actually drive (AXIS_DEFINITIONS):
     // this used to zero A1/A2, which nothing drove, while skipping V1 and V2,
     // which were driven — so those axes held their last value through a stop.
-    const positionAxes = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2'];
-    const intensityAxes = ['V0', 'V1', 'A0', 'A1', 'A2'];
+    // A0, the valve, is a POSITION, as in TCodeSync and Go home: it used to be
+    // zeroed here and centred everywhere else (2026-11-20, Dave: centre it).
+    // The positions are TIMED (`L0500I2000`): a bare frame makes a real
+    // T-Code firmware over WiFi (an ESP32 OSR / SR6) slam to the middle on
+    // every pause, the jump serial had before 2026-08-01 (FT-095, Dave
+    // 2026-11-20: "make the pause frame a slow move"). MFP-style consumers
+    // read the interval like any MultiFunPlayer frame.
+    const positionAxes = ['L0', 'L1', 'L2', 'R0', 'R1', 'R2', 'A0'];
+    const intensityAxes = ['V0', 'V1', 'A1', 'A2'];
     this.send([
-      ...positionAxes.map((a) => `${a}${mid}`),
+      ...positionAxes.map((a) => `${a}${mid}I${REST_MOVE_MS}`),
       ...intensityAxes.map((a) => `${a}${off}`),
     ].join(' ') + '\n');
+    for (const a of positionAxes) this._recordMove(a, 50, REST_MOVE_MS, now);
+    return positionAxes;
   }
 
   get connected() { return this._connected; }

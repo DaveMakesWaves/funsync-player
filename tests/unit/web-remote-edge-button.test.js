@@ -245,3 +245,46 @@ describe('every locale has the four Edge button strings', () => {
     }
   });
 });
+
+// Dave's phone, 2026-11-24: three Orgasm presses in 1.3 s, and nothing on the
+// desktop could say whether they were presses or a thumb sliding off the
+// button (pointerleave let go). Both buttons now keep the touch while it is
+// down; losing it (the browser takes it away) still lets go.
+describe('the hold buttons keep the touch (2026-11-24)', () => {
+  const down = (el, pointerId) => el.dispatchEvent(Object.assign(new Event('pointerdown', { bubbles: true, cancelable: true }), { pointerId }));
+  const orgasmSent = () => client().sent.filter(([k]) => k === 'orgasm').map(([, a]) => a);
+
+  for (const [name, btn, sent] of [['Orgasm', orgasmBtn, orgasmSent], ['Edge', edgeBtn, edgeSent]]) {
+    it(`${name}: the press captures that pointer`, () => {
+      const el = btn();
+      el.setPointerCapture = vi.fn();
+      down(el, 7);
+      expect(el.setPointerCapture).toHaveBeenCalledWith(7);
+      fire(el, 'pointerup');
+      expect(sent()).toEqual([true, false]);
+      delete el.setPointerCapture;
+    });
+
+    it(`${name}: a lost capture lets go, once`, () => {
+      down(btn(), 3);
+      fire(btn(), 'lostpointercapture');
+      fire(btn(), 'pointerup');
+      expect(sent()).toEqual([true, false]);
+    });
+  }
+});
+
+describe('"Starting…" while the desktop\'s Handy switches to the finisher (2026-11-24)', () => {
+  it('active + starting reads Starting, then Release to return once the Handy plays it', () => {
+    fromDesktop({ type: 'orgasm-state', configured: true, active: true, mode: 'hold', starting: true });
+    expect(orgasmBtn().textContent).toBe(DE.webRemote.player.orgasmStarting);
+    expect(orgasmBtn().classList.contains('player__orgasm-btn--active')).toBe(true);
+    fromDesktop({ type: 'orgasm-state', configured: true, active: true, mode: 'hold', starting: false });
+    expect(orgasmBtn().textContent).toBe(DE.webRemote.player.orgasmRiding);
+  });
+
+  it('an older desktop that sends no starting flag reads as before', () => {
+    fromDesktop({ type: 'orgasm-state', configured: true, active: true, mode: 'hold' });
+    expect(orgasmBtn().textContent).toBe(DE.webRemote.player.orgasmRiding);
+  });
+});

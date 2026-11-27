@@ -12,6 +12,7 @@
   <link rel="icon" type="image/png" sizes="256x256" href="./icons/icon-256.png">
   <link rel="apple-touch-icon" href="./icons/icon-256.png">
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./polish.css"><!-- 2026-11-23 polish; delete this line to revert -->
 </head>
 <body>
   <div id="app">
@@ -48,7 +49,7 @@
              Collections / Playlists / Categories) — Norman signifier. -->
         <div class="search-bar">
           <span class="search-bar__icon" id="searchIconSlot"></span>
-          <input type="search" id="searchInput" class="search-bar__input"
+          <input type="text" role="searchbox" id="searchInput" class="search-bar__input"
                  placeholder="Search library" data-i18n-placeholder="webRemote.search.library"
                  autocomplete="off" autocapitalize="none" autocorrect="off"
                  inputmode="search" enterkeyhint="search" spellcheck="false"

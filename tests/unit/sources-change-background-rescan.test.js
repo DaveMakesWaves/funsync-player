@@ -25,6 +25,7 @@ import { Library } from '../../renderer/components/library.js';
 import { DataService } from '../../renderer/js/data-service.js';
 import { t } from '../../renderer/js/i18n.js';
 import { canonicalPath, isSubpath } from '../../renderer/js/path-utils.js';
+import { askSourceOverlap } from '../../renderer/js/source-overlap-ask.js';
 
 const SRC_A = { id: 'a', name: 'Main', path: 'D:/v', enabled: true };
 const SRC_B = { id: 'b', name: 'Bulk', path: 'E:/bulk', enabled: true };
@@ -251,6 +252,7 @@ describe('R3-13: a source added from the nav bar in another view is scanned at o
       crypto: globalThis.crypto,
       showToast: vi.fn(),
       t,
+      askSourceOverlap,
     });
     adder = Object.assign(new Lifted(), {
       settings: ds,

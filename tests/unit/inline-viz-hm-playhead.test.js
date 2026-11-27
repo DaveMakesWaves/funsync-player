@@ -326,7 +326,7 @@ describe('Settings > Playback "Playhead on the heatmap strip" (#381)', () => {
   // (lifted with the panel's options) now send INLINE_VIZ_STATE.
   it('ticking it, or moving the opacity slider, while the pop-out is open tells the pop-out at once; closed, nothing is sent', async () => {
     const sent = [];
-    const Lifted = liftAppClass(['_sendPlayerWindowInlineVizState', '_applyInlineVizOpacity'], {
+    const Lifted = liftAppClass(['_sendPlayerWindowInlineVizState', '_applyInlineVizOpacity', '_inlineTimelineView'], {
       window: { funsync: { playerPopoutRelay: (dir, msg) => sent.push([dir, msg]) } },
       PLAYERWIN,
       INLINE_VIZ_OPACITY_DEFAULT: Number(/const INLINE_VIZ_OPACITY_DEFAULT = (\d+);/.exec(APP_SRC)[1]),
@@ -340,12 +340,12 @@ describe('Settings > Playback "Playhead on the heatmap strip" (#381)', () => {
     });
     await openPlayback(app);
     document.querySelector('#sp-hm-playhead').click();
-    expect(sent).toEqual([['to-popout', { type: PLAYERWIN.INLINE_VIZ_STATE, playhead: true, opacity: 80 }]]);
+    expect(sent).toEqual([['to-popout', { type: PLAYERWIN.INLINE_VIZ_STATE, playhead: true, opacity: 80, placement: 'overlay', timelineView: { windowMs: 5000, anchor: 'centre' } }]]);
 
     const slider = document.querySelector('#sp-inline-viz-opacity');
     slider.value = '50';
     slider.dispatchEvent(new Event('input', { bubbles: true }));
-    expect(sent.at(-1)).toEqual(['to-popout', { type: PLAYERWIN.INLINE_VIZ_STATE, playhead: true, opacity: 50 }]);
+    expect(sent.at(-1)).toEqual(['to-popout', { type: PLAYERWIN.INLINE_VIZ_STATE, playhead: true, opacity: 50, placement: 'overlay', timelineView: { windowMs: 5000, anchor: 'centre' } }]);
 
     app._playerWindowOpen = false;
     app._playerWindowActive = false;
@@ -358,7 +358,7 @@ describe('Settings > Playback "Playhead on the heatmap strip" (#381)', () => {
 
   it('the pop-out is told the setting when it opens (it reuses InlineViz)', () => {
     const sent = [];
-    const Lifted = liftAppClass(['_sendPlayerWindowInitialState'], {
+    const Lifted = liftAppClass(['_sendPlayerWindowInitialState', '_inlineTimelineView'], {
       window: { funsync: { playerPopoutRelay: (dir, msg) => sent.push([dir, msg]) } },
       document: { documentElement: { dataset: {} } },
       PLAYERWIN,

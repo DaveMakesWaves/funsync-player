@@ -164,7 +164,7 @@ describe('nav bar Library menu', () => {
 describe('player variant menu', () => {
   it('+ Add variation: closing the dialog puts the focus back on the variant button', async () => {
     document.body.innerHTML = '<button id="variant-btn"></button><div id="variant-dropdown" hidden></div>';
-    const Lifted = liftAppClass(['_showVariantDropdown', '_variantLabelText'], { document, t, showToast: () => {} });
+    const Lifted = liftAppClass(['_showVariantDropdown', '_markVariantItemIfMissing', '_variantLabelText'], { document, t, showToast: () => {} });
     const app = Object.assign(new Lifted(), {
       _allVariantsWithManual: [{ label: 'Default' }, { label: 'soft' }],
       _activeVariantIndex: 0,

@@ -7,11 +7,14 @@
   <title>FunSync Player</title>
   <link rel="stylesheet" href="styles/player.css">
   <link rel="stylesheet" href="styles/library.css">
+  <link rel="stylesheet" href="styles/no-video-tile.css">
   <link rel="stylesheet" href="styles/nav-bar.css">
   <link rel="stylesheet" href="styles/modal.css">
   <link rel="stylesheet" href="styles/playlists.css">
   <link rel="stylesheet" href="styles/categories.css">
   <link rel="stylesheet" href="styles/editor.css">
+  <link rel="stylesheet" href="styles/editor-gamepad.css">
+  <link rel="stylesheet" href="styles/editor-tools.css">
   <link rel="stylesheet" href="styles/eroscripts.css">
   <link rel="stylesheet" href="styles/session-card.css">
   <link rel="stylesheet" href="styles/up-next.css">
@@ -19,9 +22,13 @@
   <link rel="stylesheet" href="styles/queue-panel.css">
   <link rel="stylesheet" href="styles/video-options.css">
   <link rel="stylesheet" href="styles/stash.css">
+  <link rel="stylesheet" href="styles/script-player.css">
+  <link rel="stylesheet" href="styles/device-sim-axes.css"><!-- 2026-11-24 simulator: other axes, looks, Align to the video -->
   <!-- Modern interface-style layer — MUST be last so its [data-style="modern"]
        rules win specificity ties. Inert unless <html data-style="modern">. -->
+  <link rel="stylesheet" href="styles/holiday.css">
   <link rel="stylesheet" href="styles/modern.css">
+  <link rel="stylesheet" href="styles/modern-polish.css"><!-- 2026-11-23 Modern polish; delete this line to revert -->
 </head>
 <body>
   <div id="app">
@@ -69,6 +76,8 @@
 
     <!-- Categories View (hidden until opened) -->
     <div id="categories-container" class="categories" hidden></div>
+    <!-- The EroScripts tab (2026-11-22): the search panel docked, a post's videos, downloads. -->
+    <div id="eroscripts-container" hidden></div>
 
     <!-- Video Player Container (hidden until video loaded) -->
     <div id="player-container" class="player-container" hidden>
@@ -98,6 +107,12 @@
           <div class="script-loading-overlay__spinner"></div>
           <div class="script-loading-overlay__text" data-i18n="player.preparingScript">Preparing script…</div>
         </div>
+      </div>
+
+      <!-- A stream's state (2026-11-23): Starting / Loading / Reconnecting. Clicks go through. -->
+      <div id="stream-status" class="stream-status" role="status" aria-live="polite" hidden>
+        <div class="stream-status__spinner" aria-hidden="true"></div>
+        <div class="stream-status__text"></div>
       </div>
 
       <!-- Controls Overlay -->
@@ -321,6 +336,13 @@
                   <span data-i18n="player.deviceSimulator">Device simulator</span>
                   <span class="controls-overflow__check" aria-hidden="true"></span>
                 </button>
+                <!-- Disabled (zaikechi #381): never chosen by FunSync again;
+                     ticking it while the video plays goes on to the next. -->
+                <button id="btn-disable-video" class="controls-overflow__item controls-overflow__item--check" role="menuitemcheckbox" aria-checked="false" data-i18n-aria-label="library.disabled.menuAria" aria-label="Disabled: never played automatically" hidden>
+                  <i data-lucide="ban"></i>
+                  <span data-i18n="library.disabled.menuLabel">Disabled</span>
+                  <span class="controls-overflow__check" aria-hidden="true"></span>
+                </button>
                 <button id="btn-pip" class="controls-overflow__item" role="menuitem" data-i18n-aria-label="player.pictureInPicture" aria-label="Picture in Picture">
                   <i data-lucide="picture-in-picture-2"></i>
                   <span data-i18n="player.pictureInPicture">Picture-in-Picture</span>
@@ -361,14 +383,27 @@
           <span class="player__sync-chip-dot" aria-hidden="true"></span>
           <span id="player-sync-chip-text" class="player__sync-chip-text"></span>
         </div>
+        <!-- Stop all (DESIGN.md §2.15): beside the device chip, shown while a device is connected. -->
+        <button type="button" id="btn-player-stop-all" class="player__stop-all-btn" data-i18n-aria-label="nav.stopAll" data-i18n-title="nav.stopAllTitle" aria-label="Stop all devices" title="Stop all devices (Shift+Space)" hidden><i data-lucide="circle-stop"></i></button>
+        <!-- The script player holds the devices (v0.10.1): say so, and offer this video's script. -->
+        <div id="player-script-pill" class="player__script-pill" role="status" hidden>
+          <span class="player__script-pill-dot" aria-hidden="true"></span>
+          <span id="player-script-pill-text" class="player__script-pill-text"></span>
+          <button type="button" id="btn-script-pill-use-video" class="player__script-pill-btn"></button>
+        </div>
         <div id="video-category-dots" class="player__category-dots"></div>
-        <!-- TEMP DISABLED (2026-07-30): Load-from-URL hidden until it works reliably.
-             Restore this button + the nav-bar entry + the app.js wiring together.
-             See notes/SCRATCHPAD.md "Load-from-URL — disabled, revisit".
-        <!-- Load from URL — resolve a streaming-site page link (yt-dlp) and
-             play it synced with a funscript. See SCOPE-remote-video-url.md.
+        <!-- A stream's quality (2026-11-22): Auto or a held level, shown only while streaming. -->
+        <div id="stream-quality" class="player__quality" hidden>
+          <button type="button" id="btn-stream-quality" class="player__quality-btn" aria-haspopup="menu" aria-expanded="false"></button>
+          <div id="stream-quality-menu" class="player__quality-menu" role="menu" hidden></div>
+        </div>
+        <!-- Load from URL — resolve a streaming-site page link and play it
+             synced with a funscript. See SCOPE-remote-video-url.md. -->
+        <!-- Save this stream to the library (2026-11-23): only while an unsaved stream plays. -->
+        <button id="btn-save-stream" class="player__quick-add" data-i18n-aria-label="remoteVideo.saveToLibrary" data-i18n-title="remoteVideo.saveToLibrary" aria-label="Save to library" title="Save to library" hidden><i data-lucide="bookmark-plus"></i></button>
         <button id="btn-load-url" class="player__quick-add" data-i18n-aria-label="remoteVideo.openAria" data-i18n-title="remoteVideo.openAria" aria-label="Load from URL" title="Load from URL"><i data-lucide="link"></i></button>
-        -->
+        <!-- Favourite the playing video (zaikechi #381): it joins the Favourites playlist. -->
+        <button id="btn-player-favourite" class="player__quick-add player__favourite" type="button" aria-pressed="false" data-i18n-aria-label="library.favourites.addThis" data-i18n-title="library.favourites.addThis" aria-label="Add to favourites" title="Add to favourites" hidden><i data-lucide="heart"></i></button>
         <button id="btn-add-to-playlist" class="player__quick-add" data-i18n-aria-label="player.addToPlaylist" data-i18n-title="player.addToPlaylist" aria-label="Add to playlist" title="Add to Playlist"><i data-lucide="plus"></i></button>
         <!-- Queue panel toggle — far-right corner of the top bar. The
              columns-2 icon mirrors the Android Auto split-screen look

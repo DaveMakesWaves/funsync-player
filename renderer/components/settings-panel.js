@@ -1,10 +1,12 @@
 // SettingsPanel — App settings modal with tabs (Sources, Playback, Data)
 
 import { Modal } from './modal.js';
-import { icon, Trash2, Pencil, GripVertical } from '../js/icons.js';
+import { icon, Trash2, Pencil, GripVertical, Search, X } from '../js/icons.js';
+import { searchRows, scoreRow, words as searchWords } from '../js/settings-search.js';
 import { showToast } from '../js/toast.js';
-import { classifyOverlap } from '../js/path-utils.js';
-import { t, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale } from '../js/i18n.js';
+import { formatFileSize } from '../js/format-file-size.js';
+import { askSourceOverlap } from '../js/source-overlap-ask.js';
+import { t, tEnglish, SUPPORTED_LOCALES, LOCALE_LABELS, setLocale, getCurrentLocale } from '../js/i18n.js';
 import { createToggleSwitch } from './toggle-switch.js';
 import { createPatternTestSession } from '../js/filler-test-player.js';
 import {
@@ -14,11 +16,13 @@ import { isUserEnabled, isToggleLocked, setUserEnabled } from '../js/source-stat
 import { eventBus } from '../js/event-bus.js';
 import { openFeedbackModal } from './feedback-modal.js';
 import { GlobalHotkeysSettings } from './global-hotkeys-settings.js';
+import { VRZoomKeysSettings } from './vr-zoom-keys-settings.js';
 import { NAV_HIDEABLE_ITEMS } from './nav-bar.js';
 import { binOs } from '../js/recycle-bin.js';
 import { edgeHoldAction } from '../js/pattern-source.js';
 import { createPatternSummaryRow, openPatternDrawer } from './pattern-drawer.js';
 import { StashSettingsBlock } from './settings-stash.js';
+import { wireRailKeys } from '../js/rail-keys.js';
 
 // Interface size (V79). The steps and the default come from main's
 // electron/ui-scale.js through the preload, so the select can only offer
@@ -69,6 +73,8 @@ const SETTINGS_DEFAULTS = {
   'player.linearStrategy': 'action-boundary',
   'player.linearLookaheadMs': 60,
   'player.minStrokeMs': 60,
+  'player.hybridHoldFade': false,
+  'player.seekFrameStrip': false,
   'library.movingPreviews': true,
   'library.folderPreviews': true,
   // MUST match electron/store.js (FT-102).
@@ -89,12 +95,66 @@ const OLD_PATTERN_KEYS = new Set([
 const OLD_GAP_FILLER_FIELDS = ['presetId', 'custom'];
 
 /**
+ * Settings that live OUTSIDE this dialog, for search (2026-11-23, Dave:
+ * "if someone is looking for ... the feed notifications they can type feed
+ * or eroscripts"). Each has `settingsPanel.search.elsewhere.<id>.title`,
+ * `.where` and `.aliases` in every locale; `open` says whether app.js can
+ * take the user there (onOpenElsewhere(id)). Add a row here when a new
+ * setting lands outside Settings.
+ */
+export const SETTINGS_ELSEWHERE = [
+  { id: 'handy', open: true },
+  { id: 'buttplug', open: true },
+  { id: 'tcode', open: true },
+  { id: 'autoblow', open: true },
+  { id: 'audience', open: true },
+  { id: 'deviceSync', open: true },
+  { id: 'feeds', open: true },
+  { id: 'eroscriptsDownloads', open: true },
+  { id: 'eroscriptsLogin', open: true },
+  { id: 'streams', open: true },
+  { id: 'webRemote', open: true },
+  { id: 'vr', open: true },
+  { id: 'videoOptions', open: false },
+  { id: 'librarySort', open: true },
+];
+
+/**
  * patternChoiceWrites' list as it may be saved: an old key is dropped, and a
  * whole `player.gapFiller` keeps presetId / custom exactly as read (present
  * or absent).
  * @param {{key: string, value: any}[]} writes
  * @param {object} player — settings.player as read before the change
  */
+/**
+ * The Orgasm Switch script hint for an X mode (DESIGN.md §1.8: a hint
+ * describes the mode chosen). Anything but 'toggle' is the hold wording.
+ * @param {string} [mode] player.orgasmSwitchMode
+ */
+export function orgasmScriptHintKey(mode) {
+  return mode === 'toggle'
+    ? 'settingsPanel.playback.orgasmScriptHintToggle'
+    : 'settingsPanel.playback.orgasmScriptHint';
+}
+
+/**
+ * How "wide" a hint's text is: a CJK character takes about two Latin
+ * characters' room, so a Japanese hint folds at about the same length on
+ * screen as an English one (DESIGN.md §2.14).
+ * @param {string} text
+ */
+export function hintWidthUnits(text) {
+  let units = 0;
+  for (const ch of String(text || '')) {
+    const c = ch.codePointAt(0);
+    units += (c >= 0x2e80 && c <= 0x9fff) || (c >= 0xac00 && c <= 0xd7af) || (c >= 0xff00 && c <= 0xffef) ? 2 : 1;
+  }
+  return units;
+}
+
+/** A hint wider than this folds to two lines behind "More" (about two and a half lines of the panel). */
+export const HINT_FOLD_UNITS = 200;
+
 export function safePatternWrites(writes, player) {
   const out = [];
   for (const w of Array.isArray(writes) ? writes : []) {
@@ -155,6 +215,7 @@ export class SettingsPanel {
     onStopFillerTest,
     getStashVideos,
     onOpenStashCheck,
+    onOpenElsewhere,
   }) {
     this._settings = settings;
     // Settings > Sources > Stash (S1): Sync now sends the library's videos
@@ -162,6 +223,8 @@ export class SettingsPanel {
     // dialog at File on its Stash choice (app.js → library.js).
     this.getStashVideos = getStashVideos || (() => []);
     this.onOpenStashCheck = onOpenStashCheck || null;
+    // Settings search's Open for a setting outside Settings (app.js _openSettingElsewhere).
+    this.onOpenElsewhere = onOpenElsewhere || null;
     // Filler test button. The panel owns no devices — app.js holds the sync
     // engines, so it hands back a start/stop pair and reports progress.
     this.onTestFillerPattern = onTestFillerPattern || null;
@@ -276,6 +339,8 @@ export class SettingsPanel {
   async show() {
     let unsubscribeLang = null;
     let unsubscribeScale = null;
+    // Every opening starts with an empty search.
+    this._searchQuery = '';
     await Modal.open({
       title: t('settingsPanel.modalTitle'),
       // Its own panel layout (modal.css): the dialog body never scrolls,
@@ -283,11 +348,24 @@ export class SettingsPanel {
       // dialog body scrolled too, so at 125% Settings had two nested
       // scrollbars (FT-039).
       panelClass: 'modal-panel--settings',
+      // Settings opens on its search box: type what you are looking for.
+      initialFocus: (body) => body.querySelector('.settings-panel__search-input'),
       // Escape with a pattern drawer open closes the drawer (its draft
-      // discarded), not Settings.
-      onEscape: () => (this._patternDrawer?.isOpen() ? this._patternDrawer.cancel() : false),
+      // discarded), not Settings; with a search typed it clears the search
+      // first (a second Escape closes).
+      onEscape: () => {
+        if (this._patternDrawer?.isOpen()) return this._patternDrawer.cancel();
+        if (this._searchQuery && this._search?.input) {
+          this._search.input.value = '';
+          this._runSearch('');
+          this._search.input.focus();
+          return true;
+        }
+        return false;
+      },
       onRender: (body, close) => {
         this._renderBody(body, close, 'sources');
+        this._foldLongHints(body);
 
         // Ctrl+= / Ctrl+- / Ctrl+0 with Settings open: main saved the new
         // interface size; show it in the select (V79).
@@ -321,6 +399,7 @@ export class SettingsPanel {
             closeBtn.title = t('common.close');
           }
           this._renderBody(body, close, activeTab);
+          this._foldLongHints(body);
           // activateArea scrolls to the top; put the user back where they
           // were in the area they stayed on.
           if (this._contentEl) this._contentEl.scrollTop = scrollTop;
@@ -340,8 +419,43 @@ export class SettingsPanel {
     this._stashBlock?.destroy();
     this._stashBlock = null;
     this._closeSettings = null;
+    // The search ends with the dialog (its highlight is document-wide).
+    this._searchQuery = '';
+    this._search = null;
+    globalThis.CSS?.highlights?.delete?.('settings-search');
     // A Pattern block's test does not outlive its Stop button.
     this._endPatternBlocks();
+  }
+
+  /**
+   * Long hints fold (DESIGN.md §1.8, §2.14; Nielsen #8): a hint wider than
+   * HINT_FOLD_UNITS shows two lines and a "More" button after it; "Less"
+   * folds it again. The text stays in the DOM, so the settings search (which
+   * opens every fold while it runs, modal.css) and screen readers read it
+   * all. Not remembered. Hints rebuilt by a language switch fold again.
+   * @param {HTMLElement} root
+   */
+  _foldLongHints(root) {
+    let n = 0;
+    for (const hint of root?.querySelectorAll?.('.settings-panel__hint') || []) {
+      if (hint.dataset.foldChecked) continue;
+      hint.dataset.foldChecked = '1';
+      if (hintWidthUnits(hint.textContent) <= HINT_FOLD_UNITS) continue;
+      if (!hint.id) hint.id = `sp-hint-fold-${++n}-${Math.random().toString(36).slice(2, 7)}`;
+      hint.classList.add('settings-panel__hint--folded');
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'settings-panel__hint-more';
+      more.setAttribute('aria-controls', hint.id);
+      more.setAttribute('aria-expanded', 'false');
+      more.textContent = t('settingsPanel.hintMore');
+      more.addEventListener('click', () => {
+        const open = hint.classList.toggle('settings-panel__hint--folded') === false;
+        more.setAttribute('aria-expanded', String(open));
+        more.textContent = t(open ? 'settingsPanel.hintLess' : 'settingsPanel.hintMore');
+      });
+      hint.after(more);
+    }
   }
 
   /**
@@ -442,44 +556,544 @@ export class SettingsPanel {
    */
   _railAreas() {
     const isLinux = (typeof window !== 'undefined' && window.funsync?.platform === 'linux');
-    return [
-      { id: 'sources', label: t('settingsPanel.tabSources'), groups: [] },
+    const isWindows = (typeof window !== 'undefined' && window.funsync?.platform === 'win32');
+    const sec = (id, key) => ({ id, label: t(key) });
+    // THE map of Settings (2026-11-23, Dave: "better categorise ... better
+    // sort the settings themselves"): each area's sections, in order. The
+    // tab builders below only make sections; _placeSections puts each one
+    // where this says. Grouped by what the user is doing, not by which
+    // builder made it (Norman: conceptual model): the library, how a video
+    // plays, how the device moves, how it looks, keys, data, help.
+    // `home` is the builder whose panel the area keeps (its own late
+    // lookups stay valid); `groups`: rail links for the longer areas.
+    const areas = [
+      {
+        id: 'sources', // the old id, kept: "Library" now holds more than sources
+        label: t('settingsPanel.tabLibrary'),
+        home: 'sources',
+        withGroups: true,
+        sections: [
+          sec('sp-sec-sources', 'settingsPanel.sources.foldersHeader'),
+          sec('sp-sec-library', 'settingsPanel.sources.cardsHeader'),
+          sec('sp-sec-duplicates', 'settingsPanel.duplicates.sectionHeader'),
+          sec('sp-sec-stash', 'settingsPanel.stash.header'),
+        ],
+      },
       {
         id: 'playback',
         label: t('settingsPanel.tabPlayback'),
-        groups: [
-          { id: 'sp-sec-playback', label: t('settingsPanel.playback.playbackHeader') },
-          { id: 'sp-sec-upnext', label: t('settingsPanel.playback.upNextHeader') },
-          { id: 'sp-sec-gapskip', label: t('settingsPanel.playback.gapSkipHeader') },
-          // Dave, 2026-11-19 ~15:05 ("Add both"): the three pattern features
-          // each have an entry, next to each other.
-          { id: 'sp-sec-gapfiller', label: t('settingsPanel.playback.fillerHeader') },
-          { id: 'sp-sec-orgasm', label: t('settingsPanel.playback.orgasmHeader') },
-          { id: 'sp-sec-edge', label: t('settingsPanel.playback.edgeHeader') },
-          { id: 'sp-sec-global-hotkeys', label: t('settingsPanel.playback.globalHotkeysHeader') },
-          { id: 'sp-sec-multiaxis', label: t('settingsPanel.playback.multiHeader') },
-          // Linux-only setting, so the group would otherwise be an empty
-          // rail entry on Windows.
-          ...(isLinux ? [{ id: 'sp-sec-video', label: t('settingsPanel.playback.videoHeader') }] : []),
+        home: 'playback',
+        withGroups: true,
+        sections: [
+          sec('sp-sec-playback', 'settingsPanel.playback.playerHeader'),
+          sec('sp-sec-upnext', 'settingsPanel.playback.upNextHeader'),
+          sec('sp-sec-gapskip', 'settingsPanel.playback.gapSkipHeader'),
+          sec('sp-sec-multiaxis', 'settingsPanel.playback.multiHeader'),
+          // Linux and Windows only: elsewhere it would be an empty entry.
+          ...((isLinux || isWindows) ? [sec('sp-sec-video', 'settingsPanel.playback.videoHeader')] : []),
         ],
       },
-      { id: 'editor', label: t('settingsPanel.tabEditor'), groups: [] },
+      {
+        id: 'motion',
+        label: t('settingsPanel.tabMotion'),
+        home: null,
+        withGroups: true,
+        sections: [
+          sec('sp-sec-motion', 'settingsPanel.playback.motionHeader'),
+          // Dave, 2026-11-19 ~15:05 ("Add both"): the three pattern features
+          // each have an entry, next to each other.
+          sec('sp-sec-gapfiller', 'settingsPanel.playback.fillerHeader'),
+          sec('sp-sec-orgasm', 'settingsPanel.playback.orgasmHeader'),
+          sec('sp-sec-edge', 'settingsPanel.playback.edgeHeader'),
+        ],
+      },
       {
         id: 'appearance',
         label: t('settingsPanel.tabAppearance'),
-        groups: [
-          { id: 'sp-sec-theme', label: t('settingsPanel.appearance.themeHeader') },
-          { id: 'sp-sec-style', label: t('settingsPanel.appearance.styleHeader') },
-          { id: 'sp-sec-scale', label: t('settingsPanel.appearance.scaleHeader') },
-          { id: 'sp-sec-language', label: t('settingsPanel.appearance.languageHeader') },
-          { id: 'sp-sec-library', label: t('settingsPanel.appearance.libraryHeader') },
-          { id: 'sp-sec-nav', label: t('settingsPanel.appearance.navHeader') },
+        home: 'appearance',
+        withGroups: true,
+        sections: [
+          sec('sp-sec-theme', 'settingsPanel.appearance.themeHeader'),
+          sec('sp-sec-style', 'settingsPanel.appearance.styleHeader'),
+          sec('sp-sec-scale', 'settingsPanel.appearance.scaleHeader'),
+          sec('sp-sec-language', 'settingsPanel.appearance.languageHeader'),
+          sec('sp-sec-overlay', 'settingsPanel.playback.overlayHeader'),
+          sec('sp-sec-nav', 'settingsPanel.appearance.navHeader'),
         ],
       },
-      { id: 'data', label: t('settingsPanel.tabData'), groups: [] },
-      { id: 'security', label: t('settingsPanel.tabSecurity'), groups: [] },
-      { id: 'help', label: t('settingsPanel.tabHelp'), groups: [] },
+      {
+        id: 'keyboard',
+        label: t('settingsPanel.tabKeyboard'),
+        home: 'editor',
+        sections: [
+          sec('sp-sec-global-hotkeys', 'settingsPanel.playback.globalHotkeysHeader'),
+          sec('sp-sec-vr-zoom-keys', 'settingsPanel.vrZoomKeys.header'),
+          sec('sp-sec-position-keys', 'settingsPanel.positionKeysHeader'),
+          sec('sp-sec-editor-speed', 'settingsPanel.editorSpeed.header'),
+          sec('sp-sec-shortcuts', 'settingsPanel.help.shortcutsHeader'),
+        ],
+      },
+      {
+        id: 'data',
+        label: t('settingsPanel.tabDataPrivacy'),
+        home: 'data',
+        sections: [
+          sec('sp-sec-backup', 'settingsPanel.data.backupHeader'),
+          sec('sp-sec-export', 'settingsPanel.data.exportHeader'),
+          sec('sp-sec-converted', 'settingsPanel.data.convertedHeader'),
+          sec('sp-sec-log-privacy', 'settingsPanel.security.logsHeader'),
+        ],
+      },
+      {
+        id: 'help',
+        label: t('settingsPanel.tabHelp'),
+        home: 'help',
+        sections: [
+          sec('sp-sec-report', 'feedback.sectionHeader'),
+          sec('sp-sec-logs', 'settingsPanel.help.logsHeader'),
+          sec('sp-sec-about', 'settingsPanel.help.aboutHeader'),
+          sec('sp-sec-support', 'settingsPanel.support.header'),
+        ],
+      },
     ];
+    for (const a of areas) a.groups = a.withGroups ? a.sections : [];
+    return areas;
+  }
+
+  /**
+   * Move every built section into its area's panel, in the map's order
+   * (_railAreas). Returns { areaId: panel }. A section the map does not
+   * name stays in the area of the builder that made it, at the end, so a
+   * new section is never lost, only unsorted.
+   * @param {Object<string, HTMLElement>} built the tab builders' panels
+   */
+  _placeSections(built, areas) {
+    const placed = new Set();
+    const findSection = (id) => {
+      for (const p of Object.values(built)) {
+        const el = p?.querySelector?.(`#${id}`);
+        if (el) return el;
+      }
+      return null;
+    };
+    const panels = {};
+    for (const area of areas) {
+      const panel = (area.home && built[area.home]) || (() => {
+        const p = document.createElement('div');
+        p.className = 'settings-panel__tab-content';
+        return p;
+      })();
+      panels[area.id] = panel;
+      for (const s of area.sections) {
+        const el = findSection(s.id);
+        if (!el) continue;
+        panel.appendChild(el);
+        placed.add(el);
+      }
+    }
+    // Anything left over goes to the end of its builder's own area.
+    const areaOfBuilder = { sources: 'sources', playback: 'playback', editor: 'keyboard', appearance: 'appearance', data: 'data', security: 'data', help: 'help' };
+    for (const [builder, p] of Object.entries(built)) {
+      const target = panels[areaOfBuilder[builder]];
+      if (!p || !target) continue;
+      for (const el of [...p.querySelectorAll(':scope > .settings-panel__section')]) {
+        if (!placed.has(el)) target.appendChild(el);
+      }
+    }
+    return panels;
+  }
+
+  /** Device motion's first line: where the device's own settings are. */
+  _addMotionDevicesNote(panel) {
+    if (!panel) return;
+    const note = document.createElement('div');
+    note.className = 'settings-panel__area-note';
+    const text = document.createElement('span');
+    text.textContent = t('settingsPanel.motion.devicesNote');
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'settings-panel__area-note-btn';
+    btn.textContent = t('settingsPanel.motion.openDevices');
+    btn.addEventListener('click', () => this._openElsewhere('handy'));
+    note.append(text, btn);
+    panel.insertBefore(note, panel.firstChild);
+  }
+
+  /** Close Settings and let app.js open where a setting lives (SETTINGS_ELSEWHERE). */
+  _openElsewhere(id) {
+    const go = this.onOpenElsewhere;
+    this._closeSettings?.();
+    if (go) setTimeout(() => go(id), 0);
+  }
+
+  /** The words people use for a section or an outside setting: this language's, then English's. */
+  _searchAliases(key) {
+    const here = t(key);
+    const en = tEnglish(key);
+    return [here === key ? '' : here, en && en !== here ? en : ''].filter(Boolean).join(' ');
+  }
+
+  /**
+   * The search box over Settings (2026-11-23). Typing shows, from every
+   * area at once, the rows that match (the real controls: nothing is
+   * copied), under each area's name, then the matching settings that live
+   * elsewhere in FunSync with a way there. Clearing it puts the area back.
+   * The matching is settings-search.js's (forgiving: start of a word,
+   * shared stem, a slip or two, the words people use for each section).
+   */
+  _mountSearch({ body, layout, content, areas, panels, groupLists, activateArea }) {
+    const bar = document.createElement('div');
+    bar.className = 'settings-panel__search';
+    bar.setAttribute('role', 'search');
+    const glass = icon(Search, { width: 15, height: 15 });
+    glass.classList.add('settings-panel__search-icon');
+    glass.setAttribute('aria-hidden', 'true');
+    const input = document.createElement('input');
+    input.type = 'search';
+    input.className = 'settings-panel__search-input';
+    input.placeholder = t('settingsPanel.search.placeholder');
+    input.setAttribute('aria-label', t('settingsPanel.search.aria'));
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    input.value = this._searchQuery || '';
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'settings-panel__search-clear';
+    clear.title = t('settingsPanel.search.clear');
+    clear.setAttribute('aria-label', t('settingsPanel.search.clear'));
+    clear.appendChild(icon(X, { width: 14, height: 14 }));
+    clear.hidden = !input.value;
+    const status = document.createElement('span');
+    status.className = 'settings-panel__search-status';
+    status.setAttribute('role', 'status');
+    status.setAttribute('aria-live', 'polite');
+    const field = document.createElement('div');
+    field.className = 'settings-panel__search-field';
+    field.append(glass, input, clear);
+    bar.append(field, status);
+    body.insertBefore(bar, layout);
+
+    // Each area's name over its results (only while searching).
+    for (const a of areas) {
+      const p = panels[a.id];
+      if (!p) continue;
+      const h = document.createElement('div');
+      h.className = 'settings-panel__area-heading';
+      h.textContent = a.label;
+      h.hidden = true;
+      p.insertBefore(h, p.firstChild);
+    }
+
+    // Settings that live outside this dialog.
+    const elsewhere = document.createElement('div');
+    elsewhere.className = 'settings-panel__elsewhere';
+    elsewhere.hidden = true;
+    const eHead = document.createElement('div');
+    eHead.className = 'settings-panel__area-heading';
+    eHead.textContent = t('settingsPanel.search.elsewhereHeader');
+    elsewhere.appendChild(eHead);
+    const entries = [];
+    for (const e of SETTINGS_ELSEWHERE) {
+      const base = `settingsPanel.search.elsewhere.${e.id}`;
+      const row = document.createElement('div');
+      row.className = 'settings-panel__elsewhere-row';
+      row.dataset.elsewhere = e.id;
+      const words = document.createElement('div');
+      words.className = 'settings-panel__elsewhere-text';
+      const title = document.createElement('div');
+      title.className = 'settings-panel__elsewhere-title';
+      title.textContent = t(`${base}.title`);
+      const where = document.createElement('div');
+      where.className = 'settings-panel__hint';
+      where.textContent = t(`${base}.where`);
+      words.append(title, where);
+      row.appendChild(words);
+      if (e.open) {
+        const go = document.createElement('button');
+        go.type = 'button';
+        go.className = 'settings-panel__add-btn settings-panel__elsewhere-open';
+        go.textContent = t('settingsPanel.search.open');
+        go.setAttribute('aria-label', `${t('settingsPanel.search.open')}: ${title.textContent}`);
+        go.addEventListener('click', () => this._openElsewhere(e.id));
+        row.appendChild(go);
+      }
+      elsewhere.appendChild(row);
+      entries.push({
+        el: row,
+        label: title.textContent,
+        text: `${where.textContent} ${tEnglish(`${base}.title`) || ''}`,
+        aliases: this._searchAliases(`${base}.aliases`),
+      });
+    }
+    content.appendChild(elsewhere);
+
+    const empty = document.createElement('div');
+    empty.className = 'settings-panel__search-empty';
+    empty.hidden = true;
+    content.appendChild(empty);
+
+    this._search = { input, clear, status, layout, content, areas, panels, groupLists, activateArea, elsewhere, entries, empty };
+
+    input.addEventListener('input', () => this._runSearch(input.value));
+    // Enter / Down: into the first result, so the keyboard reaches it.
+    input.addEventListener('keydown', (e) => {
+      if ((e.key !== 'Enter' && e.key !== 'ArrowDown') || !this._searchQuery) return;
+      const first = [...content.querySelectorAll('input, select, button, textarea, [tabindex="0"]')]
+        .find((el) => !el.disabled && el.offsetParent !== null && !el.closest('.settings-panel__search-hidden, [hidden]'));
+      if (first) { e.preventDefault(); first.focus(); }
+    });
+    clear.addEventListener('click', () => {
+      input.value = '';
+      this._runSearch('');
+      input.focus();
+    });
+    // Ctrl+F (Cmd+F) anywhere in Settings goes to the box.
+    body.addEventListener('keydown', (e) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || String(e.key).toLowerCase() !== 'f') return;
+      e.preventDefault();
+      e.stopPropagation();
+      input.focus();
+      input.select();
+    });
+  }
+
+  /** Every row of every placed section, with what search reads of it. */
+  _collectSearchItems() {
+    const s = this._search;
+    const textOf = (el) => {
+      // Not the hint fold's own "More" / "Less" (§2.14): "more" would find every long hint.
+      let own = el.textContent || '';
+      if (el.querySelector?.('.settings-panel__hint-more')) {
+        const copy = el.cloneNode(true);
+        for (const m of copy.querySelectorAll('.settings-panel__hint-more')) m.remove();
+        own = copy.textContent || '';
+      }
+      const parts = [own];
+      for (const c of el.querySelectorAll?.('[aria-label], [title], [placeholder]') || []) {
+        parts.push(c.getAttribute('aria-label') || '', c.getAttribute('title') || '', c.getAttribute('placeholder') || '');
+      }
+      return parts.join(' ');
+    };
+    const labelOf = (el) => (el.querySelector?.('.settings-panel__field-label, label')?.textContent || el.textContent || '').slice(0, 200);
+    const items = [];
+    for (const a of s.areas) {
+      const p = s.panels[a.id];
+      if (!p) continue;
+      for (const sec of p.querySelectorAll(':scope > .settings-panel__section')) {
+        const header = sec.querySelector(':scope > .settings-panel__section-header');
+        const key = sec.id ? sec.id.replace(/^sp-sec-/, '') : '';
+        const aliases = key ? this._searchAliases(`settingsPanel.search.aliases.${key}`) : '';
+        // A row is a control's element and the hints right after it; hints
+        // before the first row introduce the section.
+        const rows = [];
+        const lead = [];
+        for (const c of sec.children) {
+          if (c === header) continue;
+          if (c.classList.contains('settings-panel__hint')) {
+            if (rows.length) rows[rows.length - 1].push(c);
+            else lead.push(c);
+            continue;
+          }
+          rows.push([c]);
+        }
+        if (!rows.length && lead.length) rows.push(lead.splice(0));
+        const sectionText = `${header?.textContent || ''} ${lead.map(textOf).join(' ')}`;
+        for (const els of rows) {
+          items.push({
+            section: sec,
+            els,
+            label: labelOf(els[0]),
+            text: els.map(textOf).join(' '),
+            sectionText,
+            aliases,
+            area: a.label,
+          });
+        }
+      }
+    }
+    return items;
+  }
+
+  /** Show what matches `query` (an empty one puts the panel back). */
+  _runSearch(query) {
+    const s = this._search;
+    if (!s) return;
+    const q = String(query ?? '');
+    const active = searchWords(q).length > 0;
+    this._searchQuery = active ? q : '';
+    s.clear.hidden = !q;
+    for (const el of [...s.content.querySelectorAll('.settings-panel__search-hidden')]) {
+      el.classList.remove('settings-panel__search-hidden');
+    }
+    for (const h of s.content.querySelectorAll('.settings-panel__area-heading')) h.hidden = true;
+    for (const b of this._railEl?.querySelectorAll('.settings-panel__rail-count') || []) b.remove();
+    for (const r of this._railEl?.querySelectorAll('.settings-panel__rail-item--no-results') || []) {
+      r.classList.remove('settings-panel__rail-item--no-results');
+    }
+    this._paintSearchHighlight('');
+
+    if (!active) {
+      s.content.classList.remove('settings-panel__content--searching');
+      s.layout.classList.remove('settings-panel__layout--searching');
+      s.layout.style.minHeight = '';
+      s.elsewhere.hidden = true;
+      s.empty.hidden = true;
+      s.status.textContent = '';
+      this._restoreSearchOrder();
+      s.activateArea(this._activeTabId || 'sources', { focus: false, force: true });
+      return;
+    }
+
+    // The dialog keeps its height while results come and go (it shrank and
+    // jumped with every letter), and the rail stops marking one area.
+    if (!s.layout.classList.contains('settings-panel__layout--searching')) {
+      const h = s.layout.offsetHeight;
+      if (h) s.layout.style.minHeight = `${h}px`;
+      s.layout.classList.add('settings-panel__layout--searching');
+    }
+    s.content.classList.add('settings-panel__content--searching');
+    const items = this._collectSearchItems();
+    const rows = [
+      ...items.map((it) => ({ kind: 'setting', it, label: it.label, text: it.text, section: it.sectionText, aliases: it.aliases, area: it.area })),
+      ...s.entries.map((en) => ({ kind: 'elsewhere', en, label: en.label, text: en.text, aliases: en.aliases })),
+    ];
+    const scored = searchRows(q, rows);
+    const hits = new Set(scored.map((h) => h.row));
+    const hitItems = new Set([...hits].filter((r) => r.kind === 'setting').map((r) => r.it));
+    const scoreOf = new Map(scored.map((h) => [h.row.it || h.row.en, h.score]));
+    // The best match of each block decides the blocks' order (Dave's "feed"
+    // puts Feeds and their notifications above Report a Problem's
+    // "feedback"); inside a block the panel's own order stays.
+    const best = new Map();
+
+    let total = 0;
+    for (const a of s.areas) {
+      const p = s.panels[a.id];
+      if (!p) continue;
+      let count = 0;
+      for (const sec of p.querySelectorAll(':scope > .settings-panel__section')) {
+        const own = items.filter((it) => it.section === sec);
+        let matched = own.filter((it) => hitItems.has(it));
+        if (!matched.length) {
+          sec.classList.add('settings-panel__search-hidden');
+          continue;
+        }
+        // Rows found by their OWN words win over rows found only through
+        // the section's name or aliases: "fullscreen" is in Player's
+        // aliases, and must show "Open videos fullscreen", not all four.
+        // Found only through the section, the whole section shows.
+        const byOwnWords = matched.filter((it) => scoreRow(q, { label: it.label, text: it.text }));
+        if (byOwnWords.length) matched = byOwnWords;
+        count += matched.length;
+        for (const it of matched) best.set(p, Math.max(best.get(p) || 0, scoreOf.get(it) || 0));
+        // A match its own setting keeps hidden (Gap Skip's threshold while
+        // Gap Skip is off) needs the control that shows it: the whole section.
+        if (matched.some((it) => it.els[0].hidden)) continue;
+        const keep = new Set(matched);
+        for (const it of own) {
+          if (keep.has(it)) continue;
+          for (const el of it.els) el.classList.add('settings-panel__search-hidden');
+        }
+      }
+      for (const note of p.querySelectorAll(':scope > .settings-panel__area-note')) {
+        note.classList.add('settings-panel__search-hidden');
+      }
+      p.hidden = count === 0;
+      const heading = p.querySelector(':scope > .settings-panel__area-heading');
+      if (heading) heading.hidden = count === 0;
+      total += count;
+      const railItem = this._railEl?.querySelector(`[data-area="${a.id}"]`);
+      if (railItem) {
+        if (count) {
+          const badge = document.createElement('span');
+          badge.className = 'settings-panel__rail-count';
+          badge.textContent = String(count);
+          railItem.appendChild(badge);
+        } else {
+          railItem.classList.add('settings-panel__rail-item--no-results');
+        }
+      }
+    }
+    for (const gl of Object.values(s.groupLists)) gl.hidden = true;
+
+    let elsewhereCount = 0;
+    for (const en of s.entries) {
+      const on = [...hits].some((r) => r.en === en);
+      en.el.classList.toggle('settings-panel__search-hidden', !on);
+      if (on) {
+        elsewhereCount++;
+        best.set(s.elsewhere, Math.max(best.get(s.elsewhere) || 0, scoreOf.get(en) || 0));
+      }
+    }
+    // Best first; equal scores keep the rail's order (Array sort is stable).
+    const blocks = [...s.areas.map((a) => s.panels[a.id]).filter(Boolean), s.elsewhere];
+    const ordered = blocks.filter((b) => best.has(b)).sort((x, y) => best.get(y) - best.get(x));
+    for (const b of [...ordered, ...blocks.filter((b) => !best.has(b))]) s.content.insertBefore(b, s.empty);
+    s.elsewhere.hidden = elsewhereCount === 0;
+    s.elsewhere.querySelector('.settings-panel__area-heading').hidden = elsewhereCount === 0;
+    total += elsewhereCount;
+
+    s.status.textContent = total ? t('settingsPanel.search.count', { count: total }) : '';
+    s.empty.hidden = total > 0;
+    if (!total) {
+      s.empty.textContent = '';
+      const line = document.createElement('div');
+      line.className = 'settings-panel__search-empty-line';
+      line.textContent = t('settingsPanel.search.none', { query: q.trim() });
+      const hint = document.createElement('div');
+      hint.className = 'settings-panel__hint';
+      hint.textContent = t('settingsPanel.search.noneHint');
+      s.empty.append(line, hint);
+    }
+    s.content.scrollTop = 0;
+    this._paintSearchHighlight(q);
+  }
+
+  /** The areas back in the rail's order, then the outside settings, then the empty line. */
+  _restoreSearchOrder() {
+    const s = this._search;
+    if (!s) return;
+    for (const a of s.areas) if (s.panels[a.id]) s.content.insertBefore(s.panels[a.id], s.empty);
+    s.content.insertBefore(s.elsewhere, s.empty);
+  }
+
+  /**
+   * Mark the typed words in what is on screen (CSS Custom Highlight API:
+   * no change to the DOM, so no label is ever rebuilt). Exact letters only;
+   * a word found by a slip is shown, not marked.
+   */
+  _paintSearchHighlight(q) {
+    const hl = globalThis.CSS?.highlights;
+    if (!hl || typeof globalThis.Highlight !== 'function') return;
+    hl.delete('settings-search');
+    const content = this._search?.content;
+    if (!q || !content) return;
+    const terms = searchWords(q).filter((w) => w.length >= 2);
+    if (!terms.length) return;
+    const ranges = [];
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+      acceptNode: (n) => {
+        const el = n.parentElement;
+        if (!el || el.closest('select, option, script, style, .settings-panel__area-heading, .settings-panel__search-hidden, [hidden]')) {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+      const lower = n.data.toLowerCase();
+      for (const term of terms) {
+        let i = lower.indexOf(term);
+        while (i >= 0 && ranges.length < 400) {
+          const r = document.createRange();
+          r.setStart(n, i);
+          r.setEnd(n, i + term.length);
+          ranges.push(r);
+          i = lower.indexOf(term, i + term.length);
+        }
+      }
+    }
+    if (ranges.length) hl.set('settings-search', new globalThis.Highlight(...ranges));
   }
 
   /** Mark one rail group link active, clearing the rest. */
@@ -569,7 +1183,14 @@ export class SettingsPanel {
     const panels = {};
     const groupLists = {};
 
-    const activateArea = (areaId, { focus = true } = {}) => {
+    const activateArea = (areaId, { focus = true, force = false } = {}) => {
+      // While searching every area's results are on screen at once: an
+      // area in the rail scrolls to its results instead.
+      if (!force && this._searchQuery) {
+        const heading = panels[areaId]?.querySelector(':scope > .settings-panel__area-heading');
+        if (heading && !panels[areaId].hidden) content.scrollTo({ top: Math.max(0, heading.offsetTop - 4), behavior: 'smooth' });
+        return;
+      }
       for (const a of areas) {
         const isActive = a.id === areaId;
         const item = rail.querySelector(`[data-area="${a.id}"]`);
@@ -637,22 +1258,10 @@ export class SettingsPanel {
       }
     }
 
-    // Vertical tablist keyboard pattern (Nielsen #4 standards). Up/Down
-    // now, not Left/Right — the rail is vertical.
-    rail.addEventListener('keydown', (e) => {
-      const items = [...rail.querySelectorAll('.settings-panel__rail-item')];
-      const idx = items.indexOf(document.activeElement);
-      if (idx < 0) return;
-      let next = -1;
-      if (e.key === 'ArrowDown') next = (idx + 1) % items.length;
-      else if (e.key === 'ArrowUp') next = (idx - 1 + items.length) % items.length;
-      else if (e.key === 'Home') next = 0;
-      else if (e.key === 'End') next = items.length - 1;
-      if (next >= 0) {
-        e.preventDefault();
-        items[next].click();
-      }
-    });
+    // Tablist keyboard pattern (Nielsen #4 standards): Up/Down in the
+    // column; in the narrow layout the rail is a row, and Left / Right move
+    // along it too (rail-keys.js, 2026-11-22).
+    wireRailKeys(rail, '.settings-panel__rail-item');
 
     // Scroll-spy: highlight the group whose section is currently at the top
     // of the content column, so the rail keeps agreeing with what's on
@@ -683,43 +1292,44 @@ export class SettingsPanel {
       return p;
     };
 
-    // --- Sources Tab ---
-    panels.sources = this._buildSourcesTab();
-    wirePanel('sources');
+    // The tab builders make the sections (and wire them, some of it a tick
+    // later: they look their controls up in `_lookupRoot`, the whole
+    // dialog); _placeSections then puts each section in its area by the map
+    // in _railAreas (2026-11-23).
+    this._lookupRoot = content;
+    let built;
+    try {
+      built = {
+        sources: this._buildSourcesTab(),
+        playback: this._buildPlaybackTab(),
+        editor: this._buildEditorTab(),
+        appearance: this._buildAppearanceTab(),
+        data: this._buildDataTab(),
+        security: this._buildSecurityTab(),
+        help: this._buildHelpTab(),
+      };
+    } finally {
+      this._lookupRoot = null;
+    }
+    Object.assign(panels, this._placeSections(built, areas));
+    this._addMotionDevicesNote(panels.motion);
+    for (const a of areas) wirePanel(a.id);
 
-    // --- Playback Tab ---
-    panels.playback = this._buildPlaybackTab();
-    wirePanel('playback');
-
-    // --- Editor Tab — script-authoring settings (position keys; future
-    //     home for other editor-specific tunables). Sits between Playback
-    //     and Appearance because it's content-side work that belongs
-    //     next to playback in mental model, not next to theme settings. ---
-    panels.editor = this._buildEditorTab();
-    wirePanel('editor');
-
-    // --- Appearance Tab (theme toggle) ---
-    panels.appearance = this._buildAppearanceTab();
-    wirePanel('appearance');
-
-    // --- Data Tab ---
-    panels.data = this._buildDataTab();
-    wirePanel('data');
-
-    // --- Security Tab ---
-    panels.security = this._buildSecurityTab();
-    wirePanel('security');
-
-    // --- Help Tab ---
-    panels.help = this._buildHelpTab();
-    wirePanel('help');
+    // Search (2026-11-23): its results block for settings that live outside
+    // this dialog, and a heading per area shown while searching.
+    this._mountSearch({ body, layout, content, areas, panels, groupLists, activateArea });
 
     // Activate the requested initial area (defaults to 'sources' on first
     // render, but is preserved across locale-change rebuilds). No focus on
     // the initial pass — stealing focus as the dialog opens would move it
-    // off whatever the modal itself focused.
-    const activeId = panels[initialTabId] ? initialTabId : 'sources';
-    activateArea(activeId, { focus: false });
+    // off whatever the modal itself focused. The old Editor and Security
+    // areas are inside Keyboard and Data & privacy now.
+    const moved = { editor: 'keyboard', security: 'data' };
+    const wanted = moved[initialTabId] || initialTabId;
+    const activeId = panels[wanted] ? wanted : 'sources';
+    activateArea(activeId, { focus: false, force: true });
+    // A language change rebuilds the dialog: the search the user had stays.
+    if (this._searchQuery) this._runSearch(this._searchQuery);
 
     // Done button — dedicated class (was borrowing
     // `.library__assoc-save-btn` from the library multi-select flow,
@@ -747,7 +1357,9 @@ export class SettingsPanel {
    * @param {string} [message]
    */
   setSourcesBusy(on, message = '') {
-    const panel = this._panel || this._container;
+    // `_contentEl` is the open dialog's (2026-11-23): nothing ever set
+    // `_panel` or `_container`, so this overlay never showed in the app.
+    const panel = this._panel || this._container || this._contentEl;
     const list = panel?.querySelector?.('.settings-panel__sources-list');
     if (!list) return;
     const host = list.parentElement || list;
@@ -997,7 +1609,17 @@ export class SettingsPanel {
     };
 
     renderSources();
-    panel.appendChild(sourcesList);
+    // A section of its own (2026-11-23): the Library area holds more than
+    // the folder list now, and search shows sections.
+    const foldersSection = document.createElement('div');
+    foldersSection.className = 'settings-panel__section';
+    foldersSection.id = 'sp-sec-sources';
+    const foldersHeader = document.createElement('h2');
+    foldersHeader.className = 'settings-panel__section-header';
+    foldersHeader.textContent = t('settingsPanel.sources.foldersHeader');
+    foldersSection.appendChild(foldersHeader);
+    foldersSection.appendChild(sourcesList);
+    panel.appendChild(foldersSection);
 
     const addBtn = document.createElement('button');
     addBtn.className = 'settings-panel__add-btn';
@@ -1007,30 +1629,10 @@ export class SettingsPanel {
       if (!dirPath) return;
       const srcs = this._settings.get('library.sources') || [];
 
-      const overlap = classifyOverlap(dirPath, srcs);
-      let removeChildrenIds = null;
-
-      if (overlap.kind === 'exact') {
-        showToast(t('settingsPanel.sources.alreadyAdded', { name: overlap.source.name }), 'warn');
-        return;
-      }
-
-      if (overlap.kind === 'child') {
-        const proceed = await Modal.confirm(
-          t('settingsPanel.sources.childOverlapTitle'),
-          t('settingsPanel.sources.childOverlapBody', { path: dirPath, parentName: overlap.parent.name, parentPath: overlap.parent.path }),
-          { confirmText: t('settingsPanel.sources.addAnyway') },
-        );
-        if (!proceed) return;
-      }
-
-      if (overlap.kind === 'parent') {
-        const childNames = overlap.children.map(c => `"${c.name}"`).join(', ');
-        const msg = t('settingsPanel.sources.parentOverlapBody', { path: dirPath, count: overlap.children.length, names: childNames });
-        const confirmed = await Modal.confirm(t('settingsPanel.sources.parentOverlapTitle'), msg, { confirmText: t('settingsPanel.sources.parentOverlapConfirm') });
-        if (!confirmed) return;
-        removeChildrenIds = new Set(overlap.children.map(c => c.id));
-      }
+      // The overlap questions, shared with Library ▾ "Add Source Folder…"
+      // (source-overlap-ask.js; test day B024).
+      const { proceed, removeIds: removeChildrenIds } = await askSourceOverlap(dirPath, srcs, { Modal, t, showToast });
+      if (!proceed) return;
 
       const name = await Modal.prompt(t('settingsPanel.sources.addNamePrompt'), t('settingsPanel.sources.addNamePlaceholder'), dirPath.split(/[\\/]/).pop());
       if (!name) return;
@@ -1094,7 +1696,7 @@ export class SettingsPanel {
     sourceActions.className = 'settings-panel__source-buttons';
     sourceActions.appendChild(addBtn);
     sourceActions.appendChild(recheckBtn);
-    panel.appendChild(sourceActions);
+    foldersSection.appendChild(sourceActions);
 
     // Stash (S1): a block at the bottom of Sources, not a rail item (Dave's
     // answer 1 in notes/features/DESIGN-stash-s1.md). settings-stash.js owns
@@ -1232,29 +1834,35 @@ export class SettingsPanel {
     `;
     panel.appendChild(multiAxisSection);
 
-    // --- Video & performance (Linux only) ---
+    // --- Video & performance (Linux and Windows) ---
     // Hardware decode was filed under Appearance ▸ Library, where it had
     // nothing to do with either. It's a decode/troubleshooting setting, so
-    // it belongs with playback. The whole group is omitted off Linux rather
-    // than left as an empty rail entry.
-    if (typeof window !== 'undefined' && window.funsync?.platform === 'linux') {
+    // it belongs with playback. The group shows the platform's own control
+    // (Linux: hardware decode; Windows: smooth overlays, 2026-11-20) and is
+    // omitted elsewhere rather than left as an empty rail entry.
+    const platform = (typeof window !== 'undefined') ? window.funsync?.platform : null;
+    if (platform === 'linux' || platform === 'win32') {
       const videoSection = document.createElement('div');
       videoSection.className = 'settings-panel__section';
       videoSection.id = 'sp-sec-video';
+      const field = platform === 'linux'
+        ? { id: 'sp-hw-decode', defaultOn: true, key: 'player.hwVideoDecode', label: 'settingsPanel.appearance.hwDecodeLabel', hint: 'settingsPanel.appearance.hwDecodeHint', restart: 'settingsPanel.appearance.hwDecodeRestart' }
+        : { id: 'sp-smooth-overlays', defaultOn: false, key: 'player.smoothOverlays', label: 'settingsPanel.playback.smoothOverlaysLabel', hint: 'settingsPanel.playback.smoothOverlaysHint', restart: 'settingsPanel.playback.smoothOverlaysRestart' };
       videoSection.innerHTML = `
         <h2 class="settings-panel__section-header">${t('settingsPanel.playback.videoHeader')}</h2>
         <div class="settings-panel__field">
-          <label class="settings-panel__field-label" for="sp-hw-decode">${t('settingsPanel.appearance.hwDecodeLabel')}</label>
-          <input type="checkbox" id="sp-hw-decode" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.hwVideoDecode') !== false ? 'checked' : ''} aria-describedby="sp-hw-decode-hint">
+          <label class="settings-panel__field-label" for="${field.id}">${t(field.label)}</label>
+          <input type="checkbox" id="${field.id}" class="settings-panel__input settings-panel__input--checkbox" ${(field.defaultOn ? this._settings.get(field.key) !== false : this._settings.get(field.key) === true) ? 'checked' : ''} aria-describedby="${field.id}-hint">
         </div>
-        <div class="settings-panel__hint" id="sp-hw-decode-hint">${t('settingsPanel.appearance.hwDecodeHint')}</div>
+        <div class="settings-panel__hint" id="${field.id}-hint">${t(field.hint)}</div>
       `;
-      videoSection.querySelector('#sp-hw-decode')
+      videoSection.querySelector('#' + field.id)
         .addEventListener('change', (e) => {
-          this._settings.set('player.hwVideoDecode', !!e.target.checked);
+          this._settings.set(field.key, !!e.target.checked);
           // Chromium GPU flags are read once at launch (main.js, before
-          // whenReady), so this only takes effect after a restart.
-          showToast(t('settingsPanel.appearance.hwDecodeRestart'), 'info', 5000);
+          // whenReady; electron/gpu-switches.js), so this only takes effect
+          // after a restart.
+          showToast(t(field.restart), 'info', 5000);
         });
       panel.appendChild(videoSection);
     }
@@ -1267,11 +1875,16 @@ export class SettingsPanel {
     // Was "Smoothing & limits", which had become a junk drawer: seven
     // controls of which two were about smoothing. The orgasm settings moved
     // to their own section below, random-variant moved to Up Next.
-    const playbackSection = document.createElement('div');
-    playbackSection.className = 'settings-panel__section';
-    playbackSection.id = 'sp-sec-playback';
-    playbackSection.innerHTML = `
-      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.playbackHeader')}</h2>
+    // 2026-11-23 (Dave: "the settings menu seems a bit cluttered again"):
+    // the one Playback section held three jobs in 20 rows. How the device
+    // moves (Smoothing & range, in Device motion), what the script looks
+    // like on screen (Timeline & heatmap, in Appearance), and how a video
+    // opens (Player, here). _railAreas places each section.
+    const motionSection = document.createElement('div');
+    motionSection.className = 'settings-panel__section';
+    motionSection.id = 'sp-sec-motion';
+    motionSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.motionHeader')}</h2>
       <div class="settings-panel__field">
         <span class="settings-panel__field-label">${t('settingsPanel.playback.fieldInterpolation')}</span>
         <select id="sp-smoothing" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-smoothing-hint">
@@ -1301,6 +1914,34 @@ export class SettingsPanel {
       </div>
       <div class="settings-panel__hint" id="sp-range-live-preview-hint">${t('settingsPanel.playback.rangeLivePreviewHint')}</div>
       <div class="settings-panel__hint" id="sp-smoothing-hint">${t('settingsPanel.playback.smoothingHint')}</div>
+    `;
+    const overlaySection = document.createElement('div');
+    overlaySection.className = 'settings-panel__section';
+    overlaySection.id = 'sp-sec-overlay';
+    overlaySection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.overlayHeader')}</h2>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-inline-viz-placement">${t('settingsPanel.playback.inlineVizPlacementLabel')}</label>
+        <select id="sp-inline-viz-placement" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-inline-viz-placement-hint">
+          <option value="overlay">${t('settingsPanel.playback.inlineVizPlacementOverlay')}</option>
+          <option value="below">${t('settingsPanel.playback.inlineVizPlacementBelow')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__hint" id="sp-inline-viz-placement-hint">${t('settingsPanel.playback.inlineVizPlacementHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-inline-tl-window">${t('settingsPanel.playback.inlineTimelineWindowLabel')}</label>
+        <select id="sp-inline-tl-window" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-inline-tl-hint">
+          ${[5, 10, 20, 30].map((s) => `<option value="${s * 1000}">${t('settingsPanel.playback.inlineTimelineWindowSeconds', { seconds: s })}</option>`).join('')}
+        </select>
+      </div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-inline-tl-anchor">${t('settingsPanel.playback.inlineTimelineAnchorLabel')}</label>
+        <select id="sp-inline-tl-anchor" class="settings-panel__input settings-panel__input--select" aria-describedby="sp-inline-tl-hint">
+          <option value="centre">${t('settingsPanel.playback.inlineTimelineAnchorCentre')}</option>
+          <option value="left">${t('settingsPanel.playback.inlineTimelineAnchorLeft')}</option>
+        </select>
+      </div>
+      <div class="settings-panel__hint" id="sp-inline-tl-hint">${t('settingsPanel.playback.inlineTimelineHint')}</div>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-inline-viz-opacity">${t('settingsPanel.playback.inlineVizOpacityLabel')}</label>
         <input type="range" id="sp-inline-viz-opacity" class="settings-panel__input settings-panel__input--range" min="20" max="100" step="5" value="80" aria-describedby="sp-inline-viz-opacity-hint">
@@ -1308,6 +1949,11 @@ export class SettingsPanel {
         <button type="button" id="sp-inline-viz-opacity-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.inlineVizOpacityResetTitle')}" aria-label="${t('settingsPanel.playback.inlineVizOpacityResetTitle')}">↻</button>
       </div>
       <div class="settings-panel__hint" id="sp-inline-viz-opacity-hint">${t('settingsPanel.playback.inlineVizOpacityHint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-seek-frame-strip">${t('settingsPanel.playback.seekFrameStripLabel')}</label>
+        <input type="checkbox" id="sp-seek-frame-strip" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.seekFrameStrip') === true ? 'checked' : ''} aria-describedby="sp-seek-frame-strip-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-seek-frame-strip-hint">${t('settingsPanel.playback.seekFrameStripHint')}</div>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-hm-playhead">${t('settingsPanel.playback.heatmapPlayheadLabel')}</label>
         <input type="checkbox" id="sp-hm-playhead" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.inlineHeatmapPlayhead') === true ? 'checked' : ''} aria-describedby="sp-hm-playhead-hint">
@@ -1320,6 +1966,13 @@ export class SettingsPanel {
         <button type="button" id="sp-device-sim-opacity-reset" class="settings-panel__field-reset" hidden title="${t('settingsPanel.playback.deviceSimOpacityResetTitle')}" aria-label="${t('settingsPanel.playback.deviceSimOpacityResetTitle')}">↻</button>
       </div>
       <div class="settings-panel__hint" id="sp-device-sim-opacity-hint">${t('settingsPanel.playback.deviceSimOpacityHint')}</div>
+      <div class="settings-panel__hint" id="sp-device-sim-hint">${t('settingsPanel.playback.deviceSimHint')}</div>
+    `;
+    const playbackSection = document.createElement('div');
+    playbackSection.className = 'settings-panel__section';
+    playbackSection.id = 'sp-sec-playback';
+    playbackSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.playback.playerHeader')}</h2>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-mini-player">${t('settingsPanel.appearance.miniPlayerLabel')}</label>
         <input type="checkbox" id="sp-mini-player" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.miniPlayer') === true ? 'checked' : ''} aria-describedby="sp-mini-player-hint">
@@ -1361,12 +2014,21 @@ export class SettingsPanel {
         this._settings.set('player.rememberPlaybackSpeed', !!e.target.checked);
       });
     // HM playhead marker (#381): applied to the live overlay at once.
-    playbackSection.querySelector('#sp-hm-playhead')
+    overlaySection.querySelector('#sp-hm-playhead')
       .addEventListener('change', (e) => {
         this._settings.set('player.inlineHeatmapPlayhead', !!e.target.checked);
         if (this.onInlineHeatmapPlayheadChanged) this.onInlineHeatmapPlayheadChanged(!!e.target.checked);
       });
+    // How a video opens first, then how it keeps going.
+    for (const id of ['sp-autoplay-on-open', 'sp-open-fullscreen', 'sp-remember-speed', 'sp-mini-player']) {
+      const field = playbackSection.querySelector(`#${id}`)?.closest('.settings-panel__field');
+      const hint = playbackSection.querySelector(`#${id}-hint`);
+      if (field) playbackSection.appendChild(field);
+      if (hint) playbackSection.appendChild(hint);
+    }
     panel.appendChild(playbackSection);
+    panel.appendChild(motionSection);
+    panel.appendChild(overlaySection);
 
     // --- Orgasm Switch ---
     // Its own home at last. The script picker and the hold/toggle mode were
@@ -1392,6 +2054,12 @@ export class SettingsPanel {
         </select>
       </div>
       <div class="settings-panel__hint" id="sp-orgasm-mode-hint">${t('settingsPanel.playback.orgasmModeHint')}</div>
+      <!-- X into the next video (Dave 2026-11-26, as Z): off = a video change ends it. -->
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-orgasm-carry">${t('settingsPanel.playback.orgasmCarryLabel')}</label>
+        <input type="checkbox" id="sp-orgasm-carry" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-orgasm-carry-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-orgasm-carry-hint">${t('settingsPanel.playback.orgasmCarryHint')}</div>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-orgasm-source">${t('settingsPanel.playback.orgasmSourceLabel')}</label>
         <select id="sp-orgasm-source" class="settings-panel__input settings-panel__input--select">
@@ -1414,7 +2082,7 @@ export class SettingsPanel {
         <div class="settings-panel__hint" id="sp-orgasm-pattern-none" hidden>${t('settingsPanel.playback.orgasmLibraryNone')}</div>
         <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmLibraryHint')}</div>
       </div>
-      <div class="settings-panel__hint">${t('settingsPanel.playback.orgasmScriptHint')}</div>
+      <div class="settings-panel__hint" id="sp-orgasm-script-hint">${t(orgasmScriptHintKey(this._settings.get('player.orgasmSwitchMode')))}</div>
     `;
     panel.appendChild(orgasmSection);
 
@@ -1436,6 +2104,12 @@ export class SettingsPanel {
         </select>
       </div>
       <div class="settings-panel__hint" id="sp-edge-mode-hint">${t('settingsPanel.playback.edgeModeHint')}</div>
+      <!-- Z into the next video (lr_x3 #447): off = a new video resets Z. -->
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-edge-carry">${t('settingsPanel.playback.edgeCarryLabel')}</label>
+        <input type="checkbox" id="sp-edge-carry" class="settings-panel__input settings-panel__input--checkbox" aria-describedby="sp-edge-carry-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-edge-carry-hint">${t('settingsPanel.playback.edgeCarryHint')}</div>
       <!-- What Z does while it is on (next major): stop the devices (today)
            or play a pattern from the library, rows below. -->
       <div class="settings-panel__field">
@@ -1489,8 +2163,12 @@ export class SettingsPanel {
       if (el) panel.appendChild(el);
     }
 
-    // Wire events after DOM is built
+    // Wire events after DOM is built. By then _renderBody may have moved
+    // these sections to other areas (_placeSections): look them up in the
+    // whole dialog it built, never in this tab's own panel.
+    const root = this._lookupRoot || panel;
     setTimeout(() => {
+      const panel = root;
       const gapMode = panel.querySelector('#sp-gap-mode');
       const gapThreshold = panel.querySelector('#sp-gap-threshold');
       const gapThresholdVal = panel.querySelector('#sp-gap-threshold-val');
@@ -1859,6 +2537,36 @@ export class SettingsPanel {
       // Inline TL/HM overlay opacity. Live-applies on input so the user can
       // see the effect against the video while dragging, rather than having
       // to close the panel to judge it.
+      // Timeline and heatmap over or under the video (#381). app.js applies
+      // it on the settings change.
+      // The frame strip along the seek bar (powerkool #433). app.js applies it.
+      panel.querySelector('#sp-seek-frame-strip')?.addEventListener('change', (e) => {
+        this._settings.set('player.seekFrameStrip', !!e.target.checked);
+      });
+      const vizPlace = panel.querySelector('#sp-inline-viz-placement');
+      if (vizPlace) {
+        vizPlace.value = this._settings.get('player.inlineVizPlacement') === 'below' ? 'below' : 'overlay';
+        vizPlace.addEventListener('change', () => {
+          this._settings.set('player.inlineVizPlacement', vizPlace.value === 'below' ? 'below' : 'overlay');
+        });
+      }
+      // The Timeline overlay's window and playhead (#381). app.js applies
+      // them on the settings change, here and in the pop-out.
+      const tlWindow = panel.querySelector('#sp-inline-tl-window');
+      if (tlWindow) {
+        const saved = Number(this._settings.get('player.inlineTimelineWindowMs'));
+        tlWindow.value = [5000, 10000, 20000, 30000].includes(saved) ? String(saved) : '5000';
+        tlWindow.addEventListener('change', () => {
+          this._settings.set('player.inlineTimelineWindowMs', Number(tlWindow.value) || 5000);
+        });
+      }
+      const tlAnchor = panel.querySelector('#sp-inline-tl-anchor');
+      if (tlAnchor) {
+        tlAnchor.value = this._settings.get('player.inlineTimelineAnchor') === 'left' ? 'left' : 'centre';
+        tlAnchor.addEventListener('change', () => {
+          this._settings.set('player.inlineTimelineAnchor', tlAnchor.value === 'left' ? 'left' : 'centre');
+        });
+      }
       const vizOpacity = panel.querySelector('#sp-inline-viz-opacity');
       const vizOpacityVal = panel.querySelector('#sp-inline-viz-opacity-val');
       const vizOpacityReset = panel.querySelector('#sp-inline-viz-opacity-reset');
@@ -1923,12 +2631,17 @@ export class SettingsPanel {
         });
       }
 
+
       // Orgasm Switch behaviour: hold-to-ride vs press-to-finish.
       const orgasmMode = panel.querySelector('#sp-orgasm-mode');
       if (orgasmMode) {
         orgasmMode.value = this._settings.get('player.orgasmSwitchMode') || 'hold';
         orgasmMode.addEventListener('change', () => {
           this._settings.set('player.orgasmSwitchMode', orgasmMode.value);
+          // The script hint describes the mode now chosen (DESIGN.md §1.8): it
+          // read "Hold X… release to snap back" under Press to finish too.
+          const hint = panel.querySelector('#sp-orgasm-script-hint');
+          if (hint) hint.textContent = t(orgasmScriptHintKey(orgasmMode.value));
         });
       }
 
@@ -1942,6 +2655,26 @@ export class SettingsPanel {
         // stored, V71.)
         edgeMode.addEventListener('change', () => {
           this._settings.set('player.edgeHoldMode', edgeMode.value);
+        });
+      }
+
+      // X into the next video (as Z, below). No callback: app.js reads it at
+      // each video change.
+      const orgasmCarry = panel.querySelector('#sp-orgasm-carry');
+      if (orgasmCarry) {
+        orgasmCarry.checked = this._settings.get('player.orgasmAcrossVideos') === true;
+        orgasmCarry.addEventListener('change', () => {
+          this._settings.set('player.orgasmAcrossVideos', orgasmCarry.checked);
+        });
+      }
+
+      // Z into the next video (lr_x3 #447). No callback: app.js reads it at
+      // each video change.
+      const edgeCarry = panel.querySelector('#sp-edge-carry');
+      if (edgeCarry) {
+        edgeCarry.checked = this._settings.get('player.edgeHoldAcrossVideos') === true;
+        edgeCarry.addEventListener('change', () => {
+          this._settings.set('player.edgeHoldAcrossVideos', edgeCarry.checked);
         });
       }
 
@@ -2076,17 +2809,37 @@ export class SettingsPanel {
 
     const customKeysSection = document.createElement('div');
     customKeysSection.className = 'settings-panel__section';
+    customKeysSection.id = 'sp-sec-position-keys';
     customKeysSection.innerHTML = `
-      <h2 class="settings-panel__section-header">${t('editor.customKeysTitle')}</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.positionKeysHeader')}</h2>
       <div id="sp-custom-position-keys-mount"></div>
     `;
     panel.appendChild(customKeysSection);
 
+    // VR zoom with no Ctrl (Buck Nakkidd, Discord 2026-11-27): the two keys,
+    // any key the player does not already use (vr-zoom-keys-settings.js).
+    const zoomKeysSection = document.createElement('div');
+    zoomKeysSection.className = 'settings-panel__section';
+    zoomKeysSection.id = 'sp-sec-vr-zoom-keys';
+    zoomKeysSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.vrZoomKeys.header')}</h2>
+      <div id="sp-vr-zoom-keys-mount"></div>
+      <div class="settings-panel__hint">${t('settingsPanel.vrZoomKeys.hint')}</div>
+    `;
+    panel.appendChild(zoomKeysSection);
+    new VRZoomKeysSettings({
+      element: zoomKeysSection.querySelector('#sp-vr-zoom-keys-mount'),
+      settings: this._settings,
+    });
+
+    panel.appendChild(this._buildEditorSpeedSection());
+
     // Defer + lazy-load: the settings modal doesn't pay the cost of
     // pulling in custom-position-keys.js (and its KeyCapture dep) until
     // the user actually opens the Editor tab.
+    // Taken now: the section may be in another area by the time this runs.
+    const mountSlot = panel.querySelector('#sp-custom-position-keys-mount');
     setTimeout(async () => {
-      const mountSlot = panel.querySelector('#sp-custom-position-keys-mount');
       if (!mountSlot) return;
       try {
         const { CustomPositionKeys } = await import('./custom-position-keys.js');
@@ -2098,6 +2851,56 @@ export class SettingsPanel {
     }, 0);
 
     return panel;
+  }
+
+  /**
+   * Editor speed limits (2026-11-24): the timeline marks strokes faster than
+   * the max (lilac, OFS's max speed highlight; roa uses 400) and moving
+   * strokes slower than the min (dashed; kinetics: the Handy stops under about
+   * 33). 0 = not marked. Written on change; the editor redraws on
+   * settings:changed (ScriptEditor._speedLimits).
+   */
+  _buildEditorSpeedSection() {
+    const section = document.createElement('div');
+    section.className = 'settings-panel__section';
+    section.id = 'sp-sec-editor-speed';
+    const val = (key, dflt) => {
+      const v = Number(this._settings.get(key));
+      return Number.isFinite(v) && v >= 0 ? v : dflt;
+    };
+    section.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.editorSpeed.header')}</h2>
+      <div class="settings-panel__hint">${t('settingsPanel.editorSpeed.hint')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-editor-max-speed">${t('settingsPanel.editorSpeed.max')}</label>
+        <input type="number" id="sp-editor-max-speed" class="settings-panel__input settings-panel__input--number"
+               min="0" max="5000" step="1" inputmode="numeric" data-key="editor.maxSpeed" data-default="640" value="${val('editor.maxSpeed', 640)}">
+      </div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-editor-min-speed">${t('settingsPanel.editorSpeed.min')}</label>
+        <input type="number" id="sp-editor-min-speed" class="settings-panel__input settings-panel__input--number"
+               min="0" max="5000" step="1" inputmode="numeric" data-key="editor.minSpeed" data-default="33" value="${val('editor.minSpeed', 33)}">
+      </div>
+      <div class="settings-panel__hint">${t('settingsPanel.editorSpeed.note')}</div>
+      <div class="settings-panel__field">
+        <label class="settings-panel__field-label" for="sp-editor-fast-step">${t('settingsPanel.editorSpeed.fastStep')}</label>
+        <input type="number" id="sp-editor-fast-step" class="settings-panel__input settings-panel__input--number"
+               min="1" max="600" step="1" inputmode="numeric" data-key="editor.fastStepFrames" data-default="6" data-min="1" data-max="600" value="${val('editor.fastStepFrames', 6) || 6}">
+      </div>
+      <div class="settings-panel__hint">${t('settingsPanel.editorSpeed.fastStepHint')}</div>
+    `;
+    for (const input of section.querySelectorAll('input[data-key]')) {
+      input.addEventListener('change', () => {
+        const n = Math.round(Number(input.value));
+        // Ctrl+Left / Right's frames (work list 6.1) start at 1; the speed marks at 0 (off).
+        const lo = Number(input.dataset.min || 0);
+        const hi = Number(input.dataset.max || 5000);
+        const v = Number.isFinite(n) && n >= lo ? Math.min(hi, n) : Number(input.dataset.default);
+        input.value = String(v);
+        this._settings.set(input.dataset.key, v);
+      });
+    }
+    return section;
   }
 
   _buildAppearanceTab() {
@@ -2184,13 +2987,36 @@ export class SettingsPanel {
             <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.styleModernDesc')}</span>
           </span>
         </label>
+        <label class="settings-panel__theme-option">
+          <input type="radio" name="uiStyle" value="holiday" ${currentStyle === 'holiday' ? 'checked' : ''}>
+          <span class="settings-panel__theme-label">
+            <span class="settings-panel__theme-name">${t('settingsPanel.appearance.styleHoliday')}</span>
+            <span class="settings-panel__theme-desc">${t('settingsPanel.appearance.styleHolidayDesc')}</span>
+          </span>
+        </label>
       </div>
+      <div class="settings-panel__field" id="sp-holiday-snow-field" ${currentStyle === 'holiday' ? '' : 'hidden'}>
+        <label class="settings-panel__field-label" for="sp-holiday-snow">${t('settingsPanel.appearance.holidaySnowLabel')}</label>
+        <input type="checkbox" id="sp-holiday-snow" class="settings-panel__input settings-panel__input--checkbox" ${this._settings.get('player.holidaySnow') !== false ? 'checked' : ''} aria-describedby="sp-holiday-snow-hint">
+      </div>
+      <div class="settings-panel__hint" id="sp-holiday-snow-hint" ${currentStyle === 'holiday' ? '' : 'hidden'}>${t('settingsPanel.appearance.holidaySnowHint')}</div>
     `;
+    // Holiday (v0.10.1) brings its own "Falling snow" row, shown only while
+    // Holiday is the chosen style.
+    const showSnowRow = (on) => {
+      styleSection.querySelector('#sp-holiday-snow-field').hidden = !on;
+      styleSection.querySelector('#sp-holiday-snow-hint').hidden = !on;
+    };
     styleSection.querySelector('[data-setting="player.uiStyle"]')
       .addEventListener('change', (e) => {
         const target = e.target;
         if (!(target instanceof HTMLInputElement) || target.type !== 'radio') return;
         this._settings.set('player.uiStyle', target.value);
+        showSnowRow(target.value === 'holiday');
+      });
+    styleSection.querySelector('#sp-holiday-snow')
+      .addEventListener('change', (e) => {
+        this._settings.set('player.holidaySnow', e.target.checked === true);
       });
     panel.appendChild(styleSection);
 
@@ -2291,7 +3117,7 @@ export class SettingsPanel {
     // Linux-only: VA-API hardware video decode. Surfaced so users on a broken
     // GPU/VA-API driver (esp. nvidia-vaapi) can force software decode.
     librarySection.innerHTML = `
-      <h2 class="settings-panel__section-header">${t('settingsPanel.appearance.libraryHeader')}</h2>
+      <h2 class="settings-panel__section-header">${t('settingsPanel.sources.cardsHeader')}</h2>
       <div class="settings-panel__field">
         <label class="settings-panel__field-label" for="sp-moving-previews">${t('settingsPanel.appearance.movingPreviewsLabel')}</label>
         <input type="checkbox" id="sp-moving-previews" class="settings-panel__input settings-panel__input--checkbox" ${movingOn ? 'checked' : ''} aria-describedby="sp-moving-previews-hint">
@@ -2413,6 +3239,7 @@ export class SettingsPanel {
     // recall (Nielsen #6) which backup to roll back to.
     const backupSection = document.createElement('div');
     backupSection.className = 'settings-panel__section';
+    backupSection.id = 'sp-sec-backup';
     backupSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.data.backupHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">
@@ -2433,6 +3260,7 @@ export class SettingsPanel {
     // backup is a portable file.
     const exportSection = document.createElement('div');
     exportSection.className = 'settings-panel__section';
+    exportSection.id = 'sp-sec-export';
     exportSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.data.exportHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.data.exportBlurb')}</div>
@@ -2443,6 +3271,22 @@ export class SettingsPanel {
     `;
     panel.appendChild(exportSection);
 
+    // --- Section: Converted copies (Convert to play, 2026-11-26) ---------
+    // The playable copies of videos the player cannot decode live in the
+    // app's data folder; how many, how big, and a way to clear them.
+    const convertedSection = document.createElement('div');
+    convertedSection.className = 'settings-panel__section';
+    convertedSection.id = 'sp-sec-converted';
+    convertedSection.innerHTML = `
+      <h2 class="settings-panel__section-header">${t('settingsPanel.data.convertedHeader')}</h2>
+      <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.data.convertedBlurb')}</div>
+      <div id="sp-converted-status" class="settings-panel__hint" style="margin-bottom:12px">${t('settingsPanel.data.backupLoading')}</div>
+      <div style="display:flex;gap:8px">
+        <button id="sp-converted-clear" class="settings-panel__add-btn" style="border-style:solid" disabled>${t('settingsPanel.data.convertedClear')}</button>
+      </div>
+    `;
+    panel.appendChild(convertedSection);
+
     // --- Section: Find duplicates ----------------------------------------
     // pallokala2 (#330) wants disk space back, not a tidier grid, so this
     // lives in Data next to the other library-maintenance actions rather
@@ -2450,6 +3294,7 @@ export class SettingsPanel {
     // toggle. Different jobs: that one hides them, this one removes them.
     const dupesSection = document.createElement('div');
     dupesSection.className = 'settings-panel__section';
+    dupesSection.id = 'sp-sec-duplicates';
     dupesSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.duplicates.sectionHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:12px">
@@ -2470,9 +3315,12 @@ export class SettingsPanel {
     dupesSection.appendChild(dupesBtn);
     panel.appendChild(dupesSection);
 
+    // The whole dialog, not this tab: _placeSections may move a section.
+    const root = this._lookupRoot || panel;
     setTimeout(() => {
-      this._wireDataTab(panel);
-      this._refreshBackupStatus(panel);
+      this._wireDataTab(root);
+      this._refreshBackupStatus(root);
+      this._refreshConvertedStatus(root);
     }, 0);
 
     return panel;
@@ -2502,6 +3350,7 @@ export class SettingsPanel {
 
     const section = document.createElement('div');
     section.className = 'settings-panel__section';
+    section.id = 'sp-sec-log-privacy';
     section.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.security.logsHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:12px">
@@ -2555,6 +3404,7 @@ export class SettingsPanel {
     // reversibility — every field is editable until they click send).
     const feedbackSection = document.createElement('div');
     feedbackSection.className = 'settings-panel__section';
+    feedbackSection.id = 'sp-sec-report';
     feedbackSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('feedback.sectionHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">${t('feedback.sectionBlurb')}</div>
@@ -2571,6 +3421,7 @@ export class SettingsPanel {
     // them the FULL log file when 80 lines isn't enough.
     const logsSection = document.createElement('div');
     logsSection.className = 'settings-panel__section';
+    logsSection.id = 'sp-sec-logs';
     logsSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.help.logsHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.logsBlurb')}</div>
@@ -2586,6 +3437,7 @@ export class SettingsPanel {
     // Shneiderman #2 (universal usability — both paths work).
     const shortcutsSection = document.createElement('div');
     shortcutsSection.className = 'settings-panel__section';
+    shortcutsSection.id = 'sp-sec-shortcuts';
     shortcutsSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.help.shortcutsHeader')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.shortcutsBlurb')}</div>
@@ -2601,6 +3453,7 @@ export class SettingsPanel {
     // the user's default browser via shell.openExternal.
     const aboutSection = document.createElement('div');
     aboutSection.className = 'settings-panel__section';
+    aboutSection.id = 'sp-sec-about';
     aboutSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.help.aboutHeader')}</h2>
       <div id="sp-about-version" class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.help.aboutVersion', { version: '…' })}</div>
@@ -2645,6 +3498,7 @@ export class SettingsPanel {
     // the correct trade for a free tool.
     const supportSection = document.createElement('div');
     supportSection.className = 'settings-panel__section';
+    supportSection.id = 'sp-sec-support';
     supportSection.innerHTML = `
       <h2 class="settings-panel__section-header">${t('settingsPanel.support.header')}</h2>
       <div class="settings-panel__hint" style="margin-bottom:10px">${t('settingsPanel.support.blurb')}</div>
@@ -2656,7 +3510,9 @@ export class SettingsPanel {
     `;
     panel.appendChild(supportSection);
 
-    setTimeout(() => this._wireHelpTab(panel), 0);
+    // The whole dialog: Keyboard Shortcuts is placed under Keyboard.
+    const root = this._lookupRoot || panel;
+    setTimeout(() => this._wireHelpTab(root), 0);
     return panel;
   }
 
@@ -2675,7 +3531,8 @@ export class SettingsPanel {
     panel.querySelector('#sp-show-shortcuts')?.addEventListener('click', async () => {
       // Lazy-import — keyboard-help loads its own large groups arrays.
       const { openKeyboardHelp, getPlayerShortcutGroups } = await import('../js/keyboard-help.js');
-      openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
+      const { readVRZoomKeys, VR_ZOOM_KEYS_SETTING } = await import('../js/vr-zoom-keys.js');
+      openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups({ vrZoomKeys: readVRZoomKeys(this._settings?.get?.(VR_ZOOM_KEYS_SETTING)) }));
     });
     panel.querySelector('#sp-about-github')?.addEventListener('click', () => {
       window.funsync.openExternal('https://github.com/DaveMakesWaves/funsync-player');
@@ -2773,7 +3630,45 @@ export class SettingsPanel {
     }
   }
 
+  /** Settings > Data: the converted copies' count and size; Clear only when there are some. */
+  async _refreshConvertedStatus(panel) {
+    const statusEl = panel.querySelector('#sp-converted-status');
+    const btn = panel.querySelector('#sp-converted-clear');
+    if (!statusEl) return null;
+    let info = null;
+    try { info = await window.funsync?.convertedCopiesInfo?.(); } catch { info = null; }
+    const count = Number(info?.count) || 0;
+    statusEl.textContent = count > 0
+      ? t('settingsPanel.data.convertedInfo', { count, size: formatFileSize(Number(info.bytes) || 0) })
+      : t('settingsPanel.data.convertedNone');
+    if (btn) btn.disabled = count === 0;
+    this._convertedInfo = { count, bytes: Number(info?.bytes) || 0 };
+    return this._convertedInfo;
+  }
+
+  /** Clear converted copies…: asks first (count and size), then says what went. */
+  async _clearConvertedCopies(panel) {
+    const info = await this._refreshConvertedStatus(panel);
+    if (!info?.count) return false;
+    const ok = await Modal.confirm(
+      t('settingsPanel.data.convertedClearTitle'),
+      t('settingsPanel.data.convertedClearBody', { count: info.count, size: formatFileSize(info.bytes) }),
+      { confirmText: t('settingsPanel.data.convertedClearGo'), danger: true },
+    );
+    if (!ok) return false;
+    let result = null;
+    try { result = await window.funsync.clearConvertedCopies(); } catch { result = null; }
+    const removed = Number(result?.removed) || 0;
+    const kept = Number(result?.kept) || 0;
+    let text = t('settingsPanel.data.convertedCleared', { count: removed, size: formatFileSize(Number(result?.bytes) || 0) });
+    if (kept > 0) text += ' ' + t('settingsPanel.data.convertedKept', { count: kept });
+    showToast(text, 'info', 6000);
+    await this._refreshConvertedStatus(panel);
+    return true;
+  }
+
   _wireDataTab(panel) {
+    panel.querySelector('#sp-converted-clear')?.addEventListener('click', () => this._clearConvertedCopies(panel));
     // --- Snapshot Now ----------------------------------------------------
     panel.querySelector('#sp-backup-now')?.addEventListener('click', async () => {
       const btn = panel.querySelector('#sp-backup-now');
@@ -2864,10 +3759,14 @@ export class SettingsPanel {
 
     // --- Export / Import (existing zip flow) -----------------------------
     panel.querySelector('#sp-export')?.addEventListener('click', async () => {
+      // First the question: keys and logins in or out (out by default).
+      const { openExportBackupDialog } = await import('./export-backup-dialog.js');
+      const choice = await openExportBackupDialog();
+      if (!choice) return;
       const btn = panel.querySelector('#sp-export');
       btn.disabled = true; btn.textContent = t('settingsPanel.data.exporting');
       try {
-        const result = await window.funsync.exportData();
+        const result = await window.funsync.exportData({ includeSecrets: choice.includeSecrets === true });
         if (result.success) showToast(t('settingsPanel.data.exportSaved', { path: result.path }), 'info');
         else showToast(t('settingsPanel.data.exportFailed'), 'error');
       } catch { showToast(t('settingsPanel.data.exportFailed'), 'error'); }

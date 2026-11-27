@@ -122,6 +122,210 @@ function stripTags(html) {
  * @param {unknown} url
  * @returns {boolean}
  */
+/**
+ * A post's links that leave the forum, in order, once each: `[{url, text}]`
+ * (the EroScripts tab, 2026-11-22). Forum links (other posts, uploads,
+ * mentions, tags) and anything not http(s) are left out.
+ * @param {string} html  a post's `cooked` HTML
+ */
+function extractExternalLinks(html) {
+  const out = [];
+  const seen = new Set();
+  // Links, and embedded players: a post can carry its video only as an
+  // iframe (an erosync.net embed, 2026-11-22: the tab said "no video").
+  const re = /<a\b[^>]*\bhref="([^"]+)"[^>]*>([\s\S]*?)<\/a>|<iframe\b[^>]*\bsrc="([^"]+)"[^>]*>/gi;
+  let m;
+  while ((m = re.exec(String(html || ''))) !== null) {
+    const url = decodeEntities(m[1] ?? m[3]).trim();
+    if (!/^https?:\/\//i.test(url) || isEroScriptsUrl(url)) continue;
+    let host = '';
+    try { host = new URL(url).hostname.toLowerCase(); } catch { continue; }
+    if (!host || host === 'eroscripts.com' || host.endsWith('.eroscripts.com')) continue;
+    if (seen.has(url)) continue;
+    seen.add(url);
+    out.push({ url, text: m[2] === undefined ? '' : stripTags(m[2]).trim().slice(0, 200) });
+    if (out.length >= 50) break;
+  }
+  return out;
+}
+
+/** A post's like count (Discourse: like_count, or actions_summary id 2). */
+function likeCount(p) {
+  const n = Number(p?.like_count);
+  if (Number.isFinite(n) && n >= 0) return n;
+  const a = Array.isArray(p?.actions_summary) ? p.actions_summary.find((x) => x && x.id === 2) : null;
+  return Number.isFinite(Number(a?.count)) ? Number(a.count) : 0;
+}
+
+/** A reply's HTML without its quotes (a quote repeats an earlier post). */
+function withoutQuotes(html) {
+  return String(html || '').replace(/<aside\b[^>]*class="[^"]*\bquote\b[^"]*"[\s\S]*?<\/aside>/gi, '');
+}
+
+const SCRIPT_FILE_RE = /\.(funscript|zip)$/i;
+
+/**
+ * A post's attached .funscript / .zip files: [{name, url}], each URL once
+ * (forum-relative made absolute). An attachment is a link Discourse marked
+ * `class="attachment"` with a script's name, OR any link to a FORUM upload
+ * whose path ends .funscript / .zip: a poster who writes [name](upload://...)
+ * without "|attachment" gets a plain link (test day 2026-11-24, B002:
+ * "Collect Mandy's Rent - GTA VI" showed "No script in this post"). Another
+ * host's link named "x.funscript" is not an attachment. `upload://` hrefs are
+ * left to the short-URL lookup.
+ */
+function attachmentAnchors(html) {
+  const out = [];
+  const seen = new Set();
+  const re = /<a\b([^>]*)>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(String(html || ''))) !== null) {
+    const hrefMatch = /\bhref="([^"]+)"/i.exec(m[1]);
+    if (!hrefMatch) continue;
+    const href = decodeEntities(hrefMatch[1]).trim();
+    if (!href || href.startsWith('upload://') || href.startsWith('#')) continue;
+    const url = /^https?:\/\//i.test(href) ? href : (href.startsWith('/') ? `${BASE_URL}${href}` : null);
+    if (!url) continue;
+    const text = decodeEntities(stripTags(m[2])).trim();
+    const classed = /\bclass="[^"]*\battachment\b[^"]*"/i.test(m[1]);
+    let path = '';
+    try { path = decodeURIComponent(new URL(url).pathname); } catch { continue; }
+    const upload = isEroScriptsUrl(url) && /\/uploads\//i.test(path);
+    let name = null;
+    if (SCRIPT_FILE_RE.test(text) && (classed || upload)) name = text;
+    else if (upload && SCRIPT_FILE_RE.test(path)) name = path.split('/').pop();
+    if (!name || seen.has(url)) continue;
+    seen.add(url);
+    out.push({ name, url });
+  }
+  return out;
+}
+
+/**
+ * Scripts attached to a topic's REPLIES (the EroScripts review 2.5,
+ * 2026-11-23: "The scripter posted v2 in reply #23"): each reply's
+ * .funscript / .zip attachments, newest reply first, each URL once. Each:
+ * {name, url, postNumber, username, createdAt, likes}. Quotes are dropped.
+ */
+function extractReplyAttachments(posts, firstPostUrls = []) {
+  const out = [];
+  const seen = new Set(firstPostUrls);
+  const replies = (Array.isArray(posts) ? posts : [])
+    .filter((p) => p && Number(p.post_number) > 1)
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0)
+      || Number(b.post_number) - Number(a.post_number));
+  for (const p of replies) {
+    for (const a of attachmentAnchors(withoutQuotes(p.cooked))) {
+      if (seen.has(a.url)) continue;
+      seen.add(a.url);
+      out.push({ ...a, postNumber: Number(p.post_number), username: p.username || '', createdAt: p.created_at || null, likes: likeCount(p) });
+      if (out.length >= 40) return out;
+    }
+  }
+  return out;
+}
+
+/** The post reader's copy of a post: its HTML (capped) and who / when / likes. */
+const MAX_POST_HTML = 200000;
+const MAX_REPLY_HTML = 20000;
+const MAX_READER_REPLIES = 60;
+function readerPost(p, cap) {
+  return {
+    postNumber: Number(p?.post_number) || 0,
+    username: typeof p?.username === 'string' ? p.username : '',
+    createdAt: p?.created_at || null,
+    likes: likeCount(p),
+    cooked: String(p?.cooked || '').slice(0, cap),
+  };
+}
+
+/** A script preview's most actions (a long script is ~20k). */
+const MAX_PREVIEW_ACTIONS = 100000;
+/** A post image's most bytes (a preview GIF can be big). */
+const MAX_IMAGE_BYTES = 12 * 1024 * 1024;
+const IMAGE_TYPES = /^image\/(png|jpe?g|gif|webp|avif)$/;
+
+/**
+ * Links posted in a topic's REPLIES (Dave, 2026-11-22: "sometimes the original
+ * link dies and someone comments a replacement link"): the off-forum links of
+ * every post after the first, newest post first, each once, none the first
+ * post already has. Quotes are dropped first (a quote repeats the first
+ * post's links). Each: {url, text, postNumber, username, createdAt}.
+ */
+function extractReplyLinks(posts, firstPostUrls = []) {
+  const out = [];
+  const seen = new Set(firstPostUrls);
+  const replies = (Array.isArray(posts) ? posts : [])
+    .filter((p) => p && Number(p.post_number) > 1)
+    .sort((a, b) => (Date.parse(b.created_at) || 0) - (Date.parse(a.created_at) || 0)
+      || Number(b.post_number) - Number(a.post_number));
+  for (const p of replies) {
+    for (const l of extractExternalLinks(withoutQuotes(p.cooked))) {
+      if (seen.has(l.url)) continue;
+      seen.add(l.url);
+      out.push({ ...l, postNumber: Number(p.post_number), username: p.username || '', createdAt: p.created_at || null, likes: likeCount(p) });
+      if (out.length >= 50) return out;
+    }
+  }
+  return out;
+}
+
+/**
+ * A category's latest topic list as search results (the EroScripts tab's
+ * opening list): free (14) and paid (15) script threads only, pinned ones
+ * (the category's own "About" thread) left out, each with its original
+ * poster as the creator.
+ */
+const TOP_PERIODS = ['daily', 'weekly', 'monthly', 'quarterly', 'yearly', 'all'];
+
+function latestTopicsToResults(data) {
+  const users = new Map((data?.users || []).map((u) => [u.id, u]));
+  const topics = data?.topic_list?.topics || [];
+  const out = [];
+  for (const t of topics) {
+    if (!t || t.pinned || t.pinned_globally) continue;
+    if (t.category_id !== 14 && t.category_id !== 15) continue;
+    const op = (t.posters || []).find((p) => /original poster/i.test(p.description || '')) || (t.posters || [])[0];
+    const user = op ? users.get(op.user_id) : null;
+    let avatar = user?.avatar_template ? user.avatar_template.replace('{size}', '90') : null;
+    if (avatar && !avatar.startsWith('http')) avatar = `${BASE_URL}${avatar}`;
+    let thumbnail = t.image_url || null;
+    if (thumbnail && !thumbnail.startsWith('http')) thumbnail = `${BASE_URL}${thumbnail}`;
+    out.push({
+      id: t.id,
+      title: t.title || `#${t.id}`,
+      slug: t.slug || null,
+      createdAt: t.created_at || null,
+      likeCount: t.like_count || 0,
+      views: t.views || 0,
+      // The forum list's own columns (the tab's list view, 2026-11-22).
+      replies: Math.max(0, (Number(t.posts_count) || 1) - 1),
+      activityAt: t.bumped_at || t.last_posted_at || t.created_at || null,
+      tags: normaliseTags(t.tags) || [],
+      thumbnail,
+      avatar,
+      creator: user?.username || null,
+      url: `${BASE_URL}/t/${t.slug || t.id}/${t.id}`,
+      categoryId: t.category_id,
+    });
+  }
+  return out;
+}
+
+/** /tags.json as [{name, count}], each once, most used first (grouped tags included). */
+function forumTagList(data) {
+  const all = [...(Array.isArray(data?.tags) ? data.tags : [])];
+  for (const g of data?.extras?.tag_groups || []) all.push(...(Array.isArray(g?.tags) ? g.tags : []));
+  const byName = new Map();
+  for (const t of all) {
+    const name = String(t?.text || t?.name || t?.id || '').trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9-]{0,59}$/.test(name)) continue;
+    const count = Number(t?.count) || 0;
+    if (!byName.has(name) || byName.get(name) < count) byName.set(name, count);
+  }
+  return [...byName.entries()].map(([name, count]) => ({ name, count })).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+}
+
 function isEroScriptsUrl(url) {
   if (typeof url !== 'string' || !url) return false;
   let u;
@@ -372,7 +576,7 @@ const TOPIC_META_TIMEOUT_MS = SESSION_CHECK_TIMEOUT_MS;
  * The network error and the timeout are 'unknown' too (checkSession).
  *
  * @param {{status: number, text?: string, headers?: {get?: (name: string) => (string|null)}}} answer
- * @returns {{state: 'valid'|'expired'|'unknown', username?: string}}
+ * @returns {{state: 'valid'|'expired'|'unknown', username?: string, avatar?: string}}
  */
 function classifySessionAnswer({ status, text = '', headers } = {}) {
   const header = (name) => {
@@ -400,11 +604,36 @@ function classifySessionAnswer({ status, text = '', headers } = {}) {
     const user = json.current_user;
     if (user === null) return { state: 'expired' };
     const username = user && typeof user === 'object' ? user.username : null;
-    if (typeof username === 'string' && username.trim()) return { state: 'valid', username: username.trim() };
+    if (typeof username === 'string' && username.trim()) {
+      const out = { state: 'valid', username: username.trim() };
+      // The tab's account button shows it (Dave, 2026-11-25): no request more.
+      const avatar = sessionAvatarUrl(user.avatar_template);
+      if (avatar) out.avatar = avatar;
+      return out;
+    }
     return { state: 'unknown' };
   }
   if (status === 404 || status === 401 || status === 403) return { state: 'expired' };
   return { state: 'unknown' };
+}
+
+/**
+ * The signed-in user's picture from Discourse's `avatar_template` at 64 px: a
+ * path on the forum, or an https address (a CDN's letter avatar). Anything
+ * else (another scheme, plain http, not a string) is left out.
+ * @param {unknown} template
+ * @returns {string|null}
+ */
+function sessionAvatarUrl(template, size = 64) {
+  if (typeof template !== 'string' || !template.trim()) return null;
+  let url = template.trim().replace('{size}', String(size));
+  if (url.startsWith('//')) url = `https:${url}`;
+  else if (url.startsWith('/')) url = `${BASE_URL}${url}`;
+  try {
+    return new URL(url).protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
 }
 
 // A topic id as the renderer passes it: a positive whole number (or its
@@ -494,7 +723,7 @@ class EroScriptsAPI {
    * logout (restoreSession, logout) starts over.
    *
    * @param {{force?: boolean}} [opts]
-   * @returns {Promise<{state: 'loggedOut'|'valid'|'expired'|'unknown', status?: number, username?: string, cached?: boolean}>}
+   * @returns {Promise<{state: 'loggedOut'|'valid'|'expired'|'unknown', status?: number, username?: string, avatar?: string, cached?: boolean}>}
    */
   async checkSession({ force = false } = {}) {
     const cookie = this._cookie;
@@ -508,6 +737,7 @@ class EroScriptsAPI {
         const answer = { state: kept.state, cached: true };
         if (kept.status != null) answer.status = kept.status;
         if (kept.username) answer.username = kept.username;
+        if (kept.avatar) answer.avatar = kept.avatar;
         return answer;
       }
     }
@@ -520,7 +750,7 @@ class EroScriptsAPI {
     const generation = this._sessionGeneration;
     const promise = this._askSession().then((answer) => {
       if (this._sessionGeneration === generation && this._cookie === cookie) {
-        this._sessionCheck = { cookie, state: answer.state, status: answer.status, username: answer.username, at: this._now() };
+        this._sessionCheck = { cookie, state: answer.state, status: answer.status, username: answer.username, avatar: answer.avatar, at: this._now() };
       }
       return answer;
     }).finally(() => {
@@ -541,10 +771,11 @@ class EroScriptsAPI {
       });
       let text = '';
       try { text = await resp.text(); } catch { text = ''; }
-      const { state, username } = classifySessionAnswer({ status: resp.status, text, headers: resp.headers });
+      const { state, username, avatar } = classifySessionAnswer({ status: resp.status, text, headers: resp.headers });
       _debugLog(`SESSION CHECK status=${resp.status} -> ${state}`);
       const answer = { state, status: resp.status };
       if (username) answer.username = username;
+      if (avatar) answer.avatar = avatar;
       return answer;
     } catch (err) {
       _debugLog(`SESSION CHECK could not check: ${err?.name || 'error'}`);
@@ -672,7 +903,12 @@ class EroScriptsAPI {
             // topic and not on the post. It only exists on /t/{id}.json.
             // Left at 0 rather than faked; the panel hides a 0 view count.
             views: t.views || 0,
+            replies: Number.isFinite(Number(t.reply_count)) ? Number(t.reply_count) : Math.max(0, (Number(t.posts_count) || 1) - 1),
+            activityAt: t.bumped_at || t.last_posted_at || null,
             tags, thumbnail, avatar,
+            // Free or paid (the EroScripts tab, 2026-11-22): the forum files
+            // them in separate categories; see renderer/js/eroscripts-price.js.
+            categoryId: t.category_id ?? null,
             creator: post?.username || user?.username || null,
             url: `${BASE_URL}/t/${t.slug || t.id}/${t.id}`,
           };
@@ -731,6 +967,9 @@ class EroScriptsAPI {
             createdAt: post.created_at,
             likeCount: post.like_count || rawTopic?.like_count || 0,
             views: rawTopic?.views || 0,
+            replies: rawTopic ? Math.max(0, (Number(rawTopic.posts_count) || 1) - 1) : null,
+            activityAt: rawTopic?.bumped_at || rawTopic?.last_posted_at || null,
+            categoryId: rawTopic?.category_id ?? post.topic?.category_id ?? post.category_id ?? null,
             tags: normTags,
             thumbnail,
             avatar,
@@ -748,9 +987,59 @@ class EroScriptsAPI {
   }
 
   /**
+   * The newest script threads, for the EroScripts tab when nothing is
+   * searched (Dave, 2026-11-22: "by default just show the most recent threads
+   * ... free or paid, as long as they are marked as scripts"). `price`:
+   * 'free' = Free Scripts (14), 'paid' = Paid Scripts (15), anything else =
+   * the Scripts category, of which only those two are kept. Newest first by
+   * when the thread was started (Discourse's latest, order=created), a page at
+   * a time (0 first). Same result shape as search(); `more` = another page.
+   * Logged in only: the script categories are hidden from guests.
+   */
+  async latest(price = 'all', page = 0, { sort = 'newest', period = 'all', tags = [], anyTags = false } = {}) {
+    if (!this._cookie) {
+      return { results: [], error: 'Not logged in to EroScripts', errorCode: 'loginRequired', loginRequired: true };
+    }
+    const p = Number.isSafeInteger(Number(page)) && Number(page) >= 0 ? Number(page) : 0;
+    const cat = price === 'free' ? '/c/14' : price === 'paid' ? '/c/15' : '/c/scripts';
+    // Most liked: Discourse's top list for a period; Newest: started newest first.
+    const top = sort === 'top';
+    const per = TOP_PERIODS.includes(period) ? period : 'all';
+    const params = new URLSearchParams(top ? { period: per, page: String(p) } : { order: 'created', page: String(p) });
+    // Tag filters (VR / 2D, length, multi-axis): every one must be on the
+    // thread. `anyTags`: any one of them will do (the Suggested feed,
+    // 2026-11-24: the library's taste tags, a post needs only one).
+    const wanted = (Array.isArray(tags) ? tags : []).filter((t) => typeof t === 'string' && /^[a-z0-9-]{1,60}$/.test(t)).slice(0, 5);
+    for (const t of wanted) params.append('tags[]', t);
+    if (wanted.length > 1 && !anyTags) params.set('match_all_tags', 'true');
+    try {
+      const resp = await fetch(`${BASE_URL}${cat}/l/${top ? 'top' : 'latest'}.json?${params}`, { headers: this._headers() });
+      log.info(`[EroScripts] Latest status: ${resp.status} for ${price} page ${p}`);
+      if (resp.status === 429) return { results: [], error: 'Rate limited — try again in a moment', errorCode: 'rateLimited' };
+      if (resp.status === 403 || resp.status === 401) {
+        return { results: [], error: 'Access denied — try logging in again', errorCode: 'accessDenied', authExpired: true };
+      }
+      const data = await this._safeJson(resp);
+      if (!data?.topic_list) {
+        return { results: [], error: `Latest failed (${resp.status})`, errorCode: 'searchFailed', status: resp.status };
+      }
+      return { results: latestTopicsToResults(data), more: !!data.topic_list.more_topics_url };
+    } catch (err) {
+      log.error('[EroScripts] Latest error:', err.message);
+      return { results: [], error: err.message, errorCode: 'network' };
+    }
+  }
+
+  /**
    * Get attachments from a topic's first post.
    */
-  async getTopicAttachments(topicId) {
+  /**
+   * @param {number|string} topicId
+   * @param {{replies?: boolean}} [opts] replies: also read the newest replies
+   *   the topic JSON did not carry (at most 2 more requests, 40 posts), for
+   *   `replyLinks` (the EroScripts tab's download window).
+   */
+  async getTopicAttachments(topicId, { replies = false } = {}) {
     try {
       const resp = await fetch(`${BASE_URL}/t/${topicId}.json`, {
         headers: this._headers(),
@@ -779,17 +1068,9 @@ class EroScriptsAPI {
       const attachments = [];
       const html = firstPost.cooked || '';
 
-      // Match Discourse attachment links
-      const attachRegex = /<a[^>]*class="attachment"[^>]*href="([^"]+)"[^>]*>([^<]+)<\/a>/gi;
+      // Discourse attachment links, and plain links to a forum upload (B002).
+      attachments.push(...attachmentAnchors(html));
       let match;
-      while ((match = attachRegex.exec(html)) !== null) {
-        const href = match[1];
-        const name = decodeEntities(match[2].trim());
-        if (name.endsWith('.funscript') || name.endsWith('.zip')) {
-          const url = href.startsWith('http') ? href : `${BASE_URL}${href}`;
-          attachments.push({ name, url });
-        }
-      }
 
       // Also check for upload:// short URLs
       const shortUrlRegex = /href="(upload:\/\/[^"]+)"/gi;
@@ -820,22 +1101,68 @@ class EroScriptsAPI {
       }
 
       for (const a of attachments) this._noteIssuedUrl(a.url);
+      // The post's links off the forum (where the video is: a file host or a
+      // tube site), for the EroScripts tab's post view (2026-11-22). Read only;
+      // the backend's /api/downloads/classify says what each one is.
+      const links = extractExternalLinks(html);
+      // Replacement links in the replies, newest first (2026-11-22).
+      let posts = data.post_stream?.posts || [];
+      if (replies) posts = posts.concat(await this._morePosts(topicId, data));
+      const replyLinks = extractReplyLinks(posts, links.map((l) => l.url));
+      // Scripts in the replies (a fixed v2, another cut's timing): the
+      // window lists them by who posted them (review 2.5).
+      const replyScripts = extractReplyAttachments(posts, attachments.map((a) => a.url));
+      for (const a of replyScripts) this._noteIssuedUrl(a.url);
       // The post's tags, title and creator come in the same JSON, so a
       // download can record them with no extra request (video options design
       // (c)). `tags` null = the JSON did not say (unknown, never "no tags").
       const meta = parseTopicMeta(data);
+      // The post reader (review 2.1): the first post's HTML and the replies,
+      // only for the download window (replies: true); the card checks skip it.
+      const reader = replies ? {
+        post: readerPost(firstPost, MAX_POST_HTML),
+        replies: posts.filter((p) => p && Number(p.post_number) > 1)
+          .sort((a, b) => Number(a.post_number) - Number(b.post_number))
+          .slice(0, MAX_READER_REPLIES)
+          .map((p) => readerPost(p, MAX_REPLY_HTML)),
+        replyCount: Math.max(0, (Number(data.posts_count) || posts.length) - 1),
+      } : {};
       return {
         attachments,
+        links,
+        replyLinks,
+        replyScripts,
+        ...reader,
         topicId: meta?.topicId ?? null,
         url: meta?.url ?? null,
         title: meta?.title ?? null,
         creator: meta?.creator ?? null,
         tags: meta ? meta.tags : null,
+        // Free (14) or paid (15) scripts: renderer/js/eroscripts-price.js.
+        categoryId: data.category_id ?? null,
       };
     } catch (err) {
       log.error('[EroScripts] Topic error:', err.message);
       return { attachments: [], error: err.message, errorCode: 'network' };
     }
+  }
+
+  /** The newest posts the topic JSON left out (2 requests of 20 at most). Never throws. */
+  async _morePosts(topicId, data) {
+    const loaded = new Set((data.post_stream?.posts || []).map((p) => p.id));
+    const missing = (data.post_stream?.stream || []).filter((id) => !loaded.has(id)).slice(-40);
+    const out = [];
+    for (let i = 0; i < missing.length; i += 20) {
+      const ids = missing.slice(i, i + 20);
+      const qs = ids.map((id) => `post_ids[]=${encodeURIComponent(id)}`).join('&');
+      try {
+        const resp = await fetch(`${BASE_URL}/t/${encodeURIComponent(topicId)}/posts.json?${qs}`, { headers: this._headers() });
+        if (!resp.ok) break;
+        const more = await this._safeJson(resp);
+        out.push(...(more?.post_stream?.posts || []));
+      } catch { break; }
+    }
+    return out;
   }
 
   /**
@@ -924,6 +1251,58 @@ class EroScriptsAPI {
    * Fetch the first image URL from a topic's first post.
    * Used for lazy thumbnail loading in search results.
    */
+  /**
+   * Every tag on the forum with its thread count, most used first: the feed
+   * window's tag box suggests from it (Dave, 2026-11-22: "not all the tags
+   * from eroscripts pop up in the list ... i just created a feed for
+   * tentacle"). Logged in (members see tags guests do not). One request,
+   * kept for an hour. Tags in tag groups are listed under `extras`.
+   */
+  async tags() {
+    if (!this._cookie) {
+      return { tags: [], error: 'Not logged in to EroScripts', errorCode: 'loginRequired', loginRequired: true };
+    }
+    if (this._tagCache && Date.now() - this._tagCache.at < 60 * 60 * 1000) return { tags: this._tagCache.tags };
+    try {
+      const resp = await fetch(`${BASE_URL}/tags.json`, { headers: this._headers() });
+      if (resp.status === 429) return { tags: [], error: 'Rate limited', errorCode: 'rateLimited' };
+      if (resp.status === 401 || resp.status === 403) return { tags: [], error: 'Access denied', errorCode: 'accessDenied', authExpired: true };
+      const data = await this._safeJson(resp);
+      if (!data) return { tags: [], error: `Tags failed (${resp.status})`, errorCode: 'searchFailed', status: resp.status };
+      const tags = forumTagList(data);
+      this._tagCache = { at: Date.now(), tags };
+      return { tags };
+    } catch (err) {
+      log.error('[EroScripts] Tags error:', err.message);
+      return { tags: [], error: err.message, errorCode: 'network' };
+    }
+  }
+
+  /**
+   * Tags matching what is typed, as the forum's own post editor suggests
+   * them (/tags/filter/search.json): every tag a member can use, the
+   * members-only script categories' included, which /tags.json leaves out
+   * (it counts public threads only: "tentacle" showed 2 there, 2026-11-22).
+   * [{name, count}], at most 25. Logged in only.
+   */
+  async searchTags(query) {
+    const q = String(query || '').trim().toLowerCase().slice(0, 60);
+    if (!this._cookie) return { tags: [], error: 'Not logged in to EroScripts', errorCode: 'loginRequired', loginRequired: true };
+    if (!q) return { tags: [] };
+    try {
+      const params = new URLSearchParams({ q, limit: '25' });
+      const resp = await fetch(`${BASE_URL}/tags/filter/search.json?${params}`, { headers: this._headers() });
+      if (resp.status === 429) return { tags: [], error: 'Rate limited', errorCode: 'rateLimited' };
+      if (resp.status === 401 || resp.status === 403) return { tags: [], error: 'Access denied', errorCode: 'accessDenied', authExpired: true };
+      const data = await this._safeJson(resp);
+      if (!data) return { tags: [], error: `Tag search failed (${resp.status})`, errorCode: 'searchFailed', status: resp.status };
+      return { tags: forumTagList({ tags: data.results || [] }) };
+    } catch (err) {
+      log.error('[EroScripts] Tag search error:', err.message);
+      return { tags: [], error: err.message, errorCode: 'network' };
+    }
+  }
+
   async getTopicImage(topicId) {
     try {
       const resp = await fetch(`${BASE_URL}/t/${topicId}.json`, {
@@ -942,6 +1321,89 @@ class EroScriptsAPI {
       return null;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * May main fetch this script URL for the renderer? The forum's origin, or
+   * an attachment this session read from the forum (as checkDownloadRequest).
+   */
+  _scriptUrlAllowed(url) {
+    if (typeof url !== 'string' || !url || url.length > 4096) return false;
+    let u;
+    try { u = new URL(url); } catch { return false; }
+    const testOrigins = globalThis.__funsyncEroscriptsTestOrigins;
+    return isEroScriptsUrl(url)
+      || (u.protocol === 'https:' && this._issuedUrls.has(url))
+      || (Array.isArray(testOrigins) && testOrigins.includes(u.origin));
+  }
+
+  /**
+   * What a script is like before it is downloaded (the EroScripts review
+   * 2.2, 2026-11-23: "I want to know if it's frantic or slow, and how
+   * long"): its actions, its recorded length and channels. The bytes stay in
+   * the fetch cache, so the download that may follow does not fetch again.
+   * @returns {Promise<{ok:true, actions, truncated, metaDuration, channels, bytes}|{error, errorCode?, httpStatus?, refused?}>}
+   */
+  async previewScript(url) {
+    if (!this._scriptUrlAllowed(url)) return { error: 'url not allowed', refused: true };
+    try {
+      const got = await this._fetchDownload(url);
+      if (got.error) return { error: got.error, httpStatus: got.httpStatus };
+      let json;
+      try { json = JSON.parse(got.buffer.toString('utf8').replace(/^\uFEFF/, '')); } catch { return { error: 'not a funscript', errorCode: 'notScript' }; }
+      const all = Array.isArray(json?.actions) ? json.actions : null;
+      if (!all) return { error: 'not a funscript', errorCode: 'notScript' };
+      const actions = [];
+      let truncated = false;
+      for (const a of all) {
+        if (actions.length >= MAX_PREVIEW_ACTIONS) { truncated = true; break; }
+        const at = Number(a?.at);
+        const pos = Number(a?.pos);
+        if (Number.isFinite(at) && Number.isFinite(pos)) actions.push({ at, pos });
+      }
+      actions.sort((a, b) => a.at - b.at);
+      let channels = [];
+      if (json.channels && typeof json.channels === 'object' && !Array.isArray(json.channels)) channels = Object.keys(json.channels);
+      else if (Array.isArray(json.axes)) channels = json.axes.map((x) => x?.id).filter((s) => typeof s === 'string');
+      const meta = json.metadata && typeof json.metadata === 'object' ? json.metadata : {};
+      return {
+        ok: true, actions, truncated,
+        metaDuration: Number.isFinite(Number(meta.duration)) ? Number(meta.duration) : null,
+        channels: channels.slice(0, 12).map((c) => String(c).slice(0, 40)),
+        bytes: got.buffer.length,
+      };
+    } catch (err) {
+      return { error: err.message, errorCode: 'network' };
+    }
+  }
+
+  /**
+   * An image in a post, for the post reader (review 2.1): a data: URL (the
+   * page's CSP allows data: images). Forum images go with the session (a
+   * plain fetch of a secure upload gets a placeholder); another host's only
+   * when the user asked for it (`external`: the "Show image" button), never
+   * with the cookie. Images only (no SVG), at most MAX_IMAGE_BYTES.
+   */
+  async fetchImage(url, { external = false } = {}) {
+    if (typeof url !== 'string' || !url || url.length > 4096) return { error: 'invalid url' };
+    let u;
+    try { u = new URL(url); } catch { return { error: 'invalid url' }; }
+    if (u.protocol !== 'https:') return { error: 'not https' };
+    const forum = isEroScriptsUrl(url);
+    if (!forum && !external) return { error: 'not on the forum', notForum: true };
+    try {
+      // _headers sends the session only to the forum's hosts: never to another's.
+      const resp = await fetch(url, { headers: { ...this._headers(url), Accept: 'image/*' } });
+      if (!resp.ok) return { error: `Image failed (${resp.status})`, httpStatus: resp.status };
+      const type = String(resp.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+      if (!IMAGE_TYPES.test(type)) return { error: 'not an image', notImage: true };
+      if (Number(resp.headers.get('content-length') || 0) > MAX_IMAGE_BYTES) return { error: 'too big', tooBig: true };
+      const buffer = Buffer.from(await resp.arrayBuffer());
+      if (buffer.length > MAX_IMAGE_BYTES) return { error: 'too big', tooBig: true };
+      return { ok: true, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
+    } catch (err) {
+      return { error: err.message, errorCode: 'network' };
     }
   }
 
@@ -1166,8 +1628,8 @@ class EroScriptsAPI {
 }
 
 module.exports = {
-  EroScriptsAPI, isEroScriptsUrl, normalizeSavePath, isAbsoluteSavePath, FETCH_KEEP_BYTES, FETCH_KEEP_COUNT,
+  EroScriptsAPI, isEroScriptsUrl, extractExternalLinks, extractReplyLinks, extractReplyAttachments, likeCount, MAX_IMAGE_BYTES, latestTopicsToResults, forumTagList, normalizeSavePath, isAbsoluteSavePath, FETCH_KEEP_BYTES, FETCH_KEEP_COUNT,
   parseTopicMeta, parseRetryAfter, eroscriptsUserAgent, EROSCRIPTS_USER_AGENT: USER_AGENT, MAX_RETRY_AFTER_S,
-  classifySessionAnswer, SESSION_CHECK_TTL_MS, SESSION_RECHECK_MS, SESSION_CHECK_TIMEOUT_MS,
+  classifySessionAnswer, sessionAvatarUrl, SESSION_CHECK_TTL_MS, SESSION_RECHECK_MS, SESSION_CHECK_TIMEOUT_MS,
   TOPIC_META_TIMEOUT_MS, installForumUserAgent, FORUM_REQUEST_FILTER,
 };

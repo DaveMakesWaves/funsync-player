@@ -9,6 +9,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
+    "test:crlf": "node scripts/test-crlf.mjs",
     "backend:dev": "cd backend && python3 main.py || python main.py",
     "backend:test": "cd backend && python3 -m pytest -v || python -m pytest -v",
     "build": "node scripts/build.js",

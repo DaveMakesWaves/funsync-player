@@ -298,20 +298,34 @@ describe('caps and narrow ranges', () => {
     expect(bad).toEqual([]);
   });
 
-  // 144 widening loop renders: ~4-6 s on a busy machine (measured 2026-11-19, the same before and after the simple
-  // shapes), so it gets a timeout of its own like pattern-library.test.js's heavy cases.
-  it('Lowest = Highest (the narrowest a range can be set) gives every loopable pattern a loop that moves', { timeout: 60000 }, () => {
-    const bad = [];
-    for (const id of LOOPABLE) {
-      for (const speed of [null, patternSpeedBounds(id).max]) {
-        const loop = patternSourceLoop({ id, speed, min: 50, max: 50 });
-        const pos = loop ? loop.actions.map((a) => a.pos) : [];
-        if (!loop || loop.actions.length < 3 || !(loop.loopMs > 0) || Math.max(...pos) === Math.min(...pos)) {
-          bad.push(`${id} at ${speed ?? 'own'}: ${loop ? `${loop.actions.length} actions, ${loop.loopMs} ms` : 'none'}`);
-        }
+  // One case per pattern (FLAKY-TESTS row 6, fixed 2026-11-20). It was ONE case of 144 loop renders in a band the
+  // engine cannot reach the asked speed in (its calibration then runs all its steps): 1.8 s alone, and past the 5 s
+  // default under the full suite's workers, so it had a 60 s timeout of its own. Each case is 3 renders now (tens of
+  // ms) on the default timeout. "Moves" is what the Handy feels: at least MIN_LOOP_BAND - 1 units. The old check
+  // (highest != lowest) passed a 2-unit loop that read a flat 46 mm on Dave's Handy (device session step 35).
+  describe('Lowest = Highest (the narrowest a range can be set) gives every loopable pattern a loop that moves', () => {
+    // pattern-library.js MIN_LOOP_BAND (held to 5 in pattern-min-band.test.js); a number here, so the cases fail on
+    // what plays, not on a missing export, if the minimum is ever taken out.
+    const MIN_BAND = 5;
+    it.each(LOOPABLE)('%s: at its slowest, its own and its fastest speed, the middle and both ends of the range', (id) => {
+      const b = patternSpeedBounds(id);
+      for (const [speed, at] of [[b.min, 22], [null, 50], [b.max, 100]]) {
+        const what = `${speed ?? 'own'} at ${at}`;
+        const loop = patternSourceLoop({ id, speed, min: at, max: at });
+        expect(loop, what).not.toBeNull();
+        expect(loop.actions.length, what).toBeGreaterThanOrEqual(3);
+        expect(loop.actions[0].at).toBe(0);
+        expect(loop.actions.at(-1)).toEqual({ at: loop.loopMs, pos: loop.actions[0].pos });
+        const pos = loop.actions.map((a) => a.pos);
+        expect(Math.max(...pos) - Math.min(...pos), what).toBeGreaterThanOrEqual(MIN_BAND - 1);
+        // ...in the band it says it plays: at least 5 units, the asked one inside it
+        const [lo, hi] = loop.warnings.find((w) => w.code === 'range-widened').values.to;
+        expect(hi - lo, what).toBeGreaterThanOrEqual(MIN_BAND);
+        expect(lo <= at && hi >= at && lo >= 0 && hi <= 100, `${what}: ${lo}-${hi}`).toBe(true);
+        expect(Math.min(...pos), what).toBeGreaterThanOrEqual(lo - 1);
+        expect(Math.max(...pos), what).toBeLessThanOrEqual(hi + 1);
       }
-    }
-    expect(bad).toEqual([]);
+    });
   });
 
   it('a band too narrow for the pattern is widened about its middle, and says so (it used to be a 1-action loop)', () => {

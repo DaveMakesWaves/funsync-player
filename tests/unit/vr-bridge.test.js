@@ -1,6 +1,10 @@
 // Tests for VR Companion Mode — VRPlaybackProxy + VRBridge
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { VRPlaybackProxy } from '../../renderer/js/vr-playback-proxy.js';
+// Imported here, not with an await import() inside each test: the first test
+// paid for the module fetch under its own 5 s timeout and timed out at 5065 ms
+// in loaded full runs while passing alone (notes/FLAKY-TESTS.md row 1).
+import { VRBridge } from '../../renderer/js/vr-bridge.js';
 
 // === VRPlaybackProxy ===
 
@@ -245,14 +249,12 @@ describe('VRBridge — Path Normalization', () => {
 
 describe('VRBridge — Connection Lifecycle', () => {
   it('starts disconnected', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     expect(bridge.connected).toBe(false);
     expect(bridge.currentVideoPath).toBeNull();
   });
 
   it('connect calls IPC', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     const result = await bridge.connect('deovr', '127.0.0.1', 23554);
@@ -262,7 +264,6 @@ describe('VRBridge — Connection Lifecycle', () => {
   });
 
   it('failed connect returns false', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: false, error: 'refused' });
     const result = await bridge.connect('deovr');
@@ -271,7 +272,6 @@ describe('VRBridge — Connection Lifecycle', () => {
   });
 
   it('disconnect calls IPC and resets state', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
@@ -282,7 +282,6 @@ describe('VRBridge — Connection Lifecycle', () => {
   });
 
   it('fires onConnect callback', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     const cb = vi.fn();
     bridge.onConnect = cb;
@@ -292,7 +291,6 @@ describe('VRBridge — Connection Lifecycle', () => {
   });
 
   it('fires onDisconnect callback', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     const cb = vi.fn();
     bridge.onDisconnect = cb;
@@ -303,7 +301,6 @@ describe('VRBridge — Connection Lifecycle', () => {
   });
 
   it('seek sends command via IPC', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
@@ -313,7 +310,6 @@ describe('VRBridge — Connection Lifecycle', () => {
 
   it('seek does nothing when disconnected', async () => {
     vi.clearAllMocks();
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     bridge.seek(120);
     expect(window.funsync.vrSend).not.toHaveBeenCalled();
@@ -353,7 +349,6 @@ describe('VRPlaybackProxy — Edge Cases', () => {
 
 describe('VRBridge — linkState (three-state UI)', () => {
   it('returns disconnected when not connected', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     expect(bridge.linkState).toBe('disconnected');
   });
@@ -364,7 +359,6 @@ describe('VRBridge — linkState (three-state UI)', () => {
   // timestamps' in the VR modal and nav bar) for its first 5 s, retries to a
   // quiet headset included. It is 'waiting' until the first packet.
   it('returns waiting after connect until the first packet, then receiving', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
@@ -378,7 +372,6 @@ describe('VRBridge — linkState (three-state UI)', () => {
   });
 
   it('flips to waiting when no packet arrives for >5s', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
@@ -394,7 +387,6 @@ describe('VRBridge — linkState (three-state UI)', () => {
   });
 
   it('returns to receiving when a fresh packet arrives', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
@@ -417,7 +409,6 @@ describe('VRBridge — connect() coalescing', () => {
   // reads `false` as a failed dial, so the activity poll counted it toward
   // the 8 s backoff and a Connect click said "failed" without dialing.
   it('joins the in-flight attempt and reports its success', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     let resolveFirst;
     window.funsync.vrConnect.mockClear();
@@ -437,7 +428,6 @@ describe('VRBridge — connect() coalescing', () => {
   });
 
   it('joins the in-flight attempt and reports its failure', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     let resolveFirst;
     window.funsync.vrConnect.mockClear();
@@ -463,7 +453,6 @@ describe('VRBridge — connect() coalescing', () => {
   // poll is dialing another IP: the click must dial what the user typed, not
   // inherit the background dial's refusal.
   it('a connect to ANOTHER host waits for the in-flight attempt, then dials its own', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     const dials = [];
     window.funsync.vrConnect.mockClear();
@@ -489,7 +478,6 @@ describe('VRBridge — connect() coalescing', () => {
   });
 
   it('a connect to ANOTHER host ends on that host even when the in-flight one connected', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     const dials = [];
     window.funsync.vrConnect.mockClear();
@@ -518,7 +506,6 @@ describe('VRBridge — no self-retry on disconnect', () => {
     // After the connection-reliability pass, the bridge no longer
     // self-retries — activity poll is sole driver. Pre-pass this would
     // call _attemptReconnect which would schedule a setTimeout.
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     window.funsync.vrConnect.mockResolvedValue({ success: true });
     await bridge.connect('deovr');
@@ -650,8 +637,7 @@ describe('VRBridge — liveness watchdog', () => {
   it('synthesises a disconnect when no packet arrives within timeout', async () => {
     vi.useFakeTimers();
     try {
-      const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
-      const bridge = new VRBridge();
+        const bridge = new VRBridge();
       const onDisconnect = vi.fn();
       bridge.onDisconnect = onDisconnect;
       window.funsync.vrConnect.mockResolvedValue({ success: true });
@@ -673,8 +659,7 @@ describe('VRBridge — liveness watchdog', () => {
   it('does NOT tear down while packets are arriving', async () => {
     vi.useFakeTimers();
     try {
-      const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
-      const bridge = new VRBridge();
+        const bridge = new VRBridge();
       const onDisconnect = vi.fn();
       bridge.onDisconnect = onDisconnect;
       window.funsync.vrConnect.mockResolvedValue({ success: true });
@@ -712,7 +697,6 @@ describe('VRBridge — liveness watchdog while paused (FT-053)', () => {
     let stateListener = null;
     window.funsync.onVrState.mockImplementation((cb) => { stateListener = cb; return () => { stateListener = null; }; });
     window.funsync.vrConnect.mockResolvedValue({ success: true });
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     bridge = new VRBridge();
     onDisconnect = vi.fn();
     bridge.onDisconnect = onDisconnect;
@@ -781,7 +765,6 @@ describe('VRBridge — first packet of a link (FT-054)', () => {
   });
 
   it('received is false after a connect, true from the first packet; onFirstPacket fires once per link', async () => {
-    const { VRBridge } = await import('../../renderer/js/vr-bridge.js');
     const bridge = new VRBridge();
     const first = vi.fn();
     bridge.onFirstPacket = first;

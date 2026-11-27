@@ -1,5 +1,6 @@
 // KeyboardHandler — Keyboard shortcuts for video playback
 
+import { vrZoomStepFor } from './vr-zoom-keys.js';
 import { openKeyboardHelp, getPlayerShortcutGroups } from './keyboard-help.js';
 import { t } from './i18n.js';
 import { layoutKey, digitKey } from './keyboard-layout.js';
@@ -100,15 +101,39 @@ const PLAYER_SURFACE_KEYS = new Set([
  * Exported for the detached player window, which has its own key handler and
  * follows the same rule (E-01).
  */
+/**
+ * Is `el` a control of its own below a data-owns-keys="navigation" mark: an
+ * <input>, something typed into, or a textarea / select / textbox-like role
+ * that is not the marked list itself?
+ */
+function isControlBelow(el, mark) {
+  if (el === mark) return false;
+  if (String(el.tagName).toUpperCase() === 'INPUT' || el.isContentEditable) return true;
+  const owner = el.closest(OWNS_ALL_KEYS);
+  return !!owner && owner !== mark && mark.contains(owner);
+}
+
 export function targetOwnsKey(e) {
   if (e.defaultPrevented && e.key !== 'Escape') return true;
   const el = e.target;
   if (!el || typeof el.closest !== 'function') return false;
+  // Inside a menu (the player's ⋮, its speed list…) the arrows, Home / End
+  // and Enter / Space are the menu's: Left / Right seeked the video behind
+  // the open ⋮ by 5 s, and Space on "Loop video" played the video instead of
+  // ticking it (test day 2026-11-26, B098). Letters still reach the player.
+  if (LIST_NAV_KEYS.has(e.key) && el.closest('[role="menu"]')) return true;
   // A list that says it uses only its navigation keys (the Fill drawer's
   // pattern list, where the focus lands when it opens) owns those; F, M, K
   // and the rest go on to the player (live verifier 2026-11-17).
-  if (el.closest('[data-owns-keys="navigation"]')) return LIST_NAV_KEYS.has(e.key);
-  if (el.isContentEditable || el.closest(OWNS_ALL_KEYS)) return true;
+  // A control INSIDE such a list (a text box, a checkbox, a select) keeps its
+  // own rule below: typing "f" in a text box there must not toggle
+  // fullscreen (found 2a-dialog 2026-11-18; latent, fixed 2026-11-22).
+  const navMark = el.closest('[data-owns-keys="navigation"]');
+  if (navMark && !isControlBelow(el, navMark)) return LIST_NAV_KEYS.has(e.key);
+  // The marked list (often a role="listbox") or anything around it is not
+  // what owns a control's keys there: the control is.
+  const owner = el.closest(OWNS_ALL_KEYS);
+  if (el.isContentEditable || (owner && !(navMark && owner.contains(navMark)))) return true;
   // A focused <input> owns only its own keys (C-01). An input never has
   // children, so the target itself is the one to ask. Inside a dialog it
   // owns every key, as every <input> did in v0.9.2: the C-01 rule let
@@ -122,8 +147,12 @@ export function targetOwnsKey(e) {
 }
 
 export class KeyboardHandler {
-  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, isQueueOpen, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev, onPlaybackCommand, isVRZoomActive, getView, hasOffViewPlayer }) {
+  constructor({ videoPlayer, connectionPanel, onOpenFile, scriptEditor, deviceSimulator, gapSkipEngine, onNavigate, onToggleLoop, onToggleQueue, isQueueOpen, onJumpChapter, onJumpBookmark, onLoadNext, onLoadPrev, onPlaybackCommand, isVRZoomActive, getVRZoomKeys, getView, hasOffViewPlayer }) {
     this.player = videoPlayer;
+    // () => the VR zoom keys in use (vr-zoom-keys.js readVRZoomKeys): zoom
+    // with no Ctrl while isVRZoomActive (Buck Nakkidd, Discord 2026-11-27).
+    // Unset means only the Ctrl keys zoom.
+    this.getVRZoomKeys = getVRZoomKeys || null;
     // () => boolean: is a VR video open in the player view? Only then do
     // Ctrl+= / Ctrl+- / Ctrl+0 mean VR zoom. Otherwise they are left to the
     // View menu's whole-interface zoom, which they swallowed everywhere in
@@ -177,6 +206,19 @@ export class KeyboardHandler {
     return this._inPlayerView() || !!this.hasOffViewPlayer?.();
   }
 
+  /**
+   * The View menu's F11, which main sends only for an F11 the page did not
+   * take (a text field focused in the player view, any other view): the
+   * player's fullscreen, as F11 on the page is, never the window's (Dave
+   * 2026-11-22). Leaving the player's fullscreen always works; with no
+   * player on screen nothing happens. True when it acted.
+   */
+  toggleFullscreenFromMenu() {
+    if (!document.fullscreenElement && !this._playerSurfaceVisible()) return false;
+    this.player.toggleFullscreen();
+    return true;
+  }
+
   _bindEvents() {
     document.addEventListener('keydown', (e) => this._onKeyDown(e));
     document.addEventListener('keyup', (e) => this._onKeyUp(e));
@@ -208,6 +250,15 @@ export class KeyboardHandler {
     // Keys belong to a focused text field, dropdown or list, or to whatever
     // control already handled them (V43). See targetOwnsKey.
     if (targetOwnsKey(e)) return;
+
+    // Shift+Space: Stop all (DESIGN.md §1.6 S1, §2.15), in EVERY view, so
+    // before the player-surface gate below. After targetOwnsKey: a focused
+    // text field keeps it (Shift held while typing a space must type it).
+    if (e.key === ' ' && e.shiftKey && !e.ctrlKey && !e.altKey && !e.metaKey && this.onStopAll) {
+      e.preventDefault();
+      if (!e.repeat) this.onStopAll();
+      return;
+    }
 
     // Alt+1/2/3 — top-level nav between Library / Playlists / Categories.
     // Slack/Discord/Notion convention; Nielsen #7 (flexibility for experts).
@@ -257,6 +308,19 @@ export class KeyboardHandler {
       if (e.key === '0') {
         e.preventDefault();
         if (this.onVRZoomReset) this.onVRZoomReset();
+        return;
+      }
+    }
+
+    // The same zoom on one key, no Ctrl (Buck Nakkidd, Discord 2026-11-27:
+    // "sucks having to let go of device just to zoom"): bare = / - by default,
+    // set in Settings > Keyboard, and the numpad's + / -. Same gate as the
+    // Ctrl keys above; they are matched first, so Ctrl+= stays theirs.
+    if (this.getVRZoomKeys && !this.scriptEditor?.isOpen && this.isVRZoomActive?.()) {
+      const step = vrZoomStepFor(e, this.getVRZoomKeys());
+      if (step) {
+        e.preventDefault();
+        if (this.onVRZoom) this.onVRZoom(step);
         return;
       }
     }
@@ -531,7 +595,8 @@ export class KeyboardHandler {
 
       case 'g':
         e.preventDefault();
-        if (this.gapSkipEngine) this.gapSkipEngine.skipToNextAction();
+        // Mid-movement: the next movement; nothing ahead: says so (#442).
+        if (this.gapSkipEngine) this.gapSkipEngine.skipNextFromKey();
         break;
 
       case 'G':
@@ -601,7 +666,11 @@ export class KeyboardHandler {
         // only run when the card isn't showing. Not when a surface on top
         // already took this press (a playlist's Select mode, a panel): one
         // Esc both left Select mode and dismissed the card (block E2 review).
-        if (this.upNextEngine?.visible && !e.defaultPrevented) {
+        // And only while its card can be seen (the player view, the mini
+        // player or the pop-out): one armed in a player hidden behind a
+        // playlist took the first Esc there, which looked like nothing, and
+        // the queue panel needed a second (FT-104 re-check; fixed 2026-11-22).
+        if (this.upNextEngine?.visible && !e.defaultPrevented && this._playerSurfaceVisible()) {
           e.preventDefault();
           this.upNextEngine.dismiss();
           break;
@@ -640,7 +709,7 @@ export class KeyboardHandler {
       case '?':
         if (!this.scriptEditor?.isOpen) {
           e.preventDefault();
-          openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups());
+          openKeyboardHelp(t('kbd.playerTitle'), getPlayerShortcutGroups({ vrZoomKeys: this.getVRZoomKeys?.() }));
         }
         break;
 

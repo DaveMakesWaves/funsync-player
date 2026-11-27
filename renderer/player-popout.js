@@ -10,29 +10,33 @@
 
 import { t, initI18n, setLocale, translatePage } from './js/i18n.js';
 import { eventBus } from './js/event-bus.js';
+import { applySeason } from './js/holiday.js';
 import { installConsoleForwarding } from './js/logger.js';
 import { watchWcoClass } from './js/wco.js';
 import { layoutKey } from './js/keyboard-layout.js';
 import { localizeChordPart } from './js/keyboard-help.js';
 import { targetOwnsKey } from './js/keyboard.js';
-import { playedSeconds } from './js/video-load-check.js';
+import { playedSeconds, isAudioPath } from './js/video-load-check.js';
+import { setPlayerAudioTile } from './js/player-audio-tile.js';
+import { setEdgeCarryNotice } from './js/edge-hold-carry.js';
 import { isPictureStarved, ProgressWatch } from './js/playback-stall.js';
 import { showUpdateAvailableToast, showUpdateReadyToast } from './js/update-toasts.js';
 import {
   createIcons, Play, Pause, RotateCcw, Volume2, Volume1, VolumeX,
   ChevronDown, PictureInPicture2, Maximize, Minimize, Repeat1,
   EllipsisVertical, Gauge, Keyboard, SkipBack, SkipForward,
-  Activity, Thermometer,
+  Activity, Thermometer, Captions, icon,
 } from './js/icons.js';
 import { VideoPlayer } from './js/video-player.js';
 import { ProgressBar } from './js/progress-bar.js';
 import { InlineViz } from './components/inline-viz.js';
 import { UpNextCard } from './components/up-next-card.js';
+import { wireMenuKeys, moveMenuFocus, focusMenuFromKeyboard } from './js/menu-keys.js';
 import {
   INITIAL_STATE, LOAD_VIDEO, SEEK, SET_PLAY_STATE, SET_RATE, SET_VOLUME, SET_LOOP,
   HEATMAP, CHAPTERS, VARIANTS, SWITCH_VARIANT, QUEUE_STATE, LOAD_PREV, LOAD_NEXT,
   UP_NEXT, UP_NEXT_ACTION, THEME, LOCALE, READY, TIME_TICK, VIDEO_EVENT, VIDEO_META,
-  SET_INLINE_VIZ, INLINE_VIZ_STATE, ORGASM_HOLD, EDGE_HOLD, makeMessage, classifyMessage,
+  SET_INLINE_VIZ, INLINE_VIZ_STATE, ORGASM_HOLD, EDGE_HOLD, EDGE_NOTICE, SUBTITLE, STOP_ALL, makeMessage, classifyMessage,
 } from './js/player-popout-protocol.js';
 
 try { installConsoleForwarding(); } catch { /* non-fatal */ }
@@ -154,6 +158,10 @@ function _applyInlineVizState(state) {
   // HM playhead marker (#381): the main window's setting, read when the
   // pop-out opens. A change while it is open arrives as INLINE_VIZ_STATE.
   inlineViz?.setHeatmapPlayhead(state.playhead === true);
+  // Over or under the video, as the main window (#381).
+  inlineViz?.setPlacement?.(state.placement);
+  // The Timeline's window and playhead, as the main window (#381).
+  if (state.timelineView) inlineViz?.setTimelineView?.(state.timelineView);
   $('btn-inline-tl')?.setAttribute('aria-checked', String(_vizState.timeline));
   $('btn-inline-hm')?.setAttribute('aria-checked', String(_vizState.heatmap));
   _applyInlineVizOpacity(state.opacity);
@@ -176,6 +184,8 @@ function _applyInlineVizOpacity(value) {
 function _applyInlineVizLive(state) {
   if (!state) return;
   if (typeof state.playhead === 'boolean') inlineViz?.setHeatmapPlayhead(state.playhead);
+  if (state.placement === 'below' || state.placement === 'overlay') inlineViz?.setPlacement?.(state.placement);
+  if (state.timelineView) inlineViz?.setTimelineView?.(state.timelineView);
   _applyInlineVizOpacity(state.opacity);
 }
 function applyTheme(theme) {
@@ -191,6 +201,13 @@ function applyTheme(theme) {
 function applyStyle(style) {
   // No-op on undefined (a theme-only message must not reset the style).
   if (style === 'classic' || style === 'modern') document.documentElement.dataset.style = style;
+}
+
+// The Holiday style's palette (v0.10.1): the main window sends its season with
+// the style. No snow in a pop-out. No-op on undefined, like applyStyle.
+function applyPopoutSeason(season) {
+  if (season === undefined) return;
+  applySeason(season === 'holiday' ? 'holiday' : null, document, { snow: false });
 }
 
 // --- clock streaming up to main (drives the device-sync proxy) ---
@@ -278,6 +295,40 @@ function retranslateWindow() {
   render();
 }
 
+/**
+ * The CC button: its icon and an on / off switch, as the main window has
+ * (app.js). It showed here as a blank square that did nothing once the
+ * main window started sending subtitles (full manual test, 2026-11-23).
+ * The track it switches on is the newest: an emptied one from an earlier
+ * video can stay in the list.
+ */
+function wireSubtitleButton() {
+  const badge = $('subtitle-badge');
+  if (!badge || badge.dataset.wired) return;
+  badge.dataset.wired = '1';
+  badge.appendChild(icon(Captions, { width: 20, height: 20, 'stroke-width': 1.75 }));
+  badge.setAttribute('role', 'button');
+  badge.setAttribute('tabindex', '0');
+  badge.setAttribute('data-i18n-aria-label', 'app.toggleSubtitles');
+  badge.setAttribute('aria-label', t('app.toggleSubtitles'));
+  badge.style.cursor = 'pointer';
+  const toggle = () => {
+    const tracks = [...(video?.textTracks || [])];
+    if (!tracks.length) return;
+    const showing = tracks.some((tr) => tr.mode === 'showing');
+    for (const tr of tracks) tr.mode = 'disabled';
+    if (!showing) tracks[tracks.length - 1].mode = 'showing';
+    badge.classList.toggle('subtitle-badge--active', !showing);
+  };
+  badge.addEventListener('click', toggle);
+  badge.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      toggle();
+    }
+  });
+}
+
 // --- build the reused player once i18n is ready ---
 function setupPlayer() {
   // Render the lucide icons baked into the copied DOM.
@@ -298,6 +349,7 @@ function setupPlayer() {
     controlsElement: $('controls'),
     containerElement: containerEl,
   });
+  wireSubtitleButton();
   progressBar = new ProgressBar({
     containerElement: $('progress-container'),
     videoPlayer,
@@ -315,6 +367,7 @@ function setupPlayer() {
   // (RA-S1-6) this window drew its markers but never named them on hover.
   videoPlayer.onProgressHover = (timeSeconds, xPx, widthPx) => {
     progressBar.updateThumbnailPreview(timeSeconds);
+    progressBar.updateScriptPreview?.(timeSeconds);
     if (Number.isFinite(xPx) && Number.isFinite(widthPx)) {
       progressBar.updateMarkerTooltip(xPx, widthPx, (videoPlayer.duration || 0) * 1000);
     }
@@ -422,6 +475,14 @@ function setupPlayer() {
     overflowMenu.hidden = !overflowMenu.hidden;
     overflowBtn.setAttribute('aria-expanded', String(!overflowMenu.hidden));
   });
+  // The main window's arrow keys in the menu (menu-keys.js; document runs
+  // before this window's player keys on window), and Escape closes it here
+  // too (it never did in this window), the focus back on ⋮.
+  if (overflowBtn && overflowMenu) {
+    wireMenuKeys(overflowBtn, overflowMenu, {
+      close: () => { overflowMenu.hidden = true; overflowBtn.setAttribute('aria-expanded', 'false'); },
+    });
+  }
 
   // Playback speed — LOCAL (the pop-out <video> is the authority; the rate
   // is streamed up in every TIME_TICK so the device proxy scales too).
@@ -443,20 +504,46 @@ function setupPlayer() {
     updateSpeedUI(video.playbackRate || 1);
     sendTick();
   });
-  const openSpeedPopover = () => {
+  // The main window's keys (menu-keys.js; B089, break-it 2026-11-25): opened
+  // from the keyboard the focus goes to the current speed, the arrows move
+  // through the speeds (they changed the volume), Escape closes it (it never
+  // did here) and gives the focus back to where it was opened from.
+  let speedAnchor = null;
+  const openSpeedPopover = (anchor = null, fromKeyboard = false) => {
     speedPopover.replaceChildren();
     const cur = video.playbackRate || 1;
     SPEEDS.forEach((s) => {
       const b = document.createElement('button');
       b.className = 'speed-popover__item' + (s === cur ? ' is-active' : '');
+      b.setAttribute('role', 'menuitem');
       b.textContent = `${s}×`;
-      b.addEventListener('click', (e) => { e.stopPropagation(); applyRate(s); speedPopover.hidden = true; });
+      b.addEventListener('click', (e) => {
+        e.stopPropagation();
+        // Chosen with Enter: the focus back to where it was opened from
+        // (read before the rate, as in main, where the list re-renders).
+        const hadFocus = speedPopover.contains(document.activeElement);
+        applyRate(s);
+        if (hadFocus) speedAnchor?.focus();
+        speedPopover.hidden = true;
+      });
       speedPopover.appendChild(b);
     });
     speedPopover.hidden = false;
+    speedAnchor = anchor;
+    if (fromKeyboard) focusMenuFromKeyboard(speedPopover, '.speed-popover__item.is-active');
   };
-  $('speed-chip')?.addEventListener('click', (e) => { e.stopPropagation(); speedPopover.hidden ? openSpeedPopover() : (speedPopover.hidden = true); });
-  $('btn-speed-menu')?.addEventListener('click', (e) => { e.stopPropagation(); overflowMenu.hidden = true; openSpeedPopover(); });
+  $('speed-chip')?.addEventListener('click', (e) => { e.stopPropagation(); speedPopover.hidden ? openSpeedPopover($('speed-chip'), e.detail === 0) : (speedPopover.hidden = true); });
+  $('btn-speed-menu')?.addEventListener('click', (e) => { e.stopPropagation(); overflowMenu.hidden = true; openSpeedPopover(overflowBtn, e.detail === 0); });
+  document.addEventListener('keydown', (e) => {
+    if (!speedPopover || speedPopover.hidden || e.key !== 'Escape') return;
+    e.preventDefault();
+    if (speedPopover.contains(document.activeElement)) speedAnchor?.focus();
+    speedPopover.hidden = true;
+  }, true);
+  document.addEventListener('keydown', (e) => {
+    if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    if (moveMenuFocus(speedPopover, e.key)) e.preventDefault();
+  });
 
   // Loop — LOCAL (video.loop on the pop-out's element).
   const updateLoopUI = () => {
@@ -496,6 +583,9 @@ function setupPlayer() {
     i = Math.max(0, Math.min(SPEEDS.length - 1, i + dir));
     applyRate(SPEEDS[i]);
   };
+  // The View menu's F11 (an F11 a focused control kept): the player's
+  // fullscreen, never the window's (Dave 2026-11-22).
+  window.funsync?.onMenuToggleFullscreen?.(() => videoPlayer?.toggleFullscreen());
   window.addEventListener('keydown', (e) => {
     // The main window's rule (keyboard.js targetOwnsKey, C-01): a focused
     // control keeps only the keys it uses. This returned for ANY focused
@@ -508,8 +598,18 @@ function setupPlayer() {
     // another alphabet, so K, F, M, J, L, P, N work on a Russian or Korean
     // layout too; they matched e.key ('л', 'а', …) and did nothing (CB-07).
     switch (layoutKey(e)) {
-      case ' ': case 'k': e.preventDefault(); videoPlayer.togglePlay(); break;
+      // Shift+Space: Stop all (DESIGN.md §2.15). This window's video pauses
+      // at once; main stops every device and every other source.
+      case ' ':
+        e.preventDefault();
+        if (e.shiftKey) { video.pause(); send(makeMessage(STOP_ALL)); break; }
+        videoPlayer.togglePlay();
+        break;
+      case 'k': e.preventDefault(); videoPlayer.togglePlay(); break;
       case 'f': case 'F': videoPlayer.toggleFullscreen(); break;
+      // F11 is the player's fullscreen too (Dave 2026-11-22), never the
+      // window's: taken here, the View menu's F11 never sees it.
+      case 'F11': e.preventDefault(); videoPlayer.toggleFullscreen(); break;
       case 'm': case 'M': videoPlayer.toggleMute(); break;
       case 'ArrowLeft': e.preventDefault(); video.currentTime = Math.max(0, video.currentTime - 5); break;
       case 'ArrowRight': e.preventDefault(); video.currentTime = Math.min(video.duration || 1e9, video.currentTime + 5); break;
@@ -582,6 +682,7 @@ function showShortcutsHelp() {
     ['< / >', t('player.speed.menuLabel')],
     ['Shift+L', t('player.loopVideo.menuLabel')],
     ['P / N', t('player.previous') + ' / ' + t('player.next')],
+    ['Shift+Space', t('kbd.stopAll')],
   ];
   const card = document.createElement('div');
   card.className = 'ppo-shortcuts__card';
@@ -612,6 +713,9 @@ function showShortcutsHelp() {
 // --- load / switch the video ---
 function loadVideo({ src, timeMs, autoplay, title }) {
   if (!src || !videoPlayer) return;
+  // An audio file: the audio tile, as the main player shows it (S033).
+  setPlayerAudioTile(document.getElementById('video-wrapper'),
+    isAudioPath(decodeURIComponent(String(src).split(/[?#]/)[0])) ? (title || decodeURIComponent(String(src).split('/').pop())) : null);
   _hasVideo = true;
   if (loadingEl) loadingEl.hidden = true;
   containerEl.hidden = false;
@@ -684,7 +788,29 @@ function renderVariants(list, activeLabel, activeText, extra = {}) {
       send(makeMessage(SWITCH_VARIANT, { label: v.label }));
     });
     dropdown.appendChild(item);
+    markVariantItemIfMissing(item, v.path);
   });
+}
+
+/**
+ * A variation whose file is gone: dimmed, "Script not found", not offered,
+ * as the main window's menu and the video options dialog mark it
+ * (2026-11-22; also in v0.9.2). Only a definite "absent" marks it; a check
+ * that cannot answer leaves the row as it is.
+ */
+function markVariantItemIfMissing(item, path) {
+  const api = window.funsync;
+  if (!path || typeof api?.filesExist !== 'function') return;
+  Promise.resolve(api.filesExist([path])).then((answer) => {
+    if (!Array.isArray(answer) || answer[0] !== false || !item.isConnected) return;
+    item.disabled = true;
+    item.classList.add('variant-selector__item--missing');
+    const tag = document.createElement('span');
+    tag.className = 'variant-selector__missing-tag';
+    tag.textContent = t('videoOptions.script.status.missing');
+    const name = item.querySelector('.variant-selector__item-label');
+    if (name) name.after(tag); else item.appendChild(tag);
+  }, () => { /* unknown: leave the row as it is */ });
 }
 
 // --- Up Next card (engine in main; this is the view) ---
@@ -700,7 +826,9 @@ function handleUpNext(payload) {
       upNextCard.show(payload.path, payload.countdownSec);
       break;
     case 'thumb':
-      upNextCard.setThumbnail(payload.path, payload.thumbDataUrl);
+      // No picture to show (an audio file): the grey logo tile (N-05).
+      if (payload.thumbNoVideo) upNextCard.setNoVideoThumbnail(payload.path, { stream: !!payload.thumbStream });
+      else upNextCard.setThumbnail(payload.path, payload.thumbDataUrl);
       break;
     case 'tick':
       upNextCard.tick(payload.remaining);
@@ -723,7 +851,7 @@ function onMessage(payload) {
   switch (type) {
     case INITIAL_STATE:
       applyTheme(payload.theme);
-      applyStyle(payload.uiStyle);
+      applyStyle(payload.uiStyle); applyPopoutSeason(payload.season);
       if (typeof payload.backendPort === 'number') _backendPort = payload.backendPort;
       _applyInlineVizState(payload.inlineViz);
       if (payload.locale) setLocale(payload.locale).then(() => { _i18nReady = true; render(); });
@@ -731,6 +859,7 @@ function onMessage(payload) {
       if (payload.video) loadVideo(payload.video);
       break;
     case LOAD_VIDEO: loadVideo(payload); break;
+    case EDGE_NOTICE: setEdgeCarryNotice(document.getElementById('video-wrapper'), payload?.text || null); break;
     case SEEK: try { video.currentTime = (payload.timeMs || 0) / 1000; } catch { /* ignore */ } break;
     case SET_PLAY_STATE: if (payload.paused) video.pause(); else video.play().catch(() => {}); break;
     case SET_RATE: if (payload.rate > 0) videoPlayer?.setPlaybackRate?.(payload.rate); break;
@@ -769,7 +898,15 @@ function onMessage(payload) {
     case QUEUE_STATE: renderQueueState(payload); break;
     case UP_NEXT: handleUpNext(payload); break;
     case INLINE_VIZ_STATE: _applyInlineVizLive(payload); break;
-    case THEME: applyTheme(payload.theme); applyStyle(payload.uiStyle); break;
+    case THEME: applyTheme(payload.theme); applyStyle(payload.uiStyle); applyPopoutSeason(payload.season); break;
+    // The video's subtitles, from the main window (2026-11-22: none showed).
+    case SUBTITLE:
+      if (payload.name && typeof payload.text === 'string') {
+        videoPlayer?.loadSubtitles({ name: payload.name, textContent: payload.text }, { show: payload.show !== false });
+      } else {
+        videoPlayer?.clearSubtitles();
+      }
+      break;
     // A live switch in the main window (V50). setLocale walks the static
     // data-i18n keys itself, then its language:changed runs
     // retranslateWindow(), which re-applies what this window owns (V69).

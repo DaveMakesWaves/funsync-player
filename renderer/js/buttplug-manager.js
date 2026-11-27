@@ -524,6 +524,30 @@ export class ButtplugManager {
   }
 
   /**
+   * The command round trip to one toy through Intiface (the Bluetooth sync
+   * test, brokenobj #431): the time from sending a STOP until Intiface
+   * answers that it went out to the toy (for Bluetooth, the BLE write). A
+   * stop is harmless on an idle toy. `count` of them, `gapMs` apart; returns
+   * each round trip in ms (one that failed is left out).
+   */
+  async measureRoundTrip(deviceIndex, { count = 10, gapMs = 120, now = () => performance.now() } = {}) {
+    const device = this._devices.get(deviceIndex);
+    if (!device) return [];
+    const out = [];
+    for (let i = 0; i < count; i++) {
+      const t0 = now();
+      try {
+        await device.stop();
+        out.push(now() - t0);
+      } catch (err) {
+        this._warnOnce(`rtt-${deviceIndex}`, `[Buttplug] Round-trip check to "${device.name}" failed: ${err?.message || err}`);
+      }
+      if (i < count - 1) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    return out;
+  }
+
+  /**
    * Stop all devices.
    */
   async stopAll() {
@@ -563,15 +587,24 @@ export class ButtplugManager {
    */
   async stopSustainedOutputs() {
     if (!this._client || !this._connected) return;
-    await Promise.all(this.devices.map(async (dev) => {
+    // Every zero of every device at once (FN-02 note, TODO triage
+    // 2026-11-23): awaited one after another, a device with vibrate AND
+    // rotate stopped its second motor one Intiface round trip late, and a
+    // failed first zero skipped the rest. All are sent; the first failure
+    // is still reported once they have all settled.
+    const sends = [];
+    for (const dev of this.devices) {
       // Deliberately NOT gated on `canLinear` being false — hardware that is
       // both (some Lovense) still needs its motor silenced while keeping its
       // position untouched.
-      if (dev.canVibrate) await this.sendVibrate(dev.index, 0);
-      if (dev.canOscillate) await this.sendOscillate(dev.index, 0);
-      if (dev.canRotate) await this.sendRotate(dev.index, 0, true);
-      if (dev.canScalar) await this.sendScalar(dev.index, 0);
-    }));
+      if (dev.canVibrate) sends.push(this.sendVibrate(dev.index, 0));
+      if (dev.canOscillate) sends.push(this.sendOscillate(dev.index, 0));
+      if (dev.canRotate) sends.push(this.sendRotate(dev.index, 0, true));
+      if (dev.canScalar) sends.push(this.sendScalar(dev.index, 0));
+    }
+    const results = await Promise.allSettled(sends);
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) throw failed.reason;
   }
 
   /**

@@ -257,3 +257,54 @@ describe('VRProjectionRenderer — render writes uniforms', () => {
     r.unmount();
   });
 });
+
+// Found 2026-11-22 making the forum GIF (#427): the render loop follows the video's own frames
+// (requestVideoFrameCallback), so while PAUSED nothing drew. A projection applied while paused, or a
+// seek while paused, left the view black until play, and a drag to look around did not move it.
+describe('VRProjectionRenderer — draws while paused', () => {
+  let frames;
+  beforeEach(() => {
+    frames = [];
+    vi.stubGlobal('requestAnimationFrame', (cb) => { frames.push(cb); return frames.length; });
+    vi.stubGlobal('cancelAnimationFrame', (h) => { frames[h - 1] = null; });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  const flush = () => { const q = frames.splice(0); for (const cb of q) cb && cb(); };
+  const draws = () => glMock._calls.filter((c) => c[0] === 'drawArrays').length;
+
+  it('mount, a look around, a new field of view and a seek each draw once on the next frame, with no video frames coming', () => {
+    const r = new VRProjectionRenderer();
+    const video = makeVideo();                  // paused: its frame callback never fires
+    r.mount(video, makeContainer());
+    flush();
+    const afterMount = draws();
+    expect(afterMount).toBeGreaterThanOrEqual(2);   // the first tick, then the one after layout
+    r.setYawPitch(30, 10);                      // a drag to look around
+    flush();
+    expect(draws()).toBe(afterMount + 1);
+    r.setFov(100);
+    r.setEye('right');                          // two changes in one frame: one draw
+    flush();
+    expect(draws()).toBe(afterMount + 2);
+    video.dispatchEvent(new Event('seeked'));
+    flush();
+    expect(draws()).toBe(afterMount + 3);
+    r.setProjection('fisheye-180');
+    flush();
+    expect(draws()).toBe(afterMount + 4);
+    r.unmount();
+  });
+
+  it('after unmount nothing is drawn and the seek listener is gone', () => {
+    const r = new VRProjectionRenderer();
+    const video = makeVideo();
+    r.mount(video, makeContainer());
+    r.setYawPitch(5, 5);
+    r.unmount();
+    const before = draws();
+    flush();
+    video.dispatchEvent(new Event('seeked'));
+    flush();
+    expect(draws()).toBe(before);
+  });
+});

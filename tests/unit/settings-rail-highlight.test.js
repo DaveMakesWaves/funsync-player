@@ -40,33 +40,38 @@ afterEach(async () => {
 });
 afterAll(() => _setBundlesForTests('en', EN, EN));
 
-// The Playback area's sections, top to bottom (px from the content's top).
-// Gap Filler and Edge Hold have rail entries of their own since pf-fixup
-// (Dave 2026-11-19 ~15:05, "Add both").
+// The Playback area's sections, top to bottom (px from the content's top;
+// the Settings re-sort of 2026-11-23 left Player, Up Next, Gap Skip and
+// Multi-Axis here): the last two start less than a screen from the end.
 const TOPS = {
   'sp-sec-playback': 0,
-  'sp-sec-upnext': 400,
-  'sp-sec-gapskip': 800,
-  'sp-sec-gapfiller': 1000,
-  'sp-sec-orgasm': 1200,
-  'sp-sec-edge': 1400,
-  'sp-sec-global-hotkeys': 1600,
+  'sp-sec-upnext': 700,
+  'sp-sec-gapskip': 1600,
   'sp-sec-multiaxis': 1800,
+};
+// Device motion's (Gap Filler and Edge Hold have rail entries of their own
+// since pf-fixup, Dave 2026-11-19 ~15:05 "Add both"; in Device motion since
+// 2026-11-23).
+const MOTION_TOPS = {
+  'sp-sec-motion': 0,
+  'sp-sec-gapfiller': 500,
+  'sp-sec-orgasm': 900,
+  'sp-sec-edge': 1300,
 };
 const CLIENT = 600;
 const SCROLL_HEIGHT = 2100; // the deepest scrollTop is 1500
 
-/** Open Settings on Playback with the stubbed geometry. */
-function openPlayback() {
+/** Open Settings on an area (Playback by default) with the stubbed geometry. */
+function openPlayback(area = 'playback', tops = TOPS) {
   const panel = new SettingsPanel({ settings: settingsStub() });
   showing = panel.show();
-  document.querySelector('.settings-panel__rail-item[data-area="playback"]').click();
+  document.querySelector(`.settings-panel__rail-item[data-area="${area}"]`).click();
   const content = document.querySelector('.settings-panel__content');
   let top = 0;
   Object.defineProperty(content, 'scrollTop', { configurable: true, get: () => top, set: (v) => { top = Math.max(0, Math.min(SCROLL_HEIGHT - CLIENT, v)); } });
   Object.defineProperty(content, 'clientHeight', { configurable: true, get: () => CLIENT });
   Object.defineProperty(content, 'scrollHeight', { configurable: true, get: () => SCROLL_HEIGHT });
-  for (const [id, y] of Object.entries(TOPS)) {
+  for (const [id, y] of Object.entries(tops)) {
     const el = content.querySelector(`#${id}`);
     expect(el, id).not.toBeNull();
     Object.defineProperty(el, 'offsetTop', { configurable: true, get: () => y });
@@ -97,12 +102,12 @@ function userScrollTo(content, y) {
 }
 
 describe('the Settings rail lights the group you clicked and the one you scrolled to (FT-079)', () => {
-  it('Global hotkeys clicked: it stays lit through its scroll and after it', () => {
+  it('Gap Skip clicked (it can never reach the top): it stays lit through its scroll and after it', () => {
     const { seen } = openPlayback();
-    clickGroup('sp-sec-global-hotkeys');
+    clickGroup('sp-sec-gapskip');
     expect(seen.length).toBe(6);
-    for (const s of seen) expect(s).toEqual(['sp-sec-global-hotkeys']);
-    expect(lit()).toEqual(['sp-sec-global-hotkeys']);
+    for (const s of seen) expect(s).toEqual(['sp-sec-gapskip']);
+    expect(lit()).toEqual(['sp-sec-gapskip']);
   });
 
   it('Multi-Axis clicked: Multi-Axis', () => {
@@ -113,8 +118,8 @@ describe('the Settings rail lights the group you clicked and the one you scrolle
 
   it('a group that reaches the top: that group, as before', () => {
     const { seen } = openPlayback();
-    clickGroup('sp-sec-gapskip');
-    expect(seen.at(-1)).toEqual(['sp-sec-gapskip']);
+    clickGroup('sp-sec-upnext');
+    expect(seen.at(-1)).toEqual(['sp-sec-upnext']);
   });
 
   it('scrolled by hand: the bottom lights the last group in view, the top the first, the middle the one at the top', () => {
@@ -124,27 +129,26 @@ describe('the Settings rail lights the group you clicked and the one you scrolle
     expect(lit()).toEqual(['sp-sec-multiaxis']);
     userScrollTo(content, 0);
     expect(lit()).toEqual(['sp-sec-playback']);
-    userScrollTo(content, 810);
-    expect(lit()).toEqual(['sp-sec-gapskip']);
+    userScrollTo(content, 710);
+    expect(lit()).toEqual(['sp-sec-upnext']);
   });
 
   it('after a click, the first hand scroll follows the view again', () => {
     const { content } = openPlayback();
-    clickGroup('sp-sec-global-hotkeys');
-    userScrollTo(content, 1210);
-    expect(lit()).toEqual(['sp-sec-orgasm']);
+    clickGroup('sp-sec-gapskip');
+    userScrollTo(content, 710);
+    expect(lit()).toEqual(['sp-sec-upnext']);
   });
 });
 
 describe('Gap Filler and Edge Hold have rail entries of their own (Dave 2026-11-19 ~15:05, "Add both")', () => {
   const groups = () => [...document.querySelectorAll('.settings-panel__rail-groups:not([hidden]) .settings-panel__rail-group')];
 
-  it("the Playback rail reads ... Gap Skip, Gap Filler, Orgasm Switch, Edge Hold ..., in the content's own order", () => {
-    const { content } = openPlayback();
+  it("the Device motion rail reads Smoothing & range, Gap Filler, Orgasm Switch, Edge Hold, in the content's own order", () => {
+    const { content } = openPlayback('motion', MOTION_TOPS);
     const labels = groups().map((g) => g.textContent);
-    const at = labels.indexOf(EN.settingsPanel.playback.gapSkipHeader);
-    expect(labels.slice(at, at + 4)).toEqual([
-      EN.settingsPanel.playback.gapSkipHeader, EN.settingsPanel.playback.fillerHeader,
+    expect(labels).toEqual([
+      EN.settingsPanel.playback.motionHeader, EN.settingsPanel.playback.fillerHeader,
       EN.settingsPanel.playback.orgasmHeader, EN.settingsPanel.playback.edgeHeader,
     ]);
     // every entry has its section, and the sections stand in the rail's order
@@ -154,7 +158,7 @@ describe('Gap Filler and Edge Hold have rail entries of their own (Dave 2026-11-
   });
 
   it("each jumps to the section with its own rows: Gap Filler's on / off, threshold and pattern; Edge Hold's key and pattern", () => {
-    const { content } = openPlayback();
+    const { content } = openPlayback('motion', MOTION_TOPS);
     const filler = content.querySelector('#sp-sec-gapfiller');
     expect(filler.querySelector('.settings-panel__section-header').textContent).toBe(EN.settingsPanel.playback.fillerHeader);
     for (const id of ['sp-filler-enabled', 'sp-filler-threshold', 'sp-filler-pattern-rows', 'sp-filler-hint']) expect(filler.querySelector(`#${id}`), id).not.toBeNull();
@@ -165,12 +169,12 @@ describe('Gap Filler and Edge Hold have rail entries of their own (Dave 2026-11-
 
   it('clicked, each scrolls to its section and lights, through its scroll and after it', () => {
     for (const id of ['sp-sec-gapfiller', 'sp-sec-edge']) {
-      const { content, seen } = openPlayback();
+      const { content, seen } = openPlayback('motion', MOTION_TOPS);
       let target = null;
       const scrollTo = content.scrollTo;
       content.scrollTo = (o) => { target = o.top; scrollTo(o); };
       clickGroup(id);
-      expect(target, id).toBe(TOPS[id] - 8);
+      expect(target, id).toBe(MOTION_TOPS[id] - 8);
       for (const s of seen) expect(s, id).toEqual([id]);
       expect(lit(), id).toEqual([id]);
       document.querySelector('.settings-panel__done-btn')?.click();
@@ -178,12 +182,12 @@ describe('Gap Filler and Edge Hold have rail entries of their own (Dave 2026-11-
   });
 
   it('scrolled to by hand, each lights', () => {
-    const { content } = openPlayback();
-    userScrollTo(content, 1010);
+    const { content } = openPlayback('motion', MOTION_TOPS);
+    userScrollTo(content, 510);
     expect(lit()).toEqual(['sp-sec-gapfiller']);
-    userScrollTo(content, 1410);
+    userScrollTo(content, 1310);
     expect(lit()).toEqual(['sp-sec-edge']);
-    userScrollTo(content, 1210);
+    userScrollTo(content, 910);
     expect(lit()).toEqual(['sp-sec-orgasm']);
   });
 });

@@ -64,6 +64,27 @@ export function isAudioPath(path) {
 }
 
 /**
+ * An audio file's length in seconds for its tile: `known` (the scan's) when
+ * it has one, else ffprobe's through the bridge (the backend caches it); 0
+ * when neither answers. The tile used to get it from a hidden <video>, which
+ * no longer runs for audio files (2026-11-26).
+ * @param {string} path
+ * @param {number} [known]
+ * @param {object} [bridge] window.funsync
+ * @returns {Promise<number>}
+ */
+export async function audioDuration(path, known, bridge) {
+  if (Number(known) > 0) return Number(known);
+  try {
+    const meta = await bridge?.fetchMetadata?.(path);
+    const d = Number(meta?.duration);
+    return Number.isFinite(d) && d > 0 ? d : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Seconds this element has actually PLAYED since its current source loaded,
  * from `video.played`. Seeking and sitting paused add nothing, and a resume
  * seek to 10:00 does not count as ten minutes of playback, which is why

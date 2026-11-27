@@ -322,6 +322,9 @@ function bootMain({ renderer = 'cancel', roomOpen = false, deviceStopAnswers = t
     'let _finalSnapshotDone = false;',
     'let _unsubscribeFromStore = null;',
     'let _quitStopGuard = null;',
+    // before-quit closes an open EroScripts login window first (2026-11-25).
+    'let _eroLogin = null;',
+    lift('function closeEroScriptsLoginWindow() {', '\n}\n'),
     lift('const _unsavedEdits = createUnsavedEditsGuard(', ');\n'),
     lift('function _holdMainWindowCloseForAudienceStop() {', '\n}\n'),
     lift('async function _reloadWindow(', '\n}\n'),

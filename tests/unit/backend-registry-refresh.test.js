@@ -15,6 +15,7 @@ import { liftAppClass } from './helpers/app-methods.js';
 import { Library } from '../../renderer/components/library.js';
 import { DataService } from '../../renderer/js/data-service.js';
 import { eventBus } from '../../renderer/js/event-bus.js';
+import * as VO from '../../renderer/js/video-options-model.js';
 
 const PORT = 5123;
 
@@ -254,8 +255,15 @@ describe('Mark as VR / Mark as Flat / Reset VR reach the headset without a scan 
     delete window.funsync;
   });
 
+  // The video options dialog's VR radios (its `setVRMode`): the plan, written
+  // by runOps. The ⋮ menu's toggle (`_toggleVRType`) is gone (2026-11-23).
+  const setVR = (path, mode) => {
+    const plan = VO.planSetVRMode({ videoPath: path, manualVRType: settings.get('library.manualVRType') || {}, mode });
+    if (plan.changed) VO.runOps(plan.ops, settings);
+  };
+
   it('Mark as VR is sent with the video list', async () => {
-    await lib._toggleVRType(lib.getVideoByPath(A));
+    setVR(A, 'vr');
     expect(backend.registers).toHaveLength(0);           // debounced
     await vi.advanceTimersByTimeAsync(500);
     expect(lastOverrides()[A]).toBe('vr');
@@ -263,15 +271,15 @@ describe('Mark as VR / Mark as Flat / Reset VR reach the headset without a scan 
   });
 
   it('Mark as Flat on a VR-named file is sent', async () => {
-    await lib._toggleVRType(lib.getVideoByPath(VR));
+    setVR(VR, 'flat');
     await vi.advanceTimersByTimeAsync(500);
     expect(lastOverrides()[VR]).toBe('flat');
   });
 
   it('Reset VR clears the override on the backend', async () => {
-    await lib._toggleVRType(lib.getVideoByPath(A));
+    setVR(A, 'vr');
     await vi.advanceTimersByTimeAsync(500);
-    await lib._toggleVRType(lib.getVideoByPath(A));      // override set -> Reset VR
+    setVR(A, 'auto');                                    // Reset VR
     await vi.advanceTimersByTimeAsync(500);
     expect(lastOverrides()[A]).toBe(null);
   });
@@ -282,11 +290,11 @@ describe('Mark as VR / Mark as Flat / Reset VR reach the headset without a scan 
   // each get their own.
   it('three single-card clicks within 400 ms (A, B, A) are ONE send with the last state of each', async () => {
     const B = 'D:/v/Bulk 0.mp4';
-    await lib._toggleVRType(lib.getVideoByPath(A));      // Mark as VR
+    setVR(A, 'vr');                                      // Mark as VR
     await vi.advanceTimersByTimeAsync(100);
-    await lib._toggleVRType(lib.getVideoByPath(B));      // Mark as VR
+    setVR(B, 'vr');                                      // Mark as VR
     await vi.advanceTimersByTimeAsync(100);
-    await lib._toggleVRType(lib.getVideoByPath(A));      // Reset VR
+    setVR(A, 'auto');                                    // Reset VR
     expect(backend.registers.filter((r) => r.videos)).toHaveLength(0);
     await vi.advanceTimersByTimeAsync(500);
     expect(backend.registers.filter((r) => r.videos)).toHaveLength(1);
@@ -298,11 +306,11 @@ describe('Mark as VR / Mark as Flat / Reset VR reach the headset without a scan 
 
   it('single-card clicks 500 ms apart are sent once each', async () => {
     const B = 'D:/v/Bulk 0.mp4';
-    await lib._toggleVRType(lib.getVideoByPath(A));
+    setVR(A, 'vr');
     await vi.advanceTimersByTimeAsync(500);
     expect(backend.registers.filter((r) => r.videos)).toHaveLength(1);
     expect(lastOverrides()[A]).toBe('vr');
-    await lib._toggleVRType(lib.getVideoByPath(B));
+    setVR(B, 'vr');
     await vi.advanceTimersByTimeAsync(500);
     expect(backend.registers.filter((r) => r.videos)).toHaveLength(2);
     expect(lastOverrides()[A]).toBe('vr');
@@ -330,10 +338,10 @@ describe('Mark as VR / Mark as Flat / Reset VR reach the headset without a scan 
 
   it('a late retry never lands an older override over a newer one', async () => {
     backend.up = false;
-    await lib._toggleVRType(lib.getVideoByPath(A));      // Mark as VR: send fails, retry armed
+    setVR(A, 'vr');                                      // Mark as VR: send fails, retry armed
     await vi.advanceTimersByTimeAsync(500);
     backend.up = true;
-    await lib._toggleVRType(lib.getVideoByPath(A));      // Reset VR: a newer send
+    setVR(A, 'auto');                                    // Reset VR: a newer send
     await vi.advanceTimersByTimeAsync(5000);             // its send AND the old retry's slot
     expect(lastOverrides()[A]).toBe(null);
     // The superseded retry sends nothing at all: no second full library.
@@ -342,7 +350,7 @@ describe('Mark as VR / Mark as Flat / Reset VR reach the headset without a scan 
 
   it('a retry of the video list never undoes a newer collection edit', async () => {
     backend.up = false;
-    await lib._toggleVRType(lib.getVideoByPath(A));      // video send fails, retry armed
+    setVR(A, 'vr');                                      // video send fails, retry armed
     await vi.advanceTimersByTimeAsync(500);
     backend.up = true;
     settings.set('library.collections', [{ id: 'k1', name: 'Faves', videoPaths: [A] }]);

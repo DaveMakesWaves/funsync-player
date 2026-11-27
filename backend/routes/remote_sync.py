@@ -30,6 +30,7 @@ import logging
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from routes.media import get_video_registry
+from routes.desktop_gate import DESKTOP_ONLY
 
 router = APIRouter()
 log = logging.getLogger("funsync.remote")
@@ -175,6 +176,21 @@ async def phone_sync(ws: WebSocket) -> None:
             await _notify_observer({"type": "phone-disconnected", "ip": departing_ip})
             log.info("[remote] Phone disconnected: %s", departing_ip)
         await _safe_close(ws)
+
+
+# --- Liveness (desktop) -----------------------------------------------------
+
+@router.get("/sync/status", dependencies=DESKTOP_ONLY)
+async def sync_status() -> dict:
+    """Is a phone connected right now? The desktop asks every 10 s while it
+    shows a Web Remote session (DESIGN.md §2.16: a status that says something
+    is live must be able to find out that it is not). Desktop-only: it names
+    the phone's address."""
+    return {
+        "phoneConnected": _active_phone is not None,
+        "ip": _active_phone_ip,
+        "observerConnected": _observer is not None,
+    }
 
 
 # --- Observer endpoint (renderer) -----------------------------------------

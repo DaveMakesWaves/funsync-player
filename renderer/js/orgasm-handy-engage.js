@@ -157,9 +157,12 @@ export function holdFinisherEnd(rawContent, holdMs = HOLD_END_MS) {
  * @param {(url: string) => void} [deps.onUrlCached] — persist a fresh upload's URL
  * @param {() => boolean} deps.isCurrent — false once the user released this
  *   activation (a stale engage must never clobber the restore)
+ * @param {string} [deps.logTag] — the log prefix: 'OrgasmSwitch' (default),
+ *   'EdgeHold' or 'PatternTest', so a support log says which feature ran
+ *   (2026-11-20: an Edge Hold read as if X were on)
  * @returns {Promise<string>}
  */
-export async function engageHandyFinisher({ handyManager, content, cachedUrl, cutoff, inverted = false, once = false, onUrlCached, isCurrent }) {
+export async function engageHandyFinisher({ handyManager, content, cachedUrl, cutoff, inverted = false, once = false, onUrlCached, isCurrent, logTag = 'OrgasmSwitch' }) {
   try {
     let url = cachedUrl;
     if (!url && content) {
@@ -176,7 +179,7 @@ export async function engageHandyFinisher({ handyManager, content, cachedUrl, cu
       if (url) onUrlCached?.(url);
     }
     if (!url) {
-      console.warn('[OrgasmSwitch] Handy: no finisher cloud URL (upload failed?)');
+      console.warn(`[${logTag}] Handy: no finisher cloud URL (upload failed?)`);
       return 'no-url';
     }
     if (!isCurrent()) return 'stale'; // released during upload
@@ -188,10 +191,10 @@ export async function engageHandyFinisher({ handyManager, content, cachedUrl, cu
     if (!ok) return 'setup-failed';
     if (!isCurrent()) return 'stale'; // released during setup — restore's setScript comes after us, so main wins
     await handyManager.hsspPlay(0);
-    console.log('[OrgasmSwitch] Handy finisher looping via HSSP');
+    console.log(`[${logTag}] Handy finisher looping via HSSP`);
     return 'looping';
   } catch (e) {
-    console.warn('[OrgasmSwitch] Handy HSSP-loop engage error:', e?.message || e);
+    console.warn(`[${logTag}] Handy HSSP-loop engage error:`, e?.message || e);
     return 'error';
   }
 }

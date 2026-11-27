@@ -759,52 +759,10 @@
   opacity: 0.4;
 }
 
-/* No picture to show (an audio file, N-05): the app logo in a muted grey
- * and the file's title, the size of a thumbnail, in both themes. The list
- * row's thumb shows the logo only: the title is right beside it. */
-.library__thumb-novideo {
-  --novideo-bg: #24242c;
-  --novideo-logo-opacity: 0.8;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 6%;
-  width: 100%;
-  height: 100%;
-  padding: 6% 8%;
-  box-sizing: border-box;
-  background: var(--novideo-bg);
-  overflow: hidden;
-}
-
-:root[data-theme="light"] .library__thumb-novideo {
-  --novideo-bg: #e4e4e9;
-  --novideo-logo-opacity: 0.65;
-}
-
-.library__thumb-novideo-logo {
-  flex: 0 0 auto;
-  height: 46%;
-  aspect-ratio: 1;
-  background: url('../assets/logo-muted.png') center / contain no-repeat;
-  opacity: var(--novideo-logo-opacity);
-}
-
-.library__thumb-novideo-title {
-  max-width: 100%;
-  color: var(--text-secondary);
-  font-size: 12px;
-  font-weight: 500;
-  line-height: 1.3;
-  text-align: center;
-  overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow-wrap: anywhere;
-}
-
+/* The no-picture tile's own look is in styles/no-video-tile.css (shared with
+ * Playlists, Categories, the queue panel and the Up Next card, also in the
+ * player pop-out). The list row's thumb shows the logo only: the title is
+ * right beside it. */
 .library__list-thumb .library__thumb-novideo {
   padding: 3px;
 }
@@ -1191,39 +1149,6 @@
 .library__kebab-menu-item--danger:hover {
   color: var(--state-error);
   background: var(--state-error-soft);
-}
-
-/* Collapsible kebab groups (accordion submenus). The header is a regular
-   menu item with a rotating chevron; expanded items sit on a slightly
-   recessed band with extra left padding so the hierarchy reads at a
-   glance. [hidden] on the items container does the collapsing (display
-   guaranteed by the CSS reset's [hidden] rule). */
-.library__kebab-group-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.library__kebab-group-chevron {
-  color: var(--text-secondary);
-  font-size: 10px;
-  line-height: 1;
-  transition: transform var(--transition-fast);
-}
-
-.library__kebab-group--open .library__kebab-group-chevron {
-  transform: rotate(90deg);
-}
-
-.library__kebab-group-items {
-  background: rgba(0, 0, 0, 0.18);
-  border-top: 1px solid var(--border-subtle);
-  border-bottom: 1px solid var(--border-subtle);
-}
-
-.library__kebab-group-items .library__kebab-menu-item {
-  padding-left: 24px;
 }
 
 /* Video Count */
@@ -2611,3 +2536,168 @@
     display: none;
   }
 }
+
+/* A saved stream (2026-11-23): not a file on this computer. The VR badge's
+   look, with the link icon. */
+.library__stream-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.55);
+  color: #fff;
+}
+.library__stream-badge--inline {
+  width: auto;
+  height: auto;
+  background: none;
+  color: var(--text-secondary);
+}
+/* On a playlist or category tile: bottom left, like a library card's badges. */
+.stream-tile-badge {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  z-index: 2;
+}
+
+/* ── Favourites and Disabled (zaikechi #381, 2026-11-23) ──────────────
+   The heart sits beside the ⋮ on a card, shown on hover / focus like the
+   ⋮, and always once it is on (filled with the accent). A disabled video
+   stays in the grid, dimmed, with a "no entry" mark on its picture. */
+.library__fav-btn {
+  position: absolute;
+  top: 6px;
+  right: 46px;
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--transition-fast), background var(--transition-fast);
+  z-index: 2;
+}
+.library__fav-btn svg { pointer-events: none; }
+.library__card:hover .library__fav-btn,
+.library__card:focus-within .library__fav-btn,
+.library__fav-btn:focus-visible,
+.library__fav-btn.is-on { opacity: 1; }
+.library__fav-btn:hover { background: rgba(0, 0, 0, 0.85); }
+.library__fav-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* The heart is the accent (coral) always (Dave 2026-11-23): an outline when off, filled when on. */
+.library__fav-btn svg,
+.library__list-fav svg { stroke: var(--accent); }
+.library__fav-btn.is-on svg,
+.library__list-fav.is-on svg { fill: var(--accent); stroke: var(--accent); }
+
+.library__list-fav {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: none;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+}
+.library__list-item:hover .library__list-fav,
+.library__list-item:focus-within .library__list-fav,
+.library__list-fav.is-on { opacity: 1; }
+.library__list-fav:hover { color: var(--text-primary); background: var(--surface-overlay); }
+.library__list-fav:focus-visible { opacity: 1; outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Disabled, in the library, playlists and categories alike: the picture greyed
+   and faded, the title faded; the mark and the buttons stay crisp. */
+.is-disabled-video img,
+.is-disabled-video canvas,
+.is-disabled-video .library__card-placeholder { opacity: 0.4; filter: grayscale(1); }
+.is-disabled-video [class*="title"],
+.is-disabled-video [class*="name"] { opacity: 0.55; }
+.disabled-mark {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  z-index: 2;
+}
+.disabled-mark--inline {
+  position: static;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+  background: none;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+/* The Scripts filter's Unassigned / All pills (2026-11-26): at the right end
+   of the chips row, the EroScripts tab's feed pill group look (eroscripts.css
+   .es-feeds). */
+.library__scripts-scope {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  padding: 2px;
+  border-radius: 6px;
+  background: rgb(var(--ink-rgb) / 0.06);
+}
+.library__scripts-scope-btn {
+  border: 0;
+  border-radius: 4px;
+  padding: 4px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-family: var(--font-family);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.library__scripts-scope-btn:hover { color: var(--text-primary); }
+.library__scripts-scope-btn--on {
+  background: rgb(var(--ink-rgb) / 0.14);
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.library__scripts-scope-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* "With <video>" under a script a video uses (the Scripts filter's All). */
+.library__card-sub,
+.library__list-sub {
+  color: var(--text-secondary);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.library__card-sub { margin-top: 2px; }
+.library__list-sub { flex: 0 1 auto; min-width: 0; margin-left: 12px; }
+/* A script card's info is a column: the name, then the video's line. */
+.library__card--script .library__card-info {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+}
+.library__card--script .library__card-sub { margin-top: 1px; }

@@ -36,10 +36,11 @@ describe('the Library\'s empty state says why it is empty (R3 fix-up)', () => {
     { id: 'b', name: 'bulk', path: 'C:\\sandbox\\bulk', enabled: false },
   ];
 
-  it('every source switched off: "switched off ... Settings > Sources", not "Add a source folder"', () => {
+  it('every source switched off: "switched off ... Settings > Library", not "Add a source folder"', () => {
     _setBundlesForTests('en', EN, EN);
     const view = libraryWith(OFF);
-    expect(view.text()).toBe('Your source folders are all switched off. Turn one on in Settings > Sources to browse it.');
+    // The area is "Library" since the Settings re-sort (2026-11-23).
+    expect(view.text()).toBe('Your source folders are all switched off. Turn one on in Settings > Library to browse it.');
     expect(view.text()).not.toBe(EN.library.noSourcesEmpty);
     expect(view.button()).toBe(EN.library.addSourceFolder);
   });
@@ -48,11 +49,24 @@ describe('the Library\'s empty state says why it is empty (R3 fix-up)', () => {
     _setBundlesForTests('de', DE, EN);
     const view = libraryWith(OFF);
     expect(view.text()).toBe(DE.library.sourcesAllOff
-      .replace('{settings}', DE.settingsPanel.modalTitle).replace('{tab}', DE.settingsPanel.tabSources));
+      .replace('{settings}', DE.settingsPanel.modalTitle).replace('{tab}', DE.settingsPanel.tabLibrary));
   });
 
   it('no source at all: "Add a source folder", as before', () => {
     _setBundlesForTests('en', EN, EN);
     expect(libraryWith([]).text()).toBe(EN.library.noSourcesEmpty);
+  });
+
+  it('the empty library follows a language change (test day 2026-11-24, B007: first launch, German chosen, the empty state stayed English)', async () => {
+    const { eventBus } = await import('../../renderer/js/event-bus.js');
+    _setBundlesForTests('en', EN, EN);
+    const view = libraryWith([]);
+    expect(view.button()).toBe(EN.library.addSourceFolder);
+    _setBundlesForTests('de', DE, EN);
+    eventBus.emit('language:changed', { locale: 'de' });
+    expect(view.text()).toBe(DE.library.noSourcesEmpty);
+    expect(view.button()).toBe(DE.library.addSourceFolder);
+    // The button still adds a source after the repaint.
+    expect(document.querySelectorAll('.library__empty').length).toBe(1);
   });
 });

@@ -62,6 +62,11 @@ export const LOCALE        = 'locale';        // { type, locale }
 // INITIAL_STATE still carries both for a fresh open.
 //   { type, playhead: boolean, opacity: number (percent, 20-100) }
 export const INLINE_VIZ_STATE = 'inline-viz-state';
+// The video's subtitles (2026-11-22: the pop-out showed none). Sent when the
+// main window loads or clears them, and with every video it hands over.
+//   { type, name, text }  — the subtitle file's name (.srt / .vtt) and text
+//   { type, name: null }  — no subtitles
+export const SUBTITLE      = 'subtitle';
 
 // ── Pop-out → main ─────────────────────────────────────────────────────
 export const READY         = 'ready';         // { type }
@@ -104,6 +109,12 @@ export const FRAME_CAPTURED = 'frame-captured'; // { type, requestId, dataUrl }
 // and false on the key's release.
 export const ORGASM_HOLD   = 'orgasm-hold';    // { type, active }
 export const EDGE_HOLD     = 'edge-hold';      // { type, active }
+// Main -> player window: the note shown while Z is kept on into a new video
+// (lr_x3 #447, edge-hold-carry.js), or none (`text` null).
+export const EDGE_NOTICE   = 'edge-notice';    // { type, text }
+// Shift+Space in the player window (2026-11-23, DESIGN.md §2.15): main runs
+// Stop all, as for its own Shift+Space.
+export const STOP_ALL      = 'stop-all';       // { type }
 
 /**
  * Build an inner message payload. The window-module `relay()` wraps it in
@@ -129,5 +140,5 @@ export const ALL_MESSAGE_TYPES = Object.freeze([
   CAPTURE_FRAME, HEATMAP, CHAPTERS, VARIANTS, QUEUE_STATE, UP_NEXT, THEME, LOCALE,
   READY, TIME_TICK, VIDEO_EVENT, VIDEO_META, REQUEST_EXPAND, SWITCH_VARIANT,
   LOAD_NEXT, LOAD_PREV, UP_NEXT_ACTION, FRAME_CAPTURED, SET_INLINE_VIZ, INLINE_VIZ_STATE,
-  ORGASM_HOLD, EDGE_HOLD,
+  ORGASM_HOLD, EDGE_HOLD, EDGE_NOTICE, SUBTITLE, STOP_ALL,
 ]);

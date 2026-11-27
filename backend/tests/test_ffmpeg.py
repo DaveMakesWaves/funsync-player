@@ -815,7 +815,11 @@ class TestGenerateSingleThumbnail:
             type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))})
         )
         corrupt = tmp_path / "Corrupt Bytes.mp4"
-        corrupt.write_bytes(os.urandom(4096))
+        # Fixed bytes, not os.urandom: random input failed this once in a full
+        # run (2026-11-23; 0 of 600+ reruns), ffprobe now and then reading
+        # random bytes another way. These give "moov atom not found" +
+        # "Invalid data found when processing input" every time.
+        corrupt.write_bytes((b"FunSync test: these bytes are not a video. " * 96)[:4096])
 
         with pytest.raises(RuntimeError) as err:
             get_metadata(str(corrupt))
@@ -1056,9 +1060,15 @@ class TestRemuxToMp4:
         video.write_bytes(b"placeholder")
         captured = self._patch(monkeypatch, tmp_path, vcodec="mpeg4", acodec="mp3")
 
-        with pytest.raises(RuntimeError, match="remux"):
+        with pytest.raises(RuntimeError, match="remux") as ei:
             remux_to_mp4(str(video))
         assert captured["called"] is False
+        # Typed, with the codec (test day 2026-11-24, B027): the route turns
+        # it into a 422 the app can name the codec from, instead of "Video
+        # format not supported".
+        from services.ffmpeg import RemuxCodecError
+        assert isinstance(ei.value, RemuxCodecError)
+        assert ei.value.codec == "mpeg4"
 
     def test_cache_hit_skips_ffmpeg(self, monkeypatch, tmp_path):
         from services import ffmpeg as ffmpeg_mod
@@ -1107,3 +1117,77 @@ class TestRemuxToMp4:
         out_dir = os.path.join(str(tmp_path), "funsync_remux")
         leftovers = os.listdir(out_dir) if os.path.isdir(out_dir) else []
         assert leftovers == []
+
+
+# --- The metadata cache's saves never mix (2026-11-22, R3R-5's fix applied here) ---
+# One `.tmp-<pid>` name for every thread, written outside any lock, let two
+# saves at once leave a cache file that was not JSON.
+
+def test_two_metadata_cache_saves_at_once_use_two_temp_files_one_at_a_time(monkeypatch, tmp_path, _isolated_metadata_cache):
+    import threading
+    import time as _time
+    import services.ffmpeg as ffmpeg_mod
+
+    monkeypatch.setattr(ffmpeg_mod, "tempfile", type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))}))
+    with ffmpeg_mod._metadata_cache_lock:
+        ffmpeg_mod._metadata_cache_loaded = True
+        for i in range(400):
+            ffmpeg_mod._metadata_cache[f"C:/lib/v{i}.mp4:1:1"] = {"duration": float(i), "codec": "h264" * 20}
+    cache_path = ffmpeg_mod._metadata_cache_path()
+    opened, spans = [], []
+    real_open = open
+
+    def spy_open(file, mode="r", *a, **kw):
+        if "w" in mode and str(file).startswith(cache_path):
+            opened.append(str(file))
+            start = _time.monotonic()
+            _time.sleep(0.05)               # hold the write open: a second save would overlap here
+            spans.append((start, _time.monotonic()))
+        return real_open(file, mode, *a, **kw)
+
+    monkeypatch.setattr("builtins.open", spy_open)
+    started = threading.Barrier(2)
+
+    def one():
+        started.wait(5)
+        with ffmpeg_mod._metadata_cache_lock:
+            ffmpeg_mod._metadata_cache_dirty = max(ffmpeg_mod._metadata_cache_dirty, 1)
+        ffmpeg_mod._save_metadata_cache(force=True)
+
+    threads = [threading.Thread(target=one) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    monkeypatch.setattr("builtins.open", real_open)
+
+    assert len(opened) == 2 and opened[0] != opened[1], opened
+    (a0, a1), (b0, b1) = sorted(spans)
+    assert b0 >= a1, "the second save wrote while the first was still writing"
+    with open(cache_path, encoding="utf-8") as f:
+        assert len(json.load(f)["entries"]) == 400
+    assert not [p for p in os.listdir(os.path.dirname(cache_path)) if ".tmp-" in p]
+
+
+def test_a_failed_metadata_cache_save_removes_its_temp_file_and_tries_again(monkeypatch, tmp_path, _isolated_metadata_cache):
+    import services.ffmpeg as ffmpeg_mod
+
+    monkeypatch.setattr(ffmpeg_mod, "tempfile", type("T", (), {"gettempdir": staticmethod(lambda: str(tmp_path))}))
+    with ffmpeg_mod._metadata_cache_lock:
+        ffmpeg_mod._metadata_cache_loaded = True
+        ffmpeg_mod._metadata_cache["C:/lib/a.mp4:1:1"] = {"duration": 1.0}
+        ffmpeg_mod._metadata_cache_dirty = 1
+    real_replace = os.replace
+
+    def failing_replace(a, b):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ffmpeg_mod.os, "replace", failing_replace)
+    ffmpeg_mod._save_metadata_cache(force=True)
+    cache_dir = os.path.dirname(ffmpeg_mod._metadata_cache_path())
+    assert not [p for p in os.listdir(cache_dir) if ".tmp-" in p]
+    assert ffmpeg_mod._metadata_cache_dirty == 1        # still pending
+    monkeypatch.setattr(ffmpeg_mod.os, "replace", real_replace)
+    ffmpeg_mod._save_metadata_cache(force=True)
+    with open(ffmpeg_mod._metadata_cache_path(), encoding="utf-8") as f:
+        assert "C:/lib/a.mp4:1:1" in json.load(f)["entries"]

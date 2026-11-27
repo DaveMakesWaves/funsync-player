@@ -45,10 +45,22 @@
 // the player's keys (Space on a slider, F, M, K, J, L...) go on to the player.
 
 import { t, getCurrentLocale } from '../js/i18n.js';
+import { speedForBpm, bpmFromBeats, TEMPO_MIN_BPM, TEMPO_MAX_BPM } from '../js/fill-tempo.js';
 import { eventBus } from '../js/event-bus.js';
 import { icon, X } from '../js/icons.js';
-import { fillRange } from '../js/pattern-fill.js';
-import { listFamilies, listPatterns, describePattern, renderPattern, PATTERN_SPEED_CEILING } from '../js/pattern-library.js';
+import { fillRange, FILL_NO_CAP } from '../js/pattern-fill.js';
+import { listFamilies, listPatterns, describePattern, renderPattern, PATTERN_SPEED_CEILING, FAST_LEG } from '../js/pattern-library.js';
+
+/**
+ * No speed ceiling on what the editor writes (Dave, 2026-11-24: "there
+ * shouldnt really be a limit, i think some scripts on the forum go up to like
+ * 2000 ... its down to the scripters ... sometimes going over the limit is a
+ * trick people use for unusual movements", then "yes lift the fill cap too").
+ * The fill core gets no cap (FILL_NO_CAP) and the Speed / Ramp sliders reach
+ * FILL_SLIDER_MAX. The live patterns (Gap Filler, Orgasm Switch, Edge Hold)
+ * drive a device as they play and keep PATTERN_SPEED_CEILING.
+ */
+export const FILL_SLIDER_MAX = 5000;         // = FILL_NO_CAP (Dave: "infinite can be 5000")
 import { layoutKey } from '../js/keyboard-layout.js';
 
 /** `editor.patternFill` in electron/store.js: what the drawer remembers (design §h). */
@@ -345,7 +357,11 @@ export function dockedDrawerPlacement({
       return { mode, top: bottom - height, height };
     }
   }
-  const top = Math.max(0, Math.min(limit, eBottom - minH));
+  // Beside the timeline: inside the editor when it alone holds a whole drawer
+  // (stacked lanes make it that tall: from under the top bar it covered the
+  // control bar's right end at 1280x800, fit-on-screen pass 2026-11-24), else
+  // from under the top bar as before (a short window).
+  const top = eBottom - eTop >= minH ? eTop : Math.max(0, Math.min(limit, eBottom - minH));
   return { mode: 'side', top, height: eBottom - top };
 }
 
@@ -757,9 +773,10 @@ export class PatternFillDrawer {
    */
   _patternDefaults(id) {
     const d = describePattern(id);
-    const own = Math.min(PATTERN_SPEED_CEILING, Math.round(d?.speed || 120));
-    const lo = Math.min(PATTERN_SPEED_CEILING - 5, Math.max(5, Math.floor(d?.speedRange?.[0] || own / 2)));
-    const hi = Math.min(PATTERN_SPEED_CEILING, Math.max(lo + 5, Math.ceil(d?.speedRange?.[1] || own * 2), own));
+    const own = Math.round(d?.speed || 120);
+    const lo = Math.max(5, Math.min(Math.floor(d?.speedRange?.[0] || own / 2), FILL_SLIDER_MAX - 5));
+    // The slider reaches FILL_SLIDER_MAX on every pattern (no ceiling, Dave).
+    const hi = Math.max(lo + 5, Math.ceil(d?.speedRange?.[1] || own * 2), own, FILL_SLIDER_MAX);
     const place = d?.range || [0, 100];
     return {
       speed: null,
@@ -783,8 +800,8 @@ export class PatternFillDrawer {
   _options() {
     const s = this._state;
     return {
-      speed: s.speed === null ? null : Math.min(s.speed, PATTERN_SPEED_CEILING),
-      ramp: s.rampOn ? { to: Math.min(s.rampTo, PATTERN_SPEED_CEILING) } : null,
+      speed: s.speed === null ? null : s.speed,
+      ramp: s.rampOn ? { to: s.rampTo } : null,
       reversed: s.reversed,
       range: s.rangeOwn ? null : { min: Math.min(s.rangeMin, s.rangeMax), max: Math.max(s.rangeMin, s.rangeMax) },
       variation: s.variation,
@@ -792,7 +809,11 @@ export class PatternFillDrawer {
       joinSmoothness: s.join,
       endFit: s.endFit,
       mode: s.mode,
-      maxSpeed: PATTERN_SPEED_CEILING,
+      maxSpeed: FILL_NO_CAP,                               // no ceiling (FILL_SLIDER_MAX)
+      // ... and no hidden one: legs as short as a frame (17 ms), the joins too
+      // (the 100 ms / 50 ms floors held top speeds down; Dave: no limit).
+      allowFast: true,
+      minLegMs: FAST_LEG,
     };
   }
 
@@ -1288,11 +1309,12 @@ export class PatternFillDrawer {
     const controls = this._el('div', 'fill-drawer__controls');
     const s = () => this._state;
 
-    this._speed = this._slider({ name: 'speed', labelKey: 'editor.patternFill.speed', min: 10, max: PATTERN_SPEED_CEILING, step: 1, onInput: (v) => { s().speed = v; this._writeOutputs(); } });
+    this._speed = this._slider({ name: 'speed', labelKey: 'editor.patternFill.speed', min: 10, max: FILL_SLIDER_MAX, step: 1, onInput: (v) => { s().speed = v; this._writeOutputs(); } });
     this._speedOwn = this._el('p', 'fill-drawer__sub');
     this._speed.row.appendChild(this._speedOwn);
+    this._buildTempoRow();
 
-    this._ramp = this._slider({ name: 'ramp', labelKey: 'editor.patternFill.rampTo', min: 10, max: PATTERN_SPEED_CEILING, step: 1, onInput: (v) => { s().rampTo = v; this._writeOutputs(); } });
+    this._ramp = this._slider({ name: 'ramp', labelKey: 'editor.patternFill.rampTo', min: 10, max: FILL_SLIDER_MAX, step: 1, onInput: (v) => { s().rampTo = v; this._writeOutputs(); } });
     this._rampCheck = this._el('input', 'fill-drawer__inline-check', { type: 'checkbox', id: `${this._id}-ramp-on` });
     this._rampCheck.addEventListener('change', () => { s().rampOn = this._rampCheck.checked; this._syncControls(); this._schedule(); });
     // "Ramp to" is the on / off checkbox's label; the slider is named by the
@@ -1368,7 +1390,7 @@ export class PatternFillDrawer {
     });
 
     controls.append(
-      this._speed.row, this._ramp.row, this._reverse.label, rangeRow,
+      this._speed.row, this._tempoRow, this._ramp.row, this._reverse.label, rangeRow,
       this._variation.row, seedRow, this._join.row, this._endFit.set, this._mode.set,
     );
     body.append(find, this._list, this._empty, controls);
@@ -1549,6 +1571,56 @@ export class PatternFillDrawer {
         opt.scrollIntoView?.({ block: 'nearest' });
       }
     }
+    this._schedule();
+  }
+
+  /**
+   * Tempo (editor work list 4.7, 2026-11-24): a BPM sets the Speed to one
+   * stroke per beat over the fill's depth; From the beats reads the BPM off
+   * the beat markers inside the stretch (the editor's Generate from Beats /
+   * beat detection). The Speed slider stays free to move afterwards.
+   */
+  _buildTempoRow() {
+    this._tempoRow = this._el('div', 'fill-drawer__row fill-drawer__tempo');
+    const label = this._el('label', 'fill-drawer__label', { for: `${this._id}-bpm` });
+    label.textContent = t('editor.patternFill.tempo');
+    label.setAttribute('data-i18n', 'editor.patternFill.tempo');
+    this._bpm = this._el('input', 'fill-drawer__bpm', {
+      type: 'number', id: `${this._id}-bpm`, min: String(TEMPO_MIN_BPM), max: String(TEMPO_MAX_BPM), step: '1', inputmode: 'numeric',
+      placeholder: 'BPM',
+    });
+    this._bpmBeats = this._el('button', 'fill-drawer__btn fill-drawer__btn--small fill-drawer__bpm-beats', { type: 'button' });
+    this._bpmBeats.textContent = t('editor.patternFill.tempoFromBeats');
+    this._bpmBeats.setAttribute('data-i18n', 'editor.patternFill.tempoFromBeats');
+    this._tempoNote = this._el('p', 'fill-drawer__sub');
+    this._bpm.addEventListener('change', () => this._applyTempo(Number(this._bpm.value)));
+    this._bpmBeats.addEventListener('click', () => {
+      const w = this._window(this._getActions?.() || []);
+      const bpm = w ? bpmFromBeats(this._graph?._beatMarkers || null, w.startMs, w.endMs) : null;
+      if (bpm === null) {
+        this._tempoNote.textContent = t('editor.patternFill.tempoNoBeats');
+        return;
+      }
+      this._bpm.value = String(bpm);
+      this._applyTempo(bpm);
+    });
+    this._tempoRow.append(label, this._bpm, this._bpmBeats, this._tempoNote);
+  }
+
+  /** Speed from a BPM over the fill's depth (the chosen range, or the pattern's own). */
+  _applyTempo(bpm) {
+    const s = this._state;
+    if (!s) return;
+    const depth = Math.abs((s.rangeMax ?? 100) - (s.rangeMin ?? 0)) || 100;
+    const speed = speedForBpm(bpm, depth, { min: s.speedMin ?? 10, max: s.speedMax ?? FILL_SLIDER_MAX });
+    if (speed === null) {
+      this._tempoNote.textContent = t('editor.patternFill.tempoRange', { min: TEMPO_MIN_BPM, max: TEMPO_MAX_BPM });
+      return;
+    }
+    s.speed = speed;
+    this._tempoNote.textContent = t('editor.patternFill.tempoSet', { bpm: Math.round(bpm), speed });
+    this._syncControls();
+    this._writeOutputs?.();
     this._schedule();
   }
 

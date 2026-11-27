@@ -32,6 +32,7 @@ vi.mock('../../renderer/js/toast.js', () => ({ showToast: vi.fn() }));
 const { showToast } = await import('../../renderer/js/toast.js');
 const { _setBundlesForTests, t } = await import('../../renderer/js/i18n.js');
 const { EroScriptsPanel } = await import('../../renderer/components/eroscripts-panel.js');
+const { cleanSearchName } = await import('../../renderer/js/search-name-clean.js');
 
 // The REAL English bundle, with nothing added: the button's words must come
 // from en.json, so a key missing there fails here instead of the button
@@ -183,13 +184,13 @@ describe('C-10: the Get Script button tells a fresh save from an already-there o
 // Tab listeners sit on the panel itself. The next click outside then only
 // closed the panel (a library card clicked then did not open).
 describe('fix-up: the nav button searches for the OPEN video only', () => {
-  const NavLifted = liftAppClass(['_onEroScriptsNavClick', '_hasOpenVideo', '_currentView'], { showToast, t });
-  function nav(state) {
+  const NavLifted = liftAppClass(['_onEroScriptsNavClick', '_hasOpenVideo', '_currentView'], { showToast, t, cleanSearchName });
+  function nav(state, name = 'Square OU.mp4') {
     const app = Object.assign(new NavLifted(), {
       _navStack: state.view === 'library' ? ['library'] : ['library', state.view],
       _miniActive: !!state.mini,
       _playerWindowActive: !!state.popout,
-      _currentVideoName: 'Square OU.mp4',
+      _currentVideoName: name,
       funscriptEngine: { isLoaded: false },
       eroscriptsPanel: { _visible: false, setSearchQuery: vi.fn(), toggle: vi.fn() },
     });
@@ -203,6 +204,11 @@ describe('fix-up: the nav button searches for the OPEN video only', () => {
       expect(panel.setSearchQuery).toHaveBeenCalledWith('Square OU', true);
       expect(panel.toggle).toHaveBeenCalledTimes(1);
     }
+  });
+
+  it('v0.10.1: a slug-style file name is searched as words, the same query the auto-match uses', () => {
+    const panel = nav({ view: 'player' }, 'anna-claire-clouds-takes-on-a-mouthful-of-cum_1080p.mp4');
+    expect(panel.setSearchQuery).toHaveBeenCalledWith('anna claire clouds takes on a mouthful of cum', true);
   });
 
   it('closed with the mini player\'s ×: the panel opens empty, no search for the closed video', () => {

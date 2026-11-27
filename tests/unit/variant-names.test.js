@@ -94,7 +94,7 @@ let switched;
 
 beforeAll(() => {
   Lifted = liftAppClass([
-    '_updateVariantSelector', '_showVariantDropdown', '_variantLabelText', '_streamPlayerWindowData',
+    '_updateVariantSelector', '_showVariantDropdown', '_markVariantItemIfMissing', '_variantLabelText', '_streamPlayerWindowData',
     '_showManageVariantsModal', '_cycleVariant',
   ], {
     document, window, t, PLAYERWIN, Modal,

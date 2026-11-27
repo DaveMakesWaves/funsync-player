@@ -110,6 +110,10 @@ export function makeScriptTagRecord(topic, now, extra = {}) {
     savedAt: now,
     fetchedAt: Number.isFinite(opts.fetchedAt) ? opts.fetchedAt : null,
     stale: false,
+    // The VIDEO came from this post too (the EroScripts tab's downloads, not
+    // a script-only Get Script): its tags stay the video's when it has no
+    // script (video-options-model.js eroscriptsRecordState; Dave, 2026-11-25).
+    ...(opts.videoFromPost === true ? { videoFromPost: true } : {}),
   };
 }
 
@@ -180,7 +184,7 @@ export function topicMetaOf(answer) {
  *   now?: number}} download
  * @returns {boolean} whether anything was written
  */
-export function recordDownloadTags(settings, videoPath, { topic, answer = null, scriptPath = null, now } = {}) {
+export function recordDownloadTags(settings, videoPath, { topic, answer = null, scriptPath = null, now, video = false } = {}) {
   if (!topic || topic.id == null) return false;
   // The answer is about the post downloaded from; another id is not used.
   const same = answer && typeof answer === 'object'
@@ -198,7 +202,33 @@ export function recordDownloadTags(settings, videoPath, { topic, answer = null, 
     scriptPath: textOrNull(scriptPath) || undefined,
     match: TAG_MATCH.DOWNLOAD,
     fetchedAt: read ? when : undefined,
+    videoFromPost: video === true,
   });
+}
+
+/**
+ * Downloads made before the mark (Dave, 2026-11-25): the tab's own list of
+ * what it saved per post (`eroscripts.downloaded`: topic id -> {video}) says
+ * which videos came from a post. Their records get `videoFromPost` when they
+ * name that post. Adds the mark only, never removes or rewrites anything.
+ * @returns {number} how many records were marked
+ */
+export function markVideosFromPosts(settings, downloaded) {
+  if (!settings?.get || !settings?.set || !downloaded || typeof downloaded !== 'object') return 0;
+  const map = settings.get(SCRIPT_TAGS_KEY);
+  if (!map || typeof map !== 'object') return 0;
+  let changed = 0;
+  const next = { ...map };
+  for (const [topicId, entry] of Object.entries(downloaded)) {
+    const video = entry && typeof entry.video === 'string' ? entry.video : '';
+    const rec = video ? next[video] : null;
+    if (!rec || typeof rec !== 'object' || rec.videoFromPost === true) continue;
+    if (rec.match !== TAG_MATCH.DOWNLOAD || Number(rec.topicId) !== Number(topicId)) continue;
+    next[video] = { ...rec, videoFromPost: true };
+    changed += 1;
+  }
+  if (changed) settings.set(SCRIPT_TAGS_KEY, next);
+  return changed;
 }
 
 /**

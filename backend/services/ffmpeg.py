@@ -9,6 +9,8 @@ import tempfile
 import threading
 import time
 import atexit
+import itertools
+import re
 from typing import Any
 
 
@@ -138,6 +140,13 @@ def run_silent(*args, **kwargs):
 # SIGTERM, dev Ctrl-C) flush via atexit.
 _metadata_cache: dict[str, dict[str, Any]] = {}
 _metadata_cache_lock = threading.Lock()
+# Saves run one at a time and each writes a temp file of its own (R3R-5's
+# fix in script_meta.py, applied here 2026-11-22): one `.tmp-<pid>` name for
+# every thread, written outside any lock, let two saves at once leave a file
+# that was not JSON. Lock order: _metadata_cache_save_lock, then
+# _metadata_cache_lock; nothing takes them the other way round.
+_metadata_cache_save_lock = threading.Lock()
+_metadata_cache_tmp_names = itertools.count(1)
 _metadata_cache_loaded = False
 _metadata_cache_dirty = 0          # new entries since last successful save
 _metadata_cache_last_save = 0.0    # time.monotonic() of last save attempt
@@ -183,33 +192,41 @@ def _save_metadata_cache(force: bool = False) -> None:
     rewrite the file hundreds of times; `force` (atexit) flushes whatever
     is pending. Failures are swallowed — worst case is re-probing later."""
     global _metadata_cache_dirty, _metadata_cache_last_save
-    with _metadata_cache_lock:
-        if _metadata_cache_dirty == 0:
-            return
-        now = time.monotonic()
-        if (not force
-                and _metadata_cache_dirty < METADATA_CACHE_SAVE_BATCH
-                and (now - _metadata_cache_last_save) < METADATA_CACHE_SAVE_INTERVAL_SEC):
-            return
-        # Prune oldest-inserted entries beyond the cap (dict preserves
-        # insertion order; disk-loaded entries were inserted first).
-        excess = len(_metadata_cache) - METADATA_CACHE_MAX_ENTRIES
-        if excess > 0:
-            for key in list(_metadata_cache)[:excess]:
-                del _metadata_cache[key]
-        snapshot = {"version": METADATA_CACHE_VERSION, "entries": dict(_metadata_cache)}
-        _metadata_cache_dirty = 0
-        _metadata_cache_last_save = now
-    # Serialize + write OUTSIDE the lock — probes shouldn't wait on disk.
-    try:
-        path = _metadata_cache_path()
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        tmp_path = f"{path}.tmp-{os.getpid()}"
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            json.dump(snapshot, f, ensure_ascii=False)
-        os.replace(tmp_path, path)  # atomic on Windows AND POSIX
-    except OSError:
-        pass
+    with _metadata_cache_save_lock:
+        with _metadata_cache_lock:
+            if _metadata_cache_dirty == 0:
+                return
+            now = time.monotonic()
+            if (not force
+                    and _metadata_cache_dirty < METADATA_CACHE_SAVE_BATCH
+                    and (now - _metadata_cache_last_save) < METADATA_CACHE_SAVE_INTERVAL_SEC):
+                return
+            # Prune oldest-inserted entries beyond the cap (dict preserves
+            # insertion order; disk-loaded entries were inserted first).
+            excess = len(_metadata_cache) - METADATA_CACHE_MAX_ENTRIES
+            if excess > 0:
+                for key in list(_metadata_cache)[:excess]:
+                    del _metadata_cache[key]
+            snapshot = {"version": METADATA_CACHE_VERSION, "entries": dict(_metadata_cache)}
+            dirty_was = _metadata_cache_dirty
+            _metadata_cache_dirty = 0
+            _metadata_cache_last_save = now
+            path = _metadata_cache_path()
+            tmp_path = f"{path}.tmp-{os.getpid()}-{next(_metadata_cache_tmp_names)}"
+        # Serialize + write outside the cache lock: probes don't wait on disk
+        # (only another save waits, on _metadata_cache_save_lock).
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f, ensure_ascii=False)
+            os.replace(tmp_path, path)  # atomic on Windows AND POSIX
+        except (OSError, ValueError):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+            with _metadata_cache_lock:
+                _metadata_cache_dirty = max(_metadata_cache_dirty, dirty_was)  # the next save tries again
 
 
 atexit.register(lambda: _save_metadata_cache(force=True))
@@ -480,6 +497,20 @@ def generate_thumbnails(
 # Chromium can't decode it, so remuxing wouldn't actually help — better to
 # fail clearly than produce a still-unplayable file.
 _REMUX_VIDEO_COPYABLE = {"h264", "hevc", "h265", "av1"}
+
+
+class RemuxCodecError(RuntimeError):
+    """The video codec can't be made playable by a remux (it needs a full
+    transcode). Typed, with the codec, so /api/media/remux can say so and the
+    app can name the codec instead of "Video format not supported" (test day
+    2026-11-24, B027: an MPEG-2 .mkv)."""
+
+    def __init__(self, codec: str):
+        self.codec = codec or "unknown"
+        super().__init__(
+            f"video codec '{self.codec}' can't be remuxed to a "
+            f"browser-playable MP4 (would need a full transcode)"
+        )
 # Audio codecs already MP4/Chromium-friendly → copy as-is. Everything else
 # (ac3, eac3, dts, truehd, flac, opus, vorbis, pcm_*) → transcode to AAC.
 _REMUX_AUDIO_COPYABLE = {"aac", "mp3"}
@@ -511,6 +542,120 @@ def _probe_audio_codec(video_path: str) -> str | None:
     return name or None
 
 
+# ---------------------------------------------------------------------------
+# Embedded subtitles (#268 thirstyduck500, 2026-11-23). A text stream (SRT,
+# ASS/SSA, mov_text, WebVTT) converts to WebVTT for the player's <track>
+# (ASS styling and positions are lost). A PICTURE stream (PGS, VobSub, DVB)
+# is bitmaps and cannot become text at all: it is listed with text=False so
+# the player can say so instead of silently showing nothing.
+# ---------------------------------------------------------------------------
+
+TEXT_SUBTITLE_CODECS = {
+    "subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text",
+    "microdvd", "subviewer", "subviewer1", "jacosub", "realtext", "sami",
+    "stl", "mpl2", "pjs", "vplayer",
+}
+
+_subtitle_vtt_cache: "dict[tuple, str]" = {}
+_SUBTITLE_VTT_CACHE_MAX = 16
+
+
+def list_subtitle_streams(video_path: str) -> list:
+    """Every subtitle stream in the file: index (the file's stream index),
+    codec, language, title, default / forced flags, and whether it is text
+    the player can show. Raises FileNotFoundError for a missing file."""
+    if not os.path.isfile(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    try:
+        result = run_silent(
+            [
+                FFPROBE,
+                "-v", "quiet",
+                "-select_streams", "s",
+                "-show_entries",
+                "stream=index,codec_name:stream_tags=language,title:stream_disposition=default,forced",
+                "-of", "json",
+                video_path,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return []
+    try:
+        data = json.loads(result.stdout or "{}")
+    except ValueError:
+        return []
+    out = []
+    for s in data.get("streams", []) or []:
+        if "index" not in s:
+            continue
+        codec = str(s.get("codec_name") or "").lower()
+        tags = {str(k).lower(): v for k, v in (s.get("tags") or {}).items()}
+        disp = s.get("disposition") or {}
+        out.append({
+            "index": int(s["index"]),
+            "codec": codec,
+            "language": str(tags.get("language") or ""),
+            "title": str(tags.get("title") or ""),
+            "default": bool(disp.get("default")),
+            "forced": bool(disp.get("forced")),
+            "text": codec in TEXT_SUBTITLE_CODECS,
+        })
+    return out
+
+
+def extract_subtitle_vtt(video_path: str, stream_index: int) -> str:
+    """One text subtitle stream as WebVTT. ffmpeg reads the whole file to
+    collect a stream's cues, so a result is kept (by path, size, mtime and
+    stream) for the session. Raises FileNotFoundError (no file), LookupError
+    (no such subtitle stream), ValueError (a picture stream) or RuntimeError
+    (ffmpeg failed)."""
+    streams = list_subtitle_streams(video_path)
+    match = next((s for s in streams if s["index"] == stream_index), None)
+    if match is None:
+        raise LookupError(f"No subtitle stream {stream_index}")
+    if not match["text"]:
+        raise ValueError(f"Picture subtitles ({match['codec']}) cannot be shown as text")
+    st = os.stat(video_path)
+    key = (os.path.normcase(os.path.abspath(video_path)), st.st_size, int(st.st_mtime), stream_index)
+    if key in _subtitle_vtt_cache:
+        return _subtitle_vtt_cache[key]
+    try:
+        result = run_silent(
+            [
+                FFMPEG, "-v", "error", "-nostdin",
+                "-i", video_path,
+                "-map", f"0:{stream_index}",
+                "-f", "webvtt", "-",
+            ],
+            capture_output=True,
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        raise RuntimeError("Reading the subtitles took too long")
+    except (FileNotFoundError, subprocess.SubprocessError) as e:
+        raise RuntimeError(str(e))
+    if result.returncode != 0:
+        err = (result.stderr or b"").decode("utf-8", errors="replace")
+        raise RuntimeError(_one_line(err) or "ffmpeg failed")
+    vtt = (result.stdout or b"").decode("utf-8", errors="replace")
+    if len(_subtitle_vtt_cache) >= _SUBTITLE_VTT_CACHE_MAX:
+        _subtitle_vtt_cache.pop(next(iter(_subtitle_vtt_cache)))
+    _subtitle_vtt_cache[key] = vtt
+    return vtt
+
+
+def remux_out_path(video_path: str) -> str:
+    """Where the remuxed MP4 of `video_path` lives (or will): the temp cache."""
+    out_dir = os.path.join(tempfile.gettempdir(), "funsync_remux")
+    os.makedirs(out_dir, exist_ok=True)
+    return os.path.join(out_dir, f"{_get_video_hash(video_path)}.mp4")
+
+
 def remux_to_mp4(video_path: str) -> dict[str, Any]:
     """Repackage a video into an MP4 container for browser playback.
 
@@ -537,11 +682,9 @@ def remux_to_mp4(video_path: str) -> dict[str, Any]:
     if os.path.getsize(video_path) == 0:
         raise FileNotFoundError(f"Video is empty (0 bytes): {video_path}")
 
-    out_dir = os.path.join(tempfile.gettempdir(), "funsync_remux")
-    os.makedirs(out_dir, exist_ok=True)
     # Hash includes size+mtime (via _get_video_hash) so an edited/replaced
     # source re-remuxes instead of serving a stale MP4.
-    out_path = os.path.join(out_dir, f"{_get_video_hash(video_path)}.mp4")
+    out_path = remux_out_path(video_path)
 
     if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
         return {"path": out_path, "cached": True}
@@ -549,10 +692,7 @@ def remux_to_mp4(video_path: str) -> dict[str, Any]:
     meta = get_metadata(video_path)
     vcodec = (meta.get("codec") or "").lower()
     if vcodec not in _REMUX_VIDEO_COPYABLE:
-        raise RuntimeError(
-            f"video codec '{vcodec or 'unknown'}' can't be remuxed to a "
-            f"browser-playable MP4 (would need a full transcode)"
-        )
+        raise RemuxCodecError(vcodec)
 
     acodec = _probe_audio_codec(video_path)
 
@@ -598,6 +738,255 @@ def remux_to_mp4(video_path: str) -> dict[str, Any]:
         raise RuntimeError(f"ffmpeg remux failed: {_one_line(result.stderr, 500)}")
 
     return {"path": out_path, "cached": False, "vcodec": vcodec, "acodec": acodec}
+
+
+# ---------------------------------------------------------------------------
+# Convert to play (Dave, 2026-11-26: "fix those"): a video whose codec
+# Chromium cannot decode (MPEG-4 Part 2 / Xvid / DivX, MPEG-2, VC-1 / WMV,
+# HEVC 4:4:4 ...) played its sound over a black picture. A remux cannot help
+# (the codec is the problem), so ffmpeg re-encodes it to H.264 8-bit 4:2:0
+# with AAC / MP3 sound into the remux cache. The original is only read.
+#
+# Minutes, not seconds, so it runs as a background job: the app starts it,
+# polls its progress and can cancel it. One job per file (keyed by the same
+# size + mtime hash as the remux cache), so a second start while one runs
+# answers with the running job. Written to a .part file and renamed when
+# complete, so a cancelled or failed run never leaves a half file a later
+# start would take for done.
+# ---------------------------------------------------------------------------
+
+class TranscodeUnavailable(RuntimeError):
+    """This ffmpeg has no H.264 encoder FunSync can use."""
+
+
+_transcode_jobs: dict[str, dict[str, Any]] = {}
+# Where converted copies live: <userData>/converted, set by main.py from
+# --user-data-dir, so Windows' temp cleaning cannot take them and Settings >
+# Data can show and clear them (Dave: "yes move them to the data folder").
+# None (a backend started by hand, tests): the remux cache in temp.
+_converted_dir: str | None = None
+_transcode_lock = threading.Lock()
+_h264_encoder_probe: list = []  # [encoder name or None], filled on first use
+
+# libx264 first (in the bundled build on every platform); the OS encoders only
+# when a system ffmpeg lacks it. Settings: visually close to the source at
+# about 10x real time for 720p on a desktop CPU (veryfast, CRF 20).
+_H264_ENCODER_ARGS = {
+    "libx264": ["-preset", "veryfast", "-crf", "20"],
+    "h264_mf": ["-b:v", "8M"],
+    "h264_videotoolbox": ["-b:v", "8M"],
+}
+
+
+def _h264_encoder() -> str | None:
+    """The H.264 encoder to convert with, asked of ffmpeg once per run."""
+    if _h264_encoder_probe:
+        return _h264_encoder_probe[0]
+    found = None
+    try:
+        result = run_silent(
+            [FFMPEG, "-hide_banner", "-encoders"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20,
+        )
+        names = {line.split()[1] for line in (result.stdout or "").splitlines()
+                 if len(line.split()) > 1 and line.strip()[:1] == "V"}
+        found = next((name for name in _H264_ENCODER_ARGS if name in names), None)
+    except (FileNotFoundError, subprocess.SubprocessError, IndexError):
+        found = None
+    _h264_encoder_probe.append(found)
+    return found
+
+
+_PART_FILE = re.compile(r"^[0-9a-f]{12}\.h264\.part\.mp4$")
+
+
+def set_converted_dir(path: str | None) -> None:
+    """Called from main.py at startup with <userData>/converted.
+
+    Also removes part files a conversion left when the app closed mid-way
+    (ffmpeg goes with the backend, its half-written file stayed: 39 MB on the
+    test day, counted nowhere). At startup no conversion of this backend can
+    be running, so every part file there is a leftover. Only files named as
+    this module writes them are touched."""
+    global _converted_dir
+    _converted_dir = path or None
+    if not _converted_dir or not os.path.isdir(_converted_dir):
+        return
+    try:
+        names = os.listdir(_converted_dir)
+    except OSError:
+        return
+    for name in names:
+        if _PART_FILE.match(name):
+            _safe_unlink(os.path.join(_converted_dir, name))
+
+
+def transcode_out_path(video_path: str) -> str:
+    """Where the converted copy of `video_path` lives (or will)."""
+    out_dir = _converted_dir or os.path.join(tempfile.gettempdir(), "funsync_remux")
+    os.makedirs(out_dir, exist_ok=True)
+    return os.path.join(out_dir, f"{_get_video_hash(video_path)}.h264.mp4")
+
+
+def transcode_args(video_path: str, out_part: str, encoder: str, acodec: str | None) -> list[str]:
+    """The ffmpeg command for one conversion (progress on stdout)."""
+    args = [
+        FFMPEG, "-y", "-nostdin", "-hide_banner",
+        "-i", video_path,
+        "-map", "0:v:0", "-map", "0:a:0?",
+        "-c:v", encoder, *_H264_ENCODER_ARGS.get(encoder, []),
+        # 8-bit 4:2:0 is what every browser decodes; it needs even sizes, and
+        # an odd-sized Xvid would otherwise fail the whole run.
+        "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+        "-pix_fmt", "yuv420p",
+    ]
+    if acodec is None:
+        pass
+    elif acodec in _REMUX_AUDIO_COPYABLE:
+        args += ["-c:a", "copy"]
+    else:
+        args += ["-c:a", "aac", "-b:a", "192k"]
+    args += ["-movflags", "+faststart", "-progress", "pipe:1", "-nostats", out_part]
+    return args
+
+
+def _transcode_view(key: str, job: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "job": key,
+        "state": job["state"],
+        "progress": round(float(job.get("progress") or 0.0), 4),
+        "path": job.get("path"),
+        "error": job.get("error"),
+    }
+
+
+def _run_transcode(key: str, out_path: str, args: list[str], duration: float) -> None:
+    job = _transcode_jobs[key]
+    part = args[-1]
+    try:
+        kwargs = {}
+        if sys.platform == "win32":
+            kwargs["creationflags"] = NO_WINDOW_CREATIONFLAGS
+        proc = subprocess.Popen(
+            args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace", **kwargs,
+        )
+        job["proc"] = proc
+        tail: list[str] = []
+
+        def drain_stderr():  # a full stderr pipe would stall ffmpeg
+            for line in proc.stderr:
+                tail.append(line.rstrip())
+                del tail[:-20]
+
+        drainer = threading.Thread(target=drain_stderr, daemon=True)
+        drainer.start()
+        for raw in proc.stdout:
+            line = raw.strip()
+            # out_time_us, and out_time_ms (also microseconds, despite its name)
+            if line.startswith(("out_time_us=", "out_time_ms=")) and duration > 0:
+                try:
+                    seconds = int(line.split("=", 1)[1]) / 1_000_000
+                except ValueError:
+                    continue
+                job["progress"] = max(0.0, min(0.999, seconds / duration))
+        proc.wait()
+        drainer.join(timeout=5)
+        if job.get("cancelled"):
+            _safe_unlink(part)
+            job["state"] = "cancelled"
+            return
+        if proc.returncode != 0 or not os.path.exists(part) or os.path.getsize(part) == 0:
+            _safe_unlink(part)
+            job["state"] = "error"
+            job["error"] = _one_line(" ".join(tail), 300) or f"ffmpeg exited with {proc.returncode}"
+            return
+        os.replace(part, out_path)
+        job["progress"] = 1.0
+        job["path"] = out_path
+        job["state"] = "done"
+    except Exception as e:  # never leave a job "running" forever
+        _safe_unlink(part)
+        job["state"] = "error"
+        job["error"] = str(e) or e.__class__.__name__
+    finally:
+        job["proc"] = None
+
+
+def transcode_start(video_path: str, cached_only: bool = False) -> dict[str, Any]:
+    """Start converting `video_path` (or answer with what is there).
+
+    Returns the job view: state 'done' with `path` when a converted copy
+    exists (cached), 'running' with progress, or, with `cached_only`, state
+    'none' when there is no copy (nothing is started).
+
+    Raises FileNotFoundError (no file) and TranscodeUnavailable (no H.264
+    encoder in this ffmpeg).
+    """
+    if not os.path.isfile(video_path):
+        raise FileNotFoundError(f"Video not found: {video_path}")
+    out_path = transcode_out_path(video_path)
+    key = os.path.basename(out_path)[: -len(".h264.mp4")]
+    if os.path.exists(out_path) and os.path.getsize(out_path) > 0:
+        return {"job": key, "state": "done", "progress": 1.0, "path": out_path, "error": None, "cached": True}
+    with _transcode_lock:
+        job = _transcode_jobs.get(key)
+        if job and job["state"] == "running":
+            return _transcode_view(key, job)
+        if cached_only:
+            return {"job": key, "state": "none", "progress": 0.0, "path": None, "error": None}
+        encoder = _h264_encoder()
+        if not encoder:
+            raise TranscodeUnavailable("this ffmpeg has no H.264 encoder")
+        try:
+            duration = float(get_metadata(video_path).get("duration") or 0)
+        except (RuntimeError, ValueError, TypeError):
+            duration = 0.0
+        acodec = _probe_audio_codec(video_path)
+        part = out_path[: -len(".mp4")] + ".part.mp4"
+        args = transcode_args(video_path, part, encoder, acodec)
+        job = {"state": "running", "progress": 0.0, "path": None, "error": None,
+               "cancelled": False, "proc": None, "source": video_path}
+        _transcode_jobs[key] = job
+        threading.Thread(target=_run_transcode, args=(key, out_path, args, duration), daemon=True).start()
+        return _transcode_view(key, job)
+
+
+def transcode_status(key: str) -> dict[str, Any]:
+    """A job's state ('none' when this run has no such job)."""
+    job = _transcode_jobs.get(key)
+    if not job:
+        return {"job": key, "state": "none", "progress": 0.0, "path": None, "error": None}
+    return _transcode_view(key, job)
+
+
+def transcode_cancel(key: str) -> dict[str, Any]:
+    """Stop a running job; its part file is removed when ffmpeg has gone."""
+    job = _transcode_jobs.get(key)
+    if job and job["state"] == "running":
+        job["cancelled"] = True
+        proc = job.get("proc")
+        if proc is not None:
+            try:
+                proc.terminate()
+            except OSError:
+                pass
+    return transcode_status(key)
+
+
+def _stop_all_transcodes() -> None:
+    """On exit: a converting ffmpeg must not outlive the backend."""
+    for job in list(_transcode_jobs.values()):
+        proc = job.get("proc")
+        if proc is not None and job.get("state") == "running":
+            job["cancelled"] = True
+            try:
+                proc.kill()
+            except OSError:
+                pass
+
+
+atexit.register(_stop_all_transcodes)
 
 
 def _one_line(text, keep: int = 0) -> str:

@@ -130,7 +130,10 @@ describe('EditableScript — bookmarks', () => {
     it('omits bookmarks field when no bookmarks', () => {
       script.insertAction(1000, 50);
       const json = JSON.parse(script.toFunscriptJSON());
-      expect(json.metadata).toBeUndefined();
+      // The block itself is always written now, OFS-style (editor work list
+      // 5.3, 2026-11-24); only the bookmarks key is left out.
+      expect(json.metadata).toBeDefined();
+      expect('bookmarks' in json.metadata).toBe(false);
     });
   });
 

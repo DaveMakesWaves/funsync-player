@@ -1078,7 +1078,7 @@ export function funscriptMetaRecord(metadata, now) {
 // Filtering (mirrored in backend/web-remote/tag-filter.js)
 // ---------------------------------------------------------------------------
 
-/** Filter modes. `facets`: OR within a facet, AND across facets (the default). */
+/** Filter modes. `facets` (the default): every included tag, except the length buckets, which are OR. */
 export const FILTER_MODES = Object.freeze(['facets', 'all', 'any']);
 
 function queryKeys(list) {
@@ -1145,9 +1145,10 @@ function hasTag(query, have) {
  * Keep the videos whose tags match.
  *
  * - `include`: keys a video must have. In the default `facets` mode a video
- *   needs one of the included keys of EACH facet (OR within a facet, AND
- *   across facets); `all` needs every key, `any` one of them. Empty: no
- *   include filter.
+ *   needs EVERY included key, except the length buckets, where one is enough
+ *   (a video has one length; Dave 2026-11-22: tags were OR within a facet, so
+ *   "asian" and another tag showed videos with either); `all` needs every
+ *   key, `any` one of them. Empty: no include filter.
  * - `exclude`: a video with any of these keys is dropped (the forum's
  *   `-tags:`). Supported from day one; the first UI may only include.
  * - A key without a known facet (`the-handy`) matches that value in any facet.
@@ -1169,9 +1170,13 @@ export function filterByTags(videos, query = {}, tagsByPath = undefined) {
   if (!include.length && !exclude.length) return videos.slice();
   const mode = FILTER_MODES.includes(query?.mode) ? query.mode : 'facets';
 
+  // Every ticked tag must be on the video (Dave 2026-11-22: "only show
+  // videos with both"), except the length buckets: a video has one length,
+  // so two ticked lengths mean either. Change both copies together
+  // (renderer/js/video-tags.js and backend/web-remote/tag-filter.js).
   const groups = new Map();
   for (const q of include) {
-    const group = q.facet || '';
+    const group = q.facet === 'length' ? 'length' : (q.facet ? `${q.facet}:${q.value}` : `:${q.value}`);
     if (!groups.has(group)) groups.set(group, []);
     groups.get(group).push(q);
   }

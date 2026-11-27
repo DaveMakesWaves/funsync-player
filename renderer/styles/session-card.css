@@ -9,7 +9,7 @@
   width: 300px;
   max-width: calc(100vw - 24px);
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--ink-rgb) / 0.08);
   border-radius: 10px;
   box-shadow: 0 6px 28px rgba(0, 0, 0, 0.5);
   padding: 10px 12px;
@@ -84,7 +84,7 @@
 }
 .session-card__btn:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink-rgb) / 0.06);
 }
 
 .session-card__state {
@@ -108,7 +108,7 @@
 .session-card__progress {
   height: 3px;
   border-radius: 2px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgb(var(--ink-rgb) / 0.08);
   overflow: hidden;
   margin-bottom: 4px;
 }
@@ -145,7 +145,7 @@
   color: #5fd98c;
 }
 .session-card__device--off {
-  background: rgba(255, 255, 255, 0.04);
+  background: rgb(var(--ink-rgb) / 0.04);
   color: var(--text-secondary);
 }
 
@@ -158,7 +158,7 @@
   width: 36px;
   height: 56px;
   background: var(--bg-secondary);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgb(var(--ink-rgb) / 0.08);
   border-right: none;
   border-radius: 8px 0 0 8px;
   color: var(--text-secondary);
@@ -172,7 +172,7 @@
   bottom: 16px;
 }
 .session-card__tab:hover {
-  background: var(--bg-card-hover, rgba(255, 255, 255, 0.06));
+  background: var(--bg-card-hover, rgb(var(--ink-rgb) / 0.06));
 }
 .session-card__tab-arrow {
   font-size: 14px;
@@ -196,8 +196,8 @@
 
 .session-history__item {
   padding: 10px 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: rgb(var(--ink-rgb) / 0.03);
+  border: 1px solid rgb(var(--ink-rgb) / 0.06);
   border-radius: 6px;
 }
 
@@ -257,7 +257,7 @@
   align-items: center;
   margin-top: 12px;
   padding-top: 12px;
-  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  border-top: 1px solid rgb(var(--ink-rgb) / 0.06);
 }
 
 .session-history__count {
@@ -267,7 +267,7 @@
 
 .session-history__clear {
   background: none;
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  border: 1px solid rgb(var(--ink-rgb) / 0.1);
   color: var(--text-secondary);
   padding: 4px 10px;
   border-radius: 4px;

@@ -339,3 +339,85 @@ describe('V44: Home / End scroll the Library instead of seeking', () => {
     expect(app.videoPlayer.seek).not.toHaveBeenCalled();
   });
 });
+
+// Found 2a-dialog (2026-11-18, latent): targetOwnsKey read the navigation mark BEFORE its input rules,
+// so a text box inside a data-owns-keys="navigation" list owned only the arrows, and "f" typed there
+// toggled fullscreen behind it.
+describe('a control inside a navigation-only list keeps its own keys', () => {
+  function setup() {
+    const player = makePlayer();
+    new KeyboardHandler({ videoPlayer: player, scriptEditor: { isOpen: false } });
+    const list = document.createElement('div');
+    list.setAttribute('data-owns-keys', 'navigation');
+    list.setAttribute('role', 'listbox');
+    list.tabIndex = 0;
+    list.innerHTML = '<input type="text" id="t"><input type="checkbox" id="c"><select id="s"><option>a</option></select><div role="option" tabindex="-1" id="o">Buzz</div>';
+    document.body.appendChild(list);
+    return { player, list, text: list.querySelector('#t'), box: list.querySelector('#c'), sel: list.querySelector('#s'), opt: list.querySelector('#o') };
+  }
+
+  it('typing f, k, m in a text box there reaches the box, not the player', () => {
+    const { player, text } = setup();
+    for (const k of ['f', 'k', 'm', ' ']) key(text, k);
+    expect(player.toggleFullscreen).not.toHaveBeenCalled();
+    expect(player.togglePlay).not.toHaveBeenCalled();
+    expect(player.toggleMute).not.toHaveBeenCalled();
+  });
+
+  it('a checkbox there owns Space; F still goes to the player, as on any checkbox', () => {
+    const { player, box } = setup();
+    key(box, ' ');
+    expect(player.togglePlay).not.toHaveBeenCalled();
+    key(box, 'f');
+    expect(player.toggleFullscreen).toHaveBeenCalledTimes(1);
+  });
+
+  it('a select there owns every key', () => {
+    const { player, sel } = setup();
+    key(sel, 'f');
+    expect(player.toggleFullscreen).not.toHaveBeenCalled();
+  });
+
+  it('the list itself and its options still own only the navigation keys: F goes to the player, the arrows stay', () => {
+    const { player, list, opt } = setup();
+    key(list, 'f');
+    key(opt, 'f');
+    expect(player.toggleFullscreen).toHaveBeenCalledTimes(2);
+    key(opt, 'ArrowRight');
+    expect(player.skip).not.toHaveBeenCalled();
+  });
+});
+
+// FT-104 re-check (fixed 2026-11-22): an Up Next card armed in a player hidden behind another view took the
+// first Esc there (dismissed, nothing visible changed), so the queue panel needed a second Esc.
+describe('Esc and an Up Next card nobody can see', () => {
+  function setup(view, offView = false) {
+    const player = makePlayer();
+    const onToggleQueue = vi.fn();
+    const h = new KeyboardHandler({
+      videoPlayer: player, scriptEditor: { isOpen: false },
+      getView: () => view, hasOffViewPlayer: () => offView,
+      isQueueOpen: () => true, onToggleQueue,
+    });
+    h.upNextEngine = { visible: true, dismiss: vi.fn() };
+    return { h, onToggleQueue };
+  }
+
+  it('in a playlist view with the player hidden: Esc closes the queue panel; the hidden card is left alone', () => {
+    const { h, onToggleQueue } = setup('playlists');
+    key(document.body, 'Escape');
+    expect(h.upNextEngine.dismiss).not.toHaveBeenCalled();
+    expect(onToggleQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('in the player view (or with the mini player showing) Esc dismisses the card first, as before', () => {
+    const a = setup('player');
+    key(document.body, 'Escape');
+    expect(a.h.upNextEngine.dismiss).toHaveBeenCalledTimes(1);
+    expect(a.onToggleQueue).not.toHaveBeenCalled();
+    for (const [type, fn, opts] of added.splice(0)) document.removeEventListener(type, fn, opts);
+    const b = setup('library', true);
+    key(document.body, 'Escape');
+    expect(b.h.upNextEngine.dismiss).toHaveBeenCalledTimes(1);
+  });
+});

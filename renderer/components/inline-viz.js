@@ -19,6 +19,31 @@ import { heatmapSpeedToColor } from '../js/heatmap-palette.js';
 export const INLINE_VIEW_MS = 5000;
 
 /**
+ * The Timeline overlay's own zoom and playhead (zaikechi #381, 2026-11-22),
+ * Settings > Playback: how many seconds it shows, and where the playhead
+ * sits: in the middle (as the editor, OFS-style) or near the left edge, so
+ * more of what is coming shows than of what has passed.
+ */
+export const INLINE_WINDOW_CHOICES_MS = [5000, 10000, 20000, 30000];
+export const INLINE_PLAYHEAD_LEAD = { centre: 0.5, left: 0.2 };
+
+/** A saved or sent view, made safe: an unknown window is 5 s, an unknown anchor the middle. */
+export function normalizeTimelineView(view) {
+  const ms = Number(view?.windowMs);
+  return {
+    windowMs: INLINE_WINDOW_CHOICES_MS.includes(ms) ? ms : INLINE_VIEW_MS,
+    anchor: view?.anchor === 'left' ? 'left' : 'centre',
+  };
+}
+
+/** The viewport for playback time `ms`: the window, with the playhead at its lead share. */
+export function timelineViewport(ms, view) {
+  const v = normalizeTimelineView(view);
+  const start = ms - v.windowMs * INLINE_PLAYHEAD_LEAD[v.anchor];
+  return { start, end: start + v.windowMs };
+}
+
+/**
  * Where the HM playhead marker sits, as a 0..1 share of the strip: the
  * playback position over the VIDEO duration, the same mapping the strip's
  * rects use (so the marker lands on the stroke being played). Clamped, and 0
@@ -45,6 +70,14 @@ export class InlineViz {
     // Optional playhead marker on the HM strip (zaikechi #381,
     // `player.inlineHeatmapPlayhead`, off by default).
     this._hmPlayheadOn = false;
+    // Over the video (the default) or under it (#381; Dave 2026-11-22):
+    // `player.inlineVizPlacement`. Under it, the container gets
+    // .player-container--viz-below and --inline-viz-band (the strip's height),
+    // and player.css shortens the video to make room (_applyPlacement).
+    this._container = container;
+    this._placement = 'overlay';
+    // The Timeline's window and playhead (#381): 5 s, centred, until set.
+    this._view = normalizeTimelineView(null);
 
     this._root = document.createElement('div');
     this._root.className = 'inline-viz';
@@ -99,10 +132,15 @@ export class InlineViz {
     video.addEventListener('pause', this._onStill);
     video.addEventListener('seeked', this._onSeeked);
 
+    // The TL box is re-measured only when it may have changed (see _fitCanvas):
+    // a ResizeObserver callback on the root or the TL itself, a DPR change, or
+    // a visibility toggle. Without a ResizeObserver (jsdom) it is read every frame.
+    this._tlBoxDirty = true;
     this._resizeObserver = (typeof ResizeObserver !== 'undefined')
-      ? new ResizeObserver(() => this._onResize())
+      ? new ResizeObserver(() => { this._tlBoxDirty = true; this._onResize(); })
       : null;
     this._resizeObserver?.observe(this._root);
+    this._resizeObserver?.observe(this._tlWrap);
   }
 
   /** Load the current script's main-axis actions. durationSec = video duration. */
@@ -117,7 +155,7 @@ export class InlineViz {
     // carry over to the next one (Dave, 2026-11-18: the timeline "moves
     // wayyyyy faster than the video" after a video change).
     this._graph.setVideoDuration(this._durationMs);
-    this._graph.setViewport(0, INLINE_VIEW_MS);
+    this._graph.setViewport(0, this._view.windowMs);
     this._updateVisibility();
     this._renderHeatmap();
     this._drawOnce();
@@ -135,6 +173,7 @@ export class InlineViz {
 
   setTimelineVisible(on) {
     this._tlOn = !!on;
+    this._tlBoxDirty = true;
     this._updateVisibility();
     this._drawOnce();
     this._syncLoop();
@@ -158,6 +197,53 @@ export class InlineViz {
     this._syncLoop();
   }
 
+  /**
+   * 'overlay' (over the bottom of the video, as always) or 'below' (the
+   * video shrinks and the TL / HM sit in a strip under it, so nothing covers
+   * the picture). Anything else is 'overlay'.
+   */
+  /** The Timeline's window and playhead (#381): `{ windowMs, anchor: 'centre' | 'left' }`. */
+  setTimelineView(view) {
+    this._view = normalizeTimelineView(view);
+    this._graph.setViewport(0, this._view.windowMs);
+    this._drawOnce();
+  }
+
+  get timelineView() { return { ...this._view }; }
+
+  setPlacement(placement) {
+    this._placement = placement === 'below' ? 'below' : 'overlay';
+    this._applyPlacement();
+  }
+
+  get placement() { return this._placement; }
+
+  /**
+   * The container's class and band height for the placement. Only while the
+   * strip is on screen: with nothing showing, the video keeps the whole
+   * player. The band is the strip's own height, read whenever it may change
+   * (visibility, a resize), so the video ends exactly where the strip starts.
+   */
+  _applyPlacement() {
+    const c = this._container;
+    if (!c?.classList) return;
+    const below = this._placement === 'below' && !this._root.hidden;
+    c.classList.toggle('player-container--viz-below', below);
+    // The page root gets it too: the queue panel is not inside the player
+    // container (only in fullscreen), and it must end above the control bar
+    // the band lifts (full manual test, 2026-11-23: docked, the bar ran
+    // under it).
+    const root = c.ownerDocument?.documentElement;
+    if (below) {
+      const h = Math.ceil(this._root.getBoundingClientRect().height || this._root.offsetHeight || 0);
+      c.style.setProperty('--inline-viz-band', `${h}px`);
+      root?.style?.setProperty('--inline-viz-band-root', `${h}px`);
+    } else {
+      c.style.removeProperty('--inline-viz-band');
+      root?.style?.removeProperty('--inline-viz-band-root');
+    }
+  }
+
   get timelineVisible() { return this._tlOn; }
   get heatmapVisible() { return this._hmOn; }
   get heatmapPlayheadVisible() { return this._hmPlayheadOn; }
@@ -169,6 +255,9 @@ export class InlineViz {
     this._video.removeEventListener('pause', this._onStill);
     this._video.removeEventListener('seeked', this._onSeeked);
     this._root.remove();
+    this._container?.classList?.remove('player-container--viz-below');
+    this._container?.style?.removeProperty('--inline-viz-band');
+    this._container?.ownerDocument?.documentElement?.style?.removeProperty('--inline-viz-band-root');
   }
 
   // ---- internals ----
@@ -182,14 +271,32 @@ export class InlineViz {
     this._hmWrap.hidden = this._hmCanvas.hidden;
     this._hmPlayhead.hidden = this._hmCanvas.hidden || !this._hmPlayheadOn;
     this._tlWrap.hidden = !(this._hasScript() && this._tlOn);
+    this._applyPlacement();
   }
 
   _tlActive() {
-    return this._hasScript() && this._tlOn && !this._root.hidden;
+    return this._hasScript() && this._tlOn && !this._root.hidden && !this._covered;
   }
 
   _hmPlayheadActive() {
-    return this._hasScript() && this._hmOn && this._hmPlayheadOn && !this._root.hidden;
+    return this._hasScript() && this._hmOn && this._hmPlayheadOn && !this._root.hidden && !this._covered;
+  }
+
+  /**
+   * Something sits over the strip (the docked script editor): nothing to draw
+   * there. Dave, 2026-11-25 ("speed up the player when in editor"): profiled
+   * live, the strip drew every frame under the open editor, 538 ms of 5 s of
+   * playback with six axes. Uncovered, it draws the moment at once.
+   */
+  setCovered(on) {
+    const covered = on === true;
+    if (covered === !!this._covered) return;
+    this._covered = covered;
+    if (!covered) {
+      this._tlBoxDirty = true;
+      this._drawOnce();
+    }
+    this._syncLoop();
   }
 
   /** Anything on screen that follows the clock. */
@@ -231,7 +338,11 @@ export class InlineViz {
     this._fitCanvas(this._tlCanvas, this._tlWrap);
     const ms = (this._video.currentTime || 0) * 1000;
     this._graph.setCursorTime(ms);
-    this._graph.centerOnTime(ms);
+    // The window follows the playhead at its place (#381: the middle, or
+    // near the left). The viewport's own clamps keep the start and the end
+    // of a video inside it, as centerOnTime did.
+    const { start, end } = timelineViewport(ms, this._view);
+    this._graph.setViewport(start, end);
     this._graph.draw();
   }
 
@@ -256,12 +367,23 @@ export class InlineViz {
    * Keyed on the CSS box + DPR rather than comparing pixel sizes: the canvas
    * width setter truncates the float ActionGraph assigns, so a rounded
    * comparison could differ by a pixel and re-resize on every frame.
+   *
+   * The box is read only when it may have changed (2026-11-20). Reading
+   * `clientWidth` / `clientHeight` forces a synchronous layout whenever
+   * anything on the page changed since the last frame, and the device
+   * simulator writes every frame, so this one read was ~21% of the renderer's
+   * time during playback (CPU profile: 4.6 s self of 22 s). A ResizeObserver
+   * (root and TL) marks it dirty; `devicePixelRatio` is read every frame, which
+   * costs no layout. With no ResizeObserver (jsdom) it is read every frame.
    */
   _fitCanvas(canvas, box) {
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    if (this._resizeObserver && !this._tlBoxDirty && dpr === this._tlFitDpr) return;
     const w = box.clientWidth || 0;
     const h = box.clientHeight || 0;
-    if (w <= 0 || h <= 0) return;
-    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    if (w <= 0 || h <= 0) return; // hidden or not laid out yet: stays dirty, tried again next frame
+    this._tlBoxDirty = false;
+    this._tlFitDpr = dpr;
     const key = `${w}x${h}@${dpr}`;
     if (this._tlFitKey === key) return;
     this._tlFitKey = key;
@@ -311,6 +433,7 @@ export class InlineViz {
   }
 
   _onResize() {
+    this._applyPlacement();
     this._renderHeatmap();
     this._drawOnce();
   }

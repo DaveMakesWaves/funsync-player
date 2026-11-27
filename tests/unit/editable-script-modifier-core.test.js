@@ -24,7 +24,7 @@
 import { describe, it, expect } from 'vitest';
 import { EditableScript, SEQUENCE_MODIFIERS } from '../../renderer/js/editable-script.js';
 import {
-  halfSpeed, doubleSpeed, reverseActions, remapRange, offsetTime, removePauses, rangeExtend,
+  halfSpeed, doubleSpeed, reverseActions, remapRange, offsetTime, removePauses, rangeExtend, vibrateBetween,
 } from '../../renderer/js/script-modifiers.js';
 
 /** 0/100 zigzag, `n` points `step` ms apart, starting at the bottom. */
@@ -309,11 +309,12 @@ describe('sequence modifiers refuse a selection with gaps (defect 4)', () => {
     expect(es.applyModifier(doubleSpeed).changed).toBe(true);
   });
 
-  it('the guarded set is exactly the five order/spacing modifiers', () => {
+  // + Vibrate (2026-11-24): it fills the gaps between neighbouring points, so a run only.
+  it('the guarded set is exactly the five order/spacing modifiers and Vibrate', () => {
     expect([...SEQUENCE_MODIFIERS]).toEqual(
-      expect.arrayContaining([halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend]),
+      expect.arrayContaining([halfSpeed, doubleSpeed, reverseActions, removePauses, rangeExtend, vibrateBetween]),
     );
-    expect(SEQUENCE_MODIFIERS.size).toBe(5);
+    expect(SEQUENCE_MODIFIERS.size).toBe(6);
     expect(SEQUENCE_MODIFIERS.has(remapRange)).toBe(false);
     expect(SEQUENCE_MODIFIERS.has(offsetTime)).toBe(false);
   });

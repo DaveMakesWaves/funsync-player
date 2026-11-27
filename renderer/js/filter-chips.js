@@ -2,10 +2,9 @@ import { t } from './i18n.js';
 
 // filter-chips — Active-filter chip strip with × to remove each one.
 //
-// Used by:
-//   - backend/web-remote/app.js (mobile)
-//   - renderer/components/library.js (desktop, when wired in §4.4 of the
-//     SCOPE-desktop-redesign doc)
+// Used by renderer/components/library.js (the desktop Library). The phone
+// has its own chip code, backend/web-remote/filter-chips.js; this header used
+// to say the phone used this one, which it never did (FT-063).
 //
 // Pure rendering helper. No DOM lookups, no global state. The host
 // supplies:
@@ -16,8 +15,7 @@ import { t } from './i18n.js';
 //   * a `labels` map (`{ tab: { matched: 'Matched' }, ... }`) for
 //     value → human label per key
 //   * an `iconFactory(name, size)` returning a DOM node for the X icon
-//     (lets host inject Lucide on desktop and the web-remote's icons
-//     module on mobile)
+//     (the host injects its Lucide icons)
 //   * an `onRemove(key)` callback fired when a chip's × is clicked.
 //     Host updates state, re-runs filters, and (optionally) re-renders
 //     the chip strip. We don't auto-rerender — host owns the lifecycle.

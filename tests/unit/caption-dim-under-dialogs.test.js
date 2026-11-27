@@ -58,7 +58,7 @@ function fakeWin() {
 function liftHandler(win) {
   const handlers = {};
   const fakeRequire = (id) => {
-    if (id === './window-bg') return { colorsForTheme: () => COLORS, dimColor: windowBg.dimColor };
+    if (id === './window-bg') return { colorsForTheme: () => COLORS, chromeSeason: () => null, dimColor: windowBg.dimColor };
     if (id === 'electron') return { screen: { getCursorScreenPoint: () => ({ x: -1, y: -1 }) } };
     throw new Error(`unexpected require(${id})`);
   };

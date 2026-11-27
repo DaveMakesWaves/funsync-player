@@ -34,13 +34,21 @@ describe('the phone search field has one clear button (CB-22)', () => {
   const input = /<input\b[^>]*id="searchInput"[^>]*>/.exec(html)?.[0] || '';
   const inputClass = /class="([^"]+)"/.exec(input)?.[1].split(/\s+/)[0];
 
-  it('the field is a type="search" input (the kind Chromium draws a cross in) with the app\'s own clear button', () => {
-    expect(input).toMatch(/type="search"/);
+  // Dave, 2026-11-25: "on mobile the search bar has two x" again, on his
+  // phone. The rule below hides the cross in Chromium (measured), not in every
+  // phone browser. A text field with the search keyboard gets no native cross
+  // from any browser; role=searchbox keeps what it is for screen readers.
+  it('the field is a text input with the search keyboard (no browser draws a cross in it) and the app\'s own clear button', () => {
+    expect(input).toMatch(/type="text"/);
+    expect(input).not.toMatch(/type="search"/);
+    expect(input).toMatch(/role="searchbox"/);
+    expect(input).toMatch(/inputmode="search"/);
+    expect(input).toMatch(/enterkeyhint="search"/);
     expect(inputClass).toBe('search-bar__input');
     expect(html).toMatch(/<button[^>]*id="searchClear"/);
   });
 
-  it("the native cancel cross is hidden on that field's class", () => {
+  it("the native cancel cross stays hidden on that field's class (were it ever a search field again)", () => {
     const decls = declarationsFor(`.${inputClass}::-webkit-search-cancel-button`);
     expect(decls).toMatch(/(^|;)\s*display\s*:\s*none\s*(;|$)/);
     expect(decls).toMatch(/(^|;)\s*-webkit-appearance\s*:\s*none\s*(;|$)/);

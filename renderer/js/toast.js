@@ -132,3 +132,28 @@ export function showToast(message, type = 'info', duration = TOAST_DURATION) {
 
   return { dismiss, el };
 }
+
+/**
+ * A toast with an Undo button (zaikechi #381's Disable and the like): the
+ * same body the playlist sort and Video options build by hand. The click
+ * goes on to the toast body, which dismisses it. `onUndo` runs once.
+ */
+export function showUndoToast(message, onUndo, type = 'info', duration = 6000) {
+  if (typeof document === 'undefined') return null;
+  const body = document.createElement('div');
+  body.className = 'update-toast';
+  const text = document.createElement('span');
+  text.textContent = message;
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'update-toast__btn';
+  btn.textContent = t('toast.undo');
+  let done = false;
+  btn.addEventListener('click', () => {
+    if (done) return;
+    done = true;
+    try { onUndo?.(); } catch (err) { console.warn('[Toast] undo failed', err); }
+  });
+  body.append(text, btn);
+  return showToast(body, type, duration);
+}

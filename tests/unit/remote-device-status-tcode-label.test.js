@@ -15,7 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { liftAppClass } from './helpers/app-methods.js';
 import { TCodeManager } from '../../renderer/js/tcode-manager.js';
 
-const Lifted = liftAppClass(['_pushRemoteDeviceStatus', '_pushRemoteOrgasmState'], {});
+const Lifted = liftAppClass(['_pushRemoteDeviceStatus', '_pushRemoteOrgasmState', '_connectedDevices'], {});
 
 let savedWindow;
 beforeEach(() => {

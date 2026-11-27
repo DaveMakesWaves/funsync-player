@@ -130,7 +130,7 @@ describe('the index (path -> effective tags) for the library', () => {
   });
 });
 
-describe('applyTagFilter: OR within a facet, AND across facets', () => {
+describe('applyTagFilter: every ticked tag (Dave 2026-11-22), the length buckets OR', () => {
   const { index } = indexOf();
   const run = (state, extra = {}) => paths(applyTagFilter(VIDEOS, { ...emptyTagFilter(), ...state }, { index, ...extra }));
 
@@ -141,13 +141,14 @@ describe('applyTagFilter: OR within a facet, AND across facets', () => {
     expect(tagFilterActive(emptyTagFilter())).toBe(false);
   });
 
-  it('two values of one facet: either', () => {
-    expect(run({ include: ['device:the-handy', 'device:osr2'] })).toEqual([A, B, C]);
+  it('two values of one facet: a video needs both', () => {
+    expect(run({ include: ['device:the-handy', 'device:osr2'] })).toEqual([]);
+    expect(run({ include: ['device:the-handy', 'content:pov'] })).toEqual([A]);
   });
 
   it('values of two facets: both', () => {
     expect(run({ include: ['device:the-handy', 'content:pov'] })).toEqual([A]);
-    expect(run({ include: ['device:the-handy', 'device:osr2', 'content:pov'] })).toEqual([A, B]);
+    expect(run({ include: ['device:the-handy', 'device:osr2', 'content:pov'] })).toEqual([]);
   });
 
   it('a video with no tags matches no include', () => {

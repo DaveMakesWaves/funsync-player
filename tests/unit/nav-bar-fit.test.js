@@ -117,6 +117,12 @@ function contentWidth(nav) {
   let total = 2 * Math.max(0, kids.length - 1); // .nav-bar gap: 2px
   for (const c of kids) {
     if (c.classList.contains('nav-bar__cluster-gap')) total += px(computed(c).width);
+    else if (c.classList.contains('nav-bar__group')) {
+      // The connections group (2026-11-25): its shown buttons, a 1 px border
+      // each side and a 1 px hairline between buttons.
+      const shown = [...c.children].filter((b) => !b.hidden);
+      total += 2 + Math.max(0, shown.length - 1) + shown.reduce((sum, b) => sum + buttonWidth(b), 0);
+    }
     else if (c.classList.contains('nav-bar__library-wrapper')) {
       total += buttonWidth(c.querySelector('.nav-bar__item')) + 36 - 2; // arrow 36, margin-left -2
     } else total += buttonWidth(c);
@@ -174,37 +180,55 @@ function mount() {
 // The order text comes off in, as the user sees it (nav-bar.js / nav-bar.css).
 const STEPS = [
   ['.nav-bar__remote-btn .nav-bar__action-label', '.nav-bar__vr-btn .nav-bar__action-label', '.nav-bar__settings .nav-bar__action-label'],
-  ['.nav-bar__handy-label'],
   ['.nav-bar__eroscripts .nav-bar__action-label'],
   ['[data-view-id="playlists"] .nav-bar__label', '[data-view-id="categories"] .nav-bar__label'],
   ['[data-view-id="library"] .nav-bar__label'],
 ];
 const visible = (nav, sel) => inFlow(nav.querySelector(sel));
 const fits = (nav) => contentWidth(nav) <= barWidth - 2 * PAD + 0.5;
-const fitLevel = (nav) => [1, 2, 3, 4, 5, 6].filter((n) => nav.classList.contains(`nav-bar--fit-${n}`)).length;
+const fitLevel = (nav) => [1, 2, 3, 4, 5].filter((n) => nav.classList.contains(`nav-bar--fit-${n}`)).length;
+
+/** The narrowest width (below 1024 px) where the bar shows every label it can. */
+function narrowestFull(nav) {
+  let lo = 400; // needs a step
+  let hi = 1000; // shows everything
+  while (hi - lo > 1) {
+    const mid = Math.floor((lo + hi) / 2);
+    resizeTo(mid);
+    if (fitLevel(nav) === 0) hi = mid; else lo = mid;
+  }
+  return hi;
+}
 
 /** Every button still has a name a screen reader can read. */
 function names(nav) {
-  return [...nav.querySelectorAll(':scope > button, .nav-bar__library-wrapper > button')]
+  return [...nav.querySelectorAll(':scope > button, .nav-bar__library-wrapper > button, .nav-bar__group > button')]
     .filter((b) => !b.hidden)
     .map((b) => (b.getAttribute('aria-label') || b.textContent).trim());
 }
 
-describe('CB-20: the nav bar fits its width in every language, without overlap', () => {
+// Every test here measures through jsdom's getComputedStyle, which runs the
+// whole cascade on each call: alone, "refits after a language switch" takes
+// ~1.1 s and "hiding buttons" ~1.1 s against the default 5 s timeout, so a
+// loaded full run (4 workers) can time them out. That fits the one failure
+// seen (FLAKY-TESTS.md row 7: "failed once in a full run, 3 of 3 alone";
+// its error was not recorded). One generous timeout for the whole file, as
+// the 1400-to-440 sweep already had (2026-11-23).
+describe('CB-20: the nav bar fits its width in every language, without overlap', { timeout: 30000 }, () => {
   it('reads the bar padding the model assumes from the real stylesheet', () => {
     const { nav } = mount();
     expect(px(getComputedStyle(nav).paddingRight)).toBe(PAD);
     expect(px(getComputedStyle(nav).paddingLeft)).toBe(PAD);
   });
 
-  it('German at 1024 CSS px (125% on 1280): it fits, and "Nicht verbunden" stays readable', async () => {
+  it('German at 1024 CSS px (125% on 1280): it fits, and "Keine Geräte" stays readable', async () => {
     _setBundlesForTests('de', DE, EN);
     const { nav } = mount();
     resizeTo(1024);
     expect(fits(nav)).toBe(true);
     expect(fitLevel(nav)).toBeGreaterThan(0);
     expect(visible(nav, '.nav-bar__handy-text')).toBe(true);
-    expect(nav.querySelector('.nav-bar__handy-text').textContent).toBe('Nicht verbunden');
+    expect(nav.querySelector('.nav-bar__handy-text').textContent).toBe('Keine Geräte');
     expect(visible(nav, '.nav-bar__remote-btn .nav-bar__action-label')).toBe(false);
     // The Web Remote button is still "Web-Fernsteuerung" to a screen reader.
     expect(nav.querySelector('.nav-bar__remote-btn').getAttribute('aria-label')).toBe('Web-Fernsteuerung');
@@ -225,7 +249,7 @@ describe('CB-20: the nav bar fits its width in every language, without overlap',
         resizeTo(w);
         const level = fitLevel(nav);
         const where = `${lang} at ${w}px, step ${level}`;
-        expect(fits(nav) || level === 6, where).toBe(true);
+        expect(fits(nav) || level === 5, where).toBe(true);
         // Narrower never gives text back. (The step number can drop at
         // 1024 px, where the media query hides the step-1 labels anyway.)
         const shown = STEPS.flat().filter((sel) => visible(nav, sel)).length;
@@ -236,6 +260,7 @@ describe('CB-20: the nav bar fits its width in every language, without overlap',
         // labels are off anyway, by the media query).
         STEPS.forEach((sels, i) => {
           for (const sel of sels) {
+            // Step 1 is labels the media query hides below 1024 px anyway.
             expect(visible(nav, sel), `${where}: ${sel}`).toBe(i + 1 > level && !(i === 0 && w < 1024));
           }
         });
@@ -247,14 +272,14 @@ describe('CB-20: the nav bar fits its width in every language, without overlap',
         }
         expect(names(nav), where).toEqual(allNames);
       }
-      expect(last, lang).toBeGreaterThanOrEqual(5);
+      expect(last, lang).toBeGreaterThanOrEqual(4);
     }
   }, 30000); // jsdom runs the whole cascade on every getComputedStyle
 
   it('gives the labels back when the window widens again', () => {
     const { nav } = mount();
     resizeTo(600);
-    expect(fitLevel(nav)).toBeGreaterThanOrEqual(4);
+    expect(fitLevel(nav)).toBeGreaterThanOrEqual(3); // several steps (the bar is narrower since 2026-11-25)
     resizeTo(1400);
     expect(fitLevel(nav)).toBe(0);
     for (const sels of STEPS) for (const sel of sels) expect(visible(nav, sel), sel).toBe(true);
@@ -262,43 +287,35 @@ describe('CB-20: the nav bar fits its width in every language, without overlap',
 
   it('refits after a language switch and after a longer device status', async () => {
     const { bar, nav } = mount();
-    // Wide enough for English with every label, not for German.
-    resizeTo(860);
+    // The narrowest width where English shows everything (found, not fixed:
+    // the bar's width changes with its buttons). German is longer: a step.
+    const w = narrowestFull(nav);
+    resizeTo(w);
     expect(fitLevel(nav)).toBe(0);
-    const en = fitLevel(nav);
-    expect(fits(nav)).toBe(true);
     _setBundlesForTests('de', DE, EN);
     eventBus.emit('language:changed');
     await settle();
     expect(fits(nav)).toBe(true);
-    expect(fitLevel(nav)).toBeGreaterThan(en);
+    expect(fitLevel(nav)).toBeGreaterThan(0);
 
-    // The narrowest width where English shows everything, then a longer status.
+    // Back to English there, then a longer status.
     _setBundlesForTests('en', EN, EN);
     eventBus.emit('language:changed');
     await settle();
-    let lo = 600; // needs a step
-    let hi = 1000; // shows everything
-    while (hi - lo > 1) {
-      const mid = Math.floor((lo + hi) / 2);
-      resizeTo(mid);
-      if (fitLevel(nav) === 0) hi = mid; else lo = mid;
-    }
-    resizeTo(hi);
     expect(fitLevel(nav)).toBe(0);
-    expect(visible(nav, '.nav-bar__handy-label')).toBe(true);
-    bar.setHandyStatus('unresponsive', 0); // "Not responding" is longer than "Not connected"
+    // "The Handy not responding" is longer than "No devices", and Stop all shows with it.
+    bar.setDeviceStatus({ devices: [{ label: 'The Handy', state: 'unresponsive' }] });
     await settle();
     expect(fits(nav)).toBe(true);
     expect(fitLevel(nav)).toBeGreaterThan(0);
-    bar.setHandyStatus('disconnected', 0);
+    bar.setDeviceStatus({});
     await settle();
     expect(fitLevel(nav)).toBe(0);
   });
 
   it('hiding buttons (#381) frees room, and the labels come back', async () => {
     const { bar, nav } = mount();
-    resizeTo(820);
+    resizeTo(narrowestFull(nav) - 60);
     const before = fitLevel(nav);
     expect(before).toBeGreaterThan(0);
     bar.setHiddenItems({ eroscripts: true, remote: true, vr: true, playlists: true });

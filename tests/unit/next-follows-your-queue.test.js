@@ -49,6 +49,8 @@ const LIFTED = [
   '_clearCloudUploadGate', '_showScriptLoadingOverlay', '_hideScriptLoadingOverlay',
   '_initPlayerWindow', '_currentPopoutVideo', '_sendLoadVideoToPopout',
   '_streamPlayerWindowData', '_sendPlayerWindowPlaybackState', '_mirrorPopoutVolume',
+  // "Previously watched" (the queue panel's History)
+  '_maybePushCurrentToHistory',
 ];
 
 const ALPHA = 'D:\\Lib\\Alpha.mp4';
@@ -163,7 +165,10 @@ function buildApp(libraryPaths = [ALPHA, BRAVO, CHARLIE, DELTA, ECHO]) {
     _userQueue: [],
     _userQueueBack: [],
     _userQueueNavPaths: new Set(),
-    _maybePushCurrentToHistory() {},
+    _queueHistory: [],
+    _queueHistoryCap: 50,
+    _queueHistoryThresholdMs: 5000,
+    _queueHistoryPushedForCurrent: false,
     _ensureVideoLoadWatch() {},
     _stopGapSkip() {},
     _feedInlineViz() {},
@@ -266,12 +271,25 @@ describe('FN-07: N plays the videos you added with "Add to queue"', () => {
     await press('_playNext', DELTA);
   });
 
-  it('nothing queued: N and P are what they were (a Library video has no next or previous)', async () => {
+  it('nothing queued: N and P step through the library in the order it shows (Dave 2026-11-23, powerkool #433; was playlists only)', async () => {
     await clickInLibrary(BRAVO, libraryContext([ALPHA, BRAVO, CHARLIE], 1));
-    expect(app._playNext()).toBe(false);
+    expect(await press('_playNext', CHARLIE)).toBe(true);
+    expect(await press('_playPrev', BRAVO)).toBe(true);
+    expect(await press('_playPrev', ALPHA)).toBe(true);
+    // The first one: nothing before it.
     expect(app._playPrev()).toBe(false);
     await new Promise((r) => setTimeout(r, 0));
-    expect(app._currentVideoPath).toBe(BRAVO);
+    expect(app._currentVideoPath).toBe(ALPHA);
+    // No "N / total" for the library: on a big one it is noise.
+    expect(elements.get('queue-indicator').hidden).toBe(true);
+  });
+
+  it('a category steps the same way, also without a counter', async () => {
+    const cat = { ...libraryContext([ALPHA, BRAVO, CHARLIE], 0), source: 'category', sourceLabel: 'category', sourceContext: { categoryId: 'c1' } };
+    await clickInLibrary(ALPHA, cat);
+    expect(elements.get('btn-next').hidden).toBe(false);
+    expect(await press('_playNext', BRAVO)).toBe(true);
+    expect(elements.get('queue-indicator').hidden).toBe(true);
   });
 });
 
@@ -287,6 +305,22 @@ describe('FN-07: P goes back from a video your queue played', () => {
     // N then plays it again.
     await press('_playNext', BRAVO);
     expect(queueOf()).toEqual([CHARLIE]);
+  });
+
+  it('"Previously watched" does not list the video P left (it is back in your queue) or the one P went back to (bf-verify 2026-11-19)', async () => {
+    await clickInLibrary(ALPHA);
+    app._userQueue = [BRAVO, CHARLIE];
+    video.currentTime = 10;                      // Alpha watched past the 5 s history threshold
+    await press('_playNext', BRAVO);
+    expect(app._queueHistory).toEqual([ALPHA]);
+    video.currentTime = 10;                      // Bravo watched too
+    await press('_playPrev', ALPHA);
+    expect(queueOf()).toEqual([BRAVO, CHARLIE]);
+    expect(app._queueHistory).toEqual([]);
+    // Played on from there, Alpha is history again as usual.
+    video.currentTime = 10;
+    await press('_playNext', BRAVO);
+    expect(app._queueHistory).toEqual([ALPHA]);
   });
 
   it('through a chain: Alpha, N Bravo, N Charlie, then P Bravo and P Alpha', async () => {
@@ -384,7 +418,12 @@ describe('FN-07: the prev / next buttons and the pop-out offer it', () => {
     await clickInLibrary(ALPHA);
     const next = elements.get('btn-next');
     const prev = elements.get('btn-prev');
-    expect(next.hidden).toBe(true);   // a Library video, nothing queued
+    // A Library video, nothing queued: since 2026-11-23 the buttons step
+    // through the library's own order; the first video has no previous.
+    expect(next.hidden).toBe(false);
+    expect(next.disabled).toBe(false);
+    expect(prev.disabled).toBe(true);
+    expect(elements.get('queue-indicator').hidden).toBe(true);
 
     app._userQueue.push(BRAVO);
     app._persistUserQueue();          // what "Add to queue" runs

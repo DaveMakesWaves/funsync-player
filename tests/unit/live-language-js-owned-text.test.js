@@ -223,13 +223,13 @@ describe('a live language switch keeps what components set from state (V69)', ()
     document.body.appendChild(host);
     const bar = new NavBar({ onNavigate: () => {} });
     bar.init(host);
-    bar.setHandyStatus('connected', 1);
+    bar.setDeviceStatus({ devices: [{ label: 'The Handy', state: 'unresponsive' }] });
 
     await switchInSettings('de');
 
-    expect(host.querySelector('.nav-bar__handy-text').textContent).toBe(t('nav.deviceCount', { count: 1 }));
     expect(getCurrentLocale()).toBe('de');
-    expect(host.querySelector('.nav-bar__handy-label').textContent).toBe(DE.nav.device);
+    expect(host.querySelector('.nav-bar__handy-text').textContent).toBe('The Handy reagiert nicht');
+    expect(host.querySelector('.nav-bar__handy').title).toBe('The Handy · ' + DE.nav.notResponding);
   });
 });
 

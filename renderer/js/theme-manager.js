@@ -8,6 +8,7 @@
 // changes — keeps the settings panel decoupled from the manager.
 
 import { eventBus } from './event-bus.js';
+import { styleAttributes, applySeason, applySnowSetting } from './holiday.js';
 //
 // Three valid values for `settings.player.theme`:
 //   'system' — follow the OS preference (default for new installs)
@@ -29,10 +30,17 @@ const DEFAULT_THEME = 'system';
 // non-colour execution (depth, radius, spacing, motion) via CSS. Classic is
 // the default so nobody's look changes until they opt in.
 // See notes/features/SCOPE-modern-theme.md.
-const VALID_STYLES = new Set(['classic', 'modern']);
+//
+// Holiday (v0.10.1) is Modern's execution plus a palette of its own:
+// `data-style="modern" data-season="holiday"` (renderer/js/holiday.js,
+// renderer/styles/holiday.css), in Dark and in Light.
+const VALID_STYLES = new Set(['classic', 'modern', 'holiday']);
 const DEFAULT_STYLE = 'classic';
 
 let _systemQuery = null;
+// The theme SETTING last applied, so a style change can retint the window
+// chrome for the right theme (the season changes the chrome's colours).
+let _themeSetting = DEFAULT_THEME;
 let _systemListener = null;
 
 /**
@@ -66,18 +74,26 @@ export function applyTheme(effective) {
 /**
  * Resolve the user's interface-style preference to a valid value. Pure.
  * @param {string} setting — value from settings.player.uiStyle
- * @returns {'classic'|'modern'}
+ * @returns {'classic'|'modern'|'holiday'}
  */
 export function resolveStyle(setting) {
   return VALID_STYLES.has(setting) ? setting : DEFAULT_STYLE;
 }
 
 /**
- * Apply an interface style to <html data-style="...">. Side-effect-only.
- * @param {'classic'|'modern'} style
+ * Apply an interface style to <html data-style="..."> (and Holiday's
+ * data-season). Side-effect-only. Retints the window chrome when the season
+ * changes, since Holiday's nav bar is a different colour.
+ * @param {'classic'|'modern'|'holiday'} style
  */
 export function applyStyle(style) {
-  document.documentElement.dataset.style = resolveStyle(style);
+  const { style: attr, season } = styleAttributes(resolveStyle(style));
+  const before = document.documentElement.dataset.season || null;
+  document.documentElement.dataset.style = attr;
+  applySeason(season);
+  if (before !== season) {
+    try { window?.funsync?.updateWindowChrome?.(_themeSetting, { season: season || 'none' }); } catch { /* non-fatal */ }
+  }
 }
 
 /**
@@ -99,6 +115,7 @@ export function initTheme(dataService) {
 
   // Interface style (Classic/Modern) — applied alongside the palette theme.
   applyStyle(dataService?.get?.('player.uiStyle') || DEFAULT_STYLE);
+  applySnowSetting(dataService?.get?.('player.holidaySnow'));
 
   // React to settings changes from anywhere (settings panel, IPC, etc.)
   // by re-resolving on each settings:changed event broadcast on the
@@ -108,6 +125,8 @@ export function initTheme(dataService) {
       _applyFromSetting(dataService.get('player.theme') || DEFAULT_THEME);
     } else if (path === 'player.uiStyle') {
       applyStyle(dataService.get('player.uiStyle') || DEFAULT_STYLE);
+    } else if (path === 'player.holidaySnow') {
+      applySnowSetting(dataService.get('player.holidaySnow'));
     }
   });
 
@@ -137,6 +156,7 @@ export function initTheme(dataService) {
 }
 
 function _applyFromSetting(setting) {
+  _themeSetting = setting;
   const prefersDark = typeof window !== 'undefined' && window.matchMedia
     ? window.matchMedia('(prefers-color-scheme: dark)').matches
     : true;

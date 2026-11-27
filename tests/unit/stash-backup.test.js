@@ -140,6 +140,16 @@ describe('settings.stash in a merge import', () => {
     expect(JSON.stringify(over)).not.toContain(KEY);
   });
 
+  it('"Use Stash\'s tag aliases and sub-tags" comes with the backup (overwrite reset it to off before; triage 2026-11-23)', () => {
+    const withRules = { ...local, useTagRules: true };
+    expect(dataExport.mergeConfig(config({ ...local, useTagRules: false }), config(withRules), 'overwrite').settings.stash.useTagRules).toBe(true);
+    expect(dataExport.mergeConfig(config({ ...local, useTagRules: false }), config(withRules), 'merge').settings.stash.useTagRules).toBe(true);
+    // A backup from before the opt-in: this machine's choice stays.
+    expect(dataExport.mergeConfig(config(withRules), config(local), 'merge').settings.stash.useTagRules).toBe(true);
+    // Never anything but a boolean.
+    expect(dataExport.mergeConfig(config(local), config({ ...local, useTagRules: 'yes' }), 'overwrite').settings.stash.useTagRules).toBeUndefined();
+  });
+
   it('a backup without a stash block leaves this machine\'s as it is (merge and overwrite)', () => {
     expect(dataExport.mergeConfig(config(local), config(), 'merge').settings.stash).toEqual(local);
     expect(dataExport.mergeConfig(config(local), config(), 'overwrite').settings.stash).toEqual(local);

@@ -52,7 +52,8 @@ html.has-wco .nav-bar :is(button, input, select, a, [role="button"], [tabindex])
   color: var(--text-primary);
 }
 
-.nav-bar__item--active::after {
+.nav-bar__item--active::after,
+.nav-bar__eroscripts--active::after {
   content: '';
   position: absolute;
   bottom: -9px;
@@ -332,8 +333,7 @@ html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdr
    it's the most user-action-y of the right-side buttons and the label
    adds material recognition). Same for the Devices widget — its label
    is part of its multi-element shape. */
-.nav-bar__eroscripts .nav-bar__action-label,
-.nav-bar__handy .nav-bar__action-label {
+.nav-bar__eroscripts .nav-bar__action-label {
   display: inline;
   font-size: 12px;
   font-weight: 500;
@@ -352,6 +352,19 @@ html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdr
    prior design; kept as a colour change without the bordered-pill
    variant so it visually fits the rest of the actions. */
 .nav-bar__eroscripts--connected { color: #4caf50; }
+/* New threads in the EroScripts feeds (2026-11-22): a count, flat, no glow. */
+.nav-bar__badge {
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
 .nav-bar__eroscripts--connected:hover { color: #66bb6a; }
 
 /* Cluster gap — purely visual spacing between conceptual groups in the
@@ -447,7 +460,7 @@ html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdr
  * shrink them below their text, and their text then painted over the
  * next button (German at 125% on a 1280 px window, English at 800 px).
  * NavBar._fitToWidth measures the bar and adds cumulative
- * `nav-bar--fit-1` ... `-6` classes until it fits on one line; the rules
+ * `nav-bar--fit-1` ... `-5` classes until it fits on one line; the rules
  * below are what each step takes off. What remains is a guarantee for
  * any frame in between: nothing inside a button paints outside it. */
 
@@ -473,19 +486,19 @@ html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdr
 /* While measuring, nothing may shrink: the bar overflows exactly when the
    natural widths do not fit. */
 .nav-bar.nav-bar--measuring > *,
+.nav-bar.nav-bar--measuring .nav-bar__group > *,
 .nav-bar.nav-bar--measuring .nav-bar__action > * { flex-shrink: 0; }
 
-/* Steps 1-5 hide a label VISUALLY only: it stays the button's accessible
+/* Steps 1-4 hide a label VISUALLY only: it stays the button's accessible
    name (Devices and the right-side icons also carry aria-labels), and
    every button keeps its tooltip. Library (which can show the active
    collection's name) goes after Playlists and Categories. */
 .nav-bar--fit-1 .nav-bar__remote-btn .nav-bar__action-label,
 .nav-bar--fit-1 .nav-bar__vr-btn .nav-bar__action-label,
 .nav-bar--fit-1 .nav-bar__settings .nav-bar__action-label,
-.nav-bar--fit-2 .nav-bar__handy .nav-bar__handy-label,
-.nav-bar--fit-3 .nav-bar__eroscripts .nav-bar__action-label,
-.nav-bar--fit-4 .nav-bar__item:not([data-view-id="library"]) .nav-bar__label,
-.nav-bar--fit-5 .nav-bar__item .nav-bar__label {
+.nav-bar--fit-2 .nav-bar__eroscripts .nav-bar__action-label,
+.nav-bar--fit-3 .nav-bar__item:not([data-view-id="library"]) .nav-bar__label,
+.nav-bar--fit-4 .nav-bar__item .nav-bar__label {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -497,17 +510,17 @@ html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdr
   border: 0;
 }
 
-/* Step 6: the device status text gives way last, with an ellipsis (the
+/* Step 5: the device status text gives way last, with an ellipsis (the
    LED and the aria-label still say it in full). The spacing tightens first
    so it keeps as much text as it can: cluster gaps 12 -> 4 px, view buttons
    14 -> 10 px each side (still a 36 px target). Reached only near the
    minimum window at 150%. */
-.nav-bar--fit-6 .nav-bar__cluster-gap { width: 4px; }
-.nav-bar--fit-6 .nav-bar__item {
+.nav-bar--fit-5 .nav-bar__cluster-gap { width: 4px; }
+.nav-bar--fit-5 .nav-bar__item {
   padding-left: 10px;
   padding-right: 10px;
 }
-.nav-bar--fit-6 .nav-bar__handy-text {
+.nav-bar--fit-5 .nav-bar__handy-text {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -515,3 +528,75 @@ html.backend-banner-shown #app:not([inert]):not(:has(> .connection-panel__backdr
   padding-block: 3px;
   margin-block: -3px;
 }
+
+/* Stop all (DESIGN.md §1.6 S1, §2.15): beside the device status, shown while
+   a device is connected. Neutral at rest like its neighbours; the danger red
+   only on hover / focus, so a resting bar stays calm (Modern: red rationed). */
+.nav-bar__stop-all {
+  padding: 0 8px;
+}
+.nav-bar__stop-all:hover,
+.nav-bar__stop-all:focus-visible {
+  color: var(--state-error);
+  background: var(--state-error-soft);
+}
+
+/* ---- EroScripts marked like the views (Dave, 2026-11-25) -----------------
+   Library, Playlists and Categories get the coral underline when open; the
+   EroScripts button turned its label coral instead. Now it takes the same
+   underline (the ::after above, and each style's version of it), at the same
+   height: the views' buttons are ITEM_H tall and their line sits 9 px under
+   them, both buttons are centred in the bar, so this button's line sits
+   (its height - ITEM_H) / 2 + 9 px under it. ITEM_H measured live: 32 px. */
+.nav-bar__eroscripts { position: relative; }
+.nav-bar__eroscripts--active::after {
+  bottom: calc((100% - 32px) / 2 - 9px);
+}
+/* A button clips its content (above); the line hangs below it, so this one
+   clips sideways only. */
+.nav-bar__eroscripts--active {
+  overflow-x: clip;
+  overflow-y: visible;
+}
+
+/* ---- The connections, one button group (Dave, 2026-11-25) ---------------
+   Devices, Stop all, Web Remote and VR sat loose beside Settings. Now one
+   group, as the EroScripts tab's Paste / Downloads / account group
+   (eroscripts.css .es-view__top .es-view__actions): one border, a hairline
+   between the buttons, square inside. Settings stays apart at the far right.
+   NavBar._layoutRightSide hides the group when nothing in it shows. */
+.nav-bar__group {
+  display: inline-flex;
+  align-items: stretch;
+  flex: 0 1 auto;
+  min-width: 0;
+  height: 36px;
+  border: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+  border-radius: 8px;
+  background: var(--surface-overlay, rgb(var(--ink-rgb) / 0.06));
+  overflow: hidden;
+}
+/* button. in front: Modern's rounder, pressable actions (0,3,0) never win
+   inside the group, where a rounded or shrinking segment would show a gap. */
+.nav-bar .nav-bar__group > button.nav-bar__action {
+  min-height: 0;
+  height: 100%;
+  border-radius: 0;
+}
+.nav-bar .nav-bar__group > button.nav-bar__action:active { transform: none; }
+/* A hairline before every shown button that follows a shown one. */
+.nav-bar__group > :not([hidden]) ~ :not([hidden]) {
+  border-left: 1px solid var(--border-subtle, rgb(var(--ink-rgb) / 0.12));
+}
+.nav-bar__group > .nav-bar__action:hover:not(.nav-bar__stop-all) {
+  background: var(--surface-overlay-strong, rgb(var(--ink-rgb) / 0.12));
+}
+/* The group clips, so its buttons draw their focus ring inside. */
+.nav-bar .nav-bar__group > button.nav-bar__action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+/* The pill: dot and words, a little more room at the start. */
+.nav-bar__group > .nav-bar__handy { padding: 0 12px; }
+.nav-bar__group > .nav-bar__handy .nav-bar__handy-text { color: var(--text-primary); }
+.nav-bar__group > .nav-bar__handy[data-status="disconnected"] .nav-bar__handy-text { color: var(--text-secondary); }

@@ -95,6 +95,11 @@ const UNDO_MS = 8000;
 const REMOVE_GRACE_MS = 2000;
 const PROGRESS_MS = 150;
 const MAX_UNDO = 100;
+// A sync's re-links keep their Undo for the session (TODO triage 2026-11-23):
+// Settings lists every re-linked row with Undo, and a full sync can re-link
+// more than MAX_UNDO, so the oldest answered "could not be undone" while
+// their rows still showed. Bounded all the same.
+const MAX_SESSION_UNDO = 20000;
 const MAX_RULES = 50;
 const MAX_PATH = 32768;
 const MAX_VIDEOS = 500000;
@@ -333,15 +338,35 @@ function createStashService(deps = {}) {
 
   // --- undo ---
 
-  function addUndo(entry) {
+  function addUndo(entry, { session = false } = {}) {
     const id = crypto.randomBytes(12).toString('hex');
-    undos.set(id, entry);
-    while (undos.size > MAX_UNDO) {
-      const [oldest, old] = undos.entries().next().value;
-      if (old.kind === 'remove') break; // a pending removal ends by its own timer
-      undos.delete(oldest);
-    }
+    undos.set(id, session ? { ...entry, session: true } : entry);
+    trimUndos();
     return id;
+  }
+
+  /**
+   * The oldest Undo entries go once there are too many: at most MAX_UNDO
+   * ordinary ones and MAX_SESSION_UNDO kept for the session (a sync's
+   * re-links), each counted apart so neither pushes the other out. A pending
+   * removal is never dropped here: it ends by its own timer (before, one at
+   * the front stopped the trimming altogether).
+   */
+  function trimUndos() {
+    let plain = 0;
+    let kept = 0;
+    for (const e of undos.values()) {
+      if (e.kind === 'remove') continue;
+      if (e.session) kept += 1; else plain += 1;
+    }
+    for (const [key, e] of undos) {
+      if (plain <= MAX_UNDO && kept <= MAX_SESSION_UNDO) break;
+      if (e.kind === 'remove') continue;
+      if (e.session ? kept > MAX_SESSION_UNDO : plain > MAX_UNDO) {
+        undos.delete(key);
+        if (e.session) kept -= 1; else plain -= 1;
+      }
+    }
   }
 
   function libraryReply(res) {
@@ -421,7 +446,7 @@ function createStashService(deps = {}) {
       error,
       counts: isPlainObject(r.counts) ? { ...r.counts } : null,
       relinked: Array.isArray(r.relinked) ? r.relinked.map((x) => ({
-        path: x.path, from: x.from, to: x.to, undoId: x.undo ? addUndo({ kind: 'video', undo: x.undo }) : null,
+        path: x.path, from: x.from, to: x.to, undoId: x.undo ? addUndo({ kind: 'video', undo: x.undo }, { session: true }) : null,
       })) : [],
       details: isPlainObject(r.details) ? { done: num(r.details.done), total: num(r.details.total) } : null,
       // The next lot: whether Stash's tag list was read whole (null: not asked).

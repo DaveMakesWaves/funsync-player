@@ -12,7 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import {
-  SECTIONS, organiseView, scriptView, associationSlots, handMadeSlots, eroscriptsRecordState,
+  SECTIONS, organiseView, scriptView, associationSlots, handMadeSlots, eroscriptsRecordState, eroscriptsRecordForTags,
   variationsView, planRemoveVariation, planPlayFirst, progressView, planResetProgress, planResetThumbnail,
   vrView, planSetVRMode, planUnpairSubtitle, fileView, runOps, planEntryChange, planEntryUndo,
 } from '../../renderer/js/video-options-model.js';
@@ -322,5 +322,30 @@ describe('runOps', () => {
 
   it('an unknown op throws rather than doing something else', () => {
     expect(() => runOps([{ op: 'rm -rf' }], makeFakeStore({}))).toThrow(/unknown op/);
+  });
+});
+
+// Dave, 2026-11-25: "when downloading a video and script to the libary why
+// doesnt it also get the tags? or it didnt for the most recent download".
+// Reproduced in the sandbox: a download whose post had no script (or whose
+// script did not save) recorded the post's tags under the same-name script
+// the download would have saved; the video has no script, so the record was
+// "about another script" and Video options showed no tags ("This video has
+// no script, so no EroScripts post is linked"). The video IS that post's.
+describe('a downloaded post with no script', () => {
+  const DOWNLOADED = { tags: ['pov'], topicId: 1, scriptPath: 'C:/Lib/Clip.funscript', match: 'download', videoFromPost: true };
+  it("its tags apply while the video has no script; another script still sets them aside", () => {
+    expect(eroscriptsRecordState(DOWNLOADED, null)).toBe('applies');
+    expect(eroscriptsRecordForTags(DOWNLOADED, null)).toEqual(DOWNLOADED);
+    expect(eroscriptsRecordState(DOWNLOADED, 'C:/Other/Else.funscript')).toBe('another-script');
+  });
+  it('a post only a SCRIPT came from (Get Script, a link, a search), or an older record, is set aside with no script, as before (an Unpair)', () => {
+    const { videoFromPost, ...scriptOnly } = DOWNLOADED;
+    expect(videoFromPost).toBe(true);
+    expect(eroscriptsRecordState(scriptOnly, null)).toBe('another-script');
+    for (const match of ['search', 'manual']) {
+      expect(eroscriptsRecordState({ ...scriptOnly, match }, null), match).toBe('another-script');
+    }
+    expect(eroscriptsRecordState({ tags: ['pov'], topicId: 1, scriptPath: 'C:/Lib/Clip.funscript' }, null)).toBe('another-script');
   });
 });

@@ -22,6 +22,14 @@ import {
   normaliseMotionConfig,
 } from './motion-source.js';
 import { AXIS_DEFINITIONS } from './multi-axis.js';
+import { jumpEaseMs, JUMP_MOVE_UNITS_PER_S } from './jump-ease.js';
+
+/**
+ * A parked axis's first move counts as a slam when it is quicker than this
+ * many times the stroke's own speed (and the jump pace): see
+ * `_parkedMoveTooFast`. 1.5 leaves room for the estimate's drift.
+ */
+const PARKED_SLAM_FACTOR = 1.5;
 import { StallHold, isProxyStall } from './playback-stall.js';
 
 // Poll/detect rate. This is NOT the number of moves sent — moves are emitted
@@ -125,6 +133,9 @@ export class TCodeSync {
     this._interpolationMode = 'linear';
     this._interpolator = linearInterpolate;
     this._speedLimit = 0;
+    // axis -> performance.now() until which the move after a jump is still
+    // under way: nothing new is sent to that axis before it lands (_jumpEase).
+    this._easeUntil = new Map();
 
     // Track last sent values for delta optimization
     this._lastSentAxes = {};
@@ -198,7 +209,7 @@ export class TCodeSync {
     this._stall.clear();
     this._unbindVideoEvents();
     this._stopScheduler();
-    this.tcode.stop();
+    this._stopDevice();
     this._resetState();
     console.log('[TCodeSync] Stopped');
   }
@@ -208,9 +219,15 @@ export class TCodeSync {
     this._resetIndices();
   }
 
-  /** Whether a video is currently driving this engine. */
+  /**
+   * Whether a video is SENDING to the device right now. A loaded but PAUSED
+   * video sends nothing (the pause stopped the scheduler), so the pattern
+   * Test and the range previews may use the device then (device session
+   * 2026-11-19, step 27). A stall mid-play still counts as driving. The Test
+   * stops itself when play starts (filler-test-player.js).
+   */
   isDriving() {
-    return !!this._active;
+    return !!this._active && (!!this._intervalId || this.player?.paused === false);
   }
 
   /**
@@ -246,7 +263,7 @@ export class TCodeSync {
    * @returns {boolean} false when refused
    */
   previewAxisPosition(tcode, position, durationMs) {
-    if (this._active) return false;
+    if (this.isDriving()) return false;
     if (!this.tcode?.connected) return false;
     if (!tcode || !this.isAxisEnabled(tcode)) return false;
 
@@ -259,10 +276,14 @@ export class TCodeSync {
     return true;
   }
 
-  /** Idle the device after an off-clock run. */
+  /**
+   * Idle the device after an off-clock run. Through _stopDevice, so over UDP /
+   * WebSocket the axes the rest frame centred move on from the middle at the
+   * script's pace when the paused video plays again.
+   */
   stopTestOutput() {
-    if (this._active) return;
-    try { this.tcode?.stop?.(); } catch { /* best-effort */ }
+    if (this.isDriving()) return;
+    try { this._stopDevice(); } catch { /* best-effort */ }
   }
 
   /** Set actions for a companion axis. */
@@ -423,7 +444,22 @@ export class TCodeSync {
     );
   }
 
+  /**
+   * Stop the device. Over UDP / WebSocket the manager's rest frame glides the
+   * position axes to the middle (TCodeManager.stop returns them; serial halts
+   * in place and returns none). Each of those takes its first move after the
+   * next play to the next keyframe at the keyframe's own pace, as after Go
+   * home: the usual first send snaps over ONE tick, which from the middle is
+   * half the travel at full speed (the 17 ms jump back after a pop-out,
+   * FT-095 verify-3).
+   */
+  _stopDevice() {
+    const centred = this.tcode.stop();
+    if (Array.isArray(centred)) for (const axis of centred) this._fromHome.add(axis);
+  }
+
   _resetState() {
+    this._easeUntil.clear();
     this._lastActionIndex = -1;
     this._lastSentPos = -1;
     this._lastSendTime = 0;
@@ -433,6 +469,8 @@ export class TCodeSync {
 
   _resetIndices() {
     const timeMs = this._currentTimeMs();
+    // A new jump: its own first move decides its own ease.
+    this._easeUntil.clear();
 
     // Main axis
     if (this._actions && this._actions.length > 0) {
@@ -506,10 +544,10 @@ export class TCodeSync {
       // whose rest frame centres every axis over UDP / WebSocket (FN-02).
       if (isProxyStall(this.player?.video)) { this._stall.enter('proxy'); return; }
       this._stall.clear('pause');
-      this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle');
+      this._stopScheduler(); this._stopDevice(); this._emitStatus('idle');
     };
     this._onSeeked = () => { if (!this._active) return; this._resetIndices(); };
-    this._onEnded = () => { if (!this._active) return; this._stall.clear(); this._stopScheduler(); this.tcode.stop(); this._emitStatus('idle'); };
+    this._onEnded = () => { if (!this._active) return; this._stall.clear(); this._stopScheduler(); this._stopDevice(); this._emitStatus('idle'); };
     // FN-02: the picture stops without a 'pause'. Each holds (see _stall).
     this._onWaiting = () => { if (this._active) this._stall.enter('waiting'); };
     this._onStalled = () => { if (this._active) this._stall.enter('stalled'); };
@@ -527,7 +565,7 @@ export class TCodeSync {
       this._stall.clear();   // the stop below owns every axis now
       this._awaitingResume = true;
       this._stopScheduler();
-      this.tcode.stop();
+      this._stopDevice();
       this._resetIndices();
       // A new video in the same run: its first play homes what it leaves.
       this._armHome();
@@ -644,6 +682,101 @@ export class TCodeSync {
     }
   }
 
+  /**
+   * An axis parked in the middle (a pause or stop over UDP / WebSocket, Go
+   * home, the script player handing the devices back) takes its first move to
+   * the next keyframe at the keyframe's own pace. When that keyframe is only
+   * moments away and the device is far from it, that pace is a slam: a
+   * hand-back 10 ms before a 20 → 80 stroke sent `L0799I10`, 30 units in
+   * 10 ms where the stroke itself is 600 units a second (full manual test,
+   * 2026-11-23). So when the move from where the device is would be quicker
+   * than both the move after a jump and half again the stroke's own speed,
+   * it is a jump (`_jumpEase`). A move at about the script's own speed keeps
+   * the keyframe's pace, as do a short hop and a manager that cannot say
+   * where the device is.
+   * @param {string} axis
+   * @param {number} from the stroke's start, device units (stacked)
+   * @param {number} to the next keyframe, device units (stacked)
+   * @param {number} span the stroke's length, ms
+   * @param {number} remaining ms until the next keyframe
+   * @param {number} now
+   * @returns {boolean}
+   */
+  _parkedMoveTooFast(axis, from, to, span, remaining, now) {
+    if (typeof this.tcode.estimatePosition !== 'function' || !(remaining > 0)) return false;
+    const est = this.tcode.estimatePosition(axis, now);
+    const pace = this._speedLimit > 0 ? Math.min(this._speedLimit, JUMP_MOVE_UNITS_PER_S) : JUMP_MOVE_UNITS_PER_S;
+    if (jumpEaseMs(est, to, pace) <= 0) return false; // a short hop
+    const start = typeof est === 'number' && Number.isFinite(est) ? est : to;
+    const speed = (Math.abs(to - start) / remaining) * 1000;
+    const own = span > 0 ? (Math.abs(to - from) / span) * 1000 : 0;
+    return speed > Math.max(pace, own * PARKED_SLAM_FACTOR);
+  }
+
+  /**
+   * The first move after a jump (a seek, a gap skip, a start, the end of Edge
+   * Hold): from where the device is (the manager's estimate; the middle when
+   * nothing has moved it since connecting) to `target`, at the jump pace, or
+   * the Speed limit when that is slower. Returns the move's length in ms, 0
+   * for a short hop that just snaps, and marks the axis as easing until then.
+   * Eroto #423: the one-tick snap went "to the new position at max speed".
+   */
+  _jumpEase(axis, targetAt, now) {
+    const here = targetAt(0);
+    // A manager that cannot say where the device is keeps the one-tick move.
+    if (here === null || typeof this.tcode.estimatePosition !== 'function') return { target: here, ease: 0 };
+    const est = this.tcode.estimatePosition(axis, now);
+    const pace = this._speedLimit > 0 ? Math.min(this._speedLimit, JUMP_MOVE_UNITS_PER_S) : JUMP_MOVE_UNITS_PER_S;
+    let ease = jumpEaseMs(est, here, pace);
+    if (ease <= 0) return { target: here, ease: 0 };
+    // The script moves on while the device travels: aim where it will be
+    // when the move lands, or the next keyframe's move snaps the rest of the
+    // way (found in the tests: a mid-stroke seek landed at 55 and the next
+    // send went 55 → 90 in 13 ms). Lengthen the move while that target is
+    // further than the pace allows (two rounds settle it).
+    let target = targetAt(ease) ?? here;
+    for (let round = 0; round < 2; round++) {
+      const need = jumpEaseMs(est, target, pace);
+      if (need <= ease) break;
+      ease = need;
+      target = targetAt(ease) ?? target;
+    }
+    this._easeUntil.set(axis, now + ease);
+    return { target, ease };
+  }
+
+  /** The video's playback rate (the script runs at it while a move lands). */
+  _playbackRate() {
+    const r = this.player?.video?.playbackRate ?? this.player?.playbackRate;
+    return typeof r === 'number' && r > 0 && Number.isFinite(r) ? r : 1;
+  }
+
+  /**
+   * L0's output stack for a raw script position: extender → invert →
+   * speed-limit (only with `now`, against the last send) → range → cutoff.
+   */
+  _stackL0(raw, now) {
+    let p = applyExtender(raw, this._naturalRange, this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT);
+    p = applyInvert(p, this.isAxisInverted('L0'));
+    // Optional damping (off by default) — a user-enabled velocity clamp,
+    // parity with XTEngine's damping. Left off, fast motion is untouched.
+    if (now !== null && this._speedLimit > 0 && this._lastSentPos >= 0) {
+      p = applySpeedLimit(p, this._lastSentPos, now - this._lastSendTime, this._speedLimit);
+    }
+    const range = this.getAxisRange('L0');
+    p = range.min + (p / 100) * (range.max - range.min);
+    return applyCutoff(p, this._axisCutoff.get('L0'));
+  }
+
+  /** A companion axis's output stack: extender → invert → range → cutoff, as L0. */
+  _stackAxis(tcode, state, raw) {
+    let v = applyExtender(raw, state.naturalRange, this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT);
+    v = applyInvert(v, this.isAxisInverted(tcode));
+    const range = this.getAxisRange(tcode);
+    v = range.min + (v / 100) * (range.max - range.min);
+    return applyCutoff(v, this._axisCutoff.get(tcode));
+  }
+
   /** Clamp a per-move interval to the valid [MIN_MOVE_MS, MAX_GAP_MS] window. */
   _clampMove(ms) {
     return Math.round(Math.max(MIN_MOVE_MS, Math.min(MAX_GAP_MS, ms)));
@@ -689,33 +822,36 @@ export class TCodeSync {
 
         if (remaining > 0 && remaining <= MAX_GAP_MS) {
           // Go home parked L0 in the middle: its first move is to the next
-          // keyframe at the keyframe's own pace, never a one-tick snap.
+          // keyframe at the keyframe's own pace, never a one-tick snap; unless
+          // that is a slam, then it is a jump (_parkedMoveTooFast).
           const fromHome = this._fromHome.delete('L0');
-          const firstSend = this._lastSentPos < 0 && !fromHome;
+          const firstSend = this._lastSentPos < 0
+            && (!fromHome || this._parkedMoveTooFast('L0', this._stackL0(this._actions[i].pos, null),
+              this._stackL0(next.pos, null), next.at - this._actions[i].at, remaining, now));
+          // The move after a jump is still under way: nothing new until it lands.
+          const easing = !firstSend && (this._easeUntil.get('L0') || 0) > now;
           // Steady state: target = the next keyframe's real position (so peaks
-          // and troughs reach the device intact). First send: snap to the
-          // current interpolated position over one tick.
+          // and troughs reach the device intact). First send: go to the
+          // current interpolated position, over one tick when it is close,
+          // else at the jump pace (_jumpEase).
           let rawPos = firstSend ? this._interpolator(this._actions, timeMs) : next.pos;
-          const moveMs = firstSend ? this._tickIntervalMs : remaining;
+          let moveMs = firstSend ? this._tickIntervalMs : remaining;
 
-          if (rawPos !== null) {
-            // Stack order: extender → invert → speed-limit → range → cutoff.
-            let targetPos = applyExtender(
-              rawPos, this._naturalRange,
-              this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
-            );
-            targetPos = applyInvert(targetPos, this.isAxisInverted('L0'));
-
-            // Optional damping (off by default) — a user-enabled velocity clamp,
-            // parity with XTEngine's damping. Left off, fast motion is untouched.
-            if (this._speedLimit > 0 && this._lastSentPos >= 0) {
-              const deltaMs = now - this._lastSendTime;
-              targetPos = applySpeedLimit(targetPos, this._lastSentPos, deltaMs, this._speedLimit);
+          if (rawPos !== null && !easing) {
+            let targetPos;
+            if (firstSend) {
+              // After a jump: where the script is (or, for a far jump, where
+              // it will be when the device lands), at the jump pace.
+              const rate = this._playbackRate();
+              const jump = this._jumpEase('L0', (ms) => {
+                const raw = this._interpolator(this._actions, timeMs + ms * rate);
+                return raw === null ? null : this._stackL0(raw, null);
+              }, now);
+              targetPos = jump.target;
+              if (jump.ease > 0) moveMs = jump.ease;
+            } else {
+              targetPos = this._stackL0(rawPos, now);
             }
-
-            const range = this.getAxisRange('L0');
-            targetPos = range.min + (targetPos / 100) * (range.max - range.min);
-            targetPos = applyCutoff(targetPos, this._axisCutoff.get('L0'));
 
             if (this._lastSentPos < 0 || Math.abs(targetPos - this._lastSentPos) >= MIN_POS_DELTA) {
               axisValues.L0 = targetPos;
@@ -745,9 +881,14 @@ export class TCodeSync {
       if (remaining <= 0 || remaining > MAX_GAP_MS) continue;
 
       // An axis Go home parked in the middle never snaps from there: its first
-      // move is to the next keyframe at the keyframe's own pace (goHome).
+      // move is to the next keyframe at the keyframe's own pace (goHome),
+      // unless that is a slam (_parkedMoveTooFast).
       const fromHome = this._fromHome.delete(tcode);
-      const firstSend = state.lastSentValue < 0 && !fromHome;
+      const firstSend = state.lastSentValue < 0
+        && (!fromHome || this._parkedMoveTooFast(tcode, this._stackAxis(tcode, state, cur.pos),
+          this._stackAxis(tcode, state, next.pos), next.at - cur.at, remaining, now));
+      // The move after a jump is still under way: nothing new until it lands.
+      if (!firstSend && (this._easeUntil.get(tcode) || 0) > now) continue;
       let rawVal, moveMs;
       if (firstSend) {
         // Snap to the current interpolated position over one tick.
@@ -760,15 +901,17 @@ export class TCodeSync {
         moveMs = remaining;
       }
 
-      // Extender → invert → range → cutoff, matching L0's stack order.
-      let value = applyExtender(
-        rawVal, state.naturalRange,
-        this._rangeExtenderEnabled, RANGE_EXTENDER_THRESHOLD_PCT,
-      );
-      value = applyInvert(value, this.isAxisInverted(tcode));
-      const range = this.getAxisRange(tcode);
-      value = range.min + (value / 100) * (range.max - range.min);
-      value = applyCutoff(value, this._axisCutoff.get(tcode));
+      let value = this._stackAxis(tcode, state, rawVal);
+      if (firstSend) {
+        // After a jump, as L0: where the script will be when it lands.
+        const rate = this._playbackRate();
+        const jump = this._jumpEase(tcode, (ms) => {
+          const raw = linearInterpolate(state.actions, timeMs + ms * rate);
+          return raw === null ? null : this._stackAxis(tcode, state, Math.max(0, Math.min(100, raw)));
+        }, now);
+        value = jump.target;
+        if (jump.ease > 0) moveMs = jump.ease;
+      }
 
       if (state.lastSentValue < 0 || Math.abs(value - state.lastSentValue) >= MIN_POS_DELTA) {
         axisValues[tcode] = value;

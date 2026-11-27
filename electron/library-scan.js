@@ -16,6 +16,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { MEDIA_EXTS, isTransportStream } = require('./media-extensions');
 
 /**
  * Hand the main process's event loop back for one turn.
@@ -60,7 +61,7 @@ const AXIS_SUFFIXES = new Set([
   'twist', 'yaw', 'r0',
   'roll', 'r1',
   'pitch', 'r2',
-  'vib', 'vibrate', 'v0',
+  'vib', 'vibrate', 'vibe', 'v0', // vibe: the RFC's own channel name (multi-axis editing, 2026-11-24)
   'pump', 'v1',
   'valve', 'a0',
   'suck', 'suction', 'a1',
@@ -172,13 +173,14 @@ async function rootListable(dirPath, { timeoutMs = 800, opendir = fs.promises.op
  *   exactly one video offers every script in it as a variant of that video
  * @returns {Promise<{videos, unmatchedFunscripts, unmatchedSubtitles, allFunscripts, failedPaths, skippedPaths}>}
  */
-async function scanLibrary(dirPathOrPaths, sourceMap, { log = console, readdir, folderScriptsAsVariants = false } = {}) {
+async function scanLibrary(dirPathOrPaths, sourceMap, { log = console, readdir, folderScriptsAsVariants = false, probeTransportStream = isTransportStream } = {}) {
   // Accept a single path or array of paths (multi-source)
   // sourceMap: optional { path: sourceName } mapping for VR content server grouping
   const dirPaths = Array.isArray(dirPathOrPaths) ? dirPathOrPaths : [dirPathOrPaths];
   const dirPath = dirPaths[0]; // for backward compat logging
   const _sourceMap = sourceMap || {};
-  const VIDEO_EXTS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+  // Video and audio types: the main process's one list (media-extensions.js).
+  const VIDEO_EXTS = MEDIA_EXTS;
   const FUNSCRIPT_EXT = '.funscript';
   const SUBTITLE_EXTS = ['.srt', '.vtt'];
   // AXIS_SUFFIXES: module level, the player's full set (FT-047).
@@ -244,6 +246,18 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = console, readdir, 
     const parent = entry.parentPath || entry.path || dirPath;
     return path.join(parent, entry.name);
   };
+
+  // A .ts file is a video only when it is an MPEG transport stream: a
+  // TypeScript source in a library folder must not become a "video"
+  // (2026-11-26, when the older formats joined the list).
+  const tsEntries = entries.filter((e) => e.isFile?.() && path.extname(e.name).toLowerCase() === '.ts');
+  if (tsEntries.length > 0) {
+    const notVideo = new Set();
+    for (const e of tsEntries) {
+      if (!(await probeTransportStream(entryPath(e)))) notVideo.add(e);
+    }
+    if (notVideo.size > 0) entries = entries.filter((e) => !notVideo.has(e));
+  }
 
   // Helper: get the directory of an entry (for same-directory matching)
   const entryDir = (entry) => {
@@ -677,6 +691,27 @@ async function scanLibrary(dirPathOrPaths, sourceMap, { log = console, readdir, 
       folders++;
     }
     if (folders > 0) log.info(`[Library] One-video folders: ${offered} script(s) offered as variants in ${folders} folder(s)`);
+  }
+
+  // A variant's own axis files belong to its video too: "Title (muted).vib
+  // .funscript" beside "Title (muted).funscript", a variant of "Title.mp4".
+  // Their base ("title (muted)") names no video, so nothing above claimed
+  // them and they were listed as unmatched scripts, offered as the main
+  // script of other videos (TODO 2026-11-20). The player plays them with
+  // that variant, from the variant's folder and by its exact name
+  // (multi-axis.js `sameFolderCompanions`), so the claim follows that rule.
+  const stemOf = (name) => String(name).replace(/\.funscript$/i, '').toLowerCase();
+  const scriptByPath = new Map(funscriptList.map((fs) => [fs.path, fs]));
+  await yieldTick();
+  for (const video of videos) {
+    for (const variant of video.variants || []) {
+      const own = scriptByPath.get(variant.path);
+      if (!own || own.isAxis) continue;
+      const stem = stemOf(own.name);
+      for (const axis of axisByBase.get(own.fullNormalisedBase) || []) {
+        if (axis.dir === own.dir && stemOf(axis.name) === `${stem}.${axis.axisSuffix}`) axis._used = true;
+      }
+    }
   }
 
   // One collator for the four name sorts below. `a.localeCompare(b, undefined,

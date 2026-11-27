@@ -1,6 +1,6 @@
 // EroScriptsPanel — Search and download funscripts from discuss.eroscripts.com
 
-import { icon, X } from '../js/icons.js';
+import { icon, Search, X } from '../js/icons.js';
 import { showToast } from '../js/toast.js';
 import { t } from '../js/i18n.js';
 import { recordDownloadTags, topicMetaOf } from '../js/script-tags.js';
@@ -26,6 +26,9 @@ export class EroScriptsPanel {
     // One expiry toast per dead session, not one per failed request.
     this._expiredNotified = false;
     this._username = '';
+    // The signed-in user's picture (an https address, or ''), from the login
+    // window or the login check (Dave, 2026-11-25: the tab's account button).
+    this._avatar = '';
     // The login window is open (the auth button reads "Waiting for login").
     this._loginPending = false;
     // The expired session being dropped (forgetExpiredSession), shared.
@@ -47,6 +50,19 @@ export class EroScriptsPanel {
     // `<that video>.funscript` beside it. Unset: the container answers.
     this.getOpenVideoPath = null;
     this.onLoginStatusChanged = null; // (loggedIn, username) => {}
+    // () => {}: the name, the picture or the login window's waiting changed
+    // (the tab's account button repaints). One listener: the tab's.
+    this.onProfileChanged = null;
+    // (topic) => {}: a result's "Videos…" (the EroScripts tab, 2026-11-22). Unset: no button.
+    this.onOpenPost = null;
+    // Docked in the tab (2026-11-22): results go to the tab's cards instead
+    // of this list ((results | null) => {}; null = a message took their
+    // place), and the query sent may be decorated (the Free / Paid filter).
+    this.onResults = null;
+    this.onQueryCleared = null;
+    this.queryDecorator = null;
+    this._searchExtras = null;
+    this._docked = false;
 
     this._createPanel();
     // Kept so a search right after launch waits for the saved login's
@@ -96,10 +112,22 @@ export class EroScriptsPanel {
 
     // Auth button — opens the eroscripts login page in a child window
     // (real browser context, supports TOTP / backup codes / hardware keys).
-    this._panel.querySelector('#es-auth-btn').addEventListener('click', () => this._loginViaWindow());
+    // ONE handler, swapped by _setLoggedIn / _setLoggedOut: a permanent login
+    // listener here ran beside the Log Out one, so Log Out also opened the
+    // login window, and Log In after it opened two (live, 2026-11-25; also in
+    // v0.10.0). The leftover window held FunSync's quit for 30 s.
+    this._panel.querySelector('#es-auth-btn').onclick = () => this._loginViaWindow();
 
     // Search
     this._panel.querySelector('#es-search-btn').addEventListener('click', () => this._search());
+    // Emptied in the tab: its newest-scripts list comes back (2026-11-22).
+    this._panel.querySelector('#es-search-input').addEventListener('input', (e) => {
+      if (this._docked && !e.target.value.trim() && typeof this.onQueryCleared === 'function') {
+        this._resultsView = { kind: 'placeholder' };
+        this._panel.querySelector('#es-results')?.replaceChildren();
+        this.onQueryCleared();
+      }
+    });
     this._panel.querySelector('#es-search-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this._search();
     });
@@ -127,6 +155,7 @@ export class EroScriptsPanel {
     this._panel.querySelector('.eroscripts-panel__close')?.setAttribute('aria-label', t('eroscripts.closeAria'));
     const input = this._panel.querySelector('#es-search-input');
     if (input) input.placeholder = t('eroscripts.searchPlaceholder');
+    this._searchClear?.setAttribute('aria-label', t('library.clearSearchAria'));
     const searchBtn = this._panel.querySelector('#es-search-btn');
     if (searchBtn) searchBtn.textContent = t('eroscripts.search');
 
@@ -165,6 +194,12 @@ export class EroScriptsPanel {
     const resultsEl = this._panel.querySelector('#es-results');
     if (!resultsEl) return;
     this._resultsView = { kind, query };
+    if (this._docked && typeof this.onResults === 'function') {
+      this.onResults(null, kind);
+      // Docked, "search for a video name" is not shown: the tab lists the
+      // newest scripts there instead.
+      if (kind === 'placeholder') { resultsEl.replaceChildren(); return; }
+    }
     if (kind === 'loginNeeded') {
       // Logged out, a search sends nothing and says so, with the login right
       // here (Dave, 2026-11-18: never a silent empty list).
@@ -234,7 +269,7 @@ export class EroScriptsPanel {
     // Validate the session is still active
     const { valid } = await window.funsync.eroscriptsValidate();
     if (valid) {
-      this._setLoggedIn(saved.username);
+      this._setLoggedIn(saved.username, saved.avatar);
     } else {
       // Session expired — clear it
       this._settings.set('eroscripts.session', null);
@@ -244,10 +279,13 @@ export class EroScriptsPanel {
     }
   }
 
-  _setLoggedIn(username) {
+  _setLoggedIn(username, avatar = '') {
     this._loggedIn = true;
     // Fresh session — a future expiry should announce itself again.
     this._expiredNotified = false;
+    // Another account keeps no picture of the last one.
+    if (username !== this._username) this._avatar = '';
+    if (typeof avatar === 'string' && avatar) this._avatar = avatar;
     this._username = username;
 
     const label = this._panel.querySelector('#es-auth-label');
@@ -267,11 +305,13 @@ export class EroScriptsPanel {
     if (this._resultsView?.kind === 'loginNeeded') this._renderResultsMessage('placeholder');
 
     if (this.onLoginStatusChanged) this.onLoginStatusChanged(true, username);
+    this.onProfileChanged?.();
   }
 
   _setLoggedOut() {
     this._loggedIn = false;
     this._username = '';
+    this._avatar = '';
 
     const label = this._panel.querySelector('#es-auth-label');
     const btn = this._panel.querySelector('#es-auth-btn');
@@ -286,8 +326,13 @@ export class EroScriptsPanel {
       status.textContent = '';
       status.className = 'eroscripts-panel__status';
     }
+    // The last search's results carried live Get Script buttons that now
+    // fail on the forum: show "Log in to search" over them instead, whose
+    // Log In runs the same search again (found 2026-11-18, fixed 2026-11-22).
+    if (this._resultsView?.kind === 'results') this._renderResultsMessage('loginNeeded');
 
     if (this.onLoginStatusChanged) this.onLoginStatusChanged(false, '');
+    this.onProfileChanged?.();
   }
 
   async _logout() {
@@ -338,6 +383,7 @@ export class EroScriptsPanel {
     try {
       const answer = await ask({ force: force === true });
       if (SESSION_STATES.has(answer?.state)) state = answer.state;
+      if (state === 'valid' && typeof answer?.avatar === 'string' && answer.avatar) this._setAvatar(answer.avatar);
     } catch {
       state = 'unknown';
     }
@@ -373,8 +419,43 @@ export class EroScriptsPanel {
    * cancelled or failed login is false (the window's own error toast shows).
    */
   async login() {
-    await this._loginViaWindow();
+    // Asked for because main says "not logged in": the window opens even if
+    // this panel still thinks it is (a stale state; the window then picks the
+    // session up again), as before the 2026-11-25 guard.
+    await this._loginViaWindow({ force: true });
     return this._loggedIn === true;
+  }
+
+  /** The signed-in name ('' logged out). */
+  get username() { return this._username; }
+  /** The signed-in user's picture ('' when there is none or logged out). */
+  get avatarUrl() { return this._loggedIn ? this._avatar : ''; }
+  /** The login window is open. */
+  get loginPending() { return this._loginPending === true; }
+
+  /**
+   * The tab empties the box itself (a post's tag clicked, 2026-11-25): no
+   * "emptied" event, the tab loads its list once.
+   */
+  clearQuery() {
+    const input = this._panel?.querySelector('#es-search-input');
+    if (input) input.value = '';
+    if (this._searchClear) this._searchClear.hidden = true;
+  }
+
+  /** The tab's Log In: the login window, as this panel's own button opens it. */
+  openLogin() { return this._loginViaWindow(); }
+
+  /** The tab's account menu: Log Out, as this panel's own button does. */
+  logout() { return this._logout(); }
+
+  /** A new picture from the login check: kept with the saved session too. */
+  _setAvatar(url) {
+    if (!this._loggedIn || url === this._avatar) return;
+    this._avatar = url;
+    const saved = this._settings.get('eroscripts.session');
+    if (saved && saved.username === this._username) this._settings.set('eroscripts.session', { ...saved, avatar: url });
+    this.onProfileChanged?.();
   }
 
   /**
@@ -406,7 +487,7 @@ export class EroScriptsPanel {
     try { el.focus({ preventScroll: true }); } catch { /* not focusable now */ }
   }
 
-  async _loginViaWindow() {
+  async _loginViaWindow({ force = false } = {}) {
     // Open the real eroscripts login page in a child Electron window.
     // The user authenticates via Discourse's own UI, so whatever 2FA
     // method they have enabled (TOTP, backup code, hardware key /
@@ -414,8 +495,18 @@ export class EroScriptsPanel {
     // session cookie and hands it back. Replaces the prior in-app modal
     // that hard-coded a 6-digit TOTP entry and locked out everyone with
     // a hardware key or backup-code-only setup.
+    // One login window at a time (a second ask waits for it); none while
+    // logged in, unless a caller that knows better asks (login()).
+    if (this._loggedIn && !force) return undefined;
+    if (this._loginPromise) return this._loginPromise;
+    this._loginPromise = this._openLoginWindow().finally(() => { this._loginPromise = null; });
+    return this._loginPromise;
+  }
+
+  async _openLoginWindow() {
     const btn = this._panel.querySelector('#es-auth-btn');
     this._loginPending = true;
+    this.onProfileChanged?.();
     if (btn) {
       btn.disabled = true;
       btn.textContent = t('eroscripts.waitingLogin');
@@ -426,13 +517,15 @@ export class EroScriptsPanel {
         this._settings.set('eroscripts.session', {
           cookie: result.cookie,
           username: result.username,
+          ...(typeof result.avatar === 'string' && result.avatar ? { avatar: result.avatar } : {}),
         });
-        this._setLoggedIn(result.username);
+        this._setLoggedIn(result.username, result.avatar);
       } else if (result.error && result.error !== 'Login cancelled') {
         showToast(result.error, 'error', 5000);
       }
     } finally {
       this._loginPending = false;
+      this.onProfileChanged?.();
       if (btn) {
         this._enableButton(btn);
         // From state, not the text captured before the window opened: that
@@ -445,7 +538,26 @@ export class EroScriptsPanel {
   async _search() {
     const input = this._panel.querySelector('#es-search-input');
     const query = input.value.trim();
-    if (!query || this._searching) return;
+    if (!query) return;
+    // Asked for while one is still loading (Enter again, Search, a tag added
+    // or removed in the tab): it runs when that one ends, with what is asked
+    // for THEN, and the older answer is not shown. It used to be dropped, so
+    // the results never caught up: Dave, 2026-11-25, "searching by tag doesnt
+    // seem to work" (live: a tag added during a search left the old results,
+    // 9 of 50 kept by the tag, where the forum has far more).
+    if (this._searching) { this._searchAgain = true; return; }
+    this._searchAgain = false;
+    try {
+      await this._runSearch(query);
+    } finally {
+      if (this._searchAgain) {
+        this._searchAgain = false;
+        this._search();
+      }
+    }
+  }
+
+  async _runSearch(query) {
     this._lastSearchQuery = query;
 
     // Just after launch the saved login may still be being checked.
@@ -475,10 +587,15 @@ export class EroScriptsPanel {
       this._renderResultsMessage('loginNeeded');
       return;
     }
+    // A newer search was asked for while the login was checked: no request for this one.
+    if (this._searchAgain) { this._searching = false; return; }
 
-    const answer = await window.funsync.eroscriptsSearch(query);
+    const sent = typeof this.queryDecorator === 'function' ? this.queryDecorator(query) : query;
+    const answer = await window.funsync.eroscriptsSearch(sent);
     const { results, error, authExpired } = answer;
     this._searching = false;
+    // A newer search was asked for meanwhile: this answer is old (it runs next).
+    if (this._searchAgain) return;
 
     // Main had no login to send: nothing was sent.
     if (answer?.loginRequired) {
@@ -509,7 +626,6 @@ export class EroScriptsPanel {
 
   /** "Search with fewer words": that query in the box, searched once. */
   _searchFewerWords(fewer) {
-    if (this._searching) return;
     const input = this._panel.querySelector('#es-search-input');
     if (!input) return;
     input.value = fewer;
@@ -522,6 +638,11 @@ export class EroScriptsPanel {
     const container = this._panel.querySelector('#es-results');
     container.innerHTML = '';
     this._resultsView = { kind: 'results', results };
+    // In the tab the results are its cards (2026-11-22).
+    if (this._docked && typeof this.onResults === 'function') {
+      this.onResults(results);
+      return;
+    }
 
     for (const topic of results) {
       const card = document.createElement('div');
@@ -577,12 +698,22 @@ export class EroScriptsPanel {
 
       const viewBtn = document.createElement('button');
       viewBtn.className = 'eroscripts-panel__btn eroscripts-panel__btn--secondary';
+      viewBtn.dataset.role = 'view';
       this._setLabel(viewBtn, 'eroscripts.view');
       viewBtn.addEventListener('click', () => {
         window.funsync.openExternal(topic.url);
       });
 
       actions.appendChild(dlBtn);
+      // The post's videos and scripts, in the EroScripts tab (2026-11-22).
+      if (typeof this.onOpenPost === 'function') {
+        const vidBtn = document.createElement('button');
+        vidBtn.className = 'eroscripts-panel__btn eroscripts-panel__btn--secondary';
+        vidBtn.dataset.role = 'videos';
+        this._setLabel(vidBtn, 'eroscripts.tab.videosBtn');
+        vidBtn.addEventListener('click', () => this.onOpenPost(topic));
+        actions.appendChild(vidBtn);
+      }
       actions.appendChild(viewBtn);
 
       content.appendChild(title);
@@ -617,10 +748,14 @@ export class EroScriptsPanel {
       return;
     }
 
-    if (error || attachments.length === 0) {
+    if (error) {
       this._enableButton(btn);
       this._setLabel(btn, 'eroscripts.getScript');
-      showToast(error ? eroscriptsErrorText(answer) : t('eroscripts.noAttachments'), error ? 'error' : 'warn');
+      showToast(eroscriptsErrorText(answer), 'error');
+      return;
+    }
+    if (attachments.length === 0) {
+      this._markNoScriptFile(btn);
       return;
     }
 
@@ -636,6 +771,30 @@ export class EroScriptsPanel {
     this._enableButton(btn);
     this._setLabel(btn, 'eroscripts.getScript');
     this._showAttachmentPicker(attachments, btn.parentElement, topic, topicAnswer);
+  }
+
+  /**
+   * A post with no funscript attached (v0.10.1). It used to say so in a short
+   * toast while the button went back to "Get Script", which read as nothing
+   * happening ("Art of blowjob…", topic 349527: the script is linked
+   * elsewhere). Now the result itself says it and keeps saying it: the button
+   * reads "No script file" and stays off, a line under it says where the
+   * script may be, and View (the way to it) becomes the main button.
+   */
+  _markNoScriptFile(btn) {
+    btn.disabled = true;
+    this._setLabel(btn, 'eroscripts.noScriptFile');
+    btn.classList.add('eroscripts-panel__btn--secondary');
+    const actions = btn.parentElement;
+    actions?.querySelector('[data-role="view"]')?.classList.remove('eroscripts-panel__btn--secondary');
+    const content = actions?.parentElement;
+    if (content && !content.querySelector('.eroscripts-panel__result-note')) {
+      const note = document.createElement('div');
+      note.className = 'eroscripts-panel__result-note';
+      note.setAttribute('role', 'status');
+      this._setLabel(note, 'eroscripts.noScriptFileNote');
+      content.appendChild(note);
+    }
   }
 
   _showAttachmentPicker(attachments, parentEl, topic, topicAnswer = null) {
@@ -657,6 +816,8 @@ export class EroScriptsPanel {
     }
 
     parentEl.appendChild(list);
+    // The whole list in view: the results box scrolls as little as it can.
+    if (typeof list.scrollIntoView === 'function') list.scrollIntoView({ block: 'nearest' });
   }
 
   /**
@@ -855,7 +1016,120 @@ export class EroScriptsPanel {
 
   toggle() { if (this._visible) this.hide(); else this.show(); }
 
+  /**
+   * The EroScripts tab (2026-11-22) hosts the panel in its view: no dialog,
+   * no close button, no focus trap, no outside click. `undock()` puts it back
+   * as the floating panel (the player view still opens it that way, so a
+   * video keeps playing under it).
+   */
+  dock(host, { searchExtras = null } = {}) {
+    if (!host) return;
+    if (this._visible && !this._docked) this.hide();
+    this._docked = true;
+    this._panel.classList.add('eroscripts-panel--docked');
+    this._panel.removeAttribute('role');
+    this._panel.removeAttribute('aria-modal');
+    host.appendChild(this._panel);
+    this._dockSearchBox(true);
+    // The tab's own controls beside the search box (the Free / Paid filter).
+    if (searchExtras) {
+      this._searchExtras = searchExtras;
+      this._panel.querySelector('.eroscripts-panel__input-row')?.appendChild(searchExtras);
+    }
+    // Nothing searched: the tab lists the newest scripts in its place.
+    // Nothing searched: the tab lists the newest scripts in its place. Results:
+    // the tab shows them as cards, so the list the floating panel drew for them
+    // (undock) goes; it showed above the cards after a trip to the player
+    // (Dave, 2026-11-22: "why does the search bring up 2 result sets").
+    if (this._resultsView?.kind === 'placeholder' || this._resultsView?.kind === 'results') {
+      this._panel.querySelector('#es-results')?.replaceChildren();
+    }
+    this._panel.hidden = false;
+    this._visible = true;
+    if (this._loggedIn) this.checkSession().catch(() => { /* changes nothing */ });
+  }
+
+  /**
+   * In the tab the search box is the Library's (Dave, 2026-11-25: "the
+   * searchbar can just match the one we have in the library as theres no
+   * point in being non consistant"): its magnifier, its size (180 px, 240
+   * focused; it was stretched across the row) and its clear button; Enter
+   * searches. The floating panel keeps its own box and Search button.
+   */
+  _dockSearchBox(on) {
+    const input = this._panel?.querySelector('#es-search-input');
+    if (!input) return;
+    if (on) {
+      if (!this._searchBox) {
+        const box = document.createElement('div');
+        box.className = 'library__search eroscripts-panel__search-box';
+        const glass = document.createElement('span');
+        glass.className = 'library__search-icon';
+        glass.setAttribute('aria-hidden', 'true');
+        glass.appendChild(icon(Search, { width: 14, height: 14 }));
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'library__search-clear';
+        clear.appendChild(icon(X, { width: 14, height: 14 }));
+        // Emptied: the panel's own input handler brings the newest list back.
+        clear.addEventListener('click', () => {
+          input.value = '';
+          input.dispatchEvent(new Event('input', { bubbles: true }));
+          input.focus();
+        });
+        input.addEventListener('input', () => { clear.hidden = !input.value; });
+        box.append(glass, clear);
+        this._searchBox = box;
+        this._searchClear = clear;
+      }
+      this._searchClear.setAttribute('aria-label', t('library.clearSearchAria'));
+      this._searchClear.hidden = !input.value;
+      if (input.parentElement !== this._searchBox) {
+        input.before(this._searchBox);
+        this._searchBox.insertBefore(input, this._searchClear);
+      }
+      input.classList.remove('eroscripts-panel__input', 'eroscripts-panel__search-input');
+      input.classList.add('library__search-input');
+      return;
+    }
+    if (this._searchBox && input.parentElement === this._searchBox) {
+      this._searchBox.before(input);
+      this._searchBox.remove();
+    }
+    input.classList.remove('library__search-input');
+    input.classList.add('eroscripts-panel__input', 'eroscripts-panel__search-input');
+  }
+
+  undock() {
+    if (!this._docked) return;
+    this._docked = false;
+    this._visible = false;
+    this._panel.hidden = true;
+    this._panel.classList.remove('eroscripts-panel--docked');
+    this._panel.setAttribute('role', 'dialog');
+    this._panel.setAttribute('aria-modal', 'true');
+    this._searchExtras?.remove();
+    this._searchExtras = null;
+    this._dockSearchBox(false);
+    document.getElementById('app')?.appendChild(this._panel);
+    // The tab drew the last results as cards: the floating list draws them.
+    if (this._resultsView?.kind === 'results') this._renderResults(this._resultsView.results);
+    else if (this._resultsView?.kind === 'placeholder') this._renderResultsMessage('placeholder');
+  }
+
+  get docked() { return this._docked === true; }
+
+  /** Search again with what is in the box (the tab's filter changed). */
+  search() {
+    const input = this._panel.querySelector('#es-search-input');
+    if (input?.value.trim()) this._search();
+  }
+
   show() {
+    if (this._docked) {
+      this._panel.querySelector('#es-search-input')?.focus();
+      return;
+    }
     this._panel.hidden = false;
     this._visible = true;
 
@@ -920,6 +1194,7 @@ export class EroScriptsPanel {
   }
 
   hide() {
+    if (this._docked) return; // the tab's own, until it undocks
     this._panel.hidden = true;
     this._visible = false;
     if (this._boundOutsideClick) {

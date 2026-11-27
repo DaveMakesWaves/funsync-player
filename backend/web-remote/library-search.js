@@ -105,7 +105,9 @@ export function fuzzySearch(videos, query, options = {}) {
   return results.map(r => r.video);
 }
 
-const _MEDIA_EXT_RE = / (mp4|mkv|webm|avi|mov|wmv|flv|m4v|mpg|mpeg|ts|m3u8|funscript)$/;
+// The older formats the library lists since 2026-11-26 too (S031): kept, a
+// title typed in full lost to the same words in another order.
+const _MEDIA_EXT_RE = / (mp4|mkv|webm|avi|mov|wmv|asf|flv|f4v|m4v|mpg|mpeg|vob|ts|m2ts|mts|3gp|3g2|ogv|divx|m3u8|funscript)$/;
 function _stripMediaExt(normName) {
   return normName.replace(_MEDIA_EXT_RE, '');
 }

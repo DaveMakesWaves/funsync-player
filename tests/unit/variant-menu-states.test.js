@@ -51,7 +51,7 @@ const p = (dir, name) => `${dir}\\${name}`;
 const METHODS = [
   '_loadPlayContent', 'loadFunscript', '_updateVariantSelector', '_variantLabelText',
   '_manualVariantsFor', '_planLazyRehome', '_addManualVariant', '_switchVariant',
-  '_editorAllowsReplace', '_showVariantDropdown', '_applyPreferredVariant',
+  '_editorAllowsReplace', '_showVariantDropdown', '_markVariantItemIfMissing', '_applyPreferredVariant',
   '_getPreferredVariantLabel', '_setPreferredVariantLabel', '_readScriptResilient',
   '_refreshCurrentVariantsFromDisk', '_showAddVariantModal', '_addManualVariants',
   '_showManageVariantsModal', '_cycleVariant', '_streamPlayerWindowData',

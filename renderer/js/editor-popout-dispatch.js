@@ -19,7 +19,7 @@
 // than its parent). A method that does not exist must be called PLAINLY, not
 // with `?.()`, so a rename throws and is logged instead of vanishing.
 
-import { halfSpeed, doubleSpeed, reverseActions } from './script-modifiers.js';
+import { halfSpeed, doubleSpeed, reverseActions, fadeIn, fadeOut, vibrateBetween } from './script-modifiers.js';
 import { PATTERN_SPEED_CEILING } from './pattern-library.js';
 import {
   OP_INSERT, OP_DELETE, OP_UPDATE, OP_SELECT, OP_SELECT_ALL, OP_CLEAR_SELECTION,
@@ -28,7 +28,7 @@ import {
   OP_INSERT_ALTERNATING, OP_REPEAT_LAST_STROKE, OP_MOVE_SELECTED_TO,
   OP_ADD_BOOKMARK, OP_REMOVE_BOOKMARK, OP_BEGIN_BATCH, OP_END_BATCH,
   OP_COPY, OP_SELECT_BY_POSITION, OP_MOVE_ACTIONS, OP_APPLY_MODIFIER,
-  OP_SELECT_CREATED, OP_SELECT_EVERY_NTH, OP_PLACE_AT, OP_FILL_RANGE,
+  OP_SELECT_CREATED, OP_SELECT_EVERY_NTH, OP_PLACE_AT, OP_FILL_RANGE, OP_RIPPLE_DELETE, OP_UNDO_STEPS, OP_REDO_STEPS,
 } from './editor-popout-protocol.js';
 
 /** The most points one OP_FILL_RANGE may carry (a 10-minute buzz fill is ~12,000). */
@@ -43,10 +43,9 @@ const FILL_SPEED_SLACK = 0.5;
  * a fill is never trimmed into something the user did not see.
  *
  * `range: true` is a fill of a marked time range (no anchors on t0 / t1):
- * its edge points sit ON t0 and t1, so they may (inside [t0, t1]). No leg
- * between two of its points may pass the speed ceiling
- * (PATTERN_SPEED_CEILING, 600 u/s; Dave 2026-11-17: the hard ceiling
- * everywhere): the pop-out's drawer holds it, and the parent checks.
+ * its edge points sit ON t0 and t1, so they may (inside [t0, t1]). No speed
+ * check: the editor's fill has no ceiling since 2026-11-24 (Dave: "lift the
+ * fill cap too"; it was PATTERN_SPEED_CEILING, 600 u/s, from 2026-11-17).
  *
  * t0 and t1 are the anchors' own times, which may be fractional (a file can
  * say "at": 1234.5; nothing rounds them on load). They are compared as they
@@ -79,7 +78,6 @@ export function validFillRange(payload) {
     if (range ? (p.at < t0 || p.at > t1) : p.at >= t1) return null;
     if (p.pos < 0 || p.pos > 100) return null;
     const q = { at: p.at, pos: Math.round(p.pos) };
-    if (last && (Math.abs(q.pos - last.pos) * 1000) / (q.at - last.at) > PATTERN_SPEED_CEILING + FILL_SPEED_SLACK) return null;
     out.push(q);
     last = q;
     prev = p.at;
@@ -101,7 +99,7 @@ export function validFillRange(payload) {
 // EditableScript's contiguity guard (SEQUENCE_MODIFIERS) recognises them.
 // Keys are the protocol values the pop-out sends ('reverse'), NOT the JS
 // export names.
-const POPOUT_MODIFIERS = { halfSpeed, doubleSpeed, reverse: reverseActions };
+const POPOUT_MODIFIERS = { halfSpeed, doubleSpeed, reverse: reverseActions, fadeIn, fadeOut, vibrate: vibrateBetween };
 
 /**
  * Apply one EDIT_OP from the pop-out to the parent's EditableScript.
@@ -226,9 +224,23 @@ export function applyPopoutEdit(es, payload, host) {
         // like the modals the pop-out opens); a success stays silent.
         const name = payload.name;
         const fn = POPOUT_MODIFIERS[name];
-        if (fn) host.reportModifierResult(es.applyModifier(fn), name);
+        // One options object at most (Vibrate's size / rate / taper / cap); the
+        // modifier clamps every value itself.
+        const args = Array.isArray(payload.args) && payload.args[0] && typeof payload.args[0] === 'object' ? [payload.args[0]] : [];
+        if (fn) host.reportModifierResult(es.applyModifier(fn, ...args), name);
         break;
       }
+      case OP_UNDO_STEPS:
+        // The pop-out's undo history menu: several steps at once (work list 4.5).
+        es.undoSteps?.(payload.steps);
+        break;
+      case OP_REDO_STEPS:
+        es.redoSteps?.(payload.steps);
+        break;
+      case OP_RIPPLE_DELETE:
+        // Shift+Del / Modify > Ripple delete in the pop-out; the toast goes there.
+        host.rippleDelete?.();
+        break;
       case OP_SELECT_CREATED:
         // N in the pop-out. The created record lives in THIS EditableScript;
         // the new selection reaches the pop-out through ACTIONS_CHANGED.

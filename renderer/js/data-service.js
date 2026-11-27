@@ -165,7 +165,76 @@ class DataService {
     return playlist;
   }
 
+  /**
+   * The Favourites playlist (zaikechi #381; renderer/js/favourites.js), made
+   * by main the first time it is asked for. `name` names a new one only.
+   */
+  async ensureFavouritesPlaylist(name) {
+    const have = this.getPlaylist('favourites');
+    if (have) {
+      // Main renames it when it still has a built-in name (B008: made at a
+      // first launch before the language was chosen); a user's name stays.
+      if (typeof name !== 'string' || !name.trim() || have.name === name.trim()) return have;
+      let stored = null;
+      try { stored = await window.funsync?.ensureFavouritesPlaylist?.(name); } catch { stored = null; }
+      if (stored && typeof stored.name === 'string' && stored.name !== have.name) {
+        const cached = this._cache.playlists.find((p) => p.id === 'favourites');
+        if (cached) cached.name = stored.name;
+        eventBus.emit('playlist:changed', { action: 'rename', playlist: this.getPlaylist('favourites') });
+      }
+      return this.getPlaylist('favourites');
+    }
+    let playlist = null;
+    try {
+      playlist = await window.funsync?.ensureFavouritesPlaylist?.(name);
+    } catch (err) {
+      console.warn('[DataService] Favourites playlist not made:', err?.message || err);
+      return null;
+    }
+    if (!playlist || typeof playlist !== 'object') return null;
+    if (!this.getPlaylist(playlist.id)) {
+      this._cache.playlists.unshift(playlist);
+      eventBus.emit('playlist:changed', { action: 'add', playlist });
+    }
+    return this.getPlaylist(playlist.id);
+  }
+
+  /**
+   * A following playlist's rule (zaikechi #381): `{kind: 'category'|'source'|'folder', …}`
+   * or null to stop following. Main checks it and answers with what it kept.
+   */
+  async setPlaylistFollow(id, follow) {
+    let stored;
+    try {
+      stored = await window.funsync?.setPlaylistFollow?.(id, follow);
+    } catch (err) {
+      console.warn('[DataService] playlist follow not saved:', err?.message || err);
+      return undefined;
+    }
+    if (stored === undefined) return undefined;
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) {
+      if (stored) playlist.follow = stored;
+      else { delete playlist.follow; delete playlist.excludedPaths; }
+    }
+    eventBus.emit('playlist:changed', { action: 'follow', id, follow: stored || null });
+    return stored;
+  }
+
+  /** The videos taken out of a following playlist by hand (the rule never adds them back). */
+  setPlaylistExcluded(id, paths) {
+    const clean = [...new Set((Array.isArray(paths) ? paths : []).filter((p) => typeof p === 'string' && p))];
+    const playlist = this._cache.playlists.find((p) => p.id === id);
+    if (playlist) {
+      if (clean.length) playlist.excludedPaths = clean;
+      else delete playlist.excludedPaths;
+    }
+    window.funsync?.setPlaylistExcluded?.(id, clean);
+    eventBus.emit('playlist:changed', { action: 'excluded', id });
+  }
+
   deletePlaylist(id) {
+    if (id === 'favourites') return; // never deleted (store.js)
     this._cache.playlists = this._cache.playlists.filter((p) => p.id !== id);
     window.funsync.deletePlaylist(id);
     eventBus.emit('playlist:changed', { action: 'delete', id });
@@ -248,20 +317,40 @@ class DataService {
     eventBus.emit('playlist:changed', { action: 'reorder', id });
   }
 
+  /**
+   * A following playlist (zaikechi #381) remembers what the user took out by
+   * hand, so its rule never adds it back; adding it by hand again clears
+   * that. The rule's own removals (`{ byRule: true }`) are not the user's.
+   */
+  _followExclude(playlist, paths, { add, byRule = false } = {}) {
+    if (!playlist?.follow || byRule) return;
+    const before = Array.isArray(playlist.excludedPaths) ? playlist.excludedPaths : [];
+    const set = new Set(before);
+    let changed = false;
+    for (const p of paths) {
+      if (typeof p !== 'string' || !p) continue;
+      if (add && !set.has(p)) { set.add(p); changed = true; }
+      if (!add && set.delete(p)) changed = true;
+    }
+    if (changed) this.setPlaylistExcluded(playlist.id, [...set]);
+  }
+
   addVideoToPlaylist(id, videoPath) {
     const playlist = this._cache.playlists.find((p) => p.id === id);
     if (playlist && !playlist.videoPaths.includes(videoPath)) {
       playlist.videoPaths.push(videoPath);
     }
+    this._followExclude(playlist, [videoPath], { add: false });
     window.funsync.addVideoToPlaylist(id, videoPath);
     eventBus.emit('playlist:changed', { action: 'addVideo', id, videoPath });
   }
 
-  removeVideoFromPlaylist(id, videoPath) {
+  removeVideoFromPlaylist(id, videoPath, opts = {}) {
     const playlist = this._cache.playlists.find((p) => p.id === id);
     if (playlist) {
       playlist.videoPaths = playlist.videoPaths.filter((p) => p !== videoPath);
     }
+    this._followExclude(playlist, [videoPath], { add: true, byRule: opts.byRule === true });
     window.funsync.removeVideoFromPlaylist(id, videoPath);
     eventBus.emit('playlist:changed', { action: 'removeVideo', id, videoPath });
   }
@@ -271,9 +360,10 @@ class DataService {
    * video rewrote config.json once each (a playlist's Select-mode Remove and
    * its Undo, FT-104). Added paths go on the end, as addVideoToPlaylist does.
    */
-  addVideosToPlaylist(id, videoPaths) {
+  addVideosToPlaylist(id, videoPaths, opts = {}) {
     const paths = Array.isArray(videoPaths) ? videoPaths.slice() : [];
     const playlist = this._cache.playlists.find((p) => p.id === id);
+    this._followExclude(playlist, paths, { add: false, byRule: opts.byRule === true });
     if (playlist) {
       const have = new Set(playlist.videoPaths);
       for (const p of paths) {
@@ -286,10 +376,11 @@ class DataService {
     eventBus.emit('playlist:changed', { action: 'addVideos', id, videoPaths: paths });
   }
 
-  removeVideosFromPlaylist(id, videoPaths) {
+  removeVideosFromPlaylist(id, videoPaths, opts = {}) {
     const paths = Array.isArray(videoPaths) ? videoPaths.slice() : [];
     const drop = new Set(paths);
     const playlist = this._cache.playlists.find((p) => p.id === id);
+    this._followExclude(playlist, paths, { add: true, byRule: opts.byRule === true });
     if (playlist) {
       playlist.videoPaths = playlist.videoPaths.filter((p) => !drop.has(p));
     }
@@ -363,6 +454,17 @@ class DataService {
     }
     window.funsync.assignCategory(videoPath, catId);
     eventBus.emit('category:changed', { action: 'assign', videoPath, catId });
+  }
+
+  /** assignCategory for many videos in ONE write (store.js assignCategoryToVideos). */
+  assignCategoryToVideos(videoPaths, catId) {
+    const paths = (Array.isArray(videoPaths) ? videoPaths : []).filter((p) => typeof p === 'string' && p);
+    for (const videoPath of paths) {
+      if (!this._cache.videoCategories[videoPath]) this._cache.videoCategories[videoPath] = [];
+      if (!this._cache.videoCategories[videoPath].includes(catId)) this._cache.videoCategories[videoPath].push(catId);
+    }
+    window.funsync.assignCategoryToVideos(paths, catId);
+    eventBus.emit('category:changed', { action: 'assignMany', videoPaths: paths, catId });
   }
 
   unassignCategory(videoPath, catId) {

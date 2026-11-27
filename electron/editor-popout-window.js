@@ -92,7 +92,13 @@ function open(parent, store) {
     minWidth: 600,
     minHeight: 400,
     title: 'FunSync — Script Editor',
-    parent,
+    // Deliberately NOT a `parent`-child window any more (editor work list
+    // 6.3, 2026-11-24, Dave's call delegated): an owned window hides when the
+    // main window is minimised, but the pop-out is for scripting on a second
+    // monitor while the video plays on the first, and minimising the main
+    // window took the editor away with it (TODO, found while D-01). Top-level,
+    // like the player pop-out: its own taskbar button and minimise. The cost
+    // (no auto-close with the main window) is handled below.
     autoHideMenuBar: true,
     backgroundColor: require('./window-bg').resolveWindowColors().background, // theme surface
     // Same themed title-bar overlay as the main window; the renderer supplies
@@ -126,6 +132,19 @@ function open(parent, store) {
       parent.webContents.send('editor-popout:event', { type: 'closed' });
     }
   });
+
+  // Orphan protection: a top-level window does not close with the main one,
+  // so it is closed here; it never keeps the app alive on its own. (The main
+  // window's own close already asked about unsaved edits: they live there.)
+  if (parent && !parent.isDestroyed()) {
+    const closeWithParent = () => { try { close(); } catch { /* already gone */ } };
+    parent.once('closed', closeWithParent);
+    // One listener per pop-out: dropped when it closes, so opening and
+    // docking it many times never piles them up on the main window.
+    popoutWindow.once('closed', () => {
+      try { if (!parent.isDestroyed()) parent.removeListener('closed', closeWithParent); } catch { /* gone */ }
+    });
+  }
 
   if (parent && !parent.isDestroyed()) {
     parent.webContents.send('editor-popout:event', { type: 'opened' });

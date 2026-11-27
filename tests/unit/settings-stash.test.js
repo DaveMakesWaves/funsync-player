@@ -209,13 +209,17 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 
 describe('where it is: a block at the bottom of Settings > Sources (Dave: not a rail item)', () => {
-  it('fresh install: the block sits after the source buttons, with its heading and intro; no rail item', async () => {
+  it('fresh install: the block is the last of the Library area, below the folders and their buttons, with its heading and intro; no rail area', async () => {
     await openSettings(await boot());
     const sources = $('#settings-tabpanel-sources');
     expect(block()).not.toBeNull();
     expect(block().parentElement).toBe(sources);
     expect(sources.lastElementChild).toBe(block());
-    expect(block().previousElementSibling.classList.contains('settings-panel__source-buttons')).toBe(true);
+    // Library (2026-11-23): Folders (the list and its buttons), Cards & lists,
+    // Duplicates, then Stash.
+    const kids = [...sources.children];
+    expect($('#sp-sec-sources .settings-panel__source-buttons')).not.toBeNull();
+    expect(kids.indexOf($('#sp-sec-sources'))).toBeLessThan(kids.indexOf(block()));
     expect(block().getAttribute('aria-labelledby')).toBe('sp-stash-title');
     expect($('#sp-stash-title').textContent).toBe(t('settingsPanel.stash.header'));
     expect(block().querySelector('.stash-settings__intro').textContent).toBe(t('settingsPanel.stash.intro'));
@@ -930,7 +934,8 @@ describe('the stylesheet', () => {
     const html = fs.readFileSync('renderer/index.html', 'utf8');
     const links = [...html.matchAll(/<link rel="stylesheet" href="([^"]+)">/g)].map((m) => m[1]);
     expect(links.filter((h) => h === 'styles/stash.css')).toHaveLength(1);
-    expect(links.at(-1)).toBe('styles/modern.css');
+    // The Modern layer stays last: modern.css, then its polish (2026-11-23).
+    expect(links.slice(-2)).toEqual(['styles/modern.css', 'styles/modern-polish.css']);
     expect(fs.existsSync('renderer/styles/stash.css')).toBe(true);
   });
 

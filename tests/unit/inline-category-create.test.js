@@ -10,7 +10,7 @@
 //      provided, a "+ Create new" button renders at the top of the list (or
 //      AS the empty-state when there are no items, replacing the bail-out
 //      message).
-//   2. `library._assignCategory` and `library._bulkAssignCategory` pass the
+//   2. `library._bulkAssignCategory` (the ⋮ menu's `_assignCategory` is gone) passes the
 //      shared `promptCreateCategory` helper as the callback.
 //   3. Categories component uses the same helper so there's one create flow.
 

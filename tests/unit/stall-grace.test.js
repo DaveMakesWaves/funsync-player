@@ -554,8 +554,12 @@ describe('FN-05 the FN-02 sustained-output hold follows the same window', () => 
     await run(video, 200);
     await pause(video);
     expect(bpLog.slice(at).filter((e) => e[0] === 'stopAll')).toHaveLength(1);
+    // The pause zeroes every motor itself (brokenobj #431, 2026-11-22: a
+    // Solace Pro kept its speed through StopDeviceCmd alone): once, now. The
+    // stall window must not add its own hold after it.
+    expect(hold).toHaveBeenCalledTimes(1);
     await run(video, 2000);
-    expect(hold).not.toHaveBeenCalled();
+    expect(hold).toHaveBeenCalledTimes(1);
     sync.stop();
   });
 

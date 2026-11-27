@@ -67,7 +67,8 @@ describe('CB-21: French names Gap Skip as a skip of blanks, one name everywhere'
     // entry since pf-fixup) already said "blancs": the two now agree.
     const headers = [...tab.querySelectorAll('#sp-sec-gapskip .settings-panel__section-header, #sp-sec-gapfiller .settings-panel__section-header')].map((h) => h.textContent);
     expect(headers).toEqual(['Saut des blancs', 'Remplissage des blancs']);
-    const rail = panel._railAreas().find((a) => a.id === 'playback').groups.find((g) => g.id === 'sp-sec-gapfiller');
+    // Gap Filler's rail entry is in Device motion since the 2026-11-23 re-sort.
+    const rail = panel._railAreas().find((a) => a.id === 'motion').groups.find((g) => g.id === 'sp-sec-gapfiller');
     expect(rail.label).toBe('Remplissage des blancs');
   });
 });

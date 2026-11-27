@@ -221,15 +221,22 @@ describe('the editor asks before unsaved edits are replaced (CB-01)', () => {
     await expect(first).resolves.toBe(true);
   });
 
-  it('the editor\'s own script list asks too; Cancel stays on the script being edited', async () => {
+  // Multi-axis editing (Dave, 2026-11-24): every script of the video keeps its
+  // unsaved edits in memory while another is on screen, and one Save writes
+  // them all, so the editor's own list no longer asks Save / Don't save /
+  // Cancel on each switch (it did, CB-01). Routes that REPLACE the video's
+  // scripts still ask, above and below.
+  it('the editor\'s own script list asks nothing: each script keeps its unsaved edits in memory', async () => {
     const ed = editorOn();
     edit(ed);
     ed._scriptSelect.value = OTHER;
-    const switching = ed._onScriptSelectChange();
-    await answer('cancel');
-    await switching;
-    expect(ed._funscriptPath).toBe(ALPHA);
-    expect(ed._scriptSelect.value).toBe(ALPHA);
+    await ed._onScriptSelectChange();
+    expect(dialog()).toBeNull();
+    expect(ed._funscriptPath).toBe(OTHER);
+    expect(ed.hasUnsavedChanges()).toBe(true);        // Alpha's edits, kept
+    expect(pointsOnDisk()).toBe(33);                  // nothing written
+    ed._scriptSelect.value = ALPHA;
+    await ed._onScriptSelectChange();
     expect(ed.editableScript.actionCount).toBe(38);
     expect(ed.editableScript.dirty).toBe(true);
   });
@@ -238,7 +245,7 @@ describe('the editor asks before unsaved edits are replaced (CB-01)', () => {
   // editor POP-OUT's list. Cancel put only the docked list back, so the
   // pop-out went on naming Roll over Main's points, and picking Roll again
   // fired no change. What the pop-out is told is what its list shows.
-  it('a pick in the pop-out\'s list: Cancel tells the pop-out to show the script being edited again', async () => {
+  it('a pick in the pop-out\'s list switches at once and the pop-out is told; the edits stay with their script', async () => {
     const ed = editorOn();
     ed._broadcastScriptsChanged = ScriptEditor.prototype._broadcastScriptsChanged;
     ed._relayToPopout = ScriptEditor.prototype._relayToPopout;
@@ -247,26 +254,25 @@ describe('the editor asks before unsaved edits are replaced (CB-01)', () => {
     window.funsync.editorPopoutRelay = (dir, payload) => relayed.push(payload);
     edit(ed);
     ed._handlePopoutMessage({ type: 'script-switch', path: OTHER });
-    await answer('cancel');
-    await vi.waitFor(() => expect(dialog()).toBeNull());
-    await new Promise((r) => setTimeout(r, 0));
-    expect(ed._funscriptPath).toBe(ALPHA);
-    expect(relayed.filter((m) => m.type === 'scripts-changed').at(-1)?.activePath).toBe(ALPHA);
-    expect(ed.editableScript.dirty).toBe(true);
+    // The path moves before the file is read; the pop-out hears once it is loaded.
+    await vi.waitFor(() => expect(relayed.filter((m) => m.type === 'scripts-changed').at(-1)?.activePath).toBe(OTHER));
+    expect(ed._funscriptPath).toBe(OTHER);
+    expect(dialog()).toBeNull();
+    expect(ed.hasUnsavedChanges()).toBe(true);
   });
 
-  it('the script list after Save: the file has the edits, and the way back shows them', async () => {
+  it('one Save writes every script with unsaved edits, the one on screen or not; the way back is clean', async () => {
     const ed = editorOn();
     edit(ed);
     ed._scriptSelect.value = OTHER;
-    const switching = ed._onScriptSelectChange();
-    await answer('save');
-    await switching;
-    expect(ed._funscriptPath).toBe(OTHER);
+    await ed._onScriptSelectChange();
+    await ed._save();
     expect(pointsOnDisk()).toBe(38);
+    expect(ed.hasUnsavedChanges()).toBe(false);
     ed._scriptSelect.value = ALPHA;
     await ed._onScriptSelectChange();
     expect(ed.editableScript.actionCount).toBe(38);
+    expect(ed.editableScript.dirty).toBe(false);
   });
 });
 
@@ -625,17 +631,19 @@ describe('a Save from the question does not re-upload the script being left (CB-
     clearTimeout(ed._autosaveTimer);
   });
 
-  it('Ctrl+S, and Save before the editor\'s own script list switches, still re-upload', async () => {
+  it('Ctrl+S re-uploads the main script; with another script on screen it re-uploads the MAIN script\'s edits, never the one on screen', async () => {
     const ed = syncedEditor();
     edit(ed);
     await ed._save();
     expect(ed.onReuploadHandy).toHaveBeenCalledTimes(1);
-    ed.editableScript.insertAction(12345, 70);
+    ed.editableScript.insertAction(12345, 70);        // the main script, dirty again
     ed._scriptSelect.value = OTHER;
-    const switching = ed._onScriptSelectChange();
-    await answer('save');
-    await switching;
+    await ed._onScriptSelectChange();
+    expect(dialog()).toBeNull();
+    await ed._save();
+    expect(pointsOnDisk()).toBe(39);
     expect(ed.onReuploadHandy).toHaveBeenCalledTimes(2);
+    expect(ed.funscriptEngine.reloadActions.mock.calls.at(-1)[0]).toHaveLength(39);
   });
 });
 

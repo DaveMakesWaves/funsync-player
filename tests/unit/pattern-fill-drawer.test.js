@@ -679,3 +679,35 @@ describe('the drawer and the rest of the editor', () => {
     await tick();
   });
 });
+
+// Editor work list 4.7 (2026-11-24): Tempo sets the Speed from a BPM, or from
+// the beat markers inside the stretch.
+describe('Fill with pattern: Tempo (work list 4.7)', () => {
+  it('a BPM sets the Speed to one stroke per beat over the depth; From the beats reads the markers', () => {
+    const ed = makeEditor();
+    selectStretch(ed, 2, 10);
+    press(ed._canvas, 'p');
+    expect(isOpen(ed)).toBe(true);
+    const fd = ed._fillDrawer;
+    const s = fd._state;
+    const depth = Math.abs(s.rangeMax - s.rangeMin) || 100;
+    fd._bpm.value = '120';
+    fd._bpm.dispatchEvent(new Event('change'));
+    const want = Math.max(s.speedMin, Math.min(s.speedMax, Math.round(depth * 2)));
+    expect(s.speed).toBe(want);
+    expect(Number(fd._speed.input.value)).toBe(want);
+    // Beats every 600 ms inside the stretch: 100 BPM.
+    const acts = ed.editableScript.actions;
+    const from = acts[2].at;
+    const beats = Float64Array.from({ length: 8 }, (_, i) => from + i * 600);
+    ed.graph.setBeatMarkers(beats);
+    fd._bpmBeats.click();
+    expect(fd._bpm.value).toBe('100');
+    // Out of range: says so, the speed stays.
+    const before = s.speed;
+    fd._bpm.value = '900';
+    fd._bpm.dispatchEvent(new Event('change'));
+    expect(s.speed).toBe(before);
+    expect(fd._tempoNote.textContent).toContain('300');
+  });
+});

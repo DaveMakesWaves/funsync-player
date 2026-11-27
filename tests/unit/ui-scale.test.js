@@ -290,7 +290,9 @@ describe('main.js wires it in (createWindow, the View menu, set-setting, window 
     focusedWc = null;
     const fakeRequire = (id) => {
       if (id === './ui-scale') return require('../../electron/ui-scale.js');
-      if (id === './window-bg') return { TITLE_BAR_HEIGHT, colorsForTheme: () => COLORS };
+      // The splash window's options and fade (2026-11-25): the real module.
+      if (id === './splash-window') return require('../../electron/splash-window.js');
+      if (id === './window-bg') return { TITLE_BAR_HEIGHT, colorsForTheme: () => COLORS, chromeSeason: () => null };
       if (id === 'electron') return { screen: { getCursorScreenPoint: () => cursor } };
       throw new Error(`unexpected require(${id})`);
     };
@@ -299,6 +301,7 @@ describe('main.js wires it in (createWindow, the View menu, set-setting, window 
       'const _captionHoverPolls = new Map();',
       'const _captionDimmed = new Map();', // FT-100: the handler remembers a dialog's dim per window
       lift("const uiScale = require('./ui-scale').createUiScale({", '\n});\n'),
+      "const { splashWindowOptions, splashQuery, fadeOutSplash } = require('./splash-window');",
       lift('function createWindow() {', '\n}\n'),
       lift('function buildAppMenu() {', '\n}\n'),
       lift('function _cursorOverCaption(', '\n}\n'),

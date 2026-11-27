@@ -1078,7 +1078,10 @@ class TagsSection {
       : t('videoOptions.stash.untitled', { id: String(link.sceneId ?? '?').split('@')[0] || '?' });
     const bits = [name];
     if (state === 'changed') {
-      bits.push(t('videoOptions.tags.source.stashHidden'));
+      // The Stash scene with this id no longer has this file (a Stash reset or
+      // rescan reused the id), or this file changed: said as File > Stash says
+      // it (s1-fixup-renderer, 2026-11-19; fixed 2026-11-22).
+      bits.push(t(link.sceneChanged ? 'videoOptions.tags.source.stashSceneChanged' : 'videoOptions.tags.source.stashHidden'));
     } else {
       const c = view.counts || {};
       bits.push(t('videoOptions.tags.source.stashRow', {

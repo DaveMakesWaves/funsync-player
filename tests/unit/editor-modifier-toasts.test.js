@@ -302,7 +302,10 @@ describe('the created record survives a real script switch (defect 9)', () => {
   // the file, so the unsaved points were gone. The switch now asks first; the
   // user answers Save here (the file gets the edits), and the cached stack
   // still brings the record back on undo.
-  it('A → B → A (Save at the prompt), then undo, brings the record back from the cached stack', async () => {
+  // Multi-axis editing (Dave, 2026-11-24): a switch asks nothing and keeps A
+  // in memory as it was: its edits, its "new points" record (it used to
+  // reset on a switch) and its undo history.
+  it('A → B → A keeps A in memory: its edits, its new-points record, and undo back past the nudge', async () => {
     const A = [{ at: 0, pos: 0 }, { at: 500, pos: 50 }, { at: 1000, pos: 100 }, { at: 1500, pos: 50 }, { at: 2000, pos: 0 }];
     const DISK = {
       'C:\\s\\A.funscript': JSON.stringify({ actions: A }),
@@ -312,8 +315,6 @@ describe('the created record survives a real script switch (defect 9)', () => {
       readFunscript: async (p) => DISK[p],
       writeFunscript: async (json, p) => { DISK[p] = json; return p; },
     };
-    Modal.open.mockResolvedValueOnce('save');
-
     const ed = editorWith(A);
     Object.assign(ed, {
       _funscriptPath: 'C:\\s\\A.funscript',
@@ -337,15 +338,16 @@ describe('the created record survives a real script switch (defect 9)', () => {
     es._selectedIndices = new Set(es.getCreatedIndices());
     es.moveActions(es.selectedIndices, 0, 20);
     const edited = pairs(es);
+    const created = es.getCreatedActions().map((a) => `${a.at}:${a.pos}`);
 
     ed._scriptSelect.value = 'C:\\s\\B.funscript';
     await ed._onScriptSelectChange();
-    expect(Modal.open).toHaveBeenCalledTimes(1); // the CB-01 question
-    expect(JSON.parse(DISK['C:\\s\\A.funscript']).actions.map((a) => `${a.at}:${a.pos}`)).toEqual(edited);
-    expect(es.getCreatedIndices()).toEqual([]);
+    expect(Modal.open).not.toHaveBeenCalled(); // no Save / Don't save / Cancel on a switch
+    expect(JSON.parse(DISK['C:\\s\\A.funscript']).actions).toEqual(A); // nothing written
     ed._scriptSelect.value = 'C:\\s\\A.funscript';
     await ed._onScriptSelectChange();
-    expect(es.getCreatedIndices()).toEqual([]); // the live record resets on a switch
+    expect(pairs(es)).toEqual(edited);
+    expect(es.getCreatedActions().map((a) => `${a.at}:${a.pos}`)).toEqual(created);
 
     es.undo(); // the snapshot taken before the nudge, through JSON and back
     expect(es.getCreatedActions().map((a) => `${a.at}:${a.pos}`))

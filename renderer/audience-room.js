@@ -16,6 +16,7 @@
 import { t, initI18n, setLocale } from './js/i18n.js';
 import { icon, X, Volume2, VolumeX, Eye, EyeOff, Bell, Users, RotateCcw } from './js/icons.js';
 import { watchWcoClass } from './js/wco.js';
+import { applySeason } from './js/holiday.js';
 import {
   INITIAL_STATE, VIEWER_ADDED, VIEWER_REMOVED, VIEWER_STATUS, VIEWER_OFFSET,
   HIDE_KEYS_CHANGED, THEME,
@@ -64,6 +65,13 @@ function applyTheme(t) {
 function applyStyle(s) {
   // No-op on undefined so a theme-only sync can't reset the style.
   if (s === 'classic' || s === 'modern') document.documentElement.dataset.style = s;
+}
+
+// The Holiday style's palette (v0.10.1): the main window sends its season with
+// the style. No snow in a pop-out. No-op on undefined, like applyStyle.
+function applyPopoutSeason(season) {
+  if (season === undefined) return;
+  applySeason(season === 'holiday' ? 'holiday' : null, document, { snow: false });
 }
 applyTheme('dark');
 
@@ -114,8 +122,11 @@ function render() {
   const buzzAllBtn = document.createElement('button');
   buzzAllBtn.type = 'button';
   buzzAllBtn.className = 'audience-room__buzz-all-btn';
-  buzzAllBtn.title = t('audience.room.testBuzzAllTitle');
   buzzAllBtn.disabled = !state.viewers.some(canTestBuzz);
+  // Greyed out while the video plays: say so (TODO triage 2026-11-23).
+  buzzAllBtn.title = buzzAllBtn.disabled && state.viewers.some((v) => !v.muted && v.status === 'playing')
+    ? t('audience.room.testBuzzPauseTitle')
+    : t('audience.room.testBuzzAllTitle');
   buzzAllBtn.appendChild(icon(Bell, { width: 16, height: 16 }));
   const baLabel = document.createElement('span');
   baLabel.textContent = t('audience.room.testBuzzAll');
@@ -233,6 +244,8 @@ function renderViewerCard(viewer) {
   buzzBtn.type = 'button';
   buzzBtn.className = 'audience-room__card-buzz-btn';
   buzzBtn.disabled = !canTestBuzz(viewer);
+  const buzzWhyNot = buzzBtn.disabled ? buzzBlockedTitle(viewer) : '';
+  if (buzzWhyNot) buzzBtn.title = buzzWhyNot;
   buzzBtn.appendChild(icon(Bell, { width: 14, height: 14 }));
   const buzzLabel = document.createElement('span');
   buzzLabel.textContent = t('audience.room.testBuzz');
@@ -375,6 +388,17 @@ function canTestBuzz(v) {
   return true;
 }
 
+/**
+ * Why a greyed-out Test buzz is greyed out, for its tooltip (TODO triage
+ * 2026-11-23: it said nothing). '' when the status beside it already says
+ * (Connecting, Uploading, Disconnected, an error).
+ */
+export function buzzBlockedTitle(v) {
+  if (v.muted) return t('audience.room.testBuzzUnmuteTitle');
+  if (v.status === 'playing') return t('audience.room.testBuzzPauseTitle');
+  return '';
+}
+
 // Resend (FT-121): nothing for a muted viewer, or while it is connecting.
 function canResend(v) {
   return !v.muted && v.status !== 'connecting' && v.status !== 'calibrating';
@@ -430,7 +454,7 @@ function onMessage(payload) {
       state.theme = payload.theme || 'dark';
       state.locale = payload.locale || 'en';
       applyTheme(state.theme);
-      applyStyle(payload.uiStyle);
+      applyStyle(payload.uiStyle); applyPopoutSeason(payload.season);
       // (Re-)load the locale bundle for the pop-out. If we picked the
       // same locale we already have, this is a quick no-op.
       setLocale(state.locale).then(() => {
@@ -488,7 +512,7 @@ function onMessage(payload) {
     }
     case THEME: {
       applyTheme(payload.theme);
-      applyStyle(payload.uiStyle);
+      applyStyle(payload.uiStyle); applyPopoutSeason(payload.season);
       break;
     }
   }

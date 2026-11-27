@@ -11,7 +11,14 @@
 
 import { t } from './i18n.js';
 
-const VIDEO_EXTENSIONS = ['.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov', '.mp3', '.wav', '.ogg', '.flac', '.m4a'];
+// Twin of electron/media-extensions.js MEDIA_EXTS (media-extensions.test.js
+// checks they match): the older formats Convert to play makes playable too.
+const VIDEO_EXTENSIONS = [
+  '.mp4', '.m4v', '.mkv', '.webm', '.avi', '.mov',
+  '.wmv', '.asf', '.mpg', '.mpeg', '.vob', '.ts', '.m2ts', '.mts',
+  '.flv', '.f4v', '.3gp', '.3g2', '.ogv', '.divx',
+  '.mp3', '.wav', '.ogg', '.flac', '.m4a',
+];
 const FUNSCRIPT_EXTENSIONS = ['.funscript'];
 const SUBTITLE_EXTENSIONS = ['.srt', '.vtt'];
 const ALL_ACCEPTED = [...VIDEO_EXTENSIONS, ...FUNSCRIPT_EXTENSIONS, ...SUBTITLE_EXTENSIONS];
