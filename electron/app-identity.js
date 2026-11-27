@@ -58,11 +58,14 @@ function appIdentity({ packaged, platform = process.platform, appRoot }) {
  */
 function devShortcut({ identity, execPath, programsDir }) {
   if (!identity || !identity.windowDetails || !identity.toastClsid || !execPath || !programsDir) return null;
+  // A Windows shortcut of Windows paths: path.win32 whatever the host, so the
+  // test reads the same on CI's Linux runner (path.dirname there gave '.').
+  const win = path.win32;
   return {
-    path: path.join(programsDir, `${ELECTRON_EXE_PRODUCT}.lnk`),
+    path: win.join(programsDir, `${ELECTRON_EXE_PRODUCT}.lnk`),
     options: {
       target: execPath,
-      cwd: path.dirname(execPath),
+      cwd: win.dirname(execPath),
       args: '',
       description: identity.windowDetails.relaunchDisplayName,
       appUserModelId: identity.appId,
