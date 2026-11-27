@@ -20,7 +20,7 @@ import { liftAppClass } from './helpers/app-methods.js';
 
 const bundle = (l) => JSON.parse(fs.readFileSync(`renderer/locales/${l}.json`, 'utf8'));
 const EN = bundle('en');
-const css = (f) => fs.readFileSync(`renderer/styles/${f}`, 'utf8');
+const css = (f) => fs.readFileSync(`renderer/styles/${f}`, 'utf8').replace(/\r\n/g, '\n');
 
 afterAll(() => _setBundlesForTests('en', EN, EN));
 beforeEach(() => {

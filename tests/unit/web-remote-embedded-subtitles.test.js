@@ -65,7 +65,7 @@ async function waitFor(cond, ms = 3000) {
 let app;
 beforeAll(async () => {
   localStorage.clear();
-  const html = fs.readFileSync('backend/web-remote/index.html', 'utf8');
+  const html = fs.readFileSync('backend/web-remote/index.html', 'utf8').replace(/\r\n/g, '\n');
   document.body.innerHTML = /<body>([\s\S]*)<\/body>/.exec(html)[1].replace(/<script[\s\S]*?<\/script>/g, '');
   window.matchMedia = window.matchMedia || ((q) => ({
     matches: false, media: q, addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {},
@@ -99,7 +99,7 @@ describe('a video with no subtitle file beside it', () => {
     // attribute: a mode set at once let Chromium's own selection switch
     // EVERY track on (seen live on the phone page, 2026-11-23).
     expect(tracks.map((el) => el.default)).toEqual([false, true]);
-    const src = fs.readFileSync('backend/web-remote/app.js', 'utf8');
+    const src = fs.readFileSync('backend/web-remote/app.js', 'utf8').replace(/\r\n/g, '\n');
     const fn = src.slice(src.indexOf('export async function addEmbeddedSubtitleTracks'), src.indexOf('export function buildSubtitleButton'));
     expect(fn).toContain('el.default = !!(choice?.show && choice.track === tr);');
     expect(fn).not.toMatch(/\.mode = /);
@@ -148,9 +148,9 @@ describe('the CC button', () => {
   });
 
   it('sits in the control bar before Fullscreen; the icon is Lucide "captions"', () => {
-    const src = fs.readFileSync('backend/web-remote/app.js', 'utf8');
+    const src = fs.readFileSync('backend/web-remote/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(src).toMatch(/const ccBtn = buildSubtitleButton\(videoEl\);\n\s+btnRow\.append\(playBtn, muteBtn, spacer, \.\.\.\(flatBtn \? \[flatBtn\] : \[\]\), ccBtn, fsBtn\);/);
-    const icons = fs.readFileSync('backend/web-remote/icons.js', 'utf8');
+    const icons = fs.readFileSync('backend/web-remote/icons.js', 'utf8').replace(/\r\n/g, '\n');
     expect(icons).toContain('captions: \'<rect width="18" height="14" x="3" y="5" rx="2" ry="2"/><path d="M7 15h4M15 15h2M7 11h2M13 11h4"/>\'');
   });
 });

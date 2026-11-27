@@ -74,9 +74,11 @@ describe('the script strip under an open editor', () => {
   });
 
   it('app.js stops it under the docked editor and in the mini player (which hides it); a popped-out editor leaves it drawing', () => {
-    const hook = APP_SRC.slice(APP_SRC.indexOf('this.scriptEditor.onOpenChange = () => {'));
+    // LF whatever the checkout: the slices below look for '\n  }\n' (CI's Windows runner is CRLF).
+    const LF_SRC = APP_SRC.replace(/\r\n/g, '\n');
+    const hook = LF_SRC.slice(LF_SRC.indexOf('this.scriptEditor.onOpenChange = () => {'));
     expect(hook.slice(0, hook.indexOf('};') + 2)).toMatch(/this\._syncInlineVizCovered\(\)/);
-    const helper = APP_SRC.slice(APP_SRC.indexOf('  _syncInlineVizCovered() {'));
+    const helper = LF_SRC.slice(LF_SRC.indexOf('  _syncInlineVizCovered() {'));
     const body = helper.slice(0, helper.indexOf('\n  }\n') + 4).trim();
     // The real helper, run on each case.
     const sync = new Function(`return function ${body}`)(); // eslint-disable-line no-new-func
@@ -96,7 +98,7 @@ describe('the script strip under an open editor', () => {
     expect(run({ docked: true, mini: true })).toBe(true);
     expect(run({ docked: false, mini: true })).toBe(true);
     // Mini on / off changes it too (the hook, entering and leaving the mini player).
-    const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     // (Optional-called in the mini-player methods: tests lift those onto stand-in apps.)
     expect(src.match(/this\._syncInlineVizCovered(\?\.)?\(\);/g).length).toBe(3);
   });

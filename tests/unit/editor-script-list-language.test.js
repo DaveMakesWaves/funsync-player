@@ -49,7 +49,7 @@ describe('a language switch', () => {
   });
 
   it('wired: the language handler calls it; embedded entries carry their axis name', () => {
-    const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(src).toMatch(/this\._retranslatePlayerChrome\(\);\n\s+this\._retranslateEditorScriptList\?\.\(\); \/\/ FT-103/);
     expect(src).toMatch(/embeddedAxis: suffix,\n\s+axisLabel: label\(suffix\),/);
   });

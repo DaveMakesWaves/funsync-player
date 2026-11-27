@@ -59,7 +59,7 @@ describe('after a download for the open video', () => {
   });
 
   it('wired into both download handlers, after the script loads', () => {
-    const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(src).toMatch(/await this\.loadFunscript\(\{ name: fsName, textContent: content, path: fsPath \}\);\n\s+this\._refreshVariantsAfterDownload\?\.\(fsPath\);/);
     // Download all for the open video also loads its new axes now (editor work list 6.4).
     expect(src).toMatch(/await this\.loadFunscript\(\{ name, textContent: content, path \}\);\n\s+if \(forOpen\) \{\n\s+this\._refreshVariantsAfterDownload\?\.\(path\);\n\s+await this\._loadDownloadedAxes\?\.\(path, written\);/);

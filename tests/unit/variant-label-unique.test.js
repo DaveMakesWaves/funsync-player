@@ -40,7 +40,7 @@ describe('the Associate dialog\'s naming step (library.js)', () => {
 });
 
 describe('the player\'s paths (app.js)', () => {
-  const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+  const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
   it('one-file Add, the bulk naming step and Manage > Rename all go through it', () => {
     expect(src).toContain('label: this._uniqueVariantLabel?.(label, (this._allVariantsWithManual || []).map((v) => v.label)) ?? label,');
     expect(src).toMatch(/for \(const entry of named\) \{\n\s+entry\.label = this\._uniqueVariantLabel\?\.\(entry\.label, takenLabels\) \?\? entry\.label;\n\s+takenLabels\.push\(entry\.label\);/);

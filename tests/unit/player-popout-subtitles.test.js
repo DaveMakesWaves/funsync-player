@@ -104,7 +104,7 @@ describe('app.js sends them to an open pop-out', () => {
   });
 
   it('wired at start-up, and sent again with every video handed over', () => {
-    const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(src).toMatch(/this\.videoPlayer\.onSubtitlesChanged = \(sub\) => \{\n\s+this\._currentSubtitle = sub \|\| null;\n\s+this\._sendPlayerWindowSubtitle\(\);/);
     const stream = src.slice(src.indexOf('  _streamPlayerWindowData() {'));
     expect(stream.slice(0, 600)).toContain('this._sendPlayerWindowSubtitle?.();');
@@ -131,7 +131,7 @@ describe('the pop-out\'s CC button (full manual test, 2026-11-23)', () => {
 
 describe('the pop-out loads them into its own player', () => {
   it('SUBTITLE with a file loads it; { name: null } clears', () => {
-    const src = fs.readFileSync('renderer/player-popout.js', 'utf8');
+    const src = fs.readFileSync('renderer/player-popout.js', 'utf8').replace(/\r\n/g, '\n');
     const handler = src.slice(src.indexOf('    case SUBTITLE:'), src.indexOf('    case SUBTITLE:') + 400);
     expect(handler).toMatch(/videoPlayer\?\.loadSubtitles\(\{ name: payload\.name, textContent: payload\.text \}, \{ show: payload\.show !== false \}\)/);
     expect(handler).toMatch(/videoPlayer\?\.clearSubtitles\(\)/);

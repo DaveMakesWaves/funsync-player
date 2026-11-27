@@ -11,7 +11,7 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import { offerConversion } from '../../renderer/js/convert-to-play.js';
 
-const CSS = fs.readFileSync('renderer/styles/player.css', 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+const CSS = fs.readFileSync('renderer/styles/player.css', 'utf8').replace(/\r\n/g, '\n').replace(/\/\*[\s\S]*?\*\//g, '');
 
 function rule(selector) {
   const esc = selector.replace(/[.*+?^${}()|[\]\\>]/g, '\\$&');
@@ -39,7 +39,7 @@ describe('a toast with buttons keeps them apart from its text', () => {
   });
 
   it('the stream "try lower quality" toast uses the row too', () => {
-    const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     const start = src.indexOf('  _onStreamStalling() {');
     const body = src.slice(start, src.indexOf('\n  }\n', start));
     // both of its toasts: every box it builds gets the row class

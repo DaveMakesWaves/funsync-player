@@ -437,13 +437,13 @@ describe('the search panel docks into the view', () => {
 
 describe('the app opens the tab', () => {
   it('the nav button navigates to the view; the view is hidden and shown with the others; leaving undocks', () => {
-    const src = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const src = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(src).toMatch(/'eroscripts': document\.getElementById\('eroscripts-container'\)/);
     expect(src).toMatch(/for \(const vid of \['library', 'player', 'playlists', 'categories', 'eroscripts'\]\)/);
     expect(src).toMatch(/if \(this\.eroscriptsView\) \{\n\s+this\._navigateTo\('eroscripts'\);/);
     expect(src).toMatch(/if \(viewId === 'eroscripts'\) this\.eroscriptsView\?\.hide\(\);/);
     expect(src).toMatch(/playPath: \(path\) => \{/);
-    expect(fs.readFileSync('renderer/index.html', 'utf8')).toContain('<div id="eroscripts-container" hidden></div>');
+    expect(fs.readFileSync('renderer/index.html', 'utf8').replace(/\r\n/g, '\n')).toContain('<div id="eroscripts-container" hidden></div>');
   });
 });
 
@@ -1094,7 +1094,7 @@ describe('feeds in the tab (Dave, 2026-11-22: "custom queues ... a badge for new
     view._loadLatest(true);
     expect(document.querySelectorAll('.es-skel')).toHaveLength(0);
     // Classic hides both (Modern shows them: modern-polish.css).
-    expect(fs.readFileSync('renderer/styles/eroscripts.css', 'utf8')).toMatch(/\.es-card__nothumb,\s+\.es-skel \{ display: none; \}/);
+    expect(fs.readFileSync('renderer/styles/eroscripts.css', 'utf8').replace(/\r\n/g, '\n')).toMatch(/\.es-card__nothumb,\s+\.es-skel \{ display: none; \}/);
   });
 
   it('Refresh (Dave 2026-11-23): loads the open feed again now; what came in meanwhile is New, the badge cleared; busy while loading; hidden in a search', async () => {
@@ -1279,10 +1279,10 @@ describe('the list view (Dave, 2026-11-22: "a list view more closely resembling 
 
 describe('notifications carry FunSync, not Electron (Dave, 2026-11-22: "the funsync app logo has reverted to the electron logo")', () => {
   it('the installed app uses the installer\'s app id for Windows; the logo it points at ships', async () => {
-    const appId = fs.readFileSync('electron-builder.yml', 'utf8').match(/^appId:\s*(\S+)/m)[1];
+    const appId = fs.readFileSync('electron-builder.yml', 'utf8').replace(/\r\n/g, '\n').match(/^appId:\s*(\S+)/m)[1];
     const { appIdentity } = (await import('../../electron/app-identity.js')).default;
     expect(appIdentity({ packaged: true, platform: 'win32', appRoot: '.' }).appId).toBe(appId);
-    expect(fs.readFileSync('electron/main.js', 'utf8')).toContain('app.setAppUserModelId(appId.appId)');
+    expect(fs.readFileSync('electron/main.js', 'utf8').replace(/\r\n/g, '\n')).toContain('app.setAppUserModelId(appId.appId)');
     expect(fs.existsSync('assets/icons/icon.png')).toBe(true);
   });
   // Dave, 2026-11-24: "the app icon is default electron icon again". A dev
@@ -1319,7 +1319,7 @@ describe('notifications carry FunSync, not Electron (Dave, 2026-11-22: "the funs
     expect(devShortcut({ identity: appIdentity({ packaged: true, platform: 'win32', appRoot: '.' }), execPath: exe, programsDir: 'C:\\P' })).toBeNull();
     expect(devShortcut({ identity: null, execPath: exe, programsDir: 'C:\\P' })).toBeNull();
     // main.js wires it: the fixed CLSID first, the shortcut once ready.
-    const main = fs.readFileSync('electron/main.js', 'utf8');
+    const main = fs.readFileSync('electron/main.js', 'utf8').replace(/\r\n/g, '\n');
     expect(main).toMatch(/setToastActivatorCLSID\(appId\.toastClsid\)/);
     expect(main).toMatch(/shell\.writeShortcutLink\(lnk\.path/);
   });
@@ -1427,12 +1427,12 @@ describe('Watch: a post streamed into the player with its script (Dave, 2026-11-
   });
 
   it('the app plays it through Load from URL, which is back on the nav bar and the player bar', () => {
-    const app = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const app = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(app).toMatch(/playStream: \(result, scriptPath, axes, opts\) => this\._loadRemoteVideo\(result, scriptPath, axes, opts\)/);
     expect(app).toMatch(/^\s+onLoadUrlClick: \(\) => this\._openLoadUrlModal\(\),/m);
     expect(app).toMatch(/^\s+document\.getElementById\('btn-load-url'\)\?\.addEventListener/m);
-    expect(fs.readFileSync('renderer/index.html', 'utf8')).toMatch(/^\s+<button id="btn-load-url"/m);
-    expect(fs.readFileSync('electron/main.js', 'utf8')).toMatch(/ipcMain\.handle\('get-stream-scripts-dir'/);
+    expect(fs.readFileSync('renderer/index.html', 'utf8').replace(/\r\n/g, '\n')).toMatch(/^\s+<button id="btn-load-url"/m);
+    expect(fs.readFileSync('electron/main.js', 'utf8').replace(/\r\n/g, '\n')).toMatch(/ipcMain\.handle\('get-stream-scripts-dir'/);
   });
 });
 
@@ -1584,7 +1584,7 @@ describe('multi-axis posts (Dave, 2026-11-23: "distinguish multi axis and downlo
     const [, scriptPath, axes] = playStream.mock.calls[0];
     const stem = scriptPath.split('\\').pop().replace(/\.funscript$/, '');
     expect(axes).toEqual({ roll: `C:\\Data\\stream-scripts\\${stem}.roll.funscript`, pitch: `C:\\Data\\stream-scripts\\${stem}.pitch.funscript` });
-    const app = fs.readFileSync('renderer/js/app.js', 'utf8');
+    const app = fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n');
     expect(app).toMatch(/this\._currentMultiAxis = \{ axes: \{ \.\.\.axes \} \};\s+await this\._loadMultiAxisScripts\(this\._currentMultiAxis\);/);
   });
 
@@ -1594,7 +1594,7 @@ describe('multi-axis posts (Dave, 2026-11-23: "distinguish multi axis and downlo
     await openWindow(view);
     expect(rowValue(0).textContent).toContain(TAB.dl.combinedAxes);
     expect(document.querySelector('.es-dl__axes')).toBeNull();
-    expect(fs.readFileSync('renderer/js/app.js', 'utf8')).toMatch(/this\._feedEmbeddedMultiAxis\(rawContent, this\._currentFunscriptPath\)/);
+    expect(fs.readFileSync('renderer/js/app.js', 'utf8').replace(/\r\n/g, '\n')).toMatch(/this\._feedEmbeddedMultiAxis\(rawContent, this\._currentFunscriptPath\)/);
   });
 });
 
